@@ -17,7 +17,21 @@ export const marksLegend = () => `<p class="map-legend" aria-label="Status marks
 export const tipId = (i) => `tip-u${i}`;
 export const unitIndex = (v) => new Map(v.units.map((u, i) => [u.id, i]));
 // Attributes for a unit's box: u (has a panel), u<i>, hl (dims while another box is lit).
-export const boxAttrs = (i) => ` class="u u${i} hl" aria-describedby="${tipId(i)}"`;
+// nb: the unit indexes this box connects to; their boxes light it, so it carries their c<j>.
+export const boxAttrs = (i, nb = []) => ` class="u u${i} hl${nb.filter((j) => j !== i && j !== undefined).map((j) => ` c${j}`).join('')}" aria-describedby="${tipId(i)}"`;
+
+// Units connected to each unit, by index: waits on or waited on by (--after, both ways) and sharing a linked issue or PR.
+export function neighbours(v) {
+  const ix = unitIndex(v); const nb = new Map(v.units.map((_, i) => [i, new Set()]));
+  const tie = (a, b) => { if (a !== undefined && b !== undefined && a !== b) { nb.get(a).add(b); nb.get(b).add(a); } };
+  const byRef = new Map();
+  for (const u of v.units) {
+    tie(ix.get(u.id), ix.get(u.after));
+    for (const r of unitRefs(u)) { if (!byRef.has(r.key)) byRef.set(r.key, []); byRef.get(r.key).push(ix.get(u.id)); }
+  }
+  for (const list of byRef.values()) for (const a of list) for (const b of list) tie(a, b);
+  return new Map([...nb].map(([i, set]) => [i, [...set].sort((a, b) => a - b)]));
+}
 // Classes for what a box connects to: c<i> for nodes, e<i> for edges, per unit index.
 export const near = (is, p = 'c') => ['hl', ...is.filter((i) => i !== undefined).map((i) => `${p}${i}`)].join(' ');
 
@@ -50,6 +64,6 @@ export const SHOW = 'visibility:visible;transition-delay:0s';
 export function unitTips(v, ctx, nowMs) {
   if (!v.units.length) return '';
   const rules = v.units.map((_, i) => `body:not([data-tips=off]):has(.u${i}:is(:hover,:focus)) #${tipId(i)}{${SHOW}}`
-    + `svg.map:has(.u${i}:is(:hover,:focus)) :is(.u${i},.c${i},.e${i}){opacity:1}`).join('');
+    + `svg.map:has(.u${i}:is(:hover,:focus)) :is(.u${i},.c${i},.e${i}),body:has(#${tipId(i)}:focus-within) svg.map :is(.u${i},.c${i},.e${i}){opacity:1}`).join('');
   return `<div class="tips">${v.units.map((u, i) => unitTip(u, i, ctx, nowMs)).join('')}</div><style>${rules}</style>`;
 }

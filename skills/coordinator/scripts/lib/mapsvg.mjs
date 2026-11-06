@@ -10,7 +10,7 @@ import { clip, DOTS, duration } from './plain.mjs';
 import { count } from './self.mjs';
 import { behaviourGrid, heat } from './heat.mjs';
 import { flowGraph, mindGraph, relevance } from './maps.mjs';
-import { boxAttrs, mark, marksLegend, near, unitIndex } from './maptips.mjs';
+import { boxAttrs, mark, marksLegend, near, neighbours, unitIndex } from './maptips.mjs';
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const st = (s) => `st-${String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '')}`;
@@ -52,7 +52,7 @@ export function mindSvg(v, ctx) {
   const g = mindGraph(v);
   const units = g.nodes.filter((n) => n.kind === 'unit');
   if (!units.length) return empty('No units yet.');
-  const ix = unitIndex(v);
+  const ix = unitIndex(v); const nb = neighbours(v);
   const byId = new Map(v.units.map((u) => [u.id, u]));
   const kids = (id) => g.nodes.filter((n) => n.parent === id);
   const hasB = g.nodes.some((n) => n.kind !== 'goal' && n.kind !== 'unit');
@@ -98,7 +98,7 @@ export function mindSvg(v, ctx) {
       const status = byId.get(u.unit)?.status;
       const x0 = x - PW / 2; const y0 = y - PH / 2;
       nodes.push(link(ctx.unitHref(u.unit), `${u.unit}: ${status ?? said(u.status)}, ${said(u.status)}${u.text ? ` — ${clip(u.text, 160)}` : ''}`,
-        `<rect class="nd ${st(u.status)}" x="${r1(x0)}" y="${r1(y0)}" width="${PW}" height="${PH}" rx="10"/>${txt(x0 + 10, y0 + 18, `${mark(status)} ${clip(u.label, 14)}`, 'b')}${txt(x0 + 10, y0 + 33, clip(u.text, 22), 'xs muted')}`, false, boxAttrs(ui)));
+        `<rect class="nd ${st(u.status)}" x="${r1(x0)}" y="${r1(y0)}" width="${PW}" height="${PH}" rx="10"/>${txt(x0 + 10, y0 + 18, `${mark(status)} ${clip(u.label, 14)}`, 'b')}${txt(x0 + 10, y0 + 33, clip(u.text, 22), 'xs muted')}`, false, boxAttrs(ui, nb.get(ui))));
     });
     const goal = g.nodes[0]; const gb = v.goalCheck.behaviours;
     const goalNode = link(ctx.home, `Goal: ${said(goal.status)} — ${clip(goal.text, 200)}`, `<circle class="nd goal ${st(goal.status)}" cx="${r1(cx)}" cy="${r1(cy)}" r="58"/>${txt(cx, cy - 8, 'Goal', 'b', 'middle')}`
@@ -165,7 +165,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
     if (n.kind === 'unit') {
       const status = byId.get(n.unit)?.status;
       const label = `${n.unit}: ${status ? `${status}, ` : ''}${said(n.status)}${n.crit ? ', on the critical path' : ''}${n.title ? ` — ${clip(n.title, 120)}` : ''}`;
-      return link(ctx.unitHref(n.unit), label, `<rect class="nd ${st(n.status)}${n.crit ? ' crit' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="8"/>${txt(nx + 10, y + 19, `${mark(status)} ${clip(n.label, 18)}`, 'b')}${txt(nx + 10, y + 36, clip(n.title, 24), 'sm muted')}`, false, boxAttrs(ix.get(n.unit)));
+      return link(ctx.unitHref(n.unit), label, `<rect class="nd ${st(n.status)}${n.crit ? ' crit' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="8"/>${txt(nx + 10, y + 19, `${mark(status)} ${clip(n.label, 18)}`, 'b')}${txt(nx + 10, y + 36, clip(n.title, 24), 'sm muted')}`, false, boxAttrs(ix.get(n.unit), links.get(n.id) ?? []));
     }
     if (n.kind === 'follow-up') return link(n.url ?? ctx.home, `Follow-up${n.units.length ? ` from ${n.units.join(', ')}` : ''}: ${clip(n.text, 200)}`, `<rect class="nd fu" x="${nx}" y="${y}" width="${w}" height="${h}" rx="6"/>${txt(nx + 10, y + 16, clip(`${n.label}${n.units.length ? ` · from ${n.units.join(', ')}` : ''}`, 42), 'xs muted')}${txt(nx + 10, y + 32, clip(n.text, 36), 'sm')}`, !!n.url, cls(near(links.get(n.id) ?? [])));
     const what = n.kind === 'pr' ? 'PR' : 'Issue';
@@ -189,7 +189,7 @@ const plural = (n, one) => count(n, one);
 export function heatSvg(v, ctx, nowMs = Date.now()) {
   const h = heat(v, nowMs);
   if (!h.rows.length) return empty('No units yet.');
-  const ix = unitIndex(v); const st0 = new Map(v.units.map((u) => [u.id, u.status]));
+  const ix = unitIndex(v); const nb = neighbours(v); const st0 = new Map(v.units.map((u) => [u.id, u.status]));
   const LW = 112; const n = h.cols.length;
   const cw = Math.max(12, Math.min(28, Math.floor(760 / n))); const ch = 22; const top = 36;
   const every = Math.ceil(48 / cw);
@@ -205,7 +205,7 @@ export function heatSvg(v, ctx, nowMs = Date.now()) {
     const busiest = r.cells.reduce((b, c, i) => (c.level > r.cells[b].level ? i : b), 0);
     const label = `${r.unit}: ${plural(t.rounds, 'try')}${t.fails ? ` (${t.fails} failed)` : ''}, ${plural(t.beats, 'heartbeat')}, waited ${duration(t.waitMin)}${r.cells[busiest].level ? `; busiest ${span(busiest)}` : ''}`;
     const cells = r.cells.map((c, i) => `<rect class="hc h-${c.kind} l${c.level}" x="${LW + i * cw}" y="${y}" width="${cw - 2}" height="${ch}" rx="3"><title>${esc(`${r.unit}, ${span(i)}: ${cellSay(c)}`)}</title></rect>`).join('');
-    return link(ctx.unitHref(r.unit), label, `${txt(8, y + 15, `${mark(st0.get(r.unit))} ${clip(r.unit, 11)}`, 'b')}${cells}`, false, ix.has(r.unit) ? boxAttrs(ix.get(r.unit)) : '');
+    return link(ctx.unitHref(r.unit), label, `${txt(8, y + 15, `${mark(st0.get(r.unit))} ${clip(r.unit, 11)}`, 'b')}${cells}`, false, ix.has(r.unit) ? boxAttrs(ix.get(r.unit), nb.get(ix.get(r.unit))) : '');
   }).join('');
   const width = LW + n * cw + P; const height = top + h.rows.length * (ch + 4) + P;
   return `<p class="map-say cause">One column per ${h.step === 1 ? 'hour' : `${h.step} hours`} since the run started, in UTC. Darker means more happened: tries count double, heartbeats and other events once. Red holds a failed try; amber is time spent waiting for a critic or an answer.</p>`
@@ -217,7 +217,7 @@ const MARK = { pass: '✓', fail: '✗', unchecked: '·' };
 export function behaviourSvg(v, ctx) {
   const b = behaviourGrid(v);
   if (!b.cols) return empty('No behaviours yet: add them with add --behaviour or behave.');
-  const ix = unitIndex(v); const st0 = new Map(v.units.map((u) => [u.id, u.status]));
+  const ix = unitIndex(v); const nb = neighbours(v); const st0 = new Map(v.units.map((u) => [u.id, u.status]));
   const LW = 112; const cw = 52; const ch = 24; const top = 22;
   const heads = Array.from({ length: b.cols }, (_, i) => txt(LW + i * cw + (cw - 4) / 2, 14, String(i + 1), 'xs muted', 'middle')).join('');
   const rows = b.rows.map((r, j) => {
@@ -225,7 +225,7 @@ export function behaviourSvg(v, ctx) {
     const label = `${r.label}: ${r.cells.map((c) => `${c.id} ${c.status}`).join(', ')}`;
     const cells = r.cells.map((c, i) => `<g><title>${esc(`${r.label} ${c.id}: ${c.status} — ${clip(c.text, 160)}`)}</title><rect class="nd ${st(c.status)}" x="${LW + i * cw}" y="${y}" width="${cw - 4}" height="${ch}" rx="4"/>${txt(LW + i * cw + (cw - 4) / 2, y + 16, `${MARK[c.status] ?? ''}${c.id}`, 'xs', 'middle')}</g>`).join('');
     const unit = r.unit && ix.has(r.unit);
-    return link(r.unit ? ctx.unitHref(r.unit) : ctx.home, label, `${txt(8, y + 16, unit ? `${mark(st0.get(r.unit))} ${clip(r.label, 11)}` : clip(r.label, 13), 'b')}${cells}`, false, unit ? boxAttrs(ix.get(r.unit)) : '');
+    return link(r.unit ? ctx.unitHref(r.unit) : ctx.home, label, `${txt(8, y + 16, unit ? `${mark(st0.get(r.unit))} ${clip(r.label, 11)}` : clip(r.label, 13), 'b')}${cells}`, false, unit ? boxAttrs(ix.get(r.unit), nb.get(ix.get(r.unit))) : '');
   }).join('');
   return `<p class="map-say cause">${b.pass} pass, ${b.fail} fail, ${b.unchecked} unchecked.</p>`
     + svg(LW + b.cols * cw + P, top + b.rows.length * (ch + 4) + P, 'Heatmap: units against behaviours', heads + rows, ' grid')
@@ -235,21 +235,21 @@ export function behaviourSvg(v, ctx) {
 export function relevanceSvg(v, ctx) {
   const r = relevance(v);
   if (!r.units.length) return empty('No units yet.');
-  const ix = unitIndex(v); const st0 = new Map(v.units.map((u) => [u.id, u.status]));
+  const ix = unitIndex(v); const nb = neighbours(v); const st0 = new Map(v.units.map((u) => [u.id, u.status]));
   const servedBy = new Map(r.targets.map((t) => [t.id, r.units.filter((u) => u.serves.some((x) => x.target === t.id)).map((u) => ix.get(u.unit))]));
   const TW = 260; const UW2 = 190; const H = 40; const G = 12; const ux = P + TW + 110;
   const on = r.units.filter((u) => !u.off); const off = r.units.filter((u) => u.off);
   const tY = new Map(r.targets.map((t, i) => [t.id, TOP + i * (H + G)]));
-  const uY = new Map([...on.map((u, i) => [u.unit, TOP + i * (H + G)]), ...off.map((u, i) => [u.unit, TOP + (on.length + i) * (H + G) + (on.length ? 30 : 0)])]);
+  const uY = new Map([...on.map((u, i) => [u.unit, TOP + i * (H + G)]), ...off.map((u, i) => [u.unit, TOP + (on.length + i) * (H + G) + 30])]);
   const edges = r.units.flatMap((u) => u.serves.map((s) => curve(P + TW, tY.get(s.target) + H / 2, ux, uY.get(u.unit) + H / 2, `${s.how === 'named' ? 'named' : 'inferred'} ${near([ix.get(u.unit)], 'e')}`)));
   const targets = r.targets.map((t) => link(ctx.home, `${t.label}: ${said(t.status)} — ${clip(t.text, 200)}`, `<rect class="nd ${st(t.status)}" x="${P}" y="${tY.get(t.id)}" width="${TW}" height="${H}" rx="8"/>${txt(P + 10, tY.get(t.id) + 17, clip(`${t.label}: ${t.text}`, 36), 'sm')}${txt(P + 10, tY.get(t.id) + 33, clip(servedBy.get(t.id).length ? `served by ${r.units.filter((u) => u.serves.some((x) => x.target === t.id)).map((u) => u.unit).join(', ')}` : 'no unit serves it', 44), 'xs muted')}`, false, cls(near(servedBy.get(t.id))))).join('');
   const units = r.units.map((u) => {
     const y = uY.get(u.unit);
     const how = u.off ? 'off goal' : u.distance === 0 ? `named · ${u.serves.length} of ${r.targets.length}` : `inferred · ${u.serves.length} of ${r.targets.length}`;
-    return link(ctx.unitHref(u.unit), `${u.unit}: ${how}${u.title ? ` — ${clip(u.title, 120)}` : ''}`, `<rect class="nd ${st(u.status)}${u.off ? ' off' : ''}" x="${ux}" y="${y}" width="${UW2}" height="${H}" rx="8"/>${txt(ux + 10, y + 17, `${mark(st0.get(u.unit))} ${clip(`${u.unit}${u.title ? ` · ${u.title}` : ''}`, 22)}`, 'b')}${txt(ux + 10, y + 33, how, 'xs muted')}`, false, boxAttrs(ix.get(u.unit)));
+    return link(ctx.unitHref(u.unit), `${u.unit}: ${how}${u.title ? ` — ${clip(u.title, 120)}` : ''}`, `<rect class="nd ${st(u.status)}${u.off ? ' off' : ''}" x="${ux}" y="${y}" width="${UW2}" height="${H}" rx="8"/>${txt(ux + 10, y + 17, `${mark(st0.get(u.unit))} ${clip(`${u.unit}${u.title ? ` · ${u.title}` : ''}`, 22)}`, 'b')}${txt(ux + 10, y + 33, how, 'xs muted')}`, false, boxAttrs(ix.get(u.unit), nb.get(ix.get(u.unit))));
   }).join('');
-  const offHead = off.length ? txt(ux, TOP + on.length * (H + G) + (on.length ? 18 : -8), 'Off goal', 'h warn') : '';
-  const height = TOP + r.units.length * (H + G) + (on.length && off.length ? 30 : 0) + P;
+  const offHead = off.length ? txt(ux, TOP + on.length * (H + G) + 18, 'Off goal', 'h warn') : '';
+  const height = TOP + r.units.length * (H + G) + (off.length ? 30 : 0) + P;
   const say = `<p class="map-say">${esc(`${on.length} of ${count(r.units.length, 'unit')} ${on.length === 1 ? 'serves' : 'serve'} the goal`)}${off.length ? `; off goal: ${off.map((u) => `<a href="${esc(ctx.unitHref(u.unit))}">${esc(u.unit)}</a>`).join(', ')}` : ''}. <span class="cause">Named: the unit names the ${v.goalCheck.behaviours.length ? 'behaviour id' : 'goal’s issue or the goal names the unit'}. Inferred: they share words.</span></p>`;
   return say + svg(ux + UW2 + P, Math.max(height, TOP + r.targets.length * (H + G) + P), 'Goal relevance: which goal behaviours each unit serves', `${txt(P, 20, v.goalCheck.behaviours.length ? 'Goal behaviours' : 'Goal', 'h')}${txt(ux, 20, 'Units', 'h')}<g aria-hidden="true">${edges.join('')}</g>${targets}${offHead}${units}`, ' rel')
     + legend([['ln-named', 'serves it (named)'], ['ln-inferred', 'serves it (shared words)'], ['off', 'off goal']]);

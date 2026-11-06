@@ -221,12 +221,14 @@ svg.map .hc { stroke: none; }
 .h-wait { fill: color-mix(in oklab, var(--wait) 35%, var(--card)); background: color-mix(in oklab, var(--wait) 35%, var(--card)); }
 /* Map panels (lib/maptips.mjs): shown by per-box :has rules; the live script pins and places them. */
 svg.map .hl, .graph .n { transition: opacity .15s; }
-:where(svg.map:has(a.u:is(:hover, :focus))) .hl { opacity: .22; }
+:where(svg.map:has(a.u:is(:hover, :focus))) .hl, :where(body:has(.tip[id^="tip-u"]:focus-within)) svg.map .hl { opacity: .22; }
 body[data-tips=off] svg.map .hl { opacity: 1; }
 .tip { visibility: hidden; transition: visibility 0s linear .35s; position: fixed; z-index: 20; right: 16px; bottom: 16px; width: min(340px, calc(100vw - 32px)); max-height: 60vh; overflow: auto;
   padding: 10px 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: 0 6px 24px color-mix(in oklab, var(--ink) 18%, transparent); font-size: 13px; overflow-wrap: anywhere; }
 .tip:hover, .tip:focus-within, .tip.pinned { visibility: visible; transition-delay: 0s; }
+/* The grace delay lets a pointer reach the panel; keyboard focus moves on at once. */
+body:has(:focus-visible) .tip { transition: none; }
 body[data-tips=off] .tip:not(.pinned):not(:focus-within) { visibility: hidden !important; transition: none; }
 .tip p { margin: 0 0 6px; } .tip-t { color: var(--muted); }
 .tip-mark { display: inline-block; min-width: 1.4em; text-align: center; border-radius: 4px; background: var(--cb, var(--none-bg)); color: var(--c, var(--ink)); }

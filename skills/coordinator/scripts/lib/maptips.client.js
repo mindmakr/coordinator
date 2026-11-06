@@ -92,6 +92,10 @@
   });
   addEventListener('scroll', () => { const b = pinned || (body.dataset.tips !== 'off' && shown); if (b && b.isConnected) place(b); }, { passive: true, capture: true });
 
-  // The mind map opens centred on its goal when it is wider or taller than its box.
-  document.querySelectorAll('.map-scroll.mind').forEach((s) => { s.scrollLeft = (s.scrollWidth - s.clientWidth) / 2; s.scrollTop = (s.scrollHeight - s.clientHeight) / 2; });
+  // A mind map larger than its box opens on its first unit (the top of the ring), not on the bare goal.
+  document.querySelectorAll('.map-scroll.mind').forEach((s) => {
+    const first = s.querySelector('a.u'); if (!first || (s.scrollWidth <= s.clientWidth && s.scrollHeight <= s.clientHeight)) return;
+    const c = s.getBoundingClientRect(); const r = first.getBoundingClientRect();
+    s.scrollLeft += r.left + r.width / 2 - (c.left + c.width / 2); s.scrollTop += r.top - c.top - 16;
+  });
 })();

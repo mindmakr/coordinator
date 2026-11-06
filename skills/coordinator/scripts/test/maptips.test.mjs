@@ -4,7 +4,7 @@ import { staticCtx } from '../lib/hud.mjs';
 import { mapPage } from '../lib/map/page.mjs';
 import { mapsPage } from '../lib/mapspage.mjs';
 import { MARKS, unitTip } from '../lib/maptips.mjs';
-import { mindSvg, ringRadius } from '../lib/mapsvg.mjs';
+import { flowSvg, mindSvg, relevanceSvg, ringRadius } from '../lib/mapsvg.mjs';
 
 const T0 = Date.parse('2026-11-06T06:00:00Z');
 const at = (min) => new Date(T0 + min * 60_000).toISOString();
@@ -47,7 +47,7 @@ test('panel: one non-modal dialog per unit, described by every box of that unit,
   assert.ok(!tip.includes('javascript:'), 'only http(s) links');
   assert.match(tip, /href="units\/u1.html">Open u1/);
   assert.match(html, /body:not\(\[data-tips=off\]\):has\(\.u0:is\(:hover,:focus\)\) #tip-u0\{visibility:visible;transition-delay:0s\}/, 'CSS shows it on hover and focus');
-  assert.match(html, /svg\.map:has\(\.u1:is\(:hover,:focus\)\) :is\(\.u1,\.c1,\.e1\)\{opacity:1\}/, 'and lights what it connects to');
+  assert.match(html, /svg\.map:has\(\.u1:is\(:hover,:focus\)\) :is\(\.u1,\.c1,\.e1\)[^{]*\{opacity:1\}/, 'and lights what it connects to');
   assert.match(html, /class="edge after [^"]*\be0\b[^"]*\be1\b/, 'the waits-on edge lights with either end');
 });
 
@@ -85,4 +85,28 @@ test('project map: each module has a panel with its files and helpers; names esc
   assert.match(html, /<dt>File<\/dt><dd><code>src\/b\.js<\/code>/);
   assert.ok(!html.includes('<script>alert') && !html.includes('<img src=x'), 'helper names escaped');
   assert.match(html, /class="n [^"]*\bc1\b[^"]*" id="n0"|class="n [^"]*\bc0\b[^"]*" id="n1"/, 'linked modules carry each other\'s class');
+});
+
+test('hovering a unit keeps the units it connects to lit: waits on both ways, and shared links in the mind map', () => {
+  const chain = viewOf([unit('c10'), unit('c11', { after: 'c10' }), unit('c12', { after: 'c11' }), unit('c14', { after: 'c12' }),
+    unit('c19', { links: [{ url: 'https://github.com/acme/web/issues/5' }] }), unit('c20', { links: [{ url: 'https://github.com/acme/web/issues/5' }] })]);
+  const flow = flowSvg(chain, staticCtx('', 0), T0);
+  const boxClass = (svg, id) => new RegExp(`<a href="units/${id}\.html"[^>]* class="([^"]*)"`).exec(svg)[1].split(' ');
+  assert.ok(boxClass(flow, 'c11').includes('c2'), 'c11 (waited on by c12) carries c12\'s class');
+  assert.ok(boxClass(flow, 'c14').includes('c2'), 'c14 (waits on c12) carries c12\'s class');
+  assert.ok(!boxClass(flow, 'c10').includes('c2'), 'c10 is two steps away and dims');
+  const html = mapsPage(chain, T0);
+  assert.match(html, /svg\.map:has\(\.u2:is\(:hover,:focus\)\) :is\(\.u2,\.c2,\.e2\)/, 'the rule that lights c2 elements when c12 is hovered');
+  const mind = mindSvg(chain, staticCtx('', 0));
+  assert.ok(boxClass(mind, 'c20').includes('c4'), 'c20 shares issue 5 with c19');
+  assert.match(html, /body:has\(#tip-u2:focus-within\) svg\.map :is\(\.u2,\.c2,\.e2\)/, 'lit while focus is inside the panel');
+});
+
+test('goal relevance: with no unit on goal, the Off goal heading sits below Units', () => {
+  const v = viewOf([unit('x1', { title: 'unrelated' })], { goal: 'ship the billing export' });
+  const svg = relevanceSvg(v, staticCtx('', 0));
+  const y = (label) => Number(new RegExp(`<text x="[^"]+" y="([^"]+)"[^>]*>${label}</text>`).exec(svg)[1]);
+  assert.ok(y('Off goal') - y('Units') >= 20, 'headings do not overlap');
+  const boxY = Number(/<rect class="nd [^"]*off" x="[^"]+" y="([^"]+)"/.exec(svg)[1]);
+  assert.ok(boxY > y('Off goal'), 'the off-goal box sits under its heading');
 });
