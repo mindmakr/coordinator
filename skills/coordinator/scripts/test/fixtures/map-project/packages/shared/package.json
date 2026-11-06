@@ -1,0 +1,7 @@
+{
+  "name": "@fx/shared",
+  "exports": {
+    ".": "./dist/index.js",
+    "./money": { "import": "./dist/money.js", "types": "./dist/money.d.ts" }
+  }
+}

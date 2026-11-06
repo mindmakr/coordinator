@@ -49,6 +49,10 @@
 //   run.mjs hud <run>      rewrites hud.html and units/<unit>.html beside state.json now and prints its path
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
+//   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--pit-stop [--dest dir]]
+//                  the project map (modules, helpers, settings, surfaces, reuse) into the run's map/ and map.html;
+//                  --pit-stop also copies the log, snapshot and summary into the repo (default <root>/coordinator/runs/<run>/map)
+//   run.mjs touches <run> <path> [--json]   what that file touches, from the map, for a builder's brief
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
 //                  recorded, the run closed): the run's events, snapshot and README, project lessons and
@@ -80,6 +84,7 @@ import { selfPage } from './lib/selfpage.mjs';
 import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
+import { build as buildMap, defaultDest, hasMap, mapHtml, pitStop, rerender as mapView, touchesOf } from './lib/map/index.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget'],
@@ -88,7 +93,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force'], touches: ['json'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -384,7 +389,7 @@ const commands = {
         const theme = themeFor(load(run));
         if (path === '/coordinator') return selfPage(selfModel({ ...loadSelf(), current: run }), Date.now(), liveCtx(live, run, theme));
         // /run/<other>[/unit/<u>]: another run of this folder, read-only; /run/<served> is the served run.
-        const m = /^\/run\/([^/]+)(\/unit\/.+)?$/.exec(path);
+        const m = /^\/run\/([^/]+)(\/unit\/.+|\/map)?$/.exec(path);
         const id = m ? m[1] : run;
         if (m && !isSafeId(id)) return null;
         if (m && !exists(id)) return null;
@@ -392,6 +397,8 @@ const commands = {
         const v = view(s, decide(s), Date.now(), { repo: repoFor(s) });
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
         const rest = m ? (m[2] ?? '/') : path;
+        if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
+        if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), ctx) : null;
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
       },
       version: selfVersion,
@@ -468,6 +475,29 @@ const commands = {
       } catch (e) { return { run: d, createdAt: '', error: `unreadable: ${e.message}` }; }
     }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
+  // The project map (references/map.md): from the code into the run's folder; into the repo only with --pit-stop.
+  map([run], o) {
+    const s = load(run);
+    const root = resolve(typeof o.root === 'string' ? o.root : projectDir());
+    if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
+    if (o.unit !== undefined) unitOf(s, o.unit);
+    if (o.dest !== undefined && o['pit-stop'] !== true) throw new Error('--dest goes with --pit-stop');
+    const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)) });
+    commands.hud([run]); // the dashboard links to the map
+    const b = snap.build;
+    return {
+      build: b.n, files: b.scanned, seconds: Math.round(b.ms.total / 100) / 10, partial: b.partial, stats: b.stats, page: mapHtml(runDir(run)),
+      ...(o['pit-stop'] === true ? { pitStop: pitStop(runDir(run), typeof o.dest === 'string' ? o.dest : defaultDest(root, run)) } : {}),
+    };
+  },
+  touches([run, path], o) {
+    load(run);
+    if (!path) throw new Error('usage: run.mjs touches <run> <path> [--json]');
+    const out = touchesOf(runDir(run), path, o.json === true);
+    if (o.json === true) return out;
+    process.stdout.write(out);
+    return null;
+  },
   // Forward slashes and single quotes ($ and ` stay literal), so it pastes safely into a shell brief.
   where() { const d = baseDir('project').replace(/\\/g, '/'); return { stateDir: d, env: `COORDINATOR_DIR='${d.replace(/'/g, "'\\''")}'` }; },
   push([run], o) {
@@ -484,9 +514,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|brief|close|push|pull|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
