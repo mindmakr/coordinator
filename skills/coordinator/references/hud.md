@@ -1,65 +1,78 @@
-# The HUD: a run at a glance
+# The dashboard: a run at a glance
 
-Two views of the same state, so the person never has to interrupt the loop to ask how it's going. Both read `state.json` and nothing else.
+Three views of the same state, so the person never has to interrupt the loop to ask how it's going. All read `state.json` and nothing else.
 
 ## Text: `S/run.mjs show <run>`
 
 About a dozen lines, for any harness and any terminal:
 
-- **situation:** the lead's latest `note --kind situation`, or, with none, a count such as "3 of 6 tasks in progress, 1 done, 2 waiting";
-- **needs you:** each open question (`ask`, or the older `note --kind question`) with the lead's recommendation, or "nothing". `use-answer`, or a `note --kind decision --answers q<N>`, closes question N;
+- **situation:** the lead's latest `note --kind situation`, or a count such as "3 of 6 tasks in progress, 1 done, 2 waiting";
+- **needs you:** each open question with the lead's recommendation, or "nothing". `use-answer`, or `note --kind decision --answers q<N>`, closes question N;
 - **answered:** each answer the lead has not used yet, and who gave it;
-- **time left:** rough. The median minutes a try has taken so far, times the tries still ahead on the longest chain of unfinished units (one each, plus the integration check), next to what the time budget has left. No estimate until a try finishes;
-- the run, its phase, and when it started;
-- the budget used against its limits: time, units, units added after freeze, integration rounds;
-- one row per unit: status, round against the round budget, the score trend (`3.5 → 5`), the next action; then one plain sentence (what it is for, how it went, what happens next), marked `!` when it needs attention; then the last gap with its cause;
-- the next step for the lead;
-- how many questions to confirm, follow-ups and decisions are logged.
+- **time left:** rough. The median minutes per try so far, times the tries still ahead on the longest chain of unfinished units, next to what the time budget has left;
+- the budget used against its limits;
+- one row per unit: status, round, score trend, next action and behaviours passing (`behaviours 1/2`); then its plain sentence, prefixed `[retrying]` or `[quiet]` when the lead is handling a problem, and its last gap;
+- **goal:** met or not yet, with the goal's behaviours passing;
+- the next step for the lead and the counts of questions, follow-ups and decisions.
 
-`status` replies from it (`commands/status.md`). The full notes are in `workbench.md` beside the state.
+`status` replies from it (`commands/status.md`).
 
-## HTML: `hud.html`
+## The live dashboard: `S/run.mjs serve <run> [--port P]`
 
-`.coordinator/runs/<run>/hud.html` is rewritten after every change, inside the same lock as the state and the workbench. `S/run.mjs hud <run>` rewrites it on demand (for example to update the elapsed time) and prints its path.
+A small server on 127.0.0.1 that renders the dashboard from the state on every request and keeps it current. It prints a URL with a token made fresh at each start; give it to the person once. Its rules are in `guardrails.md`.
 
-- It is one fixed template (`scripts/lib/hud.template.html`) filled from the state, so every run looks the same.
-- It opens with the situation, a highlighted **Needs you** box (calm "Nothing needs you" when nothing does) and the rough **time left**, as in the text view.
-- Each unit card starts with its plain sentence: what it is for (its `--title`, or the first clause of its bar), how it went ("passed on try 1", "failed twice in a row: <cause>", "building, try 2", "waiting for u1211") and what happens next. Its `--link` is shown when it is an http(s) URL. Then the scores. The raw gap and evidence sit behind a "Gap and evidence" toggle.
-- A **needs attention** badge marks a unit that failed two tries in a row or whose agent has gone quiet past `--stale-minutes`.
-- **Trade-off:** the toggles close again on each 15-second reload. Keeping them open needs a script, and the page has none by design; open the file without the reload (a closed run, or a published copy) to read at length.
-- Below that it shows the unit board with status chips, the score per round as a small chart, budget bars, a timeline of rounds, verdicts and notes, and the decisions, questions and follow-ups.
-- It is self-contained: no scripts, no fonts, no network. Its content security policy blocks all three, so it opens from `file://`.
-- While the run is open it reloads itself every 15 seconds. It follows the system's light or dark mode and fits a phone screen.
-- Every piece of state text in it is escaped. Gaps, evidence and notes quote issues, web pages and agents, so treat them as untrusted.
+- **Live, not reloading.** The page opens a Server-Sent Events stream (`/events`). When the state changes, and once a minute for the clocks, the server sends the page's content again, and the page updates itself in place (`lib/morph.mjs`): every row, card and section has a stable key, kept nodes stay, changed text and attributes are updated, and only new rows are inserted. Every key is unique on its page (unit ids are part of them), so the morph never confuses two rows. Because nodes are kept, the browser's own scroll anchoring (`overflow-anchor: auto`) keeps the reader's place; the page adds no scroll correction of its own. It never swaps a block while one of its form fields has focus or holds typed text. A pill in the header shows the connection, in words as well as colour: **Live** (green, pulsing), **Reconnecting** (amber, pulsing; retries with backoff, 1 s doubling to 30 s), **Disconnected** (red: the server refused the page's token, which means it restarted, or five tries in a row failed; it then stops trying and says "if the server restarted, open the new link it printed", with a **Retry** button), **Finished** (foreground colour, the run is closed). A 15-second heartbeat lets it notice a silent drop. With reduced motion set, nothing pulses.
+- **Kept state.** Open toggles (behaviours, evidence, gaps, notes), the scroll position after a reload (restored once images and fonts have loaded), the theme and the timeline filters are remembered per browser (localStorage, per run and page), across live updates and reloads.
+- **Theme toggle:** System, Light or Dark, top right.
+- **At the top:** the situation; **Goal: met / not yet**, with each goal behaviour, its status and evidence; **Needs you** with answer forms (options as cards, the recommended one first, an Other box); a note box; time left and the next step.
+- **Who acts:** only **Needs you** and the question cards address the person. A unit that failed twice in a row shows **Retrying**, one whose agent went silent shows **Quiet**; both mean the lead is on it, with the reason on hover. A legend above the units says so.
+- **Times** show in the viewer's locale and time zone: relative ("5 min ago") within 24 hours, the local date and time otherwise, and the full local time with its zone on hover. Each is a `<time datetime="…">` with the ISO timestamp; the filters read the raw timestamps.
+- **Unit dots:** each card and unit page starts with a dot: green and pulsing while building or being checked, amber while waiting or retrying, red when its agent is quiet, foreground when passed, grey when stopped (the words are in its label and tooltip). Active units come first; passed and stopped ones are dimmed, as are their timeline rows, and **Show finished** hides them (remembered per browser).
+- **Tries and scores:** "Tries used: 2 of 4" with a bar (a try is one build plus one independent review; hover says so). It turns red only near the limit on a unit still running, and is grey once the unit is finished. "Score per try (0–10)" draws one dot per try, red for a failed try and green for a passed one; each dot is focusable and its tooltip says "Try 2: failed, 8/10 — <cause>". One try reads as words: "Passed on try 1 (9/10)". Budget cards explain themselves on hover; a full units bar is normal and not red.
+- **Questions card:** open questions only, with their count. Answered ones (by the person, the lead, or a decision note that answers them) sit in a collapsed, dimmed **Answered** group: the question's header or first line, then "Answered: … — by you, 5 h ago" and the decision that closed it. On the timeline: "q1 answered: …".
+- **Unit cards:** the plain sentence, issue and PR chips, the score per round, then toggles for **Behaviours** (each with pass, fail or unchecked), **Evidence** (test output in a monospace block, collapsed when long; screenshots as thumbnails that open full size in a new tab; links), and the raw gap. **Open <unit> →** goes to the unit's page.
+- **A unit's page** (`/unit/<id>`, also live): its bar and behaviours with their evidence, other evidence and artifacts, every round (the builder's report, the critic's verdict, score, cause, gap and evidence, and each behaviour mark), its questions and notes with forms, its links, and **its own timeline**: start, beats with their milestone, built, verdicts with score and cause, strategy changes, evidence, behaviours set, questions, answers and notes on the unit, links, merges and the stop. A back link returns to the dashboard.
+- **Timelines** (the run's on the dashboard, a unit's on its page): colour-coded badges by kind, each with its text label (decision, question, answer, note, verdict pass, verdict fail, stop, merge, evidence, strategy, behaviour, build, link, info). Above them: a search box over the event text; kind chips (several at once); unit chips on the run's timeline (`run` for run-level events); a time range (last 30 min, 120 min, 4 h, 8 h, 24 h; 2–7 days ago, meaning older than 24 h up to 7 days; 8+ days ago; All); and newest or oldest first. Search ignores case, accents and Arabic or Urdu diacritics, highlights every match in the visible rows (built from text nodes, so state text stays escaped) and shows "n matches"; highlights are cleared with the search and come back after each live update. The filter and the highlights are the same functions the tests check (`lib/timeline.mjs` `matches`, `lib/highlight.mjs`).
+- **Links everywhere.** In any state text, http(s) URLs, `owner/repo#123`, and, against the run's repo, `#123`, commit shas and branch names (`feat/…`, `fix/…`) become links that open in a new tab with no referrer. Nothing else does. The run's repo is `init --repo owner/name`, else the project's `origin` remote on GitHub, else the repo most GitHub issue and PR links in the state point at.
+- **Forms** go through the same locked code as `run.mjs answer` and `note --kind person`, so `watch` sees them within 2 seconds.
 
-- Open questions show their options, the recommended one first, with any answer and who gave it. The file is read-only: it says to answer in the chat or ask the lead for the answer page.
+Stop it with Ctrl+C, or stop the background command, when the run ends.
 
-## Answering from the page: `S/run.mjs serve <run> [--port P]`
+**Why one script.** The page carries one inline script, allowed by a nonce made per response (`script-src 'nonce-…'`), plus `connect-src 'self'` for the stream and `img-src 'self'` for screenshots. Nothing else can run or load.
 
-A small server on 127.0.0.1 that renders the same HUD from the state on every request, plus forms:
+**Known issue.** In Chromium, when the top of the screen sits a few pixels below a growing list inside a tall card (for example a unit's open Evidence list), an item appended to that list can shift the view (measured once at 126 px), because the browser anchors to the card that straddles the top of the screen. Content added inside the visible area also moves what is below it, by design. Tracked in issue #23. To reproduce: in Chromium, serve a run with 8 units and 45 or more decisions, one unit with 22 or more evidence items and its Evidence list open; put the top of the screen 5–40 px below the end of that list; then add evidence to that unit from the CLI (`run.mjs evidence <run> <unit> --kind log --text …`).
 
-- each open or answered question shows its options as cards (radio buttons, or checkboxes for `--multi`) with their descriptions, the recommended one first, an **Other** text box, and **Submit**, or **Change answer** once answered. After `use-answer` the form is gone;
-- a note box at the top, and one per unit card ("Add a note on this unit");
-- every write goes through the same locked code as `run.mjs answer` and `note --kind person`, so `watch` sees it within 2 seconds.
+## The snapshot: `hud.html` and `units/<unit>.html`
 
-It prints a URL with a token made fresh at each start. The rules it enforces are in `guardrails.md`. Stop it with Ctrl+C, or stop the background command, when the run ends.
+`.coordinator/runs/<run>/hud.html` and one page per unit under `units/` are rewritten after every change, in the same lock as the state. `S/run.mjs hud <run>` rewrites them on demand.
 
-**Why a script on this page, when the file has none.** The file reloads with a 15-second meta refresh, which would wipe a half-typed answer. The answer page drops the meta refresh and carries one small inline script instead: it reloads every 15 seconds only when no form field has focus, nothing has been typed, and no unit note box is open, and typing in **Other** picks the Other option. The script is allowed by a nonce made per response (`script-src 'nonce-…'`), so no other script can run; a hash would also work, but a nonce keeps the template free to change. The file on disk keeps its no-script policy.
+- They are read-only snapshots: no scripts, no network, no reload (its content security policy blocks all three), so they open from `file://` and can be published as a page. Open questions show their options; the page says to answer in the chat or ask for the live dashboard.
+- The theme toggle works without a script there but is not remembered; toggles start closed. Times are ISO with "UTC" spelled out.
+- Screenshots up to 150 KB are embedded; larger ones are links to the file under `artifacts/`.
+
+## Looking like the project
+
+The dashboard can take its colours, fonts, radius and spacing from the project's design system: `init --theme <file.css>`, or a `Theme: <path>` line in `COORDINATOR.md` (relative to the project). The CSS file is read, never loaded:
+
+- custom properties from `:root`, `@theme`, daisyUI theme blocks, and dark ones from `.dark`, `[data-theme=dark]`, `prefers-color-scheme: dark` or a theme named dark;
+- `--background`, `--card`, `--foreground`, `--muted-foreground`, `--border`, `--primary`, `--primary-foreground`, `--success`, `--warning`, `--destructive`, `--radius`, `--font-sans`, `--font-mono`, `--spacing`, also as `--color-*`, and daisyUI's `--color-base-100/200/300/content`, `--color-error`, `--radius-box`. `var()` is resolved within the file; shadcn's bare `222 47% 11%` becomes `hsl(…)`;
+- a value that is not a plain colour or length, or holds `url(`, `@`, braces or angle brackets, is dropped. A font set at runtime (`var(--font-geist-sans)`) is dropped and the rest of the list kept. Anything missing keeps the built-in theme; a project without dark values keeps the built-in dark.
+
+The Coordinator mark stays in the foreground colour, so it fits any theme.
 
 ## Hearing the person: `S/run.mjs watch <run>`
 
-Polls the state every 2 seconds (fs.watch misses atomic renames on some systems) and prints one line per event, then keeps going and never exits:
+Polls the state every 2 seconds and prints one line per new or changed answer and per note from the person, then keeps going:
 
 ```
 answer q2 (u1) by person: No · Merge
-changed q2 (u1) by person: "Yes, after the demo" · Merge
 note by person on u3: Check the Arabic labels
 ```
 
-At start it prints the answers still waiting for the lead, so nothing answered before it started is lost. `S/run.mjs questions <run>` prints every question with its options, latest answer, history and status (`open`, `answered`, `used`, `decided`).
+At start it prints the answers still waiting for the lead. `S/run.mjs questions <run>` prints every question with its options, latest answer, history and status.
 
 ## Showing it to the person
 
-- **Claude Code:** you may publish `hud.html` as an Artifact (private by default) and give the person the link once. The published copy doesn't follow the file: republish it to the same link at milestones (a verdict, a stop, the finish), not on every change.
-- **Other harnesses:** give the person the file's path to open in a browser, or paste `show`'s output.
-- State is masked for secrets on a best-effort basis. Read the page before publishing it, and don't publish a run whose notes hold anything the person wouldn't share.
+- **Live:** start `serve` and give the person its URL, once.
+- **Claude Code:** you may also publish `hud.html` as an Artifact (private by default) at milestones; it does not follow the file.
+- State is masked for secrets on a best-effort basis. Read the page before publishing it.

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 (2026-11-06)
+
+A live dashboard, and a bar made of behaviours with evidence attached. From the owner's feedback on the 0.4 HUD.
+
+- **Live dashboard:** `run.mjs serve` pushes changes over Server-Sent Events (same token, 127.0.0.1 only, 15 s heartbeat, reconnect with backoff) and the page swaps only the blocks that changed, never one being typed in. A **Live** dot shows connected or reconnecting. No more full-page reloads.
+- **Kept state:** open sections, scroll position, theme and timeline filters are remembered per browser, across live updates and reloads.
+- **Theme toggle:** System, Light or Dark.
+- **Behaviours make up the bar:** `add --behaviour "Given … when … then …"` (repeatable) or `behave <run> <unit> [--id B1] --text …` / `--id B1 --remove`; `behaviours <run>` lists them. The critic marks each with `verdict … --behaviour B1=pass:"evidence"`; `verdict pass` is refused while any behaviour is failing or unchecked, and `start` sets them back to unchecked.
+- **Evidence per unit and behaviour:** `evidence <run> <unit> [--behaviour B1] (--text | --file | --url) --kind test|screenshot|log|link [--label]`. Text is masked and capped; images and small logs are checked and copied into `artifacts/<unit>/`; URLs must be http(s). Test output shows in a monospace block, collapsed when long; screenshots as thumbnails that open full size.
+- **Goal evidence:** `behave <run> --goal …`, `evidence <run> --goal …`; the dashboard opens with **Goal: met / not yet**, and `integrate pass` needs every goal behaviour passing.
+- **A page per unit** (`/unit/<id>`, live; `units/<id>.html` in the snapshot): behaviours, evidence, every round with the builder's report (`built --report`), the critic's verdict, score, cause and behaviour marks, notes and questions, links, and **the unit's own timeline** (start, beats with `beat --text`, built, verdicts, strategy, evidence, questions, answers, notes, links, merge, stop).
+- **Timelines:** colour-coded badges with text labels, search, kind and unit filters, time ranges (30 min to 8+ days) and sort, all kept per browser.
+- **Links everywhere:** URLs, `owner/repo#n`, and against the run's repo (`init --repo`, else the project's GitHub remote) `#n`, commit shas and branch names, each opening in a new tab with no referrer. `add`/`link --issue … --pr …` (repeatable, for linked repos) and `link --merge …` put chips on the card and the unit page.
+- **Looks like the project:** `init --theme file.css` or `Theme:` in `COORDINATOR.md` maps the design system's custom properties (shadcn, Tailwind 4 `@theme`, daisyUI) onto the dashboard; unsafe values are dropped and nothing is loaded.
+- **Retrying / Quiet, not "needs attention":** the unit badge says the lead is handling it (failed twice in a row; agent silent), with the reason on hover and a legend. Only Needs you and question cards address the person.
+- **Local times:** the live pages show times in the viewer's locale and zone (relative within 24 h, full local time on hover); the snapshot keeps ISO with UTC spelled out. Every time is a `<time datetime>`.
+- **Brand:** "Coordinator by mindmakr" mark, favicon, page titles ("<run> · Coordinator by mindmakr") and footer with the version.
+- **Your place is kept:** live updates change the page in place (keyed rows, cards and sections, every key unique on its page; kept nodes stay), so the browser's own scroll anchoring holds the reader's place. A reload restores the scroll position once images and fonts have loaded. Known issue: in Chromium, an append to a list just above the top of the screen inside a tall card can shift the view (`references/hud.md`). Event keys carry a hash of the text and a number, so two events never share one.
+- **Status at a glance:** a connection pill (Live, Reconnecting, Disconnected, Finished; after a server restart it says to open the new link and stops retrying, with a Retry button), a status dot per unit, active units first and finished ones dimmed (with Show finished), no pulsing under reduced motion.
+- **Self-explaining numbers:** "Tries used: 2 of 4", "Score per try (0–10)" with a tooltip per dot (try, result, score, cause), one try as words, budget cards that explain themselves; only limits that block work turn red.
+- **Search highlights:** every match in the visible timeline rows is marked (case, accent and diacritic insensitive, text nodes only), with an "n matches" count; kept across live updates.
+- **Answered questions leave the open list:** the Questions card counts open ones only; answered and decided ones move to a collapsed Answered group that leads with the answer.
+- **Bar changes are on the record:** after freeze, removing or rewording a behaviour needs `--reason` (logged as a bar note), and none changes while its unit is being judged. Behaviours set at `add` show on the timeline under their own kind.
+- With no `--repo` and no GitHub remote, `#n` resolves against the GitHub links already in the run.
+- **Snapshot:** `hud.html` is now a static read-only snapshot (no meta refresh, so open sections stay open); one page per unit beside it; small screenshots embedded.
+- Older state files load: every new field is optional.
+
 ## 0.4.0 (2026-11-06)
 
 The person answers the lead's questions and adds notes from the HUD, and the lead hears about it at once.

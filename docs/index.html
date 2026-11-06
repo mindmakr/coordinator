@@ -173,7 +173,7 @@ footer.colophon p { margin: 0; }
   <p class="motto">What your agents did, what they are doing next, and the evidence for it.</p>
   <div class="dateline">
     <span><time datetime="2026-11-06">Friday, 6 November 2026</time></span>
-    <span>Version 0.4 edition</span>
+    <span>Version 0.5 edition</span>
     <span>Free to install</span>
   </div>
   <nav class="sections" aria-label="Sections">
@@ -208,12 +208,12 @@ footer.colophon p { margin: 0; }
       <h3>Nothing lives only in memory</h3>
       <p>Every run is a JSON file, written atomically behind a lock, with a readable <code>workbench.md</code> beside it. A crash or a context reset resumes from the file. When the run ends, a retro turns repeated gaps into lessons, tunes the budgets from past runs, and, with your approval, sends gaps in the skill itself back to this project as issues.</p>
       <h3>The dashboard is a web page</h3>
-      <p>You don't need a purpose-built GUI app to watch a team of agents. Each run writes its own dashboard, <code>hud.html</code>, that opens in any browser: the situation in plain words, a <em>Needs you</em> box with the lead's recommendation, a rough time left, then every piece of work, its scores, budgets and a timeline. <code>run.mjs serve</code> serves the same page on your own machine with answer forms, so you can reply to the lead from the browser while it works.</p>
+      <p>You don't need a purpose-built GUI app to watch a team of agents. Each run has its own dashboard in any browser: the situation in plain words, a <em>Needs you</em> box with the lead's recommendation, a rough time left, then every piece of work, its scores, budgets and a timeline. <code>run.mjs serve</code> serves it live on your own machine, updating in place as the run moves, with answer forms so you can reply to the lead while it works. <code>hud.html</code> beside the state is a static snapshot you can open from disk.</p>
     </div>
 
     <figure>
       <img src="dashboard.png" width="1280" height="900" loading="lazy" alt="The Coordinator dashboard for a demo run. At the top: the situation, 'Totals endpoint: one gap left on partial refunds; the second try is building'. Below it the goal with its one behaviour, unchecked. A highlighted Needs you box asks whether to count partial refunds as negative lines or net them per order, with 'Net per order' marked Recommended, an Other box and a Submit button. Then a note box for the lead and a rough time left.">
-      <figcaption>The dashboard from the next version, 0.5, in development, showing a made-up demo run. The lead has parked one question, with its recommendation first; everything else carries on without you.</figcaption>
+      <figcaption>The live dashboard in 0.5, showing a made-up demo run. The lead has parked one question, with its recommendation first; everything else carries on without you.</figcaption>
     </figure>
   </article>
 
@@ -298,12 +298,12 @@ footer.colophon p { margin: 0; }
       <p>Written before building, in terms a critic can check: a red test that must go green, a screen to match, an acceptance list. A craft bar covers the writing and the UI as well: no filler copy, UI started from references, never from a blank page.</p>
     </article>
     <article>
-      <h3><span class="tag next">Next, 0.5</span> Behaviours and evidence</h3>
-      <p>In development for 0.5: the bar becomes a list of behaviours ("given … when … then …"), the critic marks each one with evidence attached (test output, screenshots, logs, links), and a pass is refused while any behaviour is failing or unchecked.</p>
+      <h3><span class="tag now">Today</span> Behaviours and evidence</h3>
+      <p>Since 0.5 the bar is a list of behaviours ("given … when … then …"), the critic marks each one with evidence attached (test output, screenshots, logs, links), and a pass is refused while any behaviour is failing or unchecked.</p>
     </article>
     <article>
       <h3><span class="tag now">Today</span> The dashboard</h3>
-      <p>A page in your browser, rewritten on every change, with a text twin in the terminal (<code>run.mjs show</code>). Version 0.5, in development, makes it live over Server-Sent Events, with a page per piece of work and a searchable timeline.</p>
+      <p>A page in your browser, rewritten on every change, with a text twin in the terminal (<code>run.mjs show</code>). Since 0.5 it is live over Server-Sent Events, with a page per piece of work and a searchable timeline.</p>
     </article>
     <article>
       <h3><span class="tag planned">Planned for 1.0</span> Answer from anywhere</h3>
@@ -383,7 +383,7 @@ footer.colophon p { margin: 0; }
       <p>Third-party packages and services a project calls, where it calls them, and which run touched them. No issue yet.</p>
     </div>
   </div>
-  <p class="note" style="margin-top:1rem">The road to 1.0, in order. <strong>Today (0.4):</strong> a local dashboard with answer forms and <code>watch</code>. <strong>Next (0.5, in development):</strong> the live dashboard with behaviours and evidence. <strong>Planned:</strong> <a href="https://github.com/mindmakr/coordinator/issues/9">an event log behind the local dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/10">run state kept in your own repository</a> · <a href="https://github.com/mindmakr/coordinator/issues/11">a GitHub App and a read-only web dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/12">answers, notes and alerts from anywhere</a> · <a href="https://github.com/mindmakr/coordinator/issues/13">built-in sub-skills</a> · <a href="https://github.com/mindmakr/coordinator/issues/14">the 1.0 release</a>. The design is a draft under review (<a href="https://github.com/mindmakr/coordinator/issues/15">#15</a>).</p>
+  <p class="note" style="margin-top:1rem">The road to 1.0, in order. <strong>Today (0.5):</strong> the live dashboard with behaviours and evidence, answer forms and <code>watch</code>. <strong>Planned:</strong> <a href="https://github.com/mindmakr/coordinator/issues/9">an event log behind the local dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/10">run state kept in your own repository</a> · <a href="https://github.com/mindmakr/coordinator/issues/11">a GitHub App and a read-only web dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/12">answers, notes and alerts from anywhere</a> · <a href="https://github.com/mindmakr/coordinator/issues/13">built-in sub-skills</a> · <a href="https://github.com/mindmakr/coordinator/issues/14">the 1.0 release</a>. The design is a draft under review (<a href="https://github.com/mindmakr/coordinator/issues/15">#15</a>).</p>
 </section>
 
 <section class="band" id="wanted" aria-labelledby="wanted-h">
@@ -422,7 +422,7 @@ footer.colophon p { margin: 0; }
 </main>
 
 <footer class="colophon">
-  <p>Coordinator by mindmakr · Version 0.4.0 · <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT licence</a></p>
+  <p>Coordinator by mindmakr · Version 0.5.0 · <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT licence</a></p>
   <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a> · <a href="https://github.com/mindmakr/coordinator">github.com/mindmakr/coordinator</a></p>
 </footer>
 

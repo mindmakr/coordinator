@@ -64,6 +64,22 @@ export function timeLeft(run, plan, nowMs) {
 
 const failStreak = (rounds) => { let k = 0; for (let i = rounds.length - 1; i >= 0 && rounds[i].verdict === 'fail'; i--) k++; return k; };
 
+// The unit's status dot, with the words a screen reader and a tooltip say.
+export const DOTS = {
+  working: 'working', waiting: 'waiting', retrying: 'retrying: the lead is on it', stale: 'quiet: no word from its agent', passed: 'passed', stopped: 'stopped',
+};
+export function dotState(u, d) {
+  if (u.status === 'pass') return 'passed';
+  if (u.status === 'stopped' || d?.action === 'stop' || d?.action === 'stopped') return 'stopped';
+  if (d?.action === 'check-stale') return 'stale';
+  if (attention(u, d)) return 'retrying';
+  if (['building', 'judging'].includes(u.status)) return 'working';
+  return 'waiting';
+}
+
+// The badge's label: the lead is handling it. Only Needs you and question cards address the person.
+export const attentionLabel = (reason) => (reason ? (reason.startsWith('no word') ? 'Quiet' : 'Retrying') : null);
+
 export function attention(u, d) {
   if (d?.action === 'check-stale') return 'no word from its agent for a while';
   if (['open', 'building', 'judging'].includes(u.status) && failStreak(u.rounds) >= 2) return `failed ${times(failStreak(u.rounds))} in a row`;

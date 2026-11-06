@@ -1,5 +1,7 @@
 # Coordinator
 
+**Coordinator by [mindmakr](https://github.com/mindmakr)**
+
 **Give your coding agent a lead.** Coordinator is an agent skill that runs a task the way a good engineering lead would. It agrees everything with you up front, staffs the work from your harness's own agents, and keeps sending the work back to independent critics until it meets a bar you can check. Then it reports, and remembers what it learned for next time.
 
 Author: Asif Raja, by [mindmakr](https://github.com/mindmakr) · Homepage: [mindmakr.github.io/coordinator](https://mindmakr.github.io/coordinator/)
@@ -90,9 +92,21 @@ Example:
 
 You can also describe the goal ("coordinate this…") and the agent picks the command itself.
 
-**Watching a run.** Each run keeps a `hud.html` beside its state. It opens with the situation in plain words, a **Needs you** box with the lead's recommendation (or "Nothing needs you"), and a rough time left; each unit says in one sentence what it is for, how it went and what happens next. Then the unit board, scores per round, budget bars, a timeline, and the decisions, questions and follow-ups. It is rewritten on every change and reloads itself, with no scripts and no network, so you can open it straight from disk. In Claude Code the lead can publish it as a private Artifact. `run.mjs show <run>` prints the same at a glance in text.
+## Dashboard
 
-**Answering from the HUD.** `run.mjs serve <run>` serves the same page on 127.0.0.1 with answer forms: each question's options as cards, the recommended one first, an Other box, and a note box per unit. The lead asks through the question tool and mirrors each question there, so you can answer in either place and change your answer until the lead uses it. `run.mjs watch <run>`, running in the lead's background, prints each answer and note as it arrives, so the lead hears at once.
+![The live dashboard: situation, goal, a question with its recommended answer](docs/dashboard.png)
+
+`run.mjs serve <run>` serves a live dashboard on 127.0.0.1, behind a token made at each start:
+
+- **Live:** it updates in place over Server-Sent Events as the run moves; open sections, scroll, theme and filters stay put, across updates and reloads.
+- **Goal: met / not yet** at the top, with the goal's behaviours and their evidence; then what needs you, with answer forms (recommended option first) and a note box.
+- **Behaviours make up each unit's bar** (`Given … when … then …`). The critic marks each pass or fail with evidence; a unit cannot pass while one is failing or unchecked. Test output, screenshots and links are attached per behaviour with `run.mjs evidence`.
+- **A page per unit:** behaviours, evidence, every round (builder's report, critic's verdict, score, cause), notes and questions, issue and PR links, and its own timeline.
+- **Timelines** with colour-coded, labelled badges, search, kind and unit filters, time ranges and sort.
+- **Links:** URLs, `owner/repo#12`, `#12`, commit shas and branch names open on GitHub in a new tab.
+- **Looks like your project:** `init --theme app/globals.css` (or `Theme:` in `COORDINATOR.md`) maps your design system's colours, fonts and radius onto it. Light, dark or system.
+
+Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once.
 
 ## What's inside
 
@@ -107,7 +121,7 @@ skills/coordinator/
 │   ├── team.md                 staffing roles from your harness's agents
 │   ├── guardrails.md           budgets, fence, stop rules, gated actions
 │   ├── durability.md           background agents, heartbeats, resume
-│   ├── hud.md                  the text and HTML views of a run
+│   ├── hud.md                  the text view, the live dashboard and the snapshot
 │   ├── learning.md             retro, lessons, budget tuning
 │   ├── upstream.md             contributing improvements back
 │   └── domains/                code · content (writing, design, research, data, prompts)
@@ -115,7 +129,8 @@ skills/coordinator/
     ├── run.mjs                 run state and the loop's decisions
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
-    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, plain, hud, questions, serve
+    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, plain, questions,
+    │                           hud, unitpage, parts, links, theme, timeline, behaviours, evidence, serve, live
     └── test/                   node:test suites
 ```
 
@@ -131,11 +146,10 @@ skills/coordinator/
 
 ## Coming soon
 
-Planned, not built yet. The road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14).
+Out in 0.5: behaviours and evidence on the bar, and the live dashboard with a page per unit ([Dashboard](#dashboard)). Planned, not built yet: the rest of the road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14).
 
 | Add-on | Status |
 |---|---|
-| Behaviours and evidence on the bar, a live dashboard with a page per unit | In development (0.5) |
 | Follow and answer a run from a phone, with alerts | On the 1.0 plan ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12), [#18](https://github.com/mindmakr/coordinator/issues/18)) |
 | Security pass as a second critic on every code change | On the 1.0 plan ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
 | Run maps: mind, flow, heat and goal relevance | On the 1.0 plan ([#20](https://github.com/mindmakr/coordinator/issues/20)) |

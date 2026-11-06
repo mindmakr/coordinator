@@ -31,7 +31,7 @@ test('the situation is the lead\'s latest note, or counted from the state', () =
   r = render(state({ notes: [{ kind: 'situation', text: 'old', at: at(5) }, { kind: 'situation', text: 'u2 keeps missing the cycle dates; u3 about 15 min.', at: at(41) }] }));
   assert.equal(r.v.situation.text, 'u2 keeps missing the cycle dates; u3 about 15 min.');
   assert.match(r.html, /<p>u2 keeps missing the cycle dates; u3 about 15 min\.<\/p>/);
-  assert.match(r.html, /the lead, 2026-01-01 00:41 UTC/);
+  assert.match(r.html, /the lead, <time datetime="2026-01-01T00:41:00.000Z" title="2026-01-01 00:41 UTC">2026-01-01 00:41 UTC<\/time>/);
 });
 
 test('needs you lists open questions with the recommendation, and is calm when there are none', () => {
@@ -45,10 +45,10 @@ test('needs you lists open questions with the recommendation, and is calm when t
   ];
   r = render(state({ notes }));
   assert.deepEqual(r.v.needsYou.map((q) => q.id), ['q1']);
-  assert.match(r.html, /<div class="needs"><b>Needs you<\/b><ul><li class="q" id="q1"><p class="qtext"><b>q1<\/b> Merge u1 now\?<\/p><p class="rec">Recommended: yes, the review says READY<\/p>/);
+  assert.match(r.html, /<div class="needs"><b>Needs you<\/b><ul><li class="q" id="q1" data-a="q-q1"><p class="qtext"><b>q1<\/b> Merge u1 now\?<\/p><p class="rec">Recommended: yes, the review says READY<\/p>/);
   assert.match(r.txt, /^needs you {2}q1: Merge u1 now\? → recommended: yes, the review says READY$/m);
   assert.match(r.txt, /open {4}1 questions/);
-  assert.match(r.html, /q2 \(decided\): Use UTC\?/);
+  assert.match(r.html, /<b>q2<\/b> Use UTC\?<p class="ans"><b>Answered:<\/b> UTC it is /, 'a decided question shows its answer, not as open');
   assert.equal(render(state({ notes, closed: { outcome: 'partial', at: at(50) } })).v.needsYou.length, 0, 'a closed run needs nobody');
 });
 
@@ -70,9 +70,9 @@ test('each unit says what it is for, how it went and what happens next', () => {
   assert.equal(say.u2, 'u2 works. Failed twice in a row: cycle dates; next another try.');
   assert.equal(say.u3, 'u3 works. Building, try 1; next a critic checks it when the builder finishes.');
   assert.equal(say.u4, 'u4 works. Waiting for u3; starts when it passes.');
-  assert.ok(html.indexOf('<p class="say">u2 works.') < html.indexOf('round 2/4'), 'the sentence comes before the scores');
-  assert.match(html, /<details class="raw"><summary>Gap and evidence<\/summary><dl><dt>Last gap<\/dt><dd>still off by one/);
-  assert.match(html, /<a href="https:\/\/github.com\/o\/r\/issues\/1" rel="noreferrer">link<\/a>/);
+  assert.ok(html.indexOf('<p class="say">u2 works.') < html.indexOf('Tries used: 2 of 4'), 'the sentence comes before the scores');
+  assert.match(html, /<details class="raw" data-d="u-u2-raw" data-a="d-u-u2-raw"><summary>Gap and evidence<\/summary><dl><dt>Last gap<\/dt><dd>still off by one/);
+  assert.match(html, /<a href="https:\/\/github.com\/o\/r\/issues\/1" target="_blank" rel="noopener noreferrer">o\/r#1<\/a>/, 'a short label for a GitHub link');
   assert.match(html, /u1 · #1 Security gaps/);
 });
 
@@ -80,8 +80,16 @@ test('attention: two failed tries in a row, or a silent agent, earn a badge', ()
   const { v, html, txt } = render(state());
   assert.deepEqual(v.units.map((u) => u.attention), [null, 'failed twice in a row', null, null]);
   assert.equal((html.match(/class="chip flag"/g) ?? []).length, 1);
-  assert.match(txt, /^ +! u2 works\. Failed twice in a row/m);
+  assert.match(txt, /^ +\[retrying\] u2 works\. Failed twice in a row/m);
   assert.equal(render(state(), 100).v.units[2].attention, 'no word from its agent for a while');
+});
+
+test('the badge says the lead is on it, never that the person must act', () => {
+  const { html } = render(state());
+  assert.match(html, /<span class="chip flag" title="The lead is on it: failed twice in a row">Retrying<\/span>/);
+  assert.match(render(state(), 100).html, /<span class="chip flag" title="The lead is on it: no word from its agent for a while">Quiet<\/span>/);
+  assert.doesNotMatch(html, /needs attention/i);
+  assert.match(html, /<p class="legend">.*<b>Needs you<\/b> = waiting on you; <b>Retrying<\/b> = the lead is on it/);
 });
 
 test('lead and agent text is escaped everywhere, and a non-web link is not a link', () => {
@@ -94,7 +102,7 @@ test('lead and agent text is escaped everywhere, and a non-web link is not a lin
   assert.doesNotMatch(html, /<img|<script|<svg onload|<i>t|href="javascript/i);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(html, /Recommended: &quot;&gt;&lt;script&gt;/);
-  assert.match(html, /<span class="cause">javascript:alert\(1\)<\/span>/);
+  assert.match(html, /<span class="badge k-link">link<\/span> javascript:alert\(1\)<\/span>/, 'shown as text, not a link');
 });
 
 test('an old state (no titles, links, situation, answers or notes) still loads', () => {
