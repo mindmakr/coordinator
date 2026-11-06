@@ -107,20 +107,38 @@ function svg(snap, gr, areaIds) {
   }).join('');
   const nodeSvg = gr.keys.map((k) => {
     const n = gr.nodes.get(k); const p = gr.pos.get(k); const i = id.get(k);
+    const near = [...new Set([...n.out.keys(), ...n.in])].map((x) => ` c${id.get(x)}`).join('');
     const facts = [`${n.files} file${n.files === 1 ? '' : 's'}`, n.routes && `${n.routes} routes`, n.screens && `${n.screens} screens`, n.helpers && `${n.helpers} shared helpers`, n.settings && `${n.settings} setting uses`].filter(Boolean).join(' · ');
     const label = gr.level === 'file' ? k.split('/').pop() : k;
-    const badge = n.routes || n.screens ? `<circle class="s" cx="${p.x + W - 9}" cy="${p.y + 9}" r="4"/>` : '';
-    const body = `<g class="n ${cls(k)}${n.tests === n.files ? ' t' : ''}" id="n${i}"><title>${esc(`${k}\n${facts}`)}</title><rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="6"/>`
-      + `<text x="${p.x + 8}" y="${p.y + 19}">${esc(clipLabel(label))}</text>${badge}</g>`;
     const url = gr.level === 'file' ? fileUrl(snap, k) : treeUrl(snap, k);
-    return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(`${k}: ${facts}`)}">${body}</a>` : body;
+    const badge = n.routes || n.screens ? `<circle class="s" cx="${p.x + W - 9}" cy="${p.y + 9}" r="4"/>` : '';
+    const body = `<g class="n ${cls(k)}${n.tests === n.files ? ' t' : ''}${near}" id="n${i}"${url ? '' : ` tabindex="0" aria-label="${esc(`${k}: ${facts}`)}" aria-describedby="tip-n${i}"`}><title>${esc(`${k}\n${facts}`)}</title><rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="6"/>`
+      + `<text x="${p.x + 8}" y="${p.y + 19}">${esc(clipLabel(label))}</text>${badge}</g>`;
+    return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(`${k}: ${facts}`)}" aria-describedby="tip-n${i}">${body}</a>` : body;
   }).join('');
-  return `<svg class="graph" width="${gr.width}" height="${gr.height + 40}" viewBox="0 0 ${gr.width} ${gr.height + 40}" role="img" aria-label="${esc(`Import graph: ${gr.keys.length} ${gr.level === 'file' ? 'files' : 'folders'}, ${gr.edges.length} links`)}">${edgeSvg}${nodeSvg}</svg>`;
+  return `<svg class="graph" width="${gr.width}" height="${gr.height + 40}" viewBox="0 0 ${gr.width} ${gr.height + 40}" role="group" aria-label="${esc(`Import graph: ${gr.keys.length} ${gr.level === 'file' ? 'files' : 'folders'}, ${gr.edges.length} links`)}">${edgeSvg}${nodeSvg}</svg>`;
 }
 
-// Hover or focus on a node lights its links; unchecked areas, light edges and tests hide.
+// A module's panel: its files (the units it is made of), shared helpers, surfaces, settings and links.
+export function moduleTips(snap, gr) {
+  const list = (xs, n = 5) => (xs.length ? `${xs.slice(0, n).map((x) => `<code>${esc(x)}</code>`).join(', ')}${xs.length > n ? ` <span class="cause">+${xs.length - n} more</span>` : ''}` : '');
+  const row = (k, v) => (v ? `<dt>${esc(k)}</dt><dd>${v}</dd>` : '');
+  return `<div class="tips">${gr.keys.map((k, i) => {
+    const n = gr.nodes.get(k);
+    const files = snap.modules.filter((m) => gr.key(m.id) === k).map((m) => (gr.level === 'file' ? m.id : m.id.slice(k.length + 1) || m.id));
+    const helpers = snap.helpers.filter((h) => gr.key(h.file) === k).map((h) => h.name);
+    return `<div class="tip" id="tip-n${i}" role="dialog" aria-modal="false" aria-labelledby="tip-n${i}-h"><p class="tip-h" id="tip-n${i}-h"><b>${esc(k)}</b></p><dl>`
+      + row(gr.level === 'file' ? 'File' : `Files (${n.files})`, list(files)) + row('Tests', n.tests ? esc(String(n.tests)) : '')
+      + row(`Helpers (${helpers.length})`, list(helpers)) + row('Surfaces', esc([n.routes && `${n.routes} routes`, n.screens && `${n.screens} screens`].filter(Boolean).join(', ')))
+      + row('Settings', n.settings ? esc(`${n.settings} use${n.settings === 1 ? '' : 's'}`) : '') + row('Imports', esc(`${n.out.size} out, ${n.in.size} in`)) + '</dl></div>';
+  }).join('')}</div>`;
+}
+
+// Hover or focus on a node lights its links and the boxes it links to, dims the rest and shows its panel; unchecked areas, light edges and tests hide.
 function styles(gr, areaIds) {
-  const per = gr.keys.map((k, i) => `:root .graph:has(#n${i}:hover) .x${i},:root .graph:has(a:focus-visible #n${i}) .x${i}{stroke:var(--run);opacity:1}`).join('');
+  const per = gr.keys.map((k, i) => `:root .graph:has(#n${i}:hover) .x${i},:root .graph:has(a:focus #n${i},#n${i}:focus) .x${i}{stroke:var(--run);opacity:1}`
+    + `.graph:has(#n${i}:hover,a:focus #n${i},#n${i}:focus) :is(#n${i},.c${i}){opacity:1}`
+    + `body:not([data-tips=off]):has(#n${i}:hover,a:focus #n${i},#n${i}:focus) #tip-n${i}{visibility:visible;transition-delay:0s}`).join('');
   const areas = [...areaIds.values()].map((i) => `:root:has(#f-a${i}:not(:checked)) :is(.a${i},.ea${i},.eb${i}){display:none}`).join('');
   return `<style>
 .mapbox{overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);max-height:70vh}
@@ -128,6 +146,7 @@ function styles(gr, areaIds) {
 .graph .n:hover rect,.graph a:focus-visible rect{stroke:var(--run);stroke-width:2}.graph .s{fill:var(--pass)}
 .graph .e{fill:none;stroke:var(--muted);opacity:.45}.graph .e.back{stroke-dasharray:4 3;stroke:var(--wait)}
 .graph:has(.n:hover) .e{opacity:.12}
+:where(.graph:has(.n:hover,a:focus .n,.n:focus)) .n{opacity:.3}body[data-tips=off] .graph .n{opacity:1}
 :root:has(#f-cycles:not(:checked)) .e.back{opacity:0}
 :root:has(#f-w3:checked) .e.w1,:root:has(#f-w10:checked) :is(.e.w1,.e.w3){display:none}
 :root:has(#f-tests:not(:checked)) .t{display:none}
@@ -165,8 +184,8 @@ export function mapPage(snap, ctx, run) {
       + `<span class="meta">build ${b.n ?? 0}${b.at ? ` · ${esc(b.at.slice(0, 16).replace('T', ' '))} UTC` : ''}${commit ? ` · commit ${commit}` : ''}${b.unit ? ` · after ${esc(b.unit)}` : ''} · ${b.scanned ?? 0} files scanned in ${((b.ms?.total ?? 0) / 1000).toFixed(1)} s</span></header>`
       + `<p class="say">${snap.modules.length} modules, ${snap.helpers.length} shared helpers, ${snap.settings.length} settings, ${kinds('route').length} routes, ${kinds('screen').length} screens, ${msgs.length} message keys in use or missing a locale, ${snap.reuse.length} reuse candidates.</p>`),
     '<h2>Imports</h2>',
-    blk('map-graph', `${filters}<p class="meta">${gr.level === 'file' ? 'One box per file' : 'One box per folder'}; arrows point from the importer to what it imports, dashed ones close a cycle (shown with Cycles, or on hover), a green dot marks routes or screens. Hover a box to light its links; click it to open it on GitHub.</p>`
-      + `<div class="mapbox">${svg(snap, gr, areaIds)}</div>`),
+    blk('map-graph', `${filters}<p class="meta">${gr.level === 'file' ? 'One box per file' : 'One box per folder'}; arrows point from the importer to what it imports, dashed ones close a cycle (shown with Cycles, or on hover), a green dot marks routes or screens. Hover, focus or tap a box to light its links and see its files and helpers; Escape closes; click it to open it on GitHub.</p>`
+      + `<div class="mapbox">${svg(snap, gr, areaIds)}</div>${moduleTips(snap, gr)}`),
     '<h2>Surfaces</h2>',
     blk('map-routes', toggle('map-routes', `Routes · ${kinds('route').length}`, rows(kinds('route'), (s) => [`<code>${esc(s.method)} ${esc(s.path)}</code>`, fileLink(snap, s.file, s.line), few(s.services.map((f) => fileLink(snap, f)))], ['Route', 'Declared in', 'Behind it'], (s) => rowArea(s.file)))),
     blk('map-screens', toggle('map-screens', `Screens · ${kinds('screen').length}`, rows(kinds('screen'), (s) => [`<code>${esc(s.path)}</code>`, fileLink(snap, s.file), (s.calls ?? []).map((c) => `<code>${esc(c.split(' ').slice(0, 2).join(' ').replace(/^route:/, ''))}</code>`).join('<br>') || '<span class="meta">no calls found</span>'], ['Screen', 'File', 'Routes it calls'], (s) => rowArea(s.file)))),

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Map labels and stats panels:** every unit box on the maps carries a status mark (✓ ✗ ■ ○ ▶ ◆, never colour alone), its id and a clipped title; hovering, focusing or tapping a box shows its status, round, scores, time spent, last gap, linked issues and PRs and files touched, and lights what it connects to while the rest dims. Escape or a tap elsewhere closes it. The project map does the same for modules (files and helpers). CSS-driven, so the snapshot works with no script; the view model gains `files` (from the last gaming check). The project map's graph is a group, not an image, so its links reach assistive technology.
+- **Maps stay readable on a phone:** maps draw at their own size (ids 13 px, the smallest text 10.5 px) and scroll inside their box with a hint, instead of shrinking; the mind map opens centred. Stacked edges say "waits on" and point to the unit waited for; issue and PR boxes say which units link them; follow-ups say which unit filed them; goal behaviours say which units serve them. The panel is a non-modal dialog: Tab from a box enters it, Tab past its last link moves on, Escape returns to the box; it stays open while the pointer is on it and is placed clear of the boxes it lights. Another run's pages name that run in the header. Hovering a unit keeps the units it waits on, the ones waiting on it and (in the mind map) those sharing an issue or PR lit; dimming stays while focus is in a panel; keyboard focus moves panels at once (the grace delay is for the pointer only); a large mind map opens on its first unit.
+
 ## 0.6.0 (2026-11-06)
 
 The coordinator's own page (#19), dashboard maps (#20), the project map (#21), the event log and repo-backed state (#9, #10) and built-in sub-skills (#13).
