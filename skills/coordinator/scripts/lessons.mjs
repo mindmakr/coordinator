@@ -2,18 +2,20 @@
 // What past runs taught: short lessons, merged when they say the same thing,
 // ranked by how often they recur and are used, pruned so loading stays cheap.
 //
-//   lessons.mjs add --tag T --text "one sentence" [--from run] [--scope global|project]
+//   lessons.mjs add --tag T --text "one sentence" [--from run] [--source URL …] [--scope global|project]
+//                   T is free: code, security, design, ux, stack, … --source is where it was learned (a study, a doc)
 //   lessons.mjs list [--tag T] [--top 8] [--scope …]      promote: true once seen 3+ times
 //   lessons.mjs use <id> | drop <id> [--scope …]
 //   lessons.mjs prune [--keep 60] [--scope …]
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { num, oneOf, optText, parse, text } from './lib/args.mjs';
+import { webUrl } from './lib/links.mjs';
 import { tokens } from './lib/rules.mjs';
 import { findSecret } from './lib/secrets.mjs';
 import { baseDir, readJson, safeId, update } from './lib/store.mjs';
 
-const FLAGS = { add: ['tag', 'text', 'from', 'scope'], list: ['tag', 'top', 'scope'], use: ['scope'], drop: ['scope'], prune: ['keep', 'scope'] };
+const FLAGS = { add: ['tag', 'text', 'from', 'source', 'scope'], list: ['tag', 'top', 'scope'], use: ['scope'], drop: ['scope'], prune: ['keep', 'scope'] };
 const norm = (s) => tokens(s).join(' ');
 const idOf = (s) => createHash('sha256').update(norm(s)).digest('hex').slice(0, 10);
 const rank = (l) => l.seen * 2 + l.used;
@@ -52,23 +54,30 @@ function main(cmd, pos, opt) {
       const t = text(opt.text, 'text', 300);
       const tag = safeId(opt.tag ?? 'general', 'tag');
       const from = optText(opt.from, 64);
+      const sources = (opt.source ?? []).map((raw) => {
+        const url = typeof raw === 'string' ? webUrl(raw.trim()) : null;
+        if (!url || url.length > 500) throw new Error(`--source must be an http(s) URL, got: ${raw}`);
+        if (findSecret(url)) throw new Error('refused: the source looks like it contains a secret');
+        return url;
+      });
       let result;
       update(file, [], (all) => {
         const hit = all.find((l) => l.id === idOf(t) || (l.tag === tag && similar(l.text, t)));
         if (hit) {
           hit.seen++; hit.lastAt = now;
           if (from && !hit.from.includes(from)) hit.from.push(from);
+          for (const u of sources) if (!(hit.sources ??= []).includes(u)) hit.sources.push(u);
           result = { id: hit.id, added: false, mergedInto: hit.text };
           return;
         }
-        all.push({ id: idOf(t), tag, text: t, seen: 1, used: 0, firstAt: now, lastAt: now, from: from ? [from] : [] });
+        all.push({ id: idOf(t), tag, text: t, seen: 1, used: 0, firstAt: now, lastAt: now, from: from ? [from] : [], ...(sources.length ? { sources } : {}) });
         result = { id: idOf(t), added: true };
       });
       return result;
     }
     case 'list':
       return readJson(file, []).filter((l) => !opt.tag || l.tag === opt.tag || l.tag === 'general').sort(byRank)
-        .slice(0, num(opt.top, 8, 1, 200)).map(({ id, tag, text: t, seen, used }) => ({ id, tag, seen, used, promote: seen >= 3, text: t }));
+        .slice(0, num(opt.top, 8, 1, 200)).map(({ id, tag, text: t, seen, used, from, sources }) => ({ id, tag, seen, used, promote: seen >= 3, text: t, from: from ?? [], ...(sources?.length ? { sources } : {}) }));
     case 'use': touch(safeId(pos[0], 'lesson id'), 'used'); return { id: pos[0], used: true };
     case 'drop': {
       const id = safeId(pos[0], 'lesson id');
@@ -87,6 +96,6 @@ function main(cmd, pos, opt) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 try {
-  const { pos, opt } = parse(rest, FLAGS[cmd] ?? []);
+  const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], cmd === 'add' ? ['source'] : []);
   console.log(JSON.stringify(main(cmd, pos, opt), null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(cmd in FLAGS ? 1 : 2); }

@@ -155,6 +155,27 @@ button { margin-top: 8px; font: inherit; font-weight: 600; color: var(--on-run);
 :focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
 form.note { margin-top: 12px; font-size: 14px; }
 form.note label { display: block; color: var(--muted); }
+.pages { display: flex; flex-wrap: wrap; gap: 4px; margin-right: auto; font-size: 13px; }
+.pages a { padding: 3px 10px; border-radius: 999px; color: var(--muted); text-decoration: none; border: 1px solid transparent; overflow-wrap: anywhere; }
+.pages a:hover { color: var(--ink); border-color: var(--line); }
+.pages a[aria-current="page"] { color: var(--ink); background: var(--none-bg); font-weight: 600; }
+.toc { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 12px; font-size: 13px; }
+.stat span { display: block; font-size: 12px; color: var(--muted); }
+.stat b { display: block; font-size: 20px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat b .cause { font-weight: 400; }
+h3.sub { font-size: 14px; margin: 18px 0 6px; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+th, td { text-align: left; padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; color: var(--muted); font-weight: 600; font-size: 12px; }
+tbody th { font-weight: 600; overflow-wrap: anywhere; min-width: 140px; }
+td .bar { max-width: 120px; }
+code { font: 12px var(--mono); background: var(--none-bg); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
+ul.plain { list-style: none; padding: 0; margin: 6px 0 0; font-size: 14px; display: grid; gap: 10px; }
+ul.plain li { overflow-wrap: anywhere; }
+ul.plain .cause { margin-top: 2px; }
+section.self .card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+section.self .card li { margin: 4px 0; overflow-wrap: anywhere; }
 footer { margin-top: 36px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 footer a { color: inherit; }
 @media (max-width: 520px) {

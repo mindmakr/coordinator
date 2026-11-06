@@ -20,7 +20,8 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, home: `${up}hud.html`,
+    live: null, theme, run: null, home: `${up}hud.html`, pages: [],
+    runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
     // Small screenshots go inline, so the snapshot shows them without loading anything.
@@ -32,12 +33,17 @@ export function staticCtx(runDir, depth = 0, theme = null) {
 }
 const mime = (f) => ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' })[f.split('.').pop().toLowerCase()] ?? 'application/octet-stream';
 
-export function liveCtx({ token, nonce }, run, theme = null) {
+// `other`: another run of the same state folder, shown read-only under /run/<id>.
+export function liveCtx({ token, nonce }, run, theme = null, other = null) {
   const t = `t=${encodeURIComponent(token)}`;
+  const base = other ? `/run/${encodeURIComponent(other)}` : '';
   return {
-    live: { token, nonce }, theme, run, home: `/?${t}`, embed: null,
-    unitHref: (id) => `/unit/${encodeURIComponent(id)}?${t}`,
-    artHref: (file) => `/artifacts/${file.split('/').map(encodeURIComponent).join('/')}?${t}`,
+    live: { token, nonce }, theme, run, store: other ?? run, base, home: base ? `${base}?${t}` : `/?${t}`, embed: null, readOnly: !!other,
+    unitHref: (id) => `${base}/unit/${encodeURIComponent(id)}?${t}`,
+    artHref: (file) => `${base}/artifacts/${file.split('/').map(encodeURIComponent).join('/')}?${t}`,
+    runHref: (id) => (id === run ? `/?${t}` : `/run/${encodeURIComponent(id)}?${t}`),
+    // The header's page links; a new page adds itself here and to lib/serve.mjs PAGE.
+    pages: [{ path: '/', label: run ?? 'Run', href: `/?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
   };
 }
 
@@ -185,7 +191,7 @@ export function timelineList(events, repo, finished = new Set()) {
 export function hud(v, nowMs = Date.now(), ctx = null) {
   ctx ??= staticCtx('', 0);
   if (ctx.token) ctx = liveCtx(ctx, v.id); // older callers pass { token, nonce }
-  const form = ctx.live && v.open ? ctx.live : null; // a closed run takes no answers
+  const form = ctx.live && v.open && !ctx.readOnly ? ctx.live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
     blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
@@ -208,6 +214,6 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
     blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id))), 'ol', ' class="timeline" data-tl-list'),
   ].join('\n');
-  return page({ title: v.id, body, ctx, path: '/', closed: !v.open });
+  return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
 }
 
