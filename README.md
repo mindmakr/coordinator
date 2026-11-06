@@ -127,7 +127,7 @@ skills/coordinator/
 │   ├── sub-skills/             investigate · plan · fix · review · verify · visual · translations · release-notes · board
 │   ├── codex.md                using the skill in OpenAI Codex CLI (discovery checked; full run not yet)
 │   ├── guardrails.md           budgets, fence, stop rules, gated actions
-│   ├── durability.md           background agents, heartbeats, resume
+│   ├── durability.md           the event log and snapshot, pit-stop push/pull, heartbeats, resume
 │   ├── hud.md                  the text view, the live dashboard and the snapshot
 │   ├── learning.md             retro, lessons, budget tuning
 │   ├── upstream.md             contributing improvements back
@@ -136,16 +136,16 @@ skills/coordinator/
     ├── run.mjs                 run state and the loop's decisions
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
-    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, plain, questions,
-    │                           hud, unitpage, parts, links, theme, timeline, behaviours, evidence, serve, live,
-    │                           self, selfpage, selfdata, study
+    ├── lib/                    pure modules: rules, store, events, eventschema, schema, statesync, gaming, secrets, args,
+    │                           workbench, view, plain, questions, hud, unitpage, parts, links, theme, timeline,
+    │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study
     └── test/                   node:test suites
 ```
 
 ## Design principles
 
 - **Short files, one job each.** Load only the playbook you need. Logic lives in pure, tested modules.
-- **State over memory.** Every run is a JSON file, written atomically behind a lock, with a readable `workbench.md`. Crashes and context resets resume from it.
+- **State over memory.** Every run is an append-only event log (`events.jsonl`) with a snapshot derived from it (`state.json`), written atomically behind a lock, with a readable `workbench.md`. Crashes and context resets resume from it. At pit stops (a unit merged, a decision, the run closed) `run.mjs push` copies the run, masked, to a `coordinator-state` branch, and `run.mjs pull` picks it up on another machine.
 - **Safe by default.**
   - No network calls, no shell strings, and ids validated against path traversal.
   - Secrets are refused in lessons and masked in run state.
