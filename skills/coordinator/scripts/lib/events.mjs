@@ -17,24 +17,8 @@ export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 const put = (o, k, v) => Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
 
-// Numbers inside ids compare as numbers: B2 before B10, u9 before u10.
-function natural(a, b) {
-  const x = a.match(/\d+|\D+/g) ?? []; const y = b.match(/\d+|\D+/g) ?? [];
-  for (let i = 0; i < Math.min(x.length, y.length); i++) {
-    if (x[i] === y[i]) continue;
-    const dx = /^\d/.test(x[i]); const dy = /^\d/.test(y[i]);
-    if (dx && dy) { const p = x[i].replace(/^0+/, ''); const q = y[i].replace(/^0+/, ''); if (p.length !== q.length) return p.length - q.length; }
-    return x[i] < y[i] ? -1 : 1;
-  }
-  return x.length - y.length;
-}
-
 function sortDeep(v) {
-  if (Array.isArray(v)) {
-    const out = v.map(sortDeep);
-    const keyed = out.length > 1 && out.every((x) => isObj(x) && typeof x.id === 'string');
-    return keyed ? out.sort((a, b) => natural(a.id, b.id)) : out;
-  }
+  if (Array.isArray(v)) return v.map(sortDeep);
   if (!isObj(v)) return v;
   const o = {};
   for (const k of Object.keys(v).sort()) put(o, k, sortDeep(v[k]));
@@ -42,7 +26,8 @@ function sortDeep(v) {
 }
 
 // The one shape a state is stored and compared in: JSON values only, keys in
-// sorted order, and arrays of records with an `id` sorted by it.
+// sorted order. Arrays keep their order: units in the order they were planned
+// (a stacked unit after its base), notes and rounds in the order they happened.
 export const canonical = (v) => (v === null || v === undefined ? null : sortDeep(JSON.parse(JSON.stringify(v))));
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
@@ -54,7 +39,18 @@ function equal(a, b) {
   return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && equal(a[k], b[k]));
 }
 
-// The smallest list of ops that turns a into b: set, del, and push for an array that grew.
+// A list of records with unique string ids (units, behaviours, evidence): ops
+// address its items by id ({ "id": "u1" } in a path), never by position.
+const keyed = (x) => Array.isArray(x) && x.every((e) => isObj(e) && typeof e.id === 'string') && new Set(x.map((e) => e.id)).size === x.length;
+// b keeps a's items in a's order (some may be gone) and only adds new ones at the end.
+function grows(a, b) {
+  const was = new Set(a.map((e) => e.id)); const is = new Set(b.map((e) => e.id));
+  const kept = b.filter((e) => was.has(e.id)).map((e) => e.id);
+  return JSON.stringify(kept) === JSON.stringify(a.filter((e) => is.has(e.id)).map((e) => e.id)) && b.slice(0, kept.length).every((e) => was.has(e.id));
+}
+const show = (path) => path.map((k) => (isObj(k) ? `[id=${k.id}]` : k)).join('.');
+
+// The smallest list of ops that turns a into b: set, del, and push for a list that grew.
 export function diff(a, b, path = [], ops = []) {
   if (equal(a, b)) return ops;
   if (isObj(a) && isObj(b)) {
@@ -63,26 +59,46 @@ export function diff(a, b, path = [], ops = []) {
       if (Object.hasOwn(a, k)) diff(a[k], b[k], [...path, k], ops);
       else ops.push({ op: 'set', path: [...path, k], value: b[k] });
     }
-  } else if (Array.isArray(a) && Array.isArray(b) && b.length >= a.length) {
+  } else if (a?.length && keyed(a) && keyed(b) && grows(a, b)) {
+    const old = new Map(a.map((e) => [e.id, e])); const ids = new Set(b.map((e) => e.id));
+    for (const e of a) if (!ids.has(e.id)) ops.push({ op: 'del', path: [...path, { id: e.id }] });
+    for (const e of b) if (old.has(e.id)) diff(old.get(e.id), e, [...path, { id: e.id }], ops);
+    const fresh = b.filter((e) => !old.has(e.id));
+    if (fresh.length) ops.push({ op: 'push', path, values: fresh });
+  } else if (Array.isArray(a) && Array.isArray(b) && b.length >= a.length && !(a.length && keyed(a))) {
     for (let i = 0; i < a.length; i++) diff(a[i], b[i], [...path, i], ops);
     if (b.length > a.length) ops.push({ op: 'push', path, values: b.slice(a.length) });
   } else ops.push({ op: 'set', path, value: b });
   return ops;
 }
 
+// Where a path segment points: an object key, an array index, or the item with an id.
+function slot(x, k, o) {
+  if (isObj(k)) {
+    const i = Array.isArray(x) ? x.findIndex((e) => isObj(e) && e.id === k.id) : -1;
+    if (i < 0) throw new Error(`op ${o.op} ${show(o.path)}: no item with id ${k.id}`);
+    return i;
+  }
+  if (x === null || typeof x !== 'object' || !Object.hasOwn(x, k)) throw new Error(`op ${o.op} ${show(o.path)}: no such path`);
+  return k;
+}
+
 export function apply(state, ops) {
   let root = state;
   for (const o of ops) {
-    const where = o.path.slice(0, -1).reduce((x, k) => {
-      if (x === null || typeof x !== 'object' || !Object.hasOwn(x, k)) throw new Error(`op ${o.op} ${o.path.join('.')}: no such path`);
-      return x[k];
-    }, root);
+    const where = o.path.slice(0, -1).reduce((x, k) => x[slot(x, k, o)], root);
     const k = o.path.at(-1);
-    if (o.op === 'set') { if (!o.path.length) root = clone(o.value); else if (where && typeof where === 'object') put(where, k, clone(o.value)); else throw new Error(`op set ${o.path.join('.')}: no such path`); }
-    else if (o.op === 'del') { if (!isObj(where) || !Object.hasOwn(where, k)) throw new Error(`op del ${o.path.join('.')}: no such key`); delete where[k]; }
-    else {
-      const arr = o.path.length ? where?.[k] : root;
-      if (!Array.isArray(arr)) throw new Error(`op push ${o.path.join('.')}: not a list`);
+    if (o.op === 'set') {
+      if (!o.path.length) root = clone(o.value);
+      else if (isObj(k)) where[slot(where, k, o)] = clone(o.value);
+      else if (where && typeof where === 'object') put(where, k, clone(o.value));
+      else throw new Error(`op set ${show(o.path)}: no such path`);
+    } else if (o.op === 'del') {
+      const i = slot(where, k, o);
+      if (Array.isArray(where)) where.splice(i, 1); else delete where[i];
+    } else {
+      const arr = o.path.length ? where?.[slot(where, k, o)] : root;
+      if (!Array.isArray(arr)) throw new Error(`op push ${show(o.path)}: not a list`);
       arr.push(...clone(o.values));
     }
   }
@@ -150,7 +166,7 @@ export function readRun(dir) {
   return { state: replay(log.events), seq: n, log, rebuilt: true };
 }
 
-export const snapshotText = (state, seq, buf) => `${JSON.stringify(canonical({ ...state, [META]: { v: V, seq, sha256: sha256(buf), stateSha256: stateHash(state) } }), null, 2)}\n`;
+export const snapshotText = (state, seq, buf) => `${JSON.stringify(canonical({ ...state, [META]: { v: V, seq, sha256: sha256(buf), stateSha256: stateHash(state) } }))}\n`;
 const line = (seq, kind, unit, payload) => validateEvent({ v: V, seq, at: new Date().toISOString(), kind, ...(unit ? { unit } : {}), payload }, `new event ${seq}`);
 
 // Change a run under its lock: `mutate` gets the state (null for a new run) and

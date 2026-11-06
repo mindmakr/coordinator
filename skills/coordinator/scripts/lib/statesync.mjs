@@ -127,6 +127,12 @@ function files(o, red, read) {
   const log = withLock(join(o.dir, STATE), () => readRun(o.dir)).log;
   const buf = redactLog(log, red);
   const state = replay(parseLog(buf, `masked ${EVENTS}`).events);
+  // Only ever extend the copy: a push never drops events another machine pushed.
+  const theirs = read(`runs/${runId}/${EVENTS}`);
+  if (theirs && !buf.subarray(0, theirs.length).equals(theirs)) {
+    if (theirs.subarray(0, buf.length).equals(buf)) throw new Error(`refused: the copy of ${runId} has events this machine lacks; run.mjs pull ${runId} first; nothing pushed`);
+    throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(buf, theirs)}; nothing pushed`);
+  }
   const out = {
     [MARKER]: 'v1\n', 'README.md': README,
     [`runs/${runId}/${EVENTS}`]: buf,
@@ -162,7 +168,7 @@ export function push(o) {
     const report = { to: d.branch, remote: d.remote, seq, files: Object.keys(out).sort() };
     if (!c) return { pushed: false, unchanged: true, ...report };
     if (!d.remote) { run(o.project, ['update-ref', `refs/heads/${d.branch}`, c, parent ?? '0'.repeat(40)]); return { pushed: true, commit: c, ...report }; }
-    try { run(o.project, ['push', '--quiet', '--no-verify', d.remote, `${c}:refs/heads/${d.branch}`]); } catch (e) {
+    try { run(o.project, ['push', '--quiet', d.remote, `${c}:refs/heads/${d.branch}`]); } catch (e) {
       if (attempt < 4 && /rejected|fetch first|non-fast-forward|stale info/i.test(String(e.stderr))) continue;
       throw new Error(`git push failed: ${String(e.stderr ?? e.message).trim()}`);
     }

@@ -84,6 +84,33 @@ test('pull never overwrites local events the copy lacks', () => {
   const r = cli(A, 'pull', 'r1');
   assert.equal(r.code, 1); assert.match(r.err, /different histories after event 4/);
   assert.equal(readFileSync(join(runDir(A, 'r1'), 'events.jsonl'), 'utf8'), before);
+  // Nor does push drop the other machine's events.
+  const tip = git(origin, 'rev-parse', 'coordinator-state').trim();
+  const p = cli(A, 'push', 'r1');
+  assert.equal(p.code, 1); assert.match(p.err, /different histories after event 4; nothing pushed/);
+  assert.equal(git(origin, 'rev-parse', 'coordinator-state').trim(), tip);
+  assert.match(show('coordinator-state', 'runs/r1/events.jsonl'), /only on b/);
+  // A machine that is merely behind is told to pull first.
+  cli(B, 'note', 'r1', '--kind', 'info', '--text', 'b again'); cli(B, 'push', 'r1');
+  rmSync(runDir(B, 'r1'), { recursive: true }); cli(B, 'pull', 'r1');
+  cli(B, 'note', 'r1', '--kind', 'info', '--text', 'b third'); cli(B, 'push', 'r1');
+  writeFileSync(join(runDir(B, 'r1'), 'events.jsonl'), show('coordinator-state', 'runs/r1/events.jsonl').split('\n').slice(0, 5).join('\n') + '\n');
+  rmSync(join(runDir(B, 'r1'), 'state.json'));
+  assert.match(cli(B, 'push', 'r1').err, /has events this machine lacks; run.mjs pull r1 first/);
+  rmSync(runDir(B, 'r1'), { recursive: true }); assert.equal(cli(B, 'pull', 'r1').out.status, 'restored');
+});
+
+test('a failing pre-push hook fails the push with its message', () => {
+  const hooks = join(root, 'hooks'); mkdirSync(hooks, { recursive: true });
+  writeFileSync(join(hooks, 'pre-push'), '#!/bin/sh\necho "blocked by policy" >&2\nexit 1\n', { mode: 0o755 });
+  git(B, 'config', 'core.hooksPath', hooks);
+  const tip = git(origin, 'rev-parse', 'coordinator-state').trim();
+  cli(B, 'note', 'r1', '--kind', 'info', '--text', 'hooked');
+  const r = cli(B, 'push', 'r1');
+  git(B, 'config', '--unset', 'core.hooksPath');
+  assert.equal(r.code, 1); assert.match(r.err, /blocked by policy/);
+  assert.equal(git(origin, 'rev-parse', 'coordinator-state').trim(), tip);
+  assert.equal(cli(B, 'push', 'r1').code, 0);
 });
 
 test('pushes from two machines keep each other\'s runs, and closed runs add a stats line', () => {

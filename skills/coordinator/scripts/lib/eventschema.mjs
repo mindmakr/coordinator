@@ -5,8 +5,14 @@ import { check } from './schema.mjs';
 export const V = 1;
 
 const ID = { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' };
-// Ops address the state by key or array index; prototype keys never appear.
-const KEY = { anyOf: [{ type: 'string', maxLength: 200, not: { enum: ['__proto__', 'constructor', 'prototype'] } }, { type: 'integer', minimum: 0 }] };
+// Ops address the state by key, by array index (lists without ids: notes,
+// rounds), or by { id } (lists of records with ids: units, behaviours,
+// evidence). Prototype keys never appear.
+const KEY = { anyOf: [
+  { type: 'string', maxLength: 200, not: { enum: ['__proto__', 'constructor', 'prototype'] } },
+  { type: 'integer', minimum: 0 },
+  { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', maxLength: 200 } } },
+] };
 const PATH = { type: 'array', maxItems: 32, items: KEY };
 const SET = { type: 'object', required: ['op', 'path', 'value'], additionalProperties: false, properties: { op: { const: 'set' }, path: PATH, value: true } };
 const DEL = { type: 'object', required: ['op', 'path'], additionalProperties: false, properties: { op: { const: 'del' }, path: { ...PATH, minItems: 1 } } };

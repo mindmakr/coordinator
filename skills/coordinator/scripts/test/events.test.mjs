@@ -38,14 +38,15 @@ test('every change appends one event with v, seq, at, kind and unit; no-op steps
   assert.equal(readFileSync(join(runDir('e1'), 'events.jsonl'), 'utf8').includes('\n  '), false, 'one line per event, never pretty-printed');
 });
 
-test('the snapshot is derived from the events: stable keys, sorted ids, last seq and a hash of the log', () => {
+test('the snapshot is derived from the events: stable keys, planned order, last seq and a hash of the log', () => {
   setup('e2');
   const s = snap('e2');
   const raw = readFileSync(join(runDir('e2'), 'events.jsonl'));
   assert.deepEqual(s.snapshot.seq, 4);
   assert.equal(s.snapshot.sha256, sha256(raw));
   assert.deepEqual(body(s), replay(parseLog(raw).events));
-  assert.deepEqual(s.units.map((u) => u.id), ['u1', 'u2', 'u10'], 'records sorted by id, numbers as numbers');
+  assert.deepEqual(s.units.map((u) => u.id), ['u2', 'u10', 'u1'], 'units stay in the order they were planned');
+  assert.equal(readFileSync(join(runDir('e2'), 'state.json'), 'utf8').trim().split('\n').length, 1, 'compact');
   const keys = Object.keys(s); assert.deepEqual(keys, [...keys].sort());
   assert.deepEqual(Object.keys(s.units[0]), [...Object.keys(s.units[0])].sort());
 });
@@ -107,6 +108,22 @@ test('every event kind has a JSON Schema; writes that break it are refused', () 
   assert.equal(snap('e5').frozen, false);
 });
 
+test('unit events read on their own: add carries the unit, later changes name it by id', () => {
+  run('init', 'e8', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  run('add', 'e8', 'zeta', '--bar', 'base'); run('add', 'e8', 'alpha', '--bar', 'stacked', '--after', 'zeta');
+  run('freeze', 'e8'); run('start', 'e8', 'zeta');
+  const ev = lines('e8');
+  const add = ev.find((e) => e.kind === 'unit.add' && e.unit === 'alpha');
+  assert.deepEqual(add.payload.ops.map((o) => [o.op, o.path]), [['push', ['units']]]);
+  assert.equal(add.payload.ops[0].values[0].id, 'alpha');
+  assert.equal(add.payload.ops[0].values[0].after, 'zeta');
+  const start = ev.find((e) => e.kind === 'unit.start');
+  assert.ok(start.payload.ops.every((o) => JSON.stringify(o.path.slice(0, 2)) === JSON.stringify(['units', { id: 'zeta' }])), 'addressed by id, not position');
+  assert.deepEqual(run('next', 'e8').out.units.map((u) => u.id), ['zeta', 'alpha'], 'a stacked unit is listed after its base');
+  assert.deepEqual(snap('e8').units.map((u) => u.id), ['zeta', 'alpha']);
+  assert.ok(readFileSync(join(runDir('e8'), 'hud.html'), 'utf8').indexOf('zeta') < readFileSync(join(runDir('e8'), 'hud.html'), 'utf8').indexOf('alpha'));
+});
+
 test('diff and apply turn one state into another exactly', () => {
   const a = canonical({ id: 'r', units: [{ id: 'b', rounds: [1] }, { id: 'a', log: [] }], notes: ['x'], gone: 1, n: { deep: { k: 'v' } } });
   const b = canonical({ id: 'r', units: [{ id: 'a', log: [{ kind: 'beat' }] }, { id: 'b', rounds: [1, 2] }, { id: 'c' }], notes: ['x', 'y'], n: { deep: { k: 'w', z: null } }, added: [true] });
@@ -115,7 +132,15 @@ test('diff and apply turn one state into another exactly', () => {
   assert.ok(ops.some((o) => o.op === 'push' && o.path.join('.') === 'notes'));
   assert.ok(ops.some((o) => o.op === 'del' && o.path.join('.') === 'gone'));
   assert.deepEqual(diff(b, b), []);
-  assert.throws(() => apply({ x: 1 }, [{ op: 'del', path: ['y'] }]), /no such key/);
+  const c = canonical({ units: [{ id: 'a', s: 1 }, { id: 'b', s: 1 }] });
+  const d = canonical({ units: [{ id: 'a', s: 1 }, { id: 'b', s: 2 }, { id: 'c', s: 0 }] });
+  assert.deepEqual(diff(c, d), [{ op: 'set', path: ['units', { id: 'b' }, 's'], value: 2 }, { op: 'push', path: ['units'], values: [{ id: 'c', s: 0 }] }]);
+  assert.deepEqual(apply(structuredClone(c), diff(c, d)), d);
+  const e = canonical({ units: [{ id: 'b', s: 1 }] });
+  assert.deepEqual(diff(c, e), [{ op: 'del', path: ['units', { id: 'a' }] }]);
+  assert.deepEqual(apply(structuredClone(c), diff(c, e)), e);
+  assert.throws(() => apply(structuredClone(c), [{ op: 'set', path: ['units', { id: 'zz' }, 's'], value: 1 }]), /no item with id zz/);
+  assert.throws(() => apply({ x: 1 }, [{ op: 'del', path: ['y'] }]), /no such path/);
 });
 
 test('hand edits to state.json are kept as a state.edited event, so the log still replays to the snapshot', () => {
