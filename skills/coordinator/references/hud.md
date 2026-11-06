@@ -11,7 +11,7 @@ About a dozen lines, for any harness and any terminal:
 - **answered:** each answer the lead has not used yet, and who gave it;
 - **time left:** rough. The median minutes per try so far, times the tries still ahead on the longest chain of unfinished units, next to what the time budget has left;
 - the budget used against its limits;
-- one row per unit: status, round, score trend, next action and behaviours passing (`behaviours 1/2`); then its plain sentence (`!` when it needs attention) and its last gap;
+- one row per unit: status, round, score trend, next action and behaviours passing (`behaviours 1/2`); then its plain sentence, prefixed `[retrying]` or `[quiet]` when the lead is handling a problem, and its last gap;
 - **goal:** met or not yet, with the goal's behaviours passing;
 - the next step for the lead and the counts of questions, follow-ups and decisions.
 
@@ -25,6 +25,8 @@ A small server on 127.0.0.1 that renders the dashboard from the state on every r
 - **Kept state.** Open toggles (behaviours, evidence, gaps, notes), the scroll position, the theme and the timeline filters are remembered per browser (localStorage, per run and page), across live updates and reloads.
 - **Theme toggle:** System, Light or Dark, top right.
 - **At the top:** the situation; **Goal: met / not yet**, with each goal behaviour, its status and evidence; **Needs you** with answer forms (options as cards, the recommended one first, an Other box); a note box; time left and the next step.
+- **Who acts:** only **Needs you** and the question cards address the person. A unit that failed twice in a row shows **Retrying**, one whose agent went silent shows **Quiet**; both mean the lead is on it, with the reason on hover. A legend above the units says so.
+- **Times** show in the viewer's locale and time zone: relative ("5 min ago") within 24 hours, the local date and time otherwise, and the full local time with its zone on hover. Each is a `<time datetime="…">` with the ISO timestamp; the filters read the raw timestamps.
 - **Unit cards:** the plain sentence, issue and PR chips, the score per round, then toggles for **Behaviours** (each with pass, fail or unchecked), **Evidence** (test output in a monospace block, collapsed when long; screenshots as thumbnails that open full size in a new tab; links), and the raw gap. **Open <unit> →** goes to the unit's page.
 - **A unit's page** (`/unit/<id>`, also live): its bar and behaviours with their evidence, other evidence and artifacts, every round (the builder's report, the critic's verdict, score, cause, gap and evidence, and each behaviour mark), its questions and notes with forms, its links, and **its own timeline**: start, beats with their milestone, built, verdicts with score and cause, strategy changes, evidence, behaviours set, questions, answers and notes on the unit, links, merges and the stop. A back link returns to the dashboard.
 - **Timelines** (the run's on the dashboard, a unit's on its page): colour-coded badges by kind, each with its text label (decision, question, answer, note, verdict pass, verdict fail, stop, merge, evidence, strategy, build, link, info). Above them: a search box over the event text; kind chips (several at once); unit chips on the run's timeline (`run` for run-level events); a time range (last 30 min, 120 min, 4 h, 8 h, 24 h; 2–7 days ago, meaning older than 24 h up to 7 days; 8+ days ago; All); and newest or oldest first. The filter is the same function the tests check (`lib/timeline.mjs` `matches`).
@@ -40,7 +42,7 @@ Stop it with Ctrl+C, or stop the background command, when the run ends.
 `.coordinator/runs/<run>/hud.html` and one page per unit under `units/` are rewritten after every change, in the same lock as the state. `S/run.mjs hud <run>` rewrites them on demand.
 
 - They are read-only snapshots: no scripts, no network, no reload (its content security policy blocks all three), so they open from `file://` and can be published as a page. Open questions show their options; the page says to answer in the chat or ask for the live dashboard.
-- The theme toggle works without a script there but is not remembered; toggles start closed.
+- The theme toggle works without a script there but is not remembered; toggles start closed. Times are ISO with "UTC" spelled out.
 - Screenshots up to 150 KB are embedded; larger ones are links to the file under `artifacts/`.
 
 ## Looking like the project

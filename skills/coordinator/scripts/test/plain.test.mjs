@@ -31,7 +31,7 @@ test('the situation is the lead\'s latest note, or counted from the state', () =
   r = render(state({ notes: [{ kind: 'situation', text: 'old', at: at(5) }, { kind: 'situation', text: 'u2 keeps missing the cycle dates; u3 about 15 min.', at: at(41) }] }));
   assert.equal(r.v.situation.text, 'u2 keeps missing the cycle dates; u3 about 15 min.');
   assert.match(r.html, /<p>u2 keeps missing the cycle dates; u3 about 15 min\.<\/p>/);
-  assert.match(r.html, /the lead, 2026-01-01 00:41 UTC/);
+  assert.match(r.html, /the lead, <time datetime="2026-01-01T00:41:00.000Z" title="2026-01-01 00:41 UTC">2026-01-01 00:41 UTC<\/time>/);
 });
 
 test('needs you lists open questions with the recommendation, and is calm when there are none', () => {
@@ -80,8 +80,16 @@ test('attention: two failed tries in a row, or a silent agent, earn a badge', ()
   const { v, html, txt } = render(state());
   assert.deepEqual(v.units.map((u) => u.attention), [null, 'failed twice in a row', null, null]);
   assert.equal((html.match(/class="chip flag"/g) ?? []).length, 1);
-  assert.match(txt, /^ +! u2 works\. Failed twice in a row/m);
+  assert.match(txt, /^ +\[retrying\] u2 works\. Failed twice in a row/m);
   assert.equal(render(state(), 100).v.units[2].attention, 'no word from its agent for a while');
+});
+
+test('the badge says the lead is on it, never that the person must act', () => {
+  const { html } = render(state());
+  assert.match(html, /<span class="chip flag" title="The lead is on it: failed twice in a row">Retrying<\/span>/);
+  assert.match(render(state(), 100).html, /<span class="chip flag" title="The lead is on it: no word from its agent for a while">Quiet<\/span>/);
+  assert.doesNotMatch(html, /needs attention/i);
+  assert.match(html, /<p class="legend"><b>Needs you<\/b> = waiting on you; <b>Retrying<\/b> = the lead is on it/);
 });
 
 test('lead and agent text is escaped everywhere, and a non-web link is not a link', () => {

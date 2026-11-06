@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
-import { badge, behaviourList, blk, chip, cls, esc, eventRow, evidenceList, page, timelineTools, toggle, when } from './parts.mjs';
+import { badge, behaviourList, blk, chip, cls, esc, eventRow, evidenceList, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { trend } from './view.mjs';
 
 export { esc };
@@ -89,7 +89,7 @@ export function questionItem(q, live, repo = null) {
   const head = `<p class="qtext">${q.header ? `<span class="chip">${esc(q.header)}</span> ` : ''}<b>${esc(q.id)}</b> ${linkify(q.text, repo)}${q.unit ? ` <span class="cause">· ${esc(q.unit)}</span>` : ''}</p>`;
   const rec = q.recommend && !q.options.length ? `<p class="rec">Recommended: ${esc(q.recommend)}</p>` : '';
   const changes = q.history.length - 1;
-  const ans = q.answer ? `<p class="ans"><b>Answer:</b> ${esc(answerText(q.answer))} <span class="cause">by ${esc(q.answer.by)}, ${esc(when(q.answer.at))}${changes > 0 ? `, changed ${changes} ${changes === 1 ? 'time' : 'times'}` : ''}</span></p>` : '';
+  const ans = q.answer ? `<p class="ans"><b>Answer:</b> ${esc(answerText(q.answer))} <span class="cause">by ${esc(q.answer.by)}, ${stamp(q.answer.at)}${changes > 0 ? `, changed ${changes} ${changes === 1 ? 'time' : 'times'}` : ''}</span></p>` : '';
   const body = live && ['open', 'answered'].includes(q.status) ? answerForm(q, live) : optionList(q);
   return `<li class="q" id="${esc(q.id)}">${head}${rec}${ans}${body}</li>`;
 }
@@ -103,7 +103,7 @@ export function unitLinks(u, repo) {
 }
 
 function unitCard(u, ctx, form, repo) {
-  const flag = u.attention ? `<span class="chip flag" title="${esc(u.attention)}">needs attention</span> ` : '';
+  const flag = u.attention ? `<span class="chip flag" title="${esc(`The lead is on it: ${u.attention}`)}">${esc(u.attentionLabel)}</span> ` : '';
   const raw = [u.gap && `<dt>Last gap</dt><dd>${linkify(u.gap, repo)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${linkify(u.evidence, repo)}</dd>`].filter(Boolean).join('');
   const passing = u.behaviours.filter((b) => b.status === 'pass').length;
   const html = `<h3><span>${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${flag}${chip(u.status, u.status)}</span></h3>`
@@ -156,8 +156,8 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const form = ctx.live && v.open ? ctx.live : null; // a closed run takes no answers
   const r = v.repo;
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${esc(when(v.started))} · updated ${esc(when(new Date(nowMs).toISOString()))}</span></header>`),
-    blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : esc(`the lead, ${when(v.situation.at)}`)}</p></div>`),
+    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     blk('goal', goalBlock(v, ctx)),
     blk('needs', needsYou(v, form)),
     form ? blk('note', noteForm(form)) : '',
@@ -166,6 +166,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     '<h2>Budget</h2>',
     blk('budget', v.budget.map((b) => `<div class="card"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max)}</div>`).join(''), 'div', ' class="budget"'),
     '<h2>Units</h2>',
+    '<p class="legend"><b>Needs you</b> = waiting on you; <b>Retrying</b> = the lead is on it; <b>Quiet</b> = the lead is checking on a silent agent.</p>',
     blk('units', v.units.length ? v.units.map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
     blk('integration', v.integration.length ? `<h2>Integration</h2><p>${v.integration.map((x) => chip(x, x)).join(' → ')}</p>` : ''),
     '<h2>Decisions, questions and follow-ups</h2>',

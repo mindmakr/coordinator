@@ -14,6 +14,8 @@ A live dashboard, and a bar made of behaviours with evidence attached. From the 
 - **Timelines:** colour-coded badges with text labels, search, kind and unit filters, time ranges (30 min to 8+ days) and sort, all kept per browser.
 - **Links everywhere:** URLs, `owner/repo#n`, and against the run's repo (`init --repo`, else the project's GitHub remote) `#n`, commit shas and branch names, each opening in a new tab with no referrer. `add`/`link --issue … --pr …` (repeatable, for linked repos) and `link --merge …` put chips on the card and the unit page.
 - **Looks like the project:** `init --theme file.css` or `Theme:` in `COORDINATOR.md` maps the design system's custom properties (shadcn, Tailwind 4 `@theme`, daisyUI) onto the dashboard; unsafe values are dropped and nothing is loaded.
+- **Retrying / Quiet, not "needs attention":** the unit badge says the lead is handling it (failed twice in a row; agent silent), with the reason on hover and a legend. Only Needs you and question cards address the person.
+- **Local times:** the live pages show times in the viewer's locale and zone (relative within 24 h, full local time on hover); the snapshot keeps ISO with UTC spelled out. Every time is a `<time datetime>`.
 - **Brand:** "Coordinator by mindmakr" mark, favicon, page titles and footer with the version.
 - **Snapshot:** `hud.html` is now a static read-only snapshot (no meta refresh, so open sections stay open); one page per unit beside it; small screenshots embedded.
 - Older state files load: every new field is optional.

@@ -3,13 +3,13 @@
 // its links and its own timeline. Same shell, same rules as the dashboard.
 import { linkify } from './links.mjs';
 import { liveCtx, noteForm, questionItem, staticCtx, timelineList, unitLinks } from './hud.mjs';
-import { behaviourList, blk, chip, esc, evidenceList, page, timelineTools, when } from './parts.mjs';
+import { behaviourList, blk, chip, esc, evidenceList, page, stamp, timelineTools } from './parts.mjs';
 import { trend } from './view.mjs';
 
 function round(r, repo) {
   const marks = (r.behaviours ?? []).map((m) => `<li>${chip(m.status, m.status)} <b>${esc(m.id)}</b>${m.evidence ? ` ${linkify(m.evidence, repo)}` : ''}</li>`).join('');
   return `<div class="round"><h4>Round ${r.n} ${chip(r.verdict, r.verdict)}${r.score !== null && r.score !== undefined ? ` <span class="cause">score ${esc(r.score)}</span>` : ''}`
-    + `${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''} <time class="cause" datetime="${esc(r.at)}">${esc(when(r.at))}</time></h4>`
+    + `${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''} ${stamp(r.at, 'cause')}</h4>`
     + `<dl>${r.report ? `<dt>Builder's report</dt><dd>${linkify(r.report, repo)}</dd>` : ''}`
     + `${r.gap ? `<dt>Gap</dt><dd>${linkify(r.gap, repo)}</dd>` : ''}${r.evidence ? `<dt>Critic's evidence</dt><dd>${linkify(r.evidence, repo)}</dd>` : ''}</dl>`
     + (marks ? `<ul class="behaviours">${marks}</ul>` : '') + '</div>';
@@ -23,11 +23,11 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   const form = ctx.live && v.open ? { ...ctx.live, back: `/unit/${u.id}` } : null; // forms come back here
   const r = v.repo;
   const loose = u.evidenceItems.filter((e) => !e.behaviour);
-  const notes = u.personNotes.map((n) => `<li>${linkify(n.text, r)} <span class="cause">${esc(when(n.at))}</span></li>`).join('');
+  const notes = u.personNotes.map((n) => `<li>${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
     blk('head', `<header class="run"><h1>${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${chip(u.status, u.status)}`
-      + `<span class="meta">round ${u.rounds}/${u.maxRounds} · scores ${esc(trend(u.scores) || 'none yet')} · updated ${esc(when(new Date(nowMs).toISOString()))}</span></header>`
+      + `<span class="meta">round ${u.rounds}/${u.maxRounds} · scores ${esc(trend(u.scores) || 'none yet')} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`
       + unitLinks(u, r) + `<p class="say">${esc(u.sentence)}</p><div class="next"><b>Next</b>${esc(u.next)}</div>`),
     '<h2>Bar and behaviours</h2>',
     blk('behaviours', `<section class="card"><p>${linkify(u.bar, r)}</p>${behaviourList(u.behaviours, r, u.evidenceItems, ctx, `p-${u.id}`)}</section>`),

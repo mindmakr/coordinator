@@ -260,6 +260,30 @@ test('serve: live updates over SSE on change, artifacts and pages need the token
   stream.destroy();
 });
 
+test('every time is a <time> with an ISO datetime; the snapshot spells out UTC; the live page localises', () => {
+  setup('ts1');
+  run('note', 'ts1', '--kind', 'situation', '--text', 'busy');
+  run('start', 'ts1', 'u1'); run('built', 'ts1', 'u1');
+  run('verdict', 'ts1', 'u1', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '3');
+  run('evidence', 'ts1', 'u1', '--kind', 'log', '--text', 'x');
+  run('note', 'ts1', '--kind', 'person', '--text', 'hi', '--unit', 'u1');
+  const iso = /<time datetime="(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"(?: class="cause")? title="(\d{4}-\d\d-\d\d \d\d:\d\d UTC)">\2<\/time>/g;
+  for (const f of ['hud.html', 'units/u1.html']) {
+    const html = readFileSync(join(runDir('ts1'), f), 'utf8');
+    const stamps = [...html.matchAll(iso)];
+    assert.ok(stamps.length >= 4, `${f}: ${stamps.length} stamps`);
+    for (const [, at, shown] of stamps) assert.equal(shown, `${at.slice(0, 16).replace('T', ' ')} UTC`);
+    assert.equal((html.match(/<time\b/g) ?? []).length, stamps.length, `${f}: every <time> carries an ISO datetime`);
+    assert.doesNotMatch(html, /\d\d:\d\d<\/span>/, 'no bare clock text outside a <time>');
+  }
+  assert.match(readFileSync(join(runDir('ts1'), 'hud.html'), 'utf8'), /Situation · the lead, <time datetime=/);
+  const s = state('ts1');
+  const live = hud(view(s, decide(s)), Date.now(), { token: 't', nonce: 'n' });
+  assert.match(live, /new Intl\.DateTimeFormat\(undefined/);
+  assert.match(live, /querySelectorAll\('time\[datetime\]'\)/);
+  assert.match(live, /data-at="\d{4}-/, 'filters still read the raw timestamp');
+});
+
 test('the footer version matches the plugin', () => {
   const plugin = JSON.parse(readFileSync(join(scripts, '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
   assert.equal(plugin.version, VERSION);

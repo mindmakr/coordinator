@@ -64,6 +64,9 @@ export function timeLeft(run, plan, nowMs) {
 
 const failStreak = (rounds) => { let k = 0; for (let i = rounds.length - 1; i >= 0 && rounds[i].verdict === 'fail'; i--) k++; return k; };
 
+// The badge's label: the lead is handling it. Only Needs you and question cards address the person.
+export const attentionLabel = (reason) => (reason ? (reason.startsWith('no word') ? 'Quiet' : 'Retrying') : null);
+
 export function attention(u, d) {
   if (d?.action === 'check-stale') return 'no word from its agent for a while';
   if (['open', 'building', 'judging'].includes(u.status) && failStreak(u.rounds) >= 2) return `failed ${times(failStreak(u.rounds))} in a row`;

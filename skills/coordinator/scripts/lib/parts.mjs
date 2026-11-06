@@ -14,6 +14,8 @@ const CLIENT = readFileSync(new URL('./live.client.js', import.meta.url), 'utf8'
 
 export const cls = (s) => String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '');
 export const when = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
+// A time: ISO with UTC spelled out in the snapshot; the live page rewrites it in the viewer's zone.
+export const stamp = (iso, cls = '') => (iso ? `<time datetime="${esc(iso)}"${cls ? ` class="${cls}"` : ''} title="${esc(when(iso))}">${esc(when(iso))}</time>` : '');
 export const chip = (label, kind = '') => `<span class="chip${kind ? ` s-${cls(kind)}` : ''}">${esc(label)}</span>`;
 export const badge = (b, label) => `<span class="badge k-${cls(b)}">${esc(label ?? b)}</span>`;
 
@@ -81,7 +83,7 @@ function evidenceItem(e, repo, ctx, key) {
     body = src ? `<a href="${esc(full)}" target="_blank" rel="noopener noreferrer"><img class="thumb" src="${esc(src)}" alt="${esc(e.label ?? 'screenshot')}" loading="lazy"></a>`
       : `<p><a href="${esc(full)}" target="_blank" rel="noopener noreferrer">Open the screenshot</a></p>`;
   } else if (e.file) body = `<p><a href="${esc(ctx.artHref(e.file))}" target="_blank" rel="noopener noreferrer">Open ${esc(e.file.split('/').pop())}</a></p>`;
-  return `<li class="evidence"><div>${head} <time datetime="${esc(e.at)}" class="cause">${esc(when(e.at))}</time></div>${body}</li>`;
+  return `<li class="evidence"><div>${head} ${stamp(e.at, 'cause')}</div>${body}</li>`;
 }
 
 export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class="evlist">${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>` : '');
@@ -89,7 +91,7 @@ export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class=
 export function eventRow(e, repo) {
   const score = e.score === null || e.score === undefined ? '' : ` · ${e.score}`;
   const cause = e.cause ? ` <span class="cause">cause: ${esc(e.cause)}</span>` : '';
-  return `<li data-at="${esc(e.at)}" data-badge="${esc(e.badge)}" data-unit="${esc(e.unit ?? '')}"><time datetime="${esc(e.at)}" title="${esc(when(e.at))}">${esc(e.at.slice(5, 16).replace('T', ' '))}</time>`
+  return `<li data-at="${esc(e.at)}" data-badge="${esc(e.badge)}" data-unit="${esc(e.unit ?? '')}">${stamp(e.at)}`
     + `<span>${badge(e.badge, e.label)}</span>`
     + `<span>${e.who ? `<b>${esc(e.who)}${esc(score)}</b> ` : ''}${linkify(e.text, repo)}${cause}</span></li>`;
 }

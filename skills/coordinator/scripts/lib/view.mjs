@@ -1,6 +1,6 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
-import { attention, clip, sentence, situation, timeLeft } from './plain.mjs';
+import { attention, attentionLabel, clip, sentence, situation, timeLeft } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
 import { unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
@@ -59,7 +59,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       const d = next.get(u.id);
       return {
         id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, after: u.after ?? null,
-        sentence: sentence(u, d), attention: attention(u, d),
+        sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
         rounds: u.rounds.length, maxRounds: run.budget.maxRounds,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
@@ -104,7 +104,7 @@ export function text(v) {
   for (const u of v.units) {
     const bs = u.behaviours.length ? ` · behaviours ${u.behaviours.filter((b) => b.status === 'pass').length}/${u.behaviours.length}` : '';
     lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
-    lines.push(`${' '.repeat(w)}${u.attention ? '! ' : ''}${clip(u.sentence, 160)}`);
+    lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);

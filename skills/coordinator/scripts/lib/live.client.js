@@ -71,6 +71,24 @@
   let t = 0;
   addEventListener('scroll', () => { clearTimeout(t); t = setTimeout(() => save(scrollKey, scrollY), 150); }, { passive: true });
 
+  // Times: the viewer's locale and zone. Relative within 24 h, local date-time otherwise;
+  // the full local time with its zone on hover. The datetime attribute stays ISO (filters read data-at).
+  const full = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' });
+  const short = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const rel = typeof Intl.RelativeTimeFormat === 'function' ? new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }) : null;
+  function localTime(el) {
+    const t = Date.parse(el.getAttribute('datetime')); if (Number.isNaN(t)) return;
+    const s = Math.round((t - Date.now()) / 1000); const a = Math.abs(s);
+    let text;
+    if (!rel || a >= 86400) text = short.format(t);
+    else if (a < 45) text = rel.format(0, 'second');
+    else if (a < 3600) text = rel.format(Math.round(s / 60), 'minute');
+    else text = rel.format(Math.round(s / 3600), 'hour');
+    el.textContent = text; el.title = full.format(t);
+  }
+  const localTimes = (root) => root.querySelectorAll('time[datetime]').forEach(localTime);
+  setInterval(() => localTimes(document), 30000);
+
   const keyed = (el) => [...el.children].filter((c) => c.dataset && c.dataset.k);
   let pending = null;
   function sync(oldParent, newParent) {
@@ -95,6 +113,7 @@
     const top = anchor ? anchor.getBoundingClientRect().top : 0;
     const tpl = document.createElement('template'); tpl.innerHTML = html;
     sync(app, tpl.content);
+    localTimes(app);
     if (anchor && anchor.isConnected) scrollBy(0, anchor.getBoundingClientRect().top - top);
     applyTimeline();
   }
@@ -120,6 +139,7 @@
   setInterval(() => { if (es && es.readyState === 1 && Date.now() - seen > 45000) retry(); }, 5000);
 
   applyOpen(document);
+  localTimes(document);
   applyTimeline();
   const y = load(scrollKey, 0);
   if (y) requestAnimationFrame(() => scrollTo(0, y));
