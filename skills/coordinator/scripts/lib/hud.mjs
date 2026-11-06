@@ -20,7 +20,7 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, home: `${up}hud.html`, pages: [],
+    live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, pages: [],
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
@@ -39,11 +39,12 @@ export function liveCtx({ token, nonce }, run, theme = null, other = null) {
   const base = other ? `/run/${encodeURIComponent(other)}` : '';
   return {
     live: { token, nonce }, theme, run, store: other ?? run, base, home: base ? `${base}?${t}` : `/?${t}`, embed: null, readOnly: !!other,
+    maps: `${base}/maps?${t}`,
     unitHref: (id) => `${base}/unit/${encodeURIComponent(id)}?${t}`,
     artHref: (file) => `${base}/artifacts/${file.split('/').map(encodeURIComponent).join('/')}?${t}`,
     runHref: (id) => (id === run ? `/?${t}` : `/run/${encodeURIComponent(id)}?${t}`),
     // The header's page links; a new page adds itself here and to lib/serve.mjs PAGE.
-    pages: [{ path: '/', label: run ?? 'Run', href: `/?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
+    pages: [{ path: '/', label: run ?? 'Run', href: `/?${t}` }, { path: '/maps', label: 'Maps', href: `/maps?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
   };
 }
 
@@ -194,7 +195,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const form = ctx.live && v.open && !ctx.readOnly ? ctx.live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}</header>`),
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     blk('goal', goalBlock(v, ctx)),
     blk('needs', needsYou(v, form)),

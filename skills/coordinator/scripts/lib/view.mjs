@@ -42,7 +42,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
     }, bar: run.bar, fence: run.fence,
     phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
-    open: !run.closed, started: run.createdAt,
+    open: !run.closed, started: run.createdAt, closedAt: run.closed?.at ?? null,
     situation: situation(run),
     needsYou: run.closed ? [] : qs.filter((q) => q.open),
     answered: run.closed ? [] : qs.filter((q) => q.status === 'answered'),
@@ -85,6 +85,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       };
     }),
     followUps: pick('follow-up'),
+    // The maps attach each follow-up to its unit (lib/maps.mjs).
+    followUpNotes: notes.filter((n) => n.kind === 'follow-up').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at })),
     timeline,
   };
 }

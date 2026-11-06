@@ -139,7 +139,7 @@ test('serve: /coordinator and /run/<other> need the token; other runs are read-o
   assert.match(self.body, /<a href="\/coordinator\?t=[^"]+" aria-current="page">Coordinator<\/a>/);
   assert.match(self.body, /<a href="\/run\/w2\?t=/); assert.match(self.body, /data-path="\/coordinator"/);
   const home = (await get(`/?t=${t}`)).body;
-  assert.match(home, /<nav class="pages" aria-label="Pages"><a href="\/\?t=[^"]+" aria-current="page">w1<\/a><a href="\/coordinator\?t=/);
+  assert.match(home, /<nav class="pages" aria-label="Pages"><a href="\/\?t=[^"]+" aria-current="page">w1<\/a><a href="\/maps\?t=[^"]+">Maps<\/a><a href="\/coordinator\?t=/);
   const other = await get(`/run/w2?t=${t}`);
   assert.equal(other.status, 200);
   assert.doesNotMatch(other.body, /<form class="(ask|note)"/, 'no forms on another run');
