@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-11-06)
+
+The coordinator's own page (#19), dashboard maps (#20), the project map (#21), the event log and repo-backed state (#9, #10) and built-in sub-skills (#13).
 
 - **Maps of a run** (#20): `/maps` on `serve` (live, in the header) and `maps.html` in the snapshot, all inline SVG, themed, keyboard accessible and linked through to units, issues and PRs. A mind map (goal → units → behaviours → evidence, by status); a flow map (stacking, linked issues and PRs with other repos dashed, follow-ups, and the critical path); heatmaps of units against hours (tries, failures, heartbeats, waiting) and against behaviours (pass or fail); and goal relevance, so off-goal work stands out. The view model gains `followUpNotes` and `closedAt` (read from the state, nothing new stored).
 - **Built-in sub-skills** (#13): investigate, plan, fix, review (with a security pass and a project-rule pass), verify, visual, translations, release notes and board, each a short playbook in `references/sub-skills/` (when, inputs, how it plugs into the loop, steps, output). `references/sub-skills.md` maps loop steps to playbooks; the builder, critic and integrator briefs and `run.md` name the right one per step. The project's own skill still wins.
