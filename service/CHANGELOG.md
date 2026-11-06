@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Review round 2 (#12):** migration 006 starts `trail_seq_global` above every `trail_seq` already held (a database at 005); comment-command write tokens are narrowed to the state repo (`repository_ids`); alert recipients are re-checked as the App before every alert and digest (60 s cache), and someone who lost access is unsubscribed and sent nothing; a flagged "answer changed after use" note raises the alert; `/alerts` drops the snapshot chip and theme buttons and sends `frame-ancestors` only as a header; comment commands ignore indented code; each GitHub mention replaces the App's previous one for that person on the issue (README says why not the tracker comment); README's known limits cover the doorbell's use of `gh auth token`. New migration test (`test/migrations.test.mjs`, Postgres).
+
 - **c12 merge:** the HUD's navigation links to `/alerts` for anyone signed in; the doorbell resolves its repo row by the id GitHub returns (`repoForPage(fullName, id)`); README's new "Known limits" says "a lead went quiet" is a guess from the pushed state; the end-to-end test has the lead beat after its push, so the HUD's answer is replayed by `pull` and used within one step.
 
 - **c11 final-review follow-ups:** a trail refresh marks its run owed before it starts and clears the mark only after a clean finish, so a crash mid-refresh never loses an owed comment; `trail_seq` values come from one global sequence (`trail_seq_global`, migration 006; a counter in the memory store), so a run dropped and re-created cannot match a stale value; a repo page resolves to the row whose id GitHub's answer carries, so a stale same-named row in another installation no longer 404s the real page.

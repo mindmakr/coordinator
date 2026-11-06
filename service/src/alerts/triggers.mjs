@@ -33,6 +33,11 @@ export function runTriggers(before, after, nowMs) {
     if (prev && q.usedAt && q.history.length > prev.history.length) out.push({ trigger: 'answer-changed', unit: q.unit, ref: q.id });
   }
   if (!before) return out;
+  // An answer that reached the lead after it used the question: pull records it as a flagged note (lib/incoming.mjs).
+  const seen = new Set((before.notes ?? []).filter((n) => n.changedAfterUse).map((n) => JSON.stringify(n.changedAfterUse)));
+  for (const n of after.notes ?? []) {
+    if (n.changedAfterUse && !seen.has(JSON.stringify(n.changedAfterUse))) out.push({ trigger: 'answer-changed', unit: n.unit ?? null, ref: String(n.changedAfterUse.q ?? '') || undefined });
+  }
   const units = new Map(before.units.map((u) => [u.id, u]));
   for (const u of after.units) {
     if (u.status === 'stopped' && units.get(u.id)?.status !== 'stopped') out.push({ trigger: 'unit-stopped', unit: u.id });

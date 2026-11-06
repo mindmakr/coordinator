@@ -17,7 +17,8 @@ const MAX_WATCHED = 50;
 const CONFIRM_MS = 24 * 3600_000;
 const EMAIL = /^[^\s@<>"',;]{1,64}@[^\s@<>"',;]{1,190}\.[A-Za-z]{2,24}$/;
 const hash = (s) => createHash('sha256').update(s).digest('hex');
-export const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+const META_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'";
+export const PAGE_CSP = `${META_CSP}; frame-ancestors 'none'`;
 
 // Push endpoints are posted to by this server, so only the browsers' own push services are accepted.
 export const PUSH_HOSTS = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
@@ -93,8 +94,12 @@ export function alertRoutes({ alerts, acl, db, config, send, now = Date.now, log
       + '<p><button type="submit">Save</button></p></form></section>'
       + (send.push ? `<section class="card"><h2>This device</h2><p><button type="button" id="push-on" data-key="${esc(send.push.publicKey)}" data-csrf="${esc(user.csrf)}">Send push alerts to this device</button></p><p id="push-state" class="meta" role="status"></p></section>` : '')
       + `<section class="card"><h2>Sent to you</h2>${list.length ? `<ul>${list.map((a) => `<li>${esc(new Date(a.createdAt).toISOString().slice(0, 16).replace('T', ' '))} · ${esc(TRIGGERS[a.trigger]?.label ?? a.trigger)}${a.count > 1 ? ` ×${a.count}` : ''} · ${esc(a.detail?.repo ?? '')} · run ${esc(a.runId)}${a.unitId ? ` · unit ${esc(a.unitId)}` : ''} · ${esc(a.status === 'queued' ? 'waiting for the digest' : a.status)}${a.detail?.channels ? ` (${esc(Object.entries(a.detail.channels).map(([k, v]) => `${k}: ${v}`).join(', '))})` : ''} <a href="${esc(a.detail?.url ?? '/')}">open</a></li>`).join('')}</ul>` : '<p>Nothing yet.</p>'}</section>`;
+    // A settings page, not a run: no "Snapshot · read-only" chip and no theme switch (it follows the system).
+    // frame-ancestors only works as a header (sent with the page), so the meta copy leaves it out.
     return page({ title: 'Alerts', body, ctx: ctx(), path: '/alerts' })
-      .replace("default-src 'none'; style-src 'unsafe-inline'; img-src data:", PAGE_CSP)
+      .replace('<span class="live" data-state="snapshot">Snapshot · read-only</span>', '')
+      .replace(/<fieldset class="themes">[\s\S]*?<\/fieldset>/, '')
+      .replace("default-src 'none'; style-src 'unsafe-inline'; img-src data:", META_CSP)
       .replace('</head>', '<link rel="manifest" href="/manifest.webmanifest"></head>')
       .replace('</body>', '<script src="/alerts/push.js" defer></script></body>');
   }

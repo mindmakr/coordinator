@@ -105,6 +105,10 @@ export function fakeGitHub() {
       comments.set(`${full}#${n}`, [...(comments.get(`${full}#${n}`) ?? []), c]);
       return c.id;
     },
+    async deleteComment(token, full, id) {
+      calls.push(['deleteComment', full, id]);
+      for (const [k, list] of comments) comments.set(k, list.filter((c) => c.id !== id));
+    },
     async updateComment(token, full, id, body) {
       calls.push(['updateComment', full, id]);
       for (const list of comments.values()) { const c = list.find((x) => x.id === id); if (c) { c.body = body; return true; } }
@@ -119,7 +123,7 @@ export function fakeGitHub() {
     authorizeUrl: (state, redirect, challenge) => `https://github.example/login/oauth/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirect)}&code_challenge=${challenge}&code_challenge_method=S256`,
     async exchangeCode(code, redirect, verifier) { calls.push(['exchangeCode', code, verifier]); return { token: `tok-${code}`, refresh: `ref-${code}`, expiresAt: Date.now() + 8 * 3600_000, refreshExpiresAt: null }; },
     async refresh(r) { return { token: r.replace('ref-', 'tok-'), refresh: r, expiresAt: Date.now() + 8 * 3600_000, refreshExpiresAt: null }; },
-    async installationToken(id, perms) { calls.push(['installationToken', id, perms]); return `inst-${id}`; },
+    async installationToken(id, perms, opts) { calls.push(['installationToken', id, perms, ...(opts ? [opts] : [])]); return `inst-${id}`; },
     installationRepos(token) { const id = Number(token.slice(5)); return it([...repos].filter(([, r]) => r.installationId === id).map(([full_name, r]) => ({ id: r.id, full_name, private: r.private ?? true }))); },
     async ref(token, full) { calls.push(['ref', full]); const r = repoOf(full); return r ? head(r) : null; },
     async tree(token, full) {
@@ -135,6 +139,12 @@ export function fakeGitHub() {
       if (!u || !r || !u.read.has(full)) return { status: 404, repo: null };
       return { status: 200, repo: { id: r.id, full_name: full, permissions: { pull: true, push: false } } };
     },
+    async userPermission(token, full, login) {
+      calls.push(['userPermission', full, login]);
+      const u = [...users.values()].find((x) => x.login === login);
+      return u && u.read.has(full) ? 'read' : 'none';
+    },
+    revoke(token, full) { userOf(token)?.read.delete(full); },
     userInstallations(token) { const u = userOf(token); return it(u ? [...new Set([...u.read].map((f) => repoOf(f)?.installationId).filter(Boolean))].map((id) => ({ id })) : []); },
     userInstallationRepos(token, id) { const u = userOf(token); return it(u ? [...u.read].filter((f) => repoOf(f)?.installationId === id).map((f) => ({ id: repoOf(f).id, full_name: f, permissions: { pull: true } })) : []); },
   };

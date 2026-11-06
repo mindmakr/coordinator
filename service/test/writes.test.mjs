@@ -38,6 +38,9 @@ test('parseCommand: one strict line, outside quotes and code fences', () => {
   assert.deepEqual(parseCommand('/coordinator note "quoted note"'), { verb: 'note', text: 'quoted note' });
   assert.equal(parseCommand('> /coordinator answer q1 server'), null, 'a quoted command is someone else\'s');
   assert.equal(parseCommand('```\n/coordinator answer q1 server\n```'), null, 'inside a code fence');
+  assert.equal(parseCommand('Type this:\n\n    /coordinator answer q1 server\n'), null, 'inside an indented code block');
+  assert.equal(parseCommand('\t/coordinator answer q1 server'), null, 'indented with a tab');
+  assert.deepEqual(parseCommand('   /coordinator answer q1 server'), { verb: 'answer', question: 'q1', choice: 'server' }, 'three spaces is still a line');
   assert.equal(parseCommand('please run /coordinator answer q1 server'), null, 'not at the start of a line');
   assert.equal(parseCommand('/coordinatorx answer q1 a'), null);
   assert.equal(parseCommand(null), null);
@@ -194,7 +197,9 @@ test('comment commands: a pusher answers and notes; 👀 then 👍; authored as 
     assert.equal(move.token, 'inst-7');
     assert.deepEqual(move.commit.author, { name: 'writer', email: '2+writer@users.noreply.github.com' });
     assert.match(move.commit.message, /comment by @writer/);
-    assert.ok(t.gh.calls.some((c) => c[0] === 'installationToken' && JSON.stringify(c[2]) === JSON.stringify(SCOPES.write)), 'the write token is narrowed to contents');
+    const writeToken = t.gh.calls.find((c) => c[0] === 'installationToken' && JSON.stringify(c[2]) === JSON.stringify(SCOPES.write));
+    assert.ok(writeToken, 'the write token is narrowed to contents');
+    assert.deepEqual(writeToken[3], { repositoryIds: [70] }, 'and to the state repo alone');
     assert.deepEqual(t.gh.reactions.filter((x) => x.id === 601).map((x) => x.content), ['eyes', '+1']);
     assert.equal(replies(t).length, 0, 'success needs no reply');
     // A note on the issue: the note is about the unit the issue belongs to.

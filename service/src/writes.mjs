@@ -155,7 +155,7 @@ export function writer({ db, gh, config, ingest, acl = null, log, now = Date.now
   // A comment command, already parsed and permission-checked (commands.mjs). Committed with an
   // installation token that can only write contents, authored as the commenter.
   async function fromCommand({ installationId, repo, runId, login, userId, cmd, unit = null, source }) {
-    const token = await gh.installationToken(installationId, SCOPES.write);
+    const token = await gh.installationToken(installationId, SCOPES.write, { repositoryIds: [repo.id] });
     const author = { name: login, email: `${Number(userId)}+${login}@users.noreply.github.com` };
     let change; let eventUnit = null; let what;
     if (cmd.verb === 'answer') {

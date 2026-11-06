@@ -5,7 +5,7 @@
 //   /coordinator note QA found the same on the export screen
 //
 // Comment text is untrusted data. One line is read: the first that starts with
-// `/coordinator`, outside quotes (`>`) and code fences; the rest of the comment
+// `/coordinator`, outside quotes (`>`), code fences and indented code; the rest of the comment
 // is ignored. The issue or PR must be linked to exactly one open run; the
 // commenter must have push access to that run's state repo (asked of GitHub,
 // not taken from author_association). The service reacts 👀 on reading the
@@ -30,7 +30,8 @@ export function parseCommand(body) {
     const line = raw.trim();
     const f = /^(`{3,}|~{3,})/.exec(line);
     if (f) { if (!fence) fence = f[1][0]; else if (f[1][0] === fence) fence = null; continue; }
-    if (fence || line.startsWith('>')) continue;
+    // Quotes, fenced code and indented code (four spaces or a tab) are text about a command, never one.
+    if (fence || line.startsWith('>') || /^( {4}|\t)/.test(raw)) continue;
     if (/^\/coordinator(\s|$)/.test(line)) return parseLine(line);
   }
   return null;

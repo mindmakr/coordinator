@@ -2,7 +2,10 @@
 //
 // - Recipients are the people who asked for alerts on a repo (alert_subscriptions),
 //   checked against GitHub with their own token when they subscribed and again
-//   whenever they open the alerts page.
+//   whenever they open the alerts page, and before every alert and digest as the App
+//   (their permission on the repo, cached at most ACCESS_TTL_SECONDS, design 7.1).
+//   Someone who lost access is unsubscribed and hears nothing more; a check that
+//   fails sends them nothing this time.
 // - Content is minimal by default: repo, run, unit, what happened and a link.
 //   A question's text is added only for people who opted in, and only while their
 //   access was confirmed in the last TEXT_FRESH_MS. A GitHub mention never carries text.
@@ -38,8 +41,30 @@ export function inQuiet(s, ms) {
   return q.start < q.end ? h >= q.start && h < q.end : h >= q.start || h < q.end;
 }
 
-export function alerts({ db, config, log, now = Date.now, send, audit = true }) {
+export function alerts({ db, gh = null, config, log, now = Date.now, send, audit = true }) {
   const store = alertStore(db);
+  const ttl = Math.min(config.accessTtlMs ?? 60_000, 60_000);
+  const access = new Map(); // `${userId}:${inst}:${repoId}` → { ok, at }
+
+  // Whether this person may still read the repo: true, false (lost: unsubscribed) or null (not known now).
+  async function canRead(user, installationId, repoId, fullName) {
+    const k = `${user.userId}:${installationId}:${repoId}`;
+    const hit = access.get(k);
+    if (hit && now() - hit.at < ttl) return hit.ok;
+    let ok;
+    try {
+      if (!gh) return null;
+      const token = await gh.installationToken(installationId);
+      ok = (await gh.userPermission(token, fullName, user.login)) !== 'none';
+    } catch (e) { log?.warn('alerts: access check failed', { login: user.login, repo: fullName, error: e }); return null; }
+    access.set(k, { ok, at: now() });
+    if (access.size > 10_000) access.delete(access.keys().next().value);
+    if (!ok) {
+      await store.unsubscribe(user.userId, installationId, repoId);
+      if (audit) await db.audit('alerts.access-lost', { installationId, login: user.login, detail: { repo: fullName } });
+    }
+    return ok;
+  }
   const link = (repo, runId, unitId) => `${config.baseUrl}${repoBase(repo.fullName)}/run/${enc(runId)}${unitId ? `/unit/${enc(unitId)}` : ''}`;
 
   // The unit's (or, with no unit, the run's) first issue or PR in the state repo itself: where a mention may go.
@@ -97,6 +122,8 @@ export function alerts({ db, config, log, now = Date.now, send, audit = true }) 
     for (const user of await store.subscribers(installationId, repo.id)) {
       const prev = await store.recent(user.userId, collapseKey, once ? 0 : n - COLLAPSE_MS);
       if (prev) { if (!once) await store.bump(prev.id); out.push([user.login, 'collapsed']); continue; }
+      const may = await canRead(user, installationId, repo.id, repo.fullName);
+      if (!may) { out.push([user.login, may === false ? 'no access' : 'not checked']); continue; }
       const s = settingsOf(await store.settings(user.userId));
       const a = { userId: user.userId, installationId, repoId: repo.id, repo: repo.fullName, runId, unitId: unit, trigger, urgency: t.urgency, collapseKey, createdAt: n, url: link(repo, runId, unit) };
       const text = trigger === 'needs-you' && s.includeText && question && n - (user.checkedAt ?? 0) < TEXT_FRESH_MS ? question : null;
@@ -178,7 +205,17 @@ export function alerts({ db, config, log, now = Date.now, send, audit = true }) 
       for (const userId of await store.queuedUsers()) {
         const s = settingsOf(await store.settings(userId));
         if (inQuiet(s, n)) continue;
-        const list = await store.queued(userId);
+        const queued = await store.queued(userId);
+        if (!queued.length) continue;
+        // Only what the person may still read; the rest is cleared without being sent.
+        // An alert whose check failed stays queued for the next sweep.
+        const login = await store.loginOf(userId);
+        const list = []; const gone = [];
+        for (const a of queued) {
+          const may = login ? await canRead({ userId, login }, a.installationId, a.repoId, a.detail?.repo ?? '') : null;
+          if (may) list.push(a); else if (may === false) gone.push(a);
+        }
+        if (gone.length) await store.markSent(gone.map((a) => a.id), n);
         if (!list.length) continue;
         const lines = list.map((a) => `- ${TRIGGERS[a.trigger]?.label ?? a.trigger}${a.count > 1 ? ` (×${a.count})` : ''}: ${a.detail?.repo ?? ''} · run ${a.runId}${a.unitId ? ` · unit ${a.unitId}` : ''}\n  ${a.detail?.url ?? ''}`);
         const title = `Coordinator: ${list.length} alert${list.length > 1 ? 's' : ''} while you were away`;

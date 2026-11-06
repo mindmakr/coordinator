@@ -35,11 +35,21 @@ export function pushSender(vapid) {
 }
 
 // A short comment on an issue or PR that @-mentions the person, so GitHub's own notifications carry it.
+// Design 9 puts the mention in the unit's tracker comment. GitHub notifies a mention only when
+// the comment holding it is created, never when an edit adds it, so a mention edited into the
+// tracker comment would reach nobody. Instead: one short alert comment per person per issue,
+// and the App's previous one for that person (found by its marker) is deleted first, so an
+// issue never collects them.
+const alertMarker = (appId, login) => `<!-- coordinator:alert app=${String(appId).replace(/\D/g, '')} for=${String(login).replace(/[^A-Za-z0-9-]/g, '')} -->`;
 export function mentionSender({ gh, appId }) {
   return {
     async send(installationId, ref, login, body) {
       const token = await gh.installationToken(installationId, SCOPES.comments);
-      await gh.createComment(token, ref.repo, ref.n, `@${login} ${body}\n\n<!-- coordinator:alert app=${appId} -->`);
+      const mark = alertMarker(appId, login);
+      for await (const c of gh.issueComments(token, ref.repo, ref.n)) {
+        if (String(c.body ?? '').endsWith(mark) && String(c.performed_via_github_app?.id ?? '') === String(appId)) await gh.deleteComment(token, ref.repo, c.id);
+      }
+      await gh.createComment(token, ref.repo, ref.n, `@${login} ${body}\n\n${mark}`);
     },
   };
 }

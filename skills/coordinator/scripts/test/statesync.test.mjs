@@ -208,3 +208,39 @@ test('answers and person notes made away are replayed after the lead\'s own late
   assert.equal(r.code, 1); assert.match(r.err, /different histories/);
   assert.equal(readFileSync(join(runDir(A, 'r3'), 'events.jsonl'), 'utf8'), log);
 });
+
+test('an answer changed away after the lead used it is kept as a flagged note, and never wedges pull or push', () => {
+  const folder = join(root, 'away4', 'state');
+  const ok = (r) => { assert.equal(r.code, 0, r.err); return r.out; };
+  ok(cli(A, 'init', 'r4', '--goal', 'g', '--bar', 'b', '--fence', 'f')); ok(cli(A, 'add', 'r4', 'u1', '--bar', 'b'));
+  ok(cli(A, 'freeze', 'r4')); ok(cli(A, 'start', 'r4', 'u1'));
+  ok(cli(A, 'ask', 'r4', '--question', 'Which?', '--header', 'Pick', '--option', 'x|the x', '--option', 'y|the y', '--unit', 'u1'));
+  ok(cli(A, 'push', 'r4', '--to', folder));
+  ok(cli(B, 'pull', 'r4', '--from', folder)); ok(cli(B, 'answer', 'r4', 'q1', '--choice', 'x')); ok(cli(B, 'push', 'r4', '--to', folder));
+  ok(cli(A, 'pull', 'r4', '--from', folder)); ok(cli(A, 'use-answer', 'r4', 'q1')); ok(cli(A, 'beat', 'r4', 'u1'));
+  // The person changes the answer before the lead's next push: the branch has not seen the use.
+  ok(cli(B, 'answer', 'r4', 'q1', '--choice', 'y')); ok(cli(B, 'push', 'r4', '--to', folder));
+  assert.equal(ok(cli(A, 'pull', 'r4', '--from', folder)).replayed, 1);
+  const q = cli(A, 'questions', 'r4').out[0];
+  assert.deepEqual([q.status, q.answer.choices], ['used', ['x']], 'the lead keeps the answer it used');
+  const late = JSON.parse(readFileSync(join(runDir(A, 'r4'), 'state.json'), 'utf8')).notes.filter((n) => n.changedAfterUse);
+  assert.equal(late.length, 1); assert.match(late[0].text, /answer changed after use: q1 → y/); assert.deepEqual(late[0].changedAfterUse.choices, ['y']);
+  assert.equal(ok(cli(A, 'pull', 'r4', '--from', folder)).replayed, 0, 'a second pull adds nothing');
+  ok(cli(A, 'push', 'r4', '--to', folder));
+  ok(cli(A, 'beat', 'r4', 'u1')); ok(cli(A, 'push', 'r4', '--to', folder));
+  assert.equal(ok(cli(A, 'pull', 'r4', '--from', folder)).status, 'up-to-date');
+});
+
+test('a note or answer from the branch with fields run.mjs never writes is not replayed (no copy on every pull)', () => {
+  const folder = join(root, 'away5', 'state');
+  const ok = (r) => { assert.equal(r.code, 0, r.err); return r.out; };
+  ok(cli(A, 'init', 'r5', '--goal', 'g', '--bar', 'b', '--fence', 'f')); ok(cli(A, 'add', 'r5', 'u1', '--bar', 'b'));
+  ok(cli(A, 'freeze', 'r5')); ok(cli(A, 'start', 'r5', 'u1'));
+  ok(cli(A, 'push', 'r5', '--to', folder)); ok(cli(A, 'beat', 'r5', 'u1'));
+  const ev = join(folder, 'runs', 'r5', 'events.jsonl');
+  const last = JSON.parse(readFileSync(ev, 'utf8').trim().split('\n').at(-1));
+  writeFileSync(ev, readFileSync(ev, 'utf8') + `${JSON.stringify({ v: last.v, seq: last.seq + 1, at: new Date().toISOString(), kind: 'note', payload: { ops: [{ op: 'push', path: ['notes'], values: [{ kind: 'person', text: 'hi', unit: null, at: new Date().toISOString(), recommend: 'x' }] }] } })}\n`);
+  const log = readFileSync(join(runDir(A, 'r5'), 'events.jsonl'), 'utf8');
+  for (let i = 0; i < 2; i++) assert.match(cli(A, 'pull', 'r5', '--from', folder).err, /different histories/);
+  assert.equal(readFileSync(join(runDir(A, 'r5'), 'events.jsonl'), 'utf8'), log);
+});

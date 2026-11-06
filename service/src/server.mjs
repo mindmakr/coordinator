@@ -44,7 +44,7 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   const github = trail({ db, gh, config, log, now });
   // c12: the doorbell rings and alerts are worked out for every run a sync changed.
   const bell = makeDoorbell({ config, db, gh, log, now });
-  const alerts = makeAlerts({ db, config, log, now, send: senders ?? makeSenders({ config, gh }) });
+  const alerts = makeAlerts({ db, gh, config, log, now, send: senders ?? makeSenders({ config, gh }) });
   const onChange = (installationId, repo, changes) => {
     bell.ring(installationId, repo.id, changes.map((c) => c.runId));
     background(() => alerts.runsChanged(installationId, repo, changes));

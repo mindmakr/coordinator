@@ -14,6 +14,7 @@ function memoryStore() {
   const subKey = (u, i, r) => `${u}:${i}:${r}`;
   return {
     async settings(userId) { return clone(settings.get(userId)?.settings) ?? null; },
+    async loginOf(userId) { return settings.get(userId)?.login ?? [...subs.values()].find((s) => s.userId === userId)?.login ?? null; },
     async putSettings(userId, login, s) { settings.set(userId, { login, settings: clone(s) }); },
     async userByEmailToken(hash) {
       for (const [userId, row] of settings) if (row.settings.emailTokenHash === hash) return { userId, login: row.login, settings: clone(row.settings) };
@@ -50,6 +51,9 @@ function pgStore(pool) {
   const q = (text, values) => pool.query(text, values);
   return {
     async settings(userId) { return (await q('SELECT settings FROM alert_settings WHERE user_id = $1', [userId])).rows[0]?.settings ?? null; },
+    async loginOf(userId) {
+      return (await q('SELECT login FROM alert_settings WHERE user_id = $1 UNION ALL SELECT login FROM alert_subscriptions WHERE user_id = $1 LIMIT 1', [userId])).rows[0]?.login ?? null;
+    },
     async putSettings(userId, login, s) {
       await q(`INSERT INTO alert_settings (user_id, login, settings) VALUES ($1, $2, $3)
         ON CONFLICT (user_id) DO UPDATE SET login = $2, settings = $3, updated_at = now()`, [userId, login, JSON.stringify(s)]);

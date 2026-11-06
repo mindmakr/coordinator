@@ -100,6 +100,8 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | An answer changed after the lead used it | push | normal |
 
 - Content is minimal: repo, run, unit, what happened and a link to the page. A question's text is added to push and email only for people who opted in and whose access was confirmed in the last 7 days; a GitHub mention never carries it, and goes only on an issue or PR in the state repo itself.
+- Before every alert and every digest the service asks GitHub, as the App, whether the person can still read the repo (their permission on it, cached at most 60 s, design 7.1). Someone who lost access is unsubscribed, gets nothing (so no question text either), and their waiting digest entries are dropped; when the check itself fails, nothing is sent to them that time.
+- A GitHub mention is its own short comment, not an edit of the tracker comment as design 9 sketches: GitHub notifies a mention only when the comment holding it is created, so a mention edited into the tracker comment would reach nobody. Each new alert comment for a person replaces the App's previous one for them on that issue (deleted first), so an issue holds at most one per person.
 - One alert per thing: the same trigger on the same unit within 15 minutes bumps the first alert's count.
 - Low and normal alerts in quiet hours wait; when the hours end, one digest goes by email and push.
 - Every alert, and what happened on each channel ("sent", "off", "not configured", "no address", "failed"), is listed on `/alerts` and in the audit log. A channel that is not configured is skipped; the rest still go.
@@ -152,6 +154,7 @@ Logs go to stdout as JSON lines. Deleting the database loses nothing but session
 
 ## Known limits
 
+- **The doorbell starts from the person's `gh auth token`.** `run.mjs watch --remote` reads it with `gh auth token` and sends it once to `POST /doorbell/token`, which checks read access and returns a 15-minute token for one repo; the GitHub token is not kept. That token is the person's full `gh` login (often broad scopes), so it reaches the service each time a doorbell token is minted. Design 11.2's device-login flow, minting a short-lived token for this App alone, would avoid that and is not built yet. Until then, point `COORDINATOR_SERVICE` only at a service you run or trust, over https; without it the skill polls the branch and sends no token anywhere.
 - **"A lead went quiet" is a guess from the state branch.** The service sees only what the lead pushes, and the lead pushes at pit stops (a unit merged, a decision, the run closing), not at every heartbeat. The alert fires when a run has units mid-work and the newest time in the pushed state (a heartbeat, round, note or start) is older than twice the run's stale budget (`staleMinutes`, 45 by default, so 90 minutes) ([src/alerts/triggers.mjs](src/alerts/triggers.mjs), `quietSince`). So a lead that is working well but has not reached a pit stop for that long is reported quiet, and a lead that stopped right after a push is not reported until the same time has passed. It is sent once per quiet spell, at normal urgency, and only by push; treat it as "worth a look", not as proof the lead is down. The lead's own machine (`run.mjs watch`, the local dashboard) knows better.
 
 ## Security notes
@@ -161,7 +164,7 @@ Logs go to stdout as JSON lines. Deleting the database loses nothing but session
 - One run log cannot fan out: a run with more than 50 units is refused, at most 10 links per unit are written to, and comment writes are capped at 200 per installation per 10 minutes (the rest wait for the next sync).
 - Sign-in: 30 tries per 10 minutes per address; `state` compared in constant time; PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
 - Cookies: HttpOnly, SameSite=Lax, `Secure` and `__Host-` prefixed on https.
-- Every POST needs this site's `Origin` and the session's CSRF token. An answer or note also needs push access, asked of GitHub with the person's own token on every write (the page's disabled forms are only a hint).
+- Every POST needs this site's `Origin` and the session's CSRF token. An answer or note also needs push access, asked of GitHub with the person's own token on every write (the page's disabled forms are only a hint). A comment command is committed with an installation token narrowed to contents and to the state repo's id alone (`repository_ids`), so it cannot write any other repo of the installation.
 - Comment text is data: one strict line is parsed, nothing else in the comment is read, and a command can only answer a question the lead asked or add a note (design 11.3).
 - Every page: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `no-store`, `nosniff`, `X-Frame-Options: DENY`, HSTS on https.
 - An unknown repo is checked with GitHub exactly like a known one the viewer cannot read, so response time does not reveal which repos the service knows.

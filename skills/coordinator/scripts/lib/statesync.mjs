@@ -238,17 +238,16 @@ export function pull(o) {
 
 // The copy's answers and person notes the local log lacks, appended in the copy's order
 // as new local events (seq renumbered), each through updateRun like run.mjs answer and note.
-// All are tried on a copy of the state first, so a refusal (a used answer, a closed run) changes nothing.
+// All are tried on a copy of the state first, so a refusal (an option the question lacks) changes nothing.
+// An answer to a question already used is kept as an "answer changed after use" note, so it never wedges the run.
 // Ones already here (an earlier pull) are skipped: a second pull adds nothing.
 function replayExtras(o, extra) {
-  const check = (s) => { if (s.closed) throw new Error(`refused: run ${s.id} is closed; the copy's answers and notes were not replayed`); };
   const trial = structuredClone(readRun(o.dir).state);
-  check(trial);
   for (const e of extra) for (const a of e.acts) replayAct(trial, a);
   let state = null; let n = 0;
   for (const e of extra) {
     const before = readRun(o.dir).seq;
-    state = updateRun(o.dir, { kind: e.kind, unit: e.unit }, (s) => { check(s); for (const a of e.acts) replayAct(s, a); });
+    state = updateRun(o.dir, { kind: e.kind, unit: e.unit }, (s) => { for (const a of e.acts) replayAct(s, a); });
     n += readRun(o.dir).seq - before;
   }
   if (n && state) o.after?.(state);

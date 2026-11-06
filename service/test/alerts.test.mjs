@@ -57,6 +57,11 @@ test('triggers: a new question, an answer changed after use, a unit stopped and 
   const b2 = structuredClone(before);
   b2.notes.find((x) => x.kind === 'question').usedAt = new Date().toISOString();
   assert.deepEqual(runTriggers(b2, after, n).map((x) => x.trigger).sort(), ['answer-changed', 'run-finished', 'unit-stopped']);
+  // The lead's pull records a change that reached it after use as a flagged note: alerted once.
+  const late = structuredClone(b2);
+  late.notes.push({ kind: 'person', text: 'answer changed after use: q1 → client', unit: 'u1', at: new Date().toISOString(), changedAfterUse: { q: 'q1', choices: ['client'], other: null, by: 'person', at: new Date().toISOString() } });
+  assert.deepEqual(runTriggers(b2, late, n).map((x) => [x.trigger, x.ref]), [['answer-changed', 'q1']]);
+  assert.deepEqual(runTriggers(late, late, n), []);
 });
 
 test('triggers: a lead is quiet when units are mid-work and nothing moved for twice the stale budget', () => {
@@ -203,6 +208,38 @@ test('a lead gone quiet is alerted once per silence', async () => {
   } finally { await t.close(); }
 });
 
+test('a recipient who lost access hears nothing more, and is unsubscribed; queued alerts for them are dropped', async () => {
+  let offset = 0;
+  const t = await setup({ settings: { email: 'ana@example.com', includeText: true }, now: () => Date.now() + offset });
+  try {
+    await t.sync();
+    assert.equal(t.sent.push.length, 1, 'access checked as the App, then sent');
+    assert.ok(t.gh.calls.some((c) => c[0] === 'userPermission' && c[1] === 'acme/web' && c[2] === 'ana'));
+    // Ana loses access; within the 60 s cache nothing new is asked, after it the check says no.
+    t.gh.revoke('tok-c1', 'acme/web');
+    offset = 61_000;
+    const out = await t.app.alerts.dispatch(INST, { id: REPO, fullName: 'acme/web' }, { runId: 'r1', trigger: 'needs-you', question: 'Which total?', key: 'q9' });
+    assert.deepEqual(out, [['ana', 'no access']]);
+    assert.equal(t.sent.push.length, 1, 'nothing sent, so no question text either');
+    assert.deepEqual(await t.store.subscribers(INST, REPO), [], 'unsubscribed');
+  } finally { await t.close(); }
+
+  const h = new Date().getUTCHours();
+  let later = 0;
+  const t2 = await setup({ settings: { email: 'ana@example.com', tz: 'UTC', quiet: { start: h, end: (h + 2) % 24 } }, now: () => Date.now() + later });
+  try {
+    await t2.sync();
+    assert.equal((await t2.store.queued(5)).length, 1);
+    t2.gh.revoke('tok-c1', 'acme/web');
+    await t2.store.putSettings(5, 'ana', { email: 'ana@example.com', tz: 'UTC', quiet: { start: (h + 3) % 24, end: (h + 4) % 24 } });
+    later = 61_000; // past the cached answer: the digest asks again
+    const sweep = await t2.app.alerts.sweep();
+    assert.equal(sweep.digests.length, 0, 'no digest to someone who lost access');
+    assert.equal((await t2.store.queued(5)).length, 0, 'and the queue is cleared');
+    assert.equal(t2.sent.email.length, 0);
+  } finally { await t2.close(); }
+});
+
 test('nobody hears about a repo they did not subscribe to', async () => {
   const t = await setup({ subscribe: false });
   try {
@@ -227,7 +264,10 @@ test('alerts page: subscribe needs read access; settings save; an email is used 
     const cookie = await signIn(t, 'c1');
     let p = await page(t, cookie);
     assert.equal(p.r.status, 200);
-    assert.match(p.r.headers.get('content-security-policy'), /script-src 'self'/);
+    assert.match(p.r.headers.get('content-security-policy'), /script-src 'self'.*frame-ancestors 'none'/);
+    const meta = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/i.exec(p.html)?.[1] ?? '';
+    assert.match(meta, /script-src 'self'/); assert.doesNotMatch(meta, /frame-ancestors/, 'ignored in a meta tag: header only');
+    assert.doesNotMatch(p.html, /Snapshot · read-only|class="themes"/, 'no run chip and no theme buttons on a settings page');
     assert.match(p.html, /email is not set up|Web push/);
     let r = await form(t, cookie, '/alerts/watch', { csrf: p.csrf, repo: 'acme/secret', on: '1' });
     assert.equal(r.status, 404, 'a repo ana cannot read');
@@ -322,6 +362,7 @@ test('push: no VAPID keys, no sender; half a key pair is refused at start', () =
 test('with no senders configured, the GitHub mention still goes, as the App, with no question text', async () => {
   const t = await startApp();
   t.gh.addRepo('acme/web', { id: REPO, installationId: INST, files: stateFiles({ r1: makeRun('r1', { issues: ['acme/web#12'] }) }) });
+  t.gh.addUser('tok-ana', { id: 5, login: 'ana', read: ['acme/web'] });
   try {
     await t.db.upsertInstallation({ id: INST, account: 'acme' });
     await t.db.upsertRepo({ installationId: INST, id: REPO, fullName: 'acme/web', private: true });
@@ -335,5 +376,11 @@ test('with no senders configured, the GitHub mention still goes, as the App, wit
     assert.doesNotMatch(mention.body, /Which total/);
     const [a] = await t.app.alerts.store.alertsFor(5);
     assert.deepEqual(a.detail.channels, { push: 'not configured', email: 'not configured', github: 'sent' });
+    // A second alert for ana on the same issue replaces her first: the issue keeps one alert comment for her.
+    await t.app.alerts.dispatch(INST, { id: REPO, fullName: 'acme/web' }, { runId: 'r1', unit: 'u1', trigger: 'needs-you', key: 'q2', state: (await t.db.run(INST, REPO, 'r1')).state });
+    const mine = (t.gh.comments.get('acme/web#12') ?? []).filter((c) => c.body.startsWith('@ana '));
+    assert.equal(mine.length, 1);
+    assert.notEqual(mine[0].id, mention.id);
+    assert.ok(t.gh.calls.some((c) => c[0] === 'deleteComment' && c[2] === mention.id));
   } finally { await t.close(); }
 });
