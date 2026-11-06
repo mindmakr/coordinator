@@ -20,7 +20,7 @@ export function listedRepos(config) {
   return new Set(list.map((x) => lower(typeof x === 'string' ? x : x?.repo)).filter(Boolean));
 }
 
-export function projectFence({ gh, ttlMs = 5 * 60_000, now = Date.now }) {
+export function projectFence({ gh, ttlMs = 60_000, now = Date.now }) {
   const cache = new Map();
   async function agrees(token, target, stateName) {
     const k = `${lower(target)}\u0000${lower(stateName)}`;

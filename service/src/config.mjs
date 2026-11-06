@@ -30,6 +30,8 @@ export function loadConfig(env = process.env) {
     trustProxy: env.TRUST_PROXY === '1',
     databaseUrl: env.DATABASE_URL || null,
     stateBranch: env.STATE_BRANCH || 'coordinator-state',
+    // Every installation is re-read this often, so a missed webhook heals (0 turns it off).
+    resyncMs: int(env.RESYNC_MINUTES, 15, 0, 1440) * 60_000,
     accessTtlMs: int(env.ACCESS_TTL_SECONDS, 60, 0, 60) * 1000, // design 10.3: at most 60 s
     sessionDays: int(env.SESSION_DAYS, 7, 1, 30),
     sessionSecret,

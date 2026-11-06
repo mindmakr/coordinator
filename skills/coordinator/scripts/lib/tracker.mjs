@@ -7,7 +7,12 @@
 // may not read the run (a public repo, or another repo than the state's).
 import { questions } from './questions.mjs';
 
-export const marker = (run, unit) => `<!-- coordinator:tracker run=${run} unit=${unit} -->`;
+// Ids go into an HTML comment, so anything but the id characters is dropped (no "-->" can close it).
+const safeId = (x) => String(x ?? '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 64);
+export const marker = (run, unit) => `<!-- coordinator:tracker run=${safeId(run)} unit=${safeId(unit)} -->`;
+// Numbers from the run are shown only when they are what they claim to be.
+const count = (n) => (Number.isInteger(n) && n >= 0 ? n : '?');
+const score = (n) => (typeof n === 'number' && Number.isFinite(n) ? n : '–');
 export const isTracker = (body, run, unit) => String(body ?? '').startsWith(marker(run, unit));
 
 const MAX = 200;
@@ -30,20 +35,22 @@ export function unitState(run, u) {
   return u.status === 'judging' ? 'judging' : 'building';
 }
 
+// Every value from the run is either a number checked by count()/score(), a fixed word
+// (unitState), or text passed through md(); nothing from the run is inserted raw.
 // run: the state; unit: its id; url: the unit's page on the web dashboard, or null;
 // github: extra lines about the unit's PRs (merged, checks), already plain text.
 export function trackerBody(run, unitId, { url = null, detail = false, github = [] } = {}) {
   const u = run.units.find((x) => x.id === unitId);
   if (!u) return null;
-  const rounds = u.rounds ?? [];
+  const rounds = Array.isArray(u.rounds) ? u.rounds : [];
   const last = rounds.at(-1);
-  const scores = rounds.map((r) => (typeof r.score === 'number' ? r.score : '–')).join(' → ');
+  const scores = rounds.map((x) => score(x.score)).join(' → ');
   const lines = [
     marker(run.id, u.id),
     `**Coordinator** · run ${md(run.id, 64)} · unit ${md(u.id, 64)}${u.title ? `: ${md(u.title, 120)}` : ''}`,
     '',
     `- **State:** ${unitState(run, u)}${run.closed ? ` (run closed: ${md(run.closed.outcome, 40)})` : ''}`,
-    `- **Tries:** ${rounds.length} of ${run.budget?.maxRounds ?? '?'}${scores ? ` · scores ${scores}` : ''}${last ? ` · last verdict ${md(last.verdict, 20)}` : ''}`,
+    `- **Tries:** ${rounds.length} of ${count(run.budget?.maxRounds)}${scores ? ` · scores ${scores}` : ''}${last ? ` · last verdict ${md(last.verdict, 20)}` : ''}`,
   ];
   if (detail && last && last.verdict !== 'pass' && (last.gap || last.cause)) lines.push(`- **Last gap:** ${md(last.gap ?? '')}${last.cause ? ` (cause: ${md(last.cause, 80)})` : ''}`);
   const open = run.closed ? [] : questions(run).filter((q) => q.open && q.unit === u.id);

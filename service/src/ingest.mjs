@@ -13,6 +13,7 @@ export const LIMITS = { mapBytes: 16 * 1024 * 1024, logBytes: 8 * 1024 * 1024, r
 
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const MAX_DEPTH = 64;
+export const MAX_UNITS = 50; // a run past this is refused, so one log cannot fan out into thousands of writes
 // Masks every string; anything nested deeper than MAX_DEPTH is refused with an Error, never a stack overflow.
 export function maskDeep(v, depth = 0) {
   if (depth > MAX_DEPTH) throw new Error(`nested deeper than ${MAX_DEPTH} levels`);
@@ -31,6 +32,7 @@ export function readLog(runId, buf) {
     const err = validRun(state);
     if (err) return { error: `the replayed state is not a run: ${err}` };
     if (state.id !== runId) return { error: `the log describes run ${JSON.stringify(String(state.id).slice(0, 64))}, not ${runId}` };
+    if (state.units.length > MAX_UNITS) return { error: `the run has ${state.units.length} units; at most ${MAX_UNITS} are read` };
     return { state: maskDeep(state), seq: log.events.length };
   } catch (e) { return { error: maskSecrets(String(e.message)).slice(0, 500) }; }
 }

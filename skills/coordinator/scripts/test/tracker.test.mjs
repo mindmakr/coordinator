@@ -45,3 +45,19 @@ test('unit states for the board; code spans survive backticks in the text', () =
   assert.equal(md('`x`'), '`` `x` ``');
   assert.equal(md(''), '');
 });
+
+test('hostile numbers and ids from a raw run.init never reach the comment raw', () => {
+  const s = run();
+  const evil = '<img src=x onerror=alert(1)> @alice https://evil.example';
+  s.budget.maxRounds = evil;
+  s.units[0].rounds[0].score = evil;
+  s.id = 'r1 --> <b>x</b>';
+  const b = trackerBody(s, 'u1');
+  assert.match(b, /1 of \? · scores –/);
+  assert.ok(b.startsWith('<!-- coordinator:tracker run=r1--bxb unit=u1 -->'), 'no > survives, so the comment cannot close early');
+  const bare = outsideCode(b);
+  for (const bad of ['<img', '@alice', 'evil.example', '<b>']) assert.equal(bare.includes(bad), false, bad);
+  for (const n of [-1, 1.5, '4', null, Infinity]) { s.budget.maxRounds = n; assert.match(trackerBody(s, 'u1'), /of \?/, String(n)); }
+  s.units[0].rounds = 'not a list';
+  assert.match(trackerBody(s, 'u1'), /Tries:\*\* 0 of \?/);
+});

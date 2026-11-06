@@ -3,8 +3,6 @@
 export function limiter({ max, windowMs, now = Date.now }) {
   const hits = new Map();
   return {
-    // Over the limit right now, without counting this request.
-    blocked(key) { const w = hits.get(key); return !!w && now() < w.reset && w.n >= max; },
     hit(key) {
       const t = now();
       let w = hits.get(key);

@@ -13,6 +13,7 @@
 import { boardConfig, boardSession } from './board.mjs';
 import { isTracker, sha256, trackerBody, unitRefs, unitState } from './core.mjs';
 import { SCOPES } from './github.mjs';
+import { limiter } from './ratelimit.mjs';
 import { repoBase } from './pages.mjs';
 import { projectFence } from './project.mjs';
 
@@ -29,9 +30,14 @@ export function githubLines(events) {
   return out;
 }
 
-export function trail({ db, gh, config, log }) {
+// Caps on what one run log can make the App write: a hostile log is pusher-controlled.
+export const CAPS = { units: 50, refsPerUnit: 10, commentWritesPerInstallation: 200, windowMs: 10 * 60_000 };
+
+export function trail({ db, gh, config, log, now = Date.now }) {
   const on = { trackers: config.trail?.trackers !== false, board: config.trail?.board !== false };
-  const fence = projectFence({ gh });
+  const fence = projectFence({ gh, now });
+  // Comment writes (create or edit) per installation per window; the rest wait for the next sync.
+  const writes = limiter({ max: CAPS.commentWritesPerInstallation, windowMs: CAPS.windowMs, now });
 
   async function findOurs(token, ref, runId, unitId) {
     for await (const c of gh.issueComments(token, ref.repo, ref.n)) {
@@ -44,6 +50,7 @@ export function trail({ db, gh, config, log }) {
     const t = await db.tracker(installationId, ref.key, runId, unitId);
     const hash = sha256(body);
     if (t?.bodySha === hash) return 'unchanged';
+    if (writes.hit(String(installationId))) return 'deferred'; // over this installation's write budget
     if (t?.commentId && await gh.updateComment(token, ref.repo, t.commentId, body)) {
       await db.putTracker(installationId, { refKey: ref.key, runId, unitId, commentId: t.commentId, bodySha: hash });
       return 'updated';
@@ -68,8 +75,8 @@ export function trail({ db, gh, config, log }) {
       if (!board && !trackersOn) return out;
       let commentToken; let session; let readToken;
       const token = async () => (readToken ??= await gh.installationToken(installationId, SCOPES.read));
-      for (const u of state.units) {
-        for (const ref of unitRefs(u)) {
+      for (const u of state.units.slice(0, CAPS.units)) {
+        for (const ref of unitRefs(u).slice(0, CAPS.refsPerUnit)) {
           const target = await db.repoByName(ref.repo);
           if (!(await fence.allows(repo, target, token))) { out.skipped = [...(out.skipped ?? []), ref.key]; continue; } // outside the project: read-only
           const events = await db.ghEvents(installationId, [ref.key]);

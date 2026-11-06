@@ -13,8 +13,10 @@ try {
   if (db.kind === 'memory') log.warn('DATABASE_URL is not set: using an in-memory store, gone on restart');
   const app = createApp({ config, db, gh: github(config.github), log });
   app.server.listen(config.port, () => log.info('listening', { port: app.server.address().port, base: config.baseUrl, db: db.kind }));
+  if (config.resyncMs) app.startResync(config.resyncMs);
   const stop = async () => {
     log.info('stopping');
+    app.stopResync();
     app.server.close();
     await app.idle();
     await db.close();

@@ -32,7 +32,7 @@ Shared code: [src/core.mjs](src/core.mjs) imports the skill's `scripts/lib` (eve
 }
 ```
 
-**Writes stay in the project.** Comments and board fields go only to the state repo and to linked repos that agree on both sides: the state branch's `coordinator.json` lists the repo in `repos`, and that repo's own default branch has a `coordinator.json` with `"primary": "<state repo>"` (for example `{ "primary": "acme/web" }` in acme/mobile). The run log and the state branch can be written by anyone who can push to the state repo, so they cannot be trusted to name other repos on their own; the second side can only be written by someone who can push to the linked repo's default branch and pass its branch protection. A link to any other repo, even one the App is installed on, is shown read-only to viewers who can read it and never written to. The agreement is re-checked every 5 minutes.
+**Writes stay in the project.** Comments and board fields go only to the state repo and to linked repos that agree on both sides: the state branch's `coordinator.json` lists the repo in `repos`, and that repo's own default branch has a `coordinator.json` with `"primary": "<state repo>"` (for example `{ "primary": "acme/web" }` in acme/mobile). The run log and the state branch can be written by anyone who can push to the state repo, so they cannot be trusted to name other repos on their own; the second side can only be written by someone who can push to the linked repo's default branch and pass its branch protection. A link to any other repo, even one the App is installed on, is shown read-only to viewers who can read it and never written to. The agreement is re-checked at most every 60 seconds, so a repo that withdraws gets no further edits after that.
 
 `"trackers": false` turns the comments off for that repo. Without `board`, no board is touched. Boards owned by a personal account are not reachable by an App; use an organisation board. `TRACKERS=off` or `BOARD=off` in the environment turns either off everywhere.
 
@@ -76,6 +76,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` (last entry) for rate limits |
 | `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 60, design 10.3), `SESSION_DAYS` | no | Defaults 3000, `coordinator-state`, 60, 7 |
 | `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off for every repo |
+| `RESYNC_MINUTES` | no | How often every installation is re-read (default 15, 0 turns it off) |
 
 ## Register the GitHub App
 
@@ -121,7 +122,9 @@ Logs go to stdout as JSON lines. Deleting the database loses nothing but session
 
 ## Security notes
 
-- Webhooks: HMAC SHA-256 checked in constant time before parsing; 5 MB body cap. Signed deliveries are never rate limited; an address with 30 refused deliveries in a minute is turned away before its body is read.
+- Webhooks: the HMAC SHA-256 is always checked first, in constant time, with a 5 MB body cap. A delivery that verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses, so someone else's misconfigured hook must not block ours. Only refused deliveries are counted (30 a minute per address, then 429 for refused ones only).
+- Every installation is re-read every `RESYNC_MINUTES` (15), so a missed or failed delivery heals on its own; an unchanged branch costs one ref read.
+- One run log cannot fan out: a run with more than 50 units is refused, at most 10 links per unit are written to, and comment writes are capped at 200 per installation per 10 minutes (the rest wait for the next sync).
 - Sign-in: 30 tries per 10 minutes per address; `state` compared in constant time; PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
 - Cookies: HttpOnly, SameSite=Lax, `Secure` and `__Host-` prefixed on https.
 - Every POST needs this site's `Origin` and the session's CSRF token.

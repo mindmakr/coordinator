@@ -166,7 +166,7 @@ async function testDb() {
 export async function startApp({ gh = fakeGitHub(), db = null, over = {}, now } = {}) {
   db ??= await testDb();
   const cfg = config(over);
-  const app = createApp({ config: cfg, db, gh, log: silent, now });
+  const app = createApp({ config: cfg, db, gh, log: silent, now: now ?? Date.now });
   await new Promise((ok) => app.server.listen(0, '127.0.0.1', ok));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   return { app, gh, db, cfg, base, close: async () => { await new Promise((ok) => app.server.close(ok)); await app.idle(); await db.close(); } };
