@@ -7,7 +7,9 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const hash = (s) => createHash('sha256').update(s).digest('hex');
-const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+// Constant-time and total: the SHA-256 digests are compared, so any input (any length, multibyte) gives true or false, never a throw.
+const digest = (s) => createHash('sha256').update(s, 'utf8').digest();
+export const same = (a, b) => typeof a === 'string' && typeof b === 'string' && timingSafeEqual(digest(a), digest(b));
 
 export function sealer(secret) {
   const key = Buffer.from(hkdfSync('sha256', secret, 'coordinator-service', 'token-encryption', 32));

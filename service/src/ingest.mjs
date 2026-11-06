@@ -5,6 +5,7 @@
 // redelivered webhook or a repeated sync changes nothing. A log that fails
 // validation keeps the last good state and records why; other runs go on.
 import { isSafeId, mapFromText, maskSecrets, parseLog, replay, unitRefs, validRun } from './core.mjs';
+import { parser } from './parser.mjs';
 
 const RUN_LOG = /^runs\/([^/]+)\/events\.jsonl$/;
 const MAP_LOG = /^runs\/([^/]+)\/map\/events\.jsonl$/;
@@ -23,7 +24,9 @@ export function maskDeep(v, depth = 0) {
   return v;
 }
 
-// The run a log describes, or an error message. Never throws.
+const why = (e, n = 500) => maskSecrets(String(e?.message ?? e).slice(0, 2 * n)).slice(0, n);
+
+// The run a log describes, or an error message. Never throws. Pure: parser.mjs runs it in a worker.
 export function readLog(runId, buf) {
   try {
     const log = parseLog(buf, `runs/${runId}/events.jsonl`);
@@ -34,12 +37,20 @@ export function readLog(runId, buf) {
     if (state.id !== runId) return { error: `the log describes run ${JSON.stringify(String(state.id).slice(0, 64))}, not ${runId}` };
     if (state.units.length > MAX_UNITS) return { error: `the run has ${state.units.length} units; at most ${MAX_UNITS} are read` };
     return { state: maskDeep(state), seq: log.events.length };
-  } catch (e) { return { error: maskSecrets(String(e.message)).slice(0, 500) }; }
+  } catch (e) { return { error: why(e) }; }
 }
 
 // The project map a run pushed (lib/map), or an error message. Never throws.
 export function readMap(buf) {
-  try { return { map: maskDeep(mapFromText(buf.toString('utf8'), 'map/events.jsonl')) }; } catch (e) { return { error: maskSecrets(String(e.message)).slice(0, 500) }; }
+  try { return { map: maskDeep(mapFromText(buf.toString('utf8'), 'map/events.jsonl')) }; } catch (e) { return { error: why(e) }; }
+}
+
+// lessons/lessons.json or coordinator.json, shaped and masked: { value } or { error }. Never throws.
+export function readJson(kind, buf) {
+  try {
+    const j = JSON.parse(buf.toString('utf8'));
+    return { value: kind === 'lessons' ? (Array.isArray(j) ? maskDeep(j.filter(isObj)) : null) : (isObj(j) ? maskDeep(j) : null) };
+  } catch (e) { return { error: why(e, 200) }; }
 }
 
 // The issues and PRs each unit links, as rows for db.setUnitRefs: at most MAX_REFS_PER_UNIT per unit,
@@ -63,7 +74,9 @@ export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).slice(0,
 // mid-refresh leaves the run owed, and a run dropped and re-created never gets an old value back.
 // onChange (optional, c12 doorbell and alerts): (installationId, repo, [{ runId, before, after }]) after a sync
 // that changed runs; it must not throw (the server runs its work in the background).
-export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null, onChange = null }) {
+// parse (tests): the readers; by default parser.mjs, which runs them in a worker thread with a timeout.
+export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null, onChange = null, parse = null }) {
+  const reader = parse ?? parser();
   const chains = new Map(); // one sync or trail refresh per repo at a time; a second waits for the first
   const serial = (k, fn) => {
     const next = (chains.get(k) ?? Promise.resolve()).catch(() => {}).then(fn);
@@ -100,7 +113,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
       for (const e of logs) {
         const prev = have.get(e.runId);
         if (prev?.eventsSha === e.sha && !force) continue; // same bytes, same result
-        const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : readLog(e.runId, await gh.blob(token, repo.fullName, e.sha));
+        const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : await reader.readLog(e.runId, await gh.blob(token, repo.fullName, e.sha));
         if (r.error) {
           // Keep the last good state; record the failure against this blob.
           await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: prev?.seq ?? null, state: prev?.state ?? null, error: r.error });
@@ -121,13 +134,13 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
         const runId = MAP_LOG.exec(e.path)[1];
         const prev = rows.get(runId);
         if (!runIds.has(runId) || !prev || (prev.mapSha === e.sha && !force)) continue;
-        const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : readMap(await gh.blob(token, repo.fullName, e.sha));
+        const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : await reader.readMap(await gh.blob(token, repo.fullName, e.sha));
         await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? prev.map ?? null, mapError: r.error ?? null });
         if (r.error) log?.warn('map log rejected', { repo: repo.fullName, run: runId, reason: r.error });
       }
       // Lessons and coordinator.json are optional: one that cannot be read is left out and named in the sync error.
-      const lessons = await readSide(token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes, (j) => (Array.isArray(j) ? maskDeep(j.filter(isObj)) : null));
-      const config = await readSide(token, repo, entries, 'coordinator.json', LIMITS.configBytes, (j) => (isObj(j) ? maskDeep(j) : null));
+      const lessons = await readSide(token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes, 'lessons');
+      const config = await readSide(token, repo, entries, 'coordinator.json', LIMITS.configBytes, 'config');
       const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons.error, config.error].filter(Boolean);
       await db.setRepoSync(installationId, repo.id, { headSha: head, error: errors.length ? errors.join('; ') : null, lessons: lessons.value, config: config.value });
       const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
@@ -168,13 +181,13 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
   }
 
   // { value, error }: never throws, whatever the file holds.
-  async function readSide(token, repo, entries, path, max, shape) {
+  async function readSide(token, repo, entries, path, max, kind) {
     const e = entries.find((x) => x.path === path && x.type === 'blob');
     if (!e) return { value: null };
     if (e.size > max) return { value: null, error: `${path}: larger than ${max} bytes` };
-    try { return { value: shape(JSON.parse((await gh.blob(token, repo.fullName, e.sha)).toString('utf8'))) }; } catch (err) {
-      return { value: null, error: `${path}: ${maskSecrets(String(err.message)).slice(0, 200)}` };
-    }
+    let r;
+    try { r = await reader.readJson(kind, await gh.blob(token, repo.fullName, e.sha)); } catch (err) { r = { error: why(err, 200) }; }
+    return r.error ? { value: null, error: `${path}: ${r.error}` } : { value: r.value ?? null };
   }
 
   // Every repo the installation can reach now: new ones added, gone ones removed, each synced.
@@ -192,5 +205,5 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     return results;
   }
 
-  return { syncRepo, syncInstallation, refreshRuns };
+  return { syncRepo, syncInstallation, refreshRuns, close: () => reader.close() };
 }

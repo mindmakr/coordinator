@@ -108,7 +108,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 - Push subscriptions are accepted only for the browsers' own push services (Google, Mozilla, Apple, Microsoft), since the service posts to them.
 - For security alerts, give the App "Secret scanning alerts", "Code scanning alerts" and "Dependabot alerts" (read) and the matching events; they are optional.
 
-**The doorbell** (design 3.2, option C) lets `run.mjs watch <run> --remote` pull within seconds of a change instead of at its next poll (every 30 s). `POST /doorbell/token?repo=owner/name` with the person's GitHub token as a Bearer returns a doorbell token for that one repo, valid 15 minutes, if GitHub says they can read it; the GitHub token is used for that check and not kept. `GET /doorbell?run=<run>` with that token is a Server-Sent Events stream of `changed` events carrying only `{ "run": "<id>" }`; it ends when the token expires, and the skill mints a new one (and so re-checks access). Without the doorbell, or when it fails, polling still delivers within 60 s.
+**The doorbell** (design 3.2, option C) lets `run.mjs watch <run> --remote` pull within seconds of a change instead of at its next poll (every 30 s). `POST /doorbell/token?repo=owner/name` with the person's GitHub token as a Bearer returns a doorbell token for that one repo, valid 15 minutes, if GitHub says they can read it; the GitHub token is used for that check and not kept. `GET /doorbell?run=<run>` with that token is a Server-Sent Events stream of `changed` events carrying only `{ "run": "<id>" }`; the service also asks GitHub, as the App, whether the person can still read the repo when the stream opens and every 60 s, and ends the stream when they cannot (or GitHub cannot say); it ends when the token expires too, and the skill mints a new one (and so re-checks access with the person's own token). Without the doorbell, or when it fails, polling still delivers within 60 s.
 
 ## Register the GitHub App
 
@@ -121,7 +121,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | Issues | write | tracker comments, comment commands | Create and edit the one tracker comment per unit; reactions and replies to commands; `issue_comment` events |
 | Pull requests | write | tracker comments, merge events | Comments on PRs; `pull_request` events |
 | Checks | read | check events | `check_suite` events |
-| Organization projects | write | board | Set the Run, Unit state and Status fields; create the two coordinator fields once. Leave it out to run without a board |
+| Organization projects | write | board | Set the Run, Unit state and Status fields; create the two coordinator fields once. Not every project uses a board, but a GitHub App cannot ask for a permission per installation, so the hosted App asks for it for the projects that do; it only ever touches a board that `coordinator.json` names. Self-hosters without boards can leave it out and set `BOARD=off` |
 
 Events: `push`, `pull_request`, `check_suite`, `issue_comment`, and for security alerts `secret_scanning_alert`, `code_scanning_alert`, `dependabot_alert` (installation events always arrive). An App registered before 0.7 needs Contents raised to write, the three security alert permissions added, and these events added in its settings; each installation then accepts the new permissions.
 
@@ -138,6 +138,8 @@ Events: `push`, `pull_request`, `check_suite`, `issue_comment`, and for security
    `gh api -X POST /app-manifests/<code>/conversions` returns `id`, `slug`, `client_id`, `client_secret`, `webhook_secret` and `pem`. Put them in the environment, never in the repo.
 4. In the App's settings, keep "Expire user authorization tokens" on.
 5. Install the App on the repos whose runs you want to see.
+
+The manifest says `"public": true`, which the hosted App needs so any account can install it. A self-hosted App for your own account or organisation can set it to `false` before step 2, so nobody else can install it.
 
 ## Deploy on Dokploy
 
@@ -159,15 +161,17 @@ Logs go to stdout as JSON lines. Deleting the database loses nothing but session
 
 ## Security notes
 
-- Webhooks: the HMAC SHA-256 is always checked first, in constant time, with a 5 MB body cap. A delivery that verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses, so someone else's misconfigured hook must not block ours. Only refused deliveries are counted (30 a minute per address, then 429 for refused ones only).
+- Webhooks: the HMAC SHA-256 is always checked first, in constant time, with a 5 MB body cap, and every body being read at once shares a 32 MB budget (past it: 503). A delivery that verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses, so someone else's misconfigured hook must not block ours. Only refused deliveries are counted (30 a minute per address); past that, a request from that address is answered 429 before its body is read, unless it names this App in `X-GitHub-Hook-Installation-Target-ID` (GitHub sets it on every App delivery). A delivery id or a body seen before is acknowledged and skipped, so a signed body replayed under a new delivery id does nothing.
+- Run logs, maps, lessons and `coordinator.json` are parsed, validated, replayed and masked in a worker thread, one at a time, with a 20 s limit, so no log can stall the server for other tenants. Every string in an event is at most 64 KiB (the skill's event schema), and secret masking is linear in the text (tested against inputs built to make regexes backtrack).
 - Every installation is re-read every `RESYNC_MINUTES` (15), so a missed or failed delivery heals on its own; an unchanged branch costs one ref read.
 - One run log cannot fan out: a run with more than 50 units is refused, at most 10 links per unit are written to, and comment writes are capped at 200 per installation per 10 minutes (the rest wait for the next sync).
-- Sign-in: 30 tries per 10 minutes per address; `state` compared in constant time; PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
+- Sign-in: 30 tries per 10 minutes per address; `state` and CSRF tokens compared as SHA-256 digests in constant time (any input, any length); PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
 - Cookies: HttpOnly, SameSite=Lax, `Secure` and `__Host-` prefixed on https.
 - Every POST needs this site's `Origin` and the session's CSRF token. An answer or note also needs push access, asked of GitHub with the person's own token on every write (the page's disabled forms are only a hint). A comment command is committed with an installation token narrowed to contents and to the state repo's id alone (`repository_ids`), so it cannot write any other repo of the installation.
-- Comment text is data: one strict line is parsed, nothing else in the comment is read, and a command can only answer a question the lead asked or add a note (design 11.3).
+- Comment text is data: one strict line is parsed, nothing else in the comment is read, and a command can only answer a question the lead asked or add a note (design 11.3). At most 60 commands an hour per installation are handled; the rest are ignored before any GitHub call.
+- Alert email: a new address gets alerts only after its owner presses the button on the confirmation page (opening the link, as mail scanners do, confirms nothing); at most 3 confirmation emails a day per person and per address. Every alert and digest email carries a signed one-click stop link, in the text and as RFC 8058 `List-Unsubscribe` and `List-Unsubscribe-Post` headers, which works without signing in. A push endpoint registered to one person is never moved to another. GitHub mentions for security alerts are posted only on private repos.
 - Every page: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `no-store`, `nosniff`, `X-Frame-Options: DENY`, HSTS on https.
 - An unknown repo is checked with GitHub exactly like a known one the viewer cannot read, so response time does not reveal which repos the service knows.
 - Run state, lessons, `coordinator.json` and maps nested deeper than 64 levels are refused with a sync error, never a crash.
 - Every repo and run query is scoped by installation id (`src/db/index.mjs` refuses a call without one); permission answers are cached per person, never shared.
-- Uninstalling the App deletes that installation's rows at once.
+- Uninstalling the App deletes that installation's rows at once: repos, runs, links, GitHub events, trackers, comment commands, alerts (sent and waiting for a digest), alert subscriptions and its audit rows, keeping one audit row saying it was removed and by whom. Its doorbell listeners are closed. Settings, push devices and sessions belong to people, not installations, and stay.

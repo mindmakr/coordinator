@@ -1,5 +1,5 @@
 // GitHub webhooks: the HMAC is checked on the raw bytes before anything is
-// parsed; a delivery id seen before is acknowledged and skipped. Pushes to the
+// parsed; a delivery id, or a body, seen before is acknowledged and skipped. Pushes to the
 // state branch resync that repo; installation events add and remove repos.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -20,7 +20,9 @@ const refKey = (full, n) => `${String(full).toLowerCase()}#${Number(n)}`;
 // alerts (optional, c12): { github(inst, refKey, kind, detail), security(inst, repoName, detail) }.
 export const SECURITY_EVENTS = { secret_scanning_alert: 'secret', code_scanning_alert: 'code', dependabot_alert: 'dependency' };
 
-export function webhooks({ db, ingest, branch = 'coordinator-state', log, commands = null, alerts = null }) {
+// forget (optional): (installationId) => after an uninstall, drops what lives outside the read model
+// (alert rows, doorbell listeners, caches). Everything else goes with db.deleteInstallation.
+export function webhooks({ db, ingest, branch = 'coordinator-state', log, commands = null, alerts = null, forget = null }) {
   // c12 alerts: a new secret, code scanning or dependency alert on a repo of this installation.
   async function securityEvent(event, p) {
     if (!['created', 'reopened', 'appeared_in_branch'].includes(p.action) || !(await db.installation(Number(p.installation.id)))) return { status: 202, body: `ignored: ${event} ${p.action}` };
@@ -31,7 +33,10 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
   async function installationEvent(p) {
     const id = Number(p.installation?.id);
     if (p.action === 'deleted') {
+      // Every row about the installation goes: repos, runs, links, events, trackers, commands, alerts
+      // (sent and queued) and its audit trail. One audit row stays: that it was removed, and by whom.
       await db.deleteInstallation(id);
+      if (forget) await forget(id);
       await db.audit('installation.deleted', { installationId: id, login: p.sender?.login ?? null });
       return { status: 200, body: 'removed' };
     }
@@ -96,10 +101,11 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
   }
 
   return {
-    async handle(event, delivery, payload) {
+    // bodyKey (optional): a digest of the raw body, so a signed body replayed under a new delivery id is skipped too.
+    async handle(event, delivery, payload, bodyKey = null) {
       if (event === 'ping') return { status: 200, body: 'pong' };
       if (!Number.isSafeInteger(Number(payload?.installation?.id)) || Number(payload.installation.id) <= 0) return { status: 202, body: 'ignored: no installation' };
-      if (delivery && await db.seenDelivery(delivery)) return { status: 200, body: 'duplicate delivery' };
+      if ((delivery && await db.seenDelivery(delivery)) || (bodyKey && await db.seenDelivery(bodyKey))) return { status: 200, body: 'duplicate delivery' };
       const r = event === 'push' ? await pushEvent(payload)
         : event === 'installation' ? await installationEvent(payload)
           : event === 'installation_repositories' ? await reposEvent(payload)
@@ -109,7 +115,7 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
                 : event === 'issue_comment' && payload.repository && commands ? await commands.handle(payload)
                 : Object.hasOwn(SECURITY_EVENTS, event) && payload.repository ? await securityEvent(event, payload)
                 : { status: 202, body: `ignored: ${event}` };
-      const done = async () => { if (delivery) await db.recordDelivery(delivery); };
+      const done = async () => { if (delivery) await db.recordDelivery(delivery); if (bodyKey) await db.recordDelivery(bodyKey); };
       if (!r.work) { await done(); return r; }
       // Recorded only once the sync succeeds, so GitHub's redelivery of a failed one is not skipped.
       return { ...r, work: async () => { try { await r.work(); await done(); } catch (e) { log?.error('webhook sync failed', { event, error: e }); } } };

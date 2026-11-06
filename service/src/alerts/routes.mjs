@@ -5,16 +5,21 @@
 //   POST /alerts/settings    email, time zone, quiet hours, channels, question text opt-in
 //   POST /alerts/watch       repo=owner/name, on=1|0 (the person must be able to read it)
 //   POST /alerts/push        a browser's push subscription (JSON, CSRF header)
-//   GET  /alerts/confirm?t=  confirms an email address
+//   GET  /alerts/confirm?t=  a page whose button (POST /alerts/confirm) confirms an email address
+//   GET|POST /alerts/unsubscribe?u=&s=  stops alert email (signed link, RFC 8058 one-click; no sign-in)
 //   GET  /alerts/sw.js, /alerts/push.js   the service worker and the page's one script
 import { createHash, randomBytes } from 'node:crypto';
 import { esc, page, blk } from '../core.mjs';
+import { limiter } from '../ratelimit.mjs';
 import { settingsOf } from './index.mjs';
 import { TRIGGERS } from './triggers.mjs';
+import { unsubscriber } from './unsubscribe.mjs';
 
 const MAX_JSON = 4 * 1024;
 const MAX_WATCHED = 50;
 const CONFIRM_MS = 24 * 3600_000;
+const MAX_LINK_FORM = 1024;
+export const CONFIRMS_PER_DAY = 3; // confirmation emails per person, and per address
 const EMAIL = /^[^\s@<>"',;]{1,64}@[^\s@<>"',;]{1,190}\.[A-Za-z]{2,24}$/;
 const hash = (s) => createHash('sha256').update(s).digest('hex');
 const META_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'";
@@ -56,8 +61,14 @@ self.addEventListener('notificationclick', (e) => {
 `;
 const MANIFEST = JSON.stringify({ name: 'Coordinator', short_name: 'Coordinator', start_url: '/', display: 'standalone', background_color: '#ffffff', theme_color: '#ffffff' });
 
+// A one-button form posting hidden fields to this site (the CSP allows form-action 'self').
+const button = (action, fields, label) => `<form method="post" action="${esc(action)}">${Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}<p><button type="submit">${esc(label)}</button></p></form>`;
+
 export function alertRoutes({ alerts, acl, db, config, send, now = Date.now, log }) {
   const store = alerts.store;
+  const unsub = unsubscriber(config);
+  // Nobody can use this service to mail an address over and over: a few confirmations a day, per person and per address.
+  const confirms = { user: limiter({ max: CONFIRMS_PER_DAY, windowMs: 86_400_000, now }), address: limiter({ max: CONFIRMS_PER_DAY, windowMs: 86_400_000, now }) };
   const ctx = () => ({ live: null, theme: null, embed: null, pages: [{ path: '/', label: 'Projects', href: '/' }, { path: '/alerts', label: 'Alerts', href: '/alerts' }] });
 
   // Re-checks every repo the person watches with their own token: gone ones are dropped,
@@ -118,6 +129,9 @@ export function alertRoutes({ alerts, acl, db, config, send, now = Date.now, log
     else if (email !== s.email && email !== prev.emailPending) {
       if (!EMAIL.test(email) || email.length > 254) return 'That email address does not look right.';
       if (!send.email) return 'Email is not set up on this service, so the address cannot be confirmed.';
+      const who = String(user.userId); const where = email.toLowerCase();
+      if (confirms.user.blocked(who) || confirms.address.blocked(where)) return 'Too many confirmation emails today; try again tomorrow.';
+      confirms.user.hit(who); confirms.address.hit(where);
       // A new address gets alerts only once its owner follows the link, so nobody can point alerts at someone else.
       const token = randomBytes(32).toString('base64url');
       Object.assign(next, { emailPending: email, emailTokenHash: hash(token), emailTokenExp: now() + CONFIRM_MS });
@@ -140,13 +154,35 @@ export function alertRoutes({ alerts, acl, db, config, send, now = Date.now, log
       if (p === '/alerts/push.js' && req.method === 'GET') { h.send(res, 200, PUSH_JS, { 'Content-Type': 'text/javascript; charset=utf-8' }); return true; }
       if (p === '/alerts/sw.js' && req.method === 'GET') { h.send(res, 200, SW_JS, { 'Content-Type': 'text/javascript; charset=utf-8' }); return true; }
       if (p === '/manifest.webmanifest' && req.method === 'GET') { h.send(res, 200, MANIFEST, { 'Content-Type': 'application/manifest+json' }); return true; }
-      if (p === '/alerts/confirm' && req.method === 'GET') {
-        const t = String(url.searchParams.get('t') ?? '');
+      // Opening the link only shows a button: mail scanners fetch links, and a fetch must not confirm.
+      if (p === '/alerts/confirm' && (req.method === 'GET' || req.method === 'POST')) {
+        const t = req.method === 'GET' ? String(url.searchParams.get('t') ?? '') : String(new URLSearchParams((await h.readBody(req, MAX_LINK_FORM)).toString('utf8')).get('t') ?? '');
         const hit = /^[A-Za-z0-9_-]{43}$/.test(t) ? await store.userByEmailToken(hash(t)) : null;
         if (!hit || !hit.settings.emailPending || hit.settings.emailTokenExp < now()) { h.html(res, 400, h.message('Link expired', 'This confirmation link is wrong or has expired. Enter the address again on the alerts page.')); return true; }
+        if (req.method === 'GET') {
+          h.html(res, 200, h.message('Confirm your alert email', `${hit.login} asked for Coordinator alerts at ${hit.settings.emailPending}.`, button('/alerts/confirm', { t }, 'Confirm this address')));
+          return true;
+        }
         await store.putSettings(hit.userId, hit.login, { ...hit.settings, email: hit.settings.emailPending, emailPending: null, emailTokenHash: null, emailTokenExp: null });
         await db.audit('alerts.email-confirmed', { login: hit.login });
         h.html(res, 200, h.message('Email confirmed', 'Alerts will go to this address.'));
+        return true;
+      }
+      // RFC 8058: a mail client POSTs to the link with List-Unsubscribe=One-Click; a person opening it gets a button.
+      if (p === '/alerts/unsubscribe' && (req.method === 'GET' || req.method === 'POST')) {
+        const body = req.method === 'POST' ? new URLSearchParams((await h.readBody(req, MAX_LINK_FORM)).toString('utf8')) : null;
+        const u = Number(url.searchParams.get('u') ?? body?.get('u'));
+        const sig = url.searchParams.get('s') ?? body?.get('s');
+        const raw = Number.isSafeInteger(u) && u > 0 ? await store.settings(u) : null;
+        if (!raw?.email || !unsub.valid(u, raw.email, sig)) { h.html(res, 400, h.message('Link expired', 'This link is wrong, or alert emails to this address have already stopped.')); return true; }
+        if (req.method === 'GET') {
+          h.html(res, 200, h.message('Stop alert emails', 'Coordinator alert emails to this address will stop.', button('/alerts/unsubscribe', { u: String(u), s: sig }, 'Stop alert emails')));
+          return true;
+        }
+        const login = await store.loginOf(u);
+        await store.putSettings(u, login ?? '', { ...raw, email: null, emailPending: null, emailTokenHash: null, emailTokenExp: null, channels: { ...settingsOf(raw).channels, email: false } });
+        await db.audit('alerts.unsubscribed', { login });
+        h.html(res, 200, h.message('Alert emails stopped', 'No more Coordinator alert emails go to this address.'));
         return true;
       }
       if (p !== '/alerts' && !p.startsWith('/alerts/')) return false;
@@ -182,7 +218,7 @@ export function alertRoutes({ alerts, acl, db, config, send, now = Date.now, log
         try { const u = new URL(sub?.endpoint); ok = u.protocol === 'https:' && !u.port && PUSH_HOSTS.test(u.hostname) && typeof sub.keys?.p256dh === 'string' && typeof sub.keys?.auth === 'string' && sub.keys.p256dh.length < 200 && sub.keys.auth.length < 100 && sub.endpoint.length < 1000; } catch { ok = false; }
         if (!ok) { h.send(res, 400, 'not a push subscription'); return true; }
         if ((await store.pushSubs(user.userId)).length >= 10) { h.send(res, 409, 'at most 10 devices'); return true; }
-        await store.addPush(user.userId, { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } });
+        if (!(await store.addPush(user.userId, { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } }))) { h.send(res, 409, 'this device gets alerts for someone else'); return true; }
         h.send(res, 204, '');
         return true;
       }

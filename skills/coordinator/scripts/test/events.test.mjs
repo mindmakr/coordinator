@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { KINDS, schemaFor, validateEvent } from '../lib/eventschema.mjs';
+import { KINDS, MAX_TEXT, schemaFor, validateEvent } from '../lib/eventschema.mjs';
 import { apply, canonical, diff, parseLog, readRun, replay, sha256, updateRun } from '../lib/events.mjs';
 import { check } from '../lib/schema.mjs';
 
@@ -201,4 +201,17 @@ test('a real 0.5 run folder migrates on a copy and behaves as before', { skip: !
   assert.deepEqual(run('questions', old.id).out, qBefore);
   assert.equal(run('list').out.find((x) => x.run === old.id).decision, listed.decision);
   assert.equal(run('show', old.id).out.split('\n')[0], shownBefore.out.split('\n')[0]);
+});
+
+test('every string in an event is at most MAX_TEXT characters, however deep it sits', () => {
+  const ev = (value) => ({ v: 1, seq: 2, at: '2026-01-01T00:00:00Z', kind: 'state.edited', payload: { ops: [{ op: 'set', path: ['goal'], value }] } });
+  assert.doesNotThrow(() => validateEvent(ev('x'.repeat(MAX_TEXT))));
+  assert.doesNotThrow(() => validateEvent(ev({ a: [1, true, null, { b: 'ok' }] })));
+  assert.throws(() => validateEvent(ev('x'.repeat(MAX_TEXT + 1))), /longer than 65536/);
+  assert.throws(() => validateEvent(ev({ a: [{ b: 'x'.repeat(MAX_TEXT + 1) }] })), /longer than 65536/);
+  const push = { v: 1, seq: 2, at: '2026-01-01T00:00:00Z', kind: 'note', payload: { ops: [{ op: 'push', path: ['notes'], values: [{ text: 'y'.repeat(MAX_TEXT + 1) }] }] } };
+  assert.throws(() => validateEvent(push), /longer than 65536/);
+  const init = (goal) => ({ v: 1, seq: 1, at: '2026-01-01T00:00:00Z', kind: 'run.imported', payload: { state: { id: 'r1', goal, units: [{ id: 'u1', report: 'fine' }] } } });
+  assert.doesNotThrow(() => validateEvent(init('a goal')));
+  assert.throws(() => validateEvent(init('g'.repeat(MAX_TEXT + 1))), /longer than 65536/);
 });

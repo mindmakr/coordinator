@@ -57,7 +57,16 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     },
     async installation(id) { const r = (await q('SELECT id, account FROM installations WHERE id = $1', [id])).rows[0]; return r ? { id: Number(r.id), account: r.account } : null; },
     async installationIds() { return (await q('SELECT id FROM installations')).rows.map((r) => Number(r.id)); },
-    async deleteInstallation(id) { await q('DELETE FROM installations WHERE id = $1', [id]); },
+    // Repos, runs, links, events, trackers and commands cascade from installations; the audit trail has no key, so it goes by hand.
+    async deleteInstallation(id) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('DELETE FROM audit WHERE installation_id = $1', [id]);
+        await c.query('DELETE FROM installations WHERE id = $1', [id]);
+        await c.query('COMMIT');
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    },
 
     async upsertRepo({ installationId, id, fullName, private: priv }) {
       await q(`INSERT INTO repos (installation_id, id, full_name, private) VALUES ($1, $2, $3, $4)

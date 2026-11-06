@@ -25,13 +25,16 @@ const bump = (buf) => appendEvent(buf, 'unit.reset', { ops: [{ op: 'set', path: 
 
 test('a flood of wrongly signed deliveries from a shared address never blocks a correctly signed one', async () => {
   const t = await world();
-  const post = (body, sig) => fetch(`${t.base}/webhook`, { method: 'POST', body, headers: { 'X-GitHub-Event': 'ping', 'X-Hub-Signature-256': sig } });
+  // GitHub names the App a delivery is for; someone else's App delivering from the same addresses names its own.
+  const post = (body, sig, app = '999') => fetch(`${t.base}/webhook`, { method: 'POST', body, headers: { 'X-GitHub-Event': 'ping', 'X-Hub-Signature-256': sig, 'X-GitHub-Hook-Installation-Target-Type': 'integration', 'X-GitHub-Hook-Installation-Target-ID': app } });
   try {
     let last;
     for (let i = 0; i < 40; i++) last = await post('{"zen":"x"}', `sha256=${'0'.repeat(64)}`);
     assert.equal(last.status, 429, 'the refused ones are limited');
     const good = '{"zen":"ours"}';
-    const r = await post(good, `sha256=${createHmac('sha256', t.cfg.github.webhookSecret).update(good).digest('hex')}`);
+    const sig = `sha256=${createHmac('sha256', t.cfg.github.webhookSecret).update(good).digest('hex')}`;
+    assert.equal((await post(good, sig)).status, 429, 'over the limit, a delivery for another App is turned away before its body is read');
+    const r = await post(good, sig, t.cfg.github.appId);
     assert.equal(r.status, 200, 'ours still gets through');
   } finally { await t.close(); }
 });

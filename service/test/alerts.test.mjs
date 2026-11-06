@@ -283,10 +283,18 @@ test('alerts page: subscribe needs read access; settings save; an email is used 
     assert.deepEqual([s.tz, s.quiet, s.channels.github], ['Europe/London', { start: 22, end: 7 }, false]);
     const link = /confirm\?t=([A-Za-z0-9_-]+)/.exec(t.sent.email[0].text)[1];
     assert.equal((await fetch(`${t.base}/alerts/confirm?t=x${link.slice(1)}`)).status, 400, 'a wrong token');
-    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${link}`)).status, 200);
+    const opened = await fetch(`${t.base}/alerts/confirm?t=${link}`); // what a mail scanner does
+    assert.equal(opened.status, 200);
+    assert.match(await opened.text(), /<form method="post" action="\/alerts\/confirm">.*Confirm this address/s);
+    assert.equal((await t.store.settings(5)).email ?? null, null, 'opening the link confirms nothing');
+    const confirm = () => fetch(`${t.base}/alerts/confirm`, { method: 'POST', body: new URLSearchParams({ t: link }), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    const done = await confirm();
+    assert.equal(done.status, 200);
+    assert.match(await done.text(), /Email confirmed/);
     s = await t.store.settings(5);
     assert.equal(s.email, 'ana@example.com');
-    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${link}`)).status, 400, 'used once');
+    assert.equal((await confirm()).status, 400, 'used once');
+    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${link}`)).status, 400, 'and the page says so');
     r = await form(t, cookie, '/alerts/settings', { csrf: p.csrf, tz: 'Mars/Olympus' });
     assert.match(await r.text(), /Unknown time zone/);
     p = await page(t, cookie);

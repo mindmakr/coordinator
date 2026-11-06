@@ -14,5 +14,11 @@ export function limiter({ max, windowMs, now = Date.now }) {
       w.n += 1;
       return w.n > max ? Math.ceil((w.reset - t) / 1000) : 0;
     },
+    // Like hit(), without counting: the seconds to wait when the next hit would be refused, else 0.
+    blocked(key) {
+      const t = now();
+      const w = hits.get(key);
+      return w && t < w.reset && w.n >= max ? Math.ceil((w.reset - t) / 1000) : 0;
+    },
   };
 }

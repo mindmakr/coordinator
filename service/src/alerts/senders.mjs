@@ -5,7 +5,7 @@ import nodemailer from 'nodemailer';
 import webpush from 'web-push';
 import { SCOPES } from '../github.mjs';
 
-// { send({ to, subject, text }) } or null when SMTP_HOST is unset.
+// { send({ to, subject, text, headers? }) } or null when SMTP_HOST is unset.
 export function emailSender(smtp) {
   if (!smtp?.host) return null;
   const transport = nodemailer.createTransport({
@@ -14,7 +14,7 @@ export function emailSender(smtp) {
     connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 30_000,
   });
   return {
-    async send({ to, subject, text }) { await transport.sendMail({ from: smtp.from, to, subject, text }); },
+    async send({ to, subject, text, headers }) { await transport.sendMail({ from: smtp.from, to, subject, text, ...(headers ? { headers } : {}) }); },
     close: () => transport.close(),
   };
 }

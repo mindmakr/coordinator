@@ -2,6 +2,7 @@
 // server; every response carries a strict CSP and no-store, every POST from a
 // browser needs the session's CSRF token and this site's Origin, and webhook
 // and sign-in routes are rate limited per client address.
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { REPO, isSafeId, questions } from './core.mjs';
 import { access as makeAccess } from './access.mjs';
@@ -20,6 +21,7 @@ import { alertRoutes } from './alerts/routes.mjs';
 import { senders as makeSenders } from './alerts/senders.mjs';
 
 const MAX_WEBHOOK = 5 * 1024 * 1024;
+export const MAX_WEBHOOK_INFLIGHT = 32 * 1024 * 1024; // every webhook body being read at once, together
 const MAX_FORM = 4 * 1024;
 const MAX_WRITE_FORM = 16 * 1024; // c12: an answer or note of 1000 characters, percent-encoded
 const WRITE_ROUTES = new Set(['answer', 'note']); // c12: POST /r/<owner>/<repo>/run/<run>/answer|note
@@ -30,12 +32,25 @@ const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
-function readBody(req, max) {
+// budget (webhooks): { used, peak, max } bytes shared by every body being read at once; a body
+// that would take the total past max is refused with 503, so many large posts at once cannot
+// fill the memory however few of them carry a valid signature.
+function readBody(req, max, budget = null) {
   return new Promise((ok, fail) => {
-    let size = 0; const chunks = [];
-    req.on('data', (c) => { size += c.length; if (size > max) { fail(new HttpError(413, 'too large')); req.destroy(); } else chunks.push(c); });
-    req.on('end', () => ok(Buffer.concat(chunks)));
-    req.on('error', fail);
+    let size = 0; let done = false; const chunks = [];
+    const finish = (fn, v) => { if (done) return; done = true; if (budget) budget.used -= size; fn(v); };
+    const refuse = (e) => { finish(fail, e); req.destroy(); };
+    req.on('data', (c) => {
+      if (done) return;
+      size += c.length;
+      if (budget) { budget.used += c.length; budget.peak = Math.max(budget.peak, budget.used); }
+      if (size > max) refuse(new HttpError(413, 'too large'));
+      else if (budget && budget.used > budget.max) refuse(new HttpError(503, 'busy; try again'));
+      else chunks.push(c);
+    });
+    req.on('end', () => finish(ok, Buffer.concat(chunks)));
+    req.on('error', (e) => finish(fail, e));
+    req.on('close', () => finish(fail, new HttpError(400, 'the request ended early')));
   });
 }
 
@@ -43,7 +58,7 @@ function readBody(req, max) {
 export function createApp({ config, db, gh, log, now = Date.now, senders = null }) {
   const github = trail({ db, gh, config, log, now });
   // c12: the doorbell rings and alerts are worked out for every run a sync changed.
-  const bell = makeDoorbell({ config, db, gh, log, now });
+  const bell = makeDoorbell({ config, db, gh, log, now, ...(config.doorbellRecheckMs ? { recheckMs: config.doorbellRecheckMs } : {}) });
   const alerts = makeAlerts({ db, gh, config, log, now, send: senders ?? makeSenders({ config, gh }) });
   const onChange = (installationId, repo, changes) => {
     bell.ring(installationId, repo.id, changes.map((c) => c.runId));
@@ -54,7 +69,8 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   // c12: answers and notes, from the HUD and from comment commands.
   const writes = makeWriter({ db, gh, config, ingest, acl, log, now });
   const commands = makeCommands({ db, gh, writes, log, now });
-  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log, commands, alerts });
+  const forget = async (id) => { await alerts.forgetInstallation(id); bell.forgetInstallation(id); };
+  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log, commands, alerts, forget });
   const auth = makeSessions({ db, gh, config, log, now });
   const alertPages = alertRoutes({ alerts, acl, db, config, send: alerts.send, now, log });
   const limits = {
@@ -63,6 +79,7 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     sync: limiter({ max: 6, windowMs: 10 * 60_000, now }),
     pages: limiter({ max: 600, windowMs: 60_000, now }),
   };
+  const inflight = { used: 0, peak: 0, max: config.webhookInflightBytes ?? MAX_WEBHOOK_INFLIGHT };
   const pending = new Set();
   const background = (fn) => {
     const p = Promise.resolve().then(fn).catch((e) => log.error('background work failed', { error: e }));
@@ -100,10 +117,22 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   // verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses,
   // so refused deliveries from one of them (someone else's hook pointed here) must never block
   // ours. Only refused requests are counted and limited.
+  //
+  // An address whose refusals are over the limit is answered before its body is read, unless the
+  // request names this App as its target (X-GitHub-Hook-Installation-Target-ID, which GitHub sets on
+  // every App delivery): someone else's App delivering here from GitHub's shared addresses is
+  // turned away unread, ours still gets through. A forged header buys only a read within the
+  // in-flight budget (MAX_WEBHOOK_INFLIGHT across all bodies at once) and a signature check.
   async function webhook(req, res) {
     const ip = clientIp(req);
-    if (Number(req.headers['content-length']) > MAX_WEBHOOK) { res.setHeader('Connection', 'close'); return send(res, 413, 'too large'); }
-    const raw = await readBody(req, MAX_WEBHOOK);
+    const close = { Connection: 'close' };
+    const length = Number(req.headers['content-length']);
+    if (length > MAX_WEBHOOK) return send(res, 413, 'too large', close);
+    const ours = String(req.headers['x-github-hook-installation-target-id'] ?? '') === String(config.github.appId);
+    const wait = ours ? 0 : limits.webhookFailures.blocked(ip);
+    if (wait) return send(res, 429, 'too many requests', { ...close, 'Retry-After': String(wait) });
+    if (Number.isFinite(length) && inflight.used + length > inflight.max) return send(res, 503, 'busy; try again', { ...close, 'Retry-After': '5' });
+    const raw = await readBody(req, MAX_WEBHOOK, inflight);
     if (!verifySignature(config.github.webhookSecret, raw, req.headers['x-hub-signature-256'])) {
       if (limited(res, 'webhookFailures', ip)) return;
       log.warn('webhook signature refused', { ip });
@@ -113,7 +142,8 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     try { payload = JSON.parse(raw.toString('utf8')); } catch { return send(res, 400, 'not JSON'); }
     const event = String(req.headers['x-github-event'] ?? '');
     const delivery = String(req.headers['x-github-delivery'] ?? '').slice(0, 100) || null;
-    const r = await hooks.handle(event, delivery, payload);
+    // A signed body sent again under a new delivery id is a replay: it is skipped like a redelivery.
+    const r = await hooks.handle(event, delivery, payload, `sha256:${createHash('sha256').update(raw).digest('hex')}`);
     send(res, r.status, r.body);
     log.info('webhook', { event, delivery, status: r.status, result: r.body });
     if (r.work) background(r.work);
@@ -248,7 +278,7 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     }
     if (req.method === 'GET' && p === '/') return home(res, user);
     // c12: the alerts pages (src/alerts/routes.mjs).
-    if (await alertPages.route(req, res, url, { user, form, html, send, redirect, readBody, validCsrf: auth.validCsrf, message: (t, x) => messagePage(t, x, user) })) return;
+    if (await alertPages.route(req, res, url, { user, form, html, send, redirect, readBody, validCsrf: auth.validCsrf, message: (t, x, action) => messagePage(t, x, user, null, action) })) return;
     const m = ROUTE.exec(p);
     if (m) return repoRoute(req, res, url, m, user);
     return notFound(res, user);
@@ -289,6 +319,7 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   let sweeping = false;
   return {
     server, ingest, resyncAll, alerts, doorbell: bell,
+    webhookBytes: () => ({ ...inflight }), // tests: the in-flight budget, and its high-water mark
     // c12: the alerts sweep (leads gone quiet, digests due), every ALERT_SWEEP_SECONDS.
     startAlerts(everyMs) {
       alertTimer = setInterval(() => { if (!sweeping) { sweeping = true; background(() => alerts.sweep().finally(() => { sweeping = false; })); } }, everyMs);

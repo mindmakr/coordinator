@@ -28,3 +28,43 @@ test('paths, file:line evidence and plain prose are left alone', () => {
     assert.equal(maskSecrets(s), s);
   }
 });
+
+// A regex with ambiguous repeats took 173 s on 'token_' x 2000 and froze the hosted service.
+test('masking is linear: adversarial inputs finish in under 50 ms', () => {
+  const N = 5000;
+  const inputs = [
+    'token_'.repeat(N), 'token='.repeat(N), 'token=x,'.repeat(N), 'token=/:1'.repeat(N), 'token: '.repeat(N), 'token is '.repeat(N),
+    'token="'.repeat(N), 'a-'.repeat(3 * N), 'a_'.repeat(3 * N), 'eyJ-'.repeat(N), `${'eyJ-'.repeat(60)}.${'a'.repeat(30000)}`,
+    'a://'.repeat(N), 'a.'.repeat(3 * N), `x://${'a:'.repeat(3 * N)}`, 'glpat-'.repeat(N), 'xoxb-'.repeat(N), 'sk-'.repeat(N), 'ghp_'.repeat(N),
+    'bearer '.repeat(N), 'authorization:'.repeat(N), '-----BEGIN '.repeat(N), `-----BEGIN RSA PRIVATE KEY-----${'-----END '.repeat(N)}`,
+    `token${' '.repeat(30000)}`, `${'aB3'.repeat(2 * N)}/`, 'DB_PASSWORD_token-api_key='.repeat(1500),
+  ];
+  for (const s of inputs) {
+    maskSecrets(s.slice(0, 64)); // warm up
+    const a = performance.now();
+    maskSecrets(s); findSecret(s);
+    const ms = performance.now() - a;
+    assert.ok(ms < 50, `${JSON.stringify(s.slice(0, 24))}… (${s.length} chars) took ${ms.toFixed(0)} ms`);
+  }
+});
+
+test('long text is masked window by window and still catches secrets anywhere in it', () => {
+  const filler = 'lorem ipsum dolor sit amet\n'.repeat(1000); // 27 KB, several windows
+  const text = `${filler}DB_PASSWORD=SuperSecret99 ${filler}ghp_abcdefghijklmnopqrstuvwxyz0123 ${filler}`;
+  const out = maskSecrets(text);
+  assert.equal(out.match(/\[redacted\]/g)?.length, 2);
+  assert.equal(out.length, text.length - 'DB_PASSWORD=SuperSecret99'.length - 'ghp_abcdefghijklmnopqrstuvwxyz0123'.length + 2 * '[redacted]'.length);
+  assert.equal(findSecret(text), true);
+  assert.equal(findSecret(filler), false);
+  const pem = `${filler}-----BEGIN RSA PRIVATE KEY-----\n${'MIIEowIBAAKCAQEA\n'.repeat(600)}-----END RSA PRIVATE KEY-----\nafter`;
+  assert.equal(maskSecrets(pem), `${filler}[redacted]\nafter`, 'a key longer than a window is masked whole');
+});
+
+test('named values: the same names and values as before the tokenizer', () => {
+  const cases = [
+    ['x "password": "p@ss w0rd" y', 'x [redacted] y'], ['a__token=abc12345', 'a__[redacted]'], ['mytoken=abc12345', 'mytoken=abc12345'],
+    ['MY_API-KEY = "abcdef"', '[redacted]'], ['token=abc12345token=xyz', '[redacted]'], ['the Token IS hunter22x ok', 'the [redacted] ok'],
+    ['client_secret: src/a.ts:4', 'client_secret: src/a.ts:4'], ['x"secret"=abc12345', 'x"[redacted]'], ['api_key: "short"', 'api_key: "short"'],
+  ];
+  for (const [s, want] of cases) assert.equal(maskSecrets(s), want, s);
+});

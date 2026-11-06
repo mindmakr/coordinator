@@ -24,6 +24,7 @@ export function memoryDb() {
       for (const [k, r] of repos) if (r.installationId === id) repos.delete(k);
       for (const [k, r] of runs) if (r.installationId === id) runs.delete(k);
       for (const m of [refs, ghEvents, trackers, commands]) for (const [k, r] of m) if (r.installationId === id) m.delete(k);
+      for (let i = audit.length - 1; i >= 0; i--) if (audit[i].installationId === id) audit.splice(i, 1);
     },
 
     async upsertRepo({ installationId, id, fullName, private: priv }) {

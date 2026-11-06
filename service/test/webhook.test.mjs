@@ -58,7 +58,11 @@ test('webhook: a push to the state branch is ingested once; a redelivery and a s
     await t.app.idle();
     assert.equal(t.gh.calls.length, calls, 'a redelivery makes no GitHub call');
 
-    r = await post(t, pushPayload(), { delivery: 'd2' }); // a new delivery, same branch tip
+    r = await post(t, pushPayload(), { delivery: 'd9' }); // the same signed body under a new delivery id: a replay
+    assert.equal(r.status, 200);
+    assert.match(await r.text(), /duplicate/);
+
+    r = await post(t, pushPayload({ pusher: { name: 'b' } }), { delivery: 'd2' }); // a new delivery, same branch tip
     await t.app.idle();
     assert.deepEqual(t.gh.calls.slice(calls).map((c) => c[0]), ['installationToken', 'ref'], 'tip unchanged: no tree or blob read');
     assert.deepEqual((await t.db.runs(7, 70)).map((x) => x.seq), [7]);

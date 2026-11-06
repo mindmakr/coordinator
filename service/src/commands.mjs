@@ -19,6 +19,9 @@ import { limiter } from './ratelimit.mjs';
 import { WriteError } from './writes.mjs';
 
 const MAX_TEXT = 1000;
+// Commands handled per installation an hour. Each costs the App several API calls, so a flood of
+// command comments on one installation's public issues cannot use up the App's quota for the rest.
+export const COMMANDS_PER_HOUR = 60;
 const USAGE = 'Commands: `/coordinator answer q3 <option>`, `/coordinator answer q3 "your own answer"`, or `/coordinator note <text>`.';
 
 // The command in a comment body, or null when there is none.
@@ -81,6 +84,7 @@ function refusal(e, cmd) {
 
 export function commands({ db, gh, writes, log, now = Date.now }) {
   const replies = limiter({ max: 20, windowMs: 3_600_000, now }); // refusal replies per installation
+  const handled = limiter({ max: COMMANDS_PER_HOUR, windowMs: 3_600_000, now });
 
   async function reply(token, inst, full, n, text) {
     if (replies.hit(String(inst))) return; // over the cap: the 😕 reaction alone says it
@@ -151,6 +155,10 @@ export function commands({ db, gh, writes, log, now = Date.now }) {
       if (!cmd) return { status: 202, body: 'ignored: no command' };
       const inst = Number(p.installation.id);
       if (!(await db.installation(inst))) return { status: 202, body: 'ignored: unknown installation' };
+      if (handled.hit(String(inst))) {
+        log.warn('comment commands over the hourly cap', { installation: inst });
+        return { status: 202, body: 'ignored: too many commands this hour' };
+      }
       return { status: 202, body: `command ${cmd.verb ?? 'refused'}`, work: () => work(inst, p, cmd) };
     },
   };

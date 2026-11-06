@@ -19,6 +19,7 @@ import { unitRefs } from '../core.mjs';
 import { refsOf } from '../ingest.mjs';
 import { repoBase } from '../pages.mjs';
 import { alertStore } from './store.mjs';
+import { unsubscriber } from './unsubscribe.mjs';
 import { TRIGGERS, isRed, quietSince, runTriggers } from './triggers.mjs';
 
 export const COLLAPSE_MS = 15 * 60_000;
@@ -43,6 +44,12 @@ export function inQuiet(s, ms) {
 
 export function alerts({ db, gh = null, config, log, now = Date.now, send, audit = true }) {
   const store = alertStore(db);
+  const unsub = unsubscriber(config);
+  // Every alert email: the stop link in the text and in the RFC 8058 headers.
+  const mail = (userId, to, subject, body) => send.email.send({
+    to, subject, headers: unsub.headers(userId, to),
+    text: `${body}\n\nStop alert emails to this address: ${unsub.url(userId, to)}\nAlert settings: ${config.baseUrl}/alerts\n`,
+  });
   const ttl = Math.min(config.accessTtlMs ?? 60_000, 60_000);
   const access = new Map(); // `${userId}:${inst}:${repoId}` → { ok, at }
 
@@ -97,9 +104,11 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
         } else if (ch === 'email') {
           if (!send.email) { out.email = 'not configured'; continue; }
           if (!s.email) { out.email = 'no address'; continue; }
-          await send.email.send({ to: s.email, subject: msg.title, text: `${msg.body}\n\n${msg.url}\n\nAlert settings: ${config.baseUrl}/alerts\n` });
+          await mail(user.userId, s.email, msg.title, `${msg.body}\n\n${msg.url}`);
           out.email = 'sent';
         } else {
+          // A mention is a public comment on a public repo; that a security alert exists is not for everyone.
+          if (a.trigger === 'security' && a.private !== true) { out.github = 'public repo'; continue; }
           if (!ref) { out.github = 'no linked issue'; continue; }
           await send.github.send(a.installationId, ref, user.login, `coordinator: ${TRIGGERS[a.trigger].label} (${a.repo} · run ${a.runId}${a.unitId ? ` · unit ${a.unitId}` : ''}): ${msg.url}`);
           out.github = 'sent';
@@ -125,7 +134,7 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
       const may = await canRead(user, installationId, repo.id, repo.fullName);
       if (!may) { out.push([user.login, may === false ? 'no access' : 'not checked']); continue; }
       const s = settingsOf(await store.settings(user.userId));
-      const a = { userId: user.userId, installationId, repoId: repo.id, repo: repo.fullName, runId, unitId: unit, trigger, urgency: t.urgency, collapseKey, createdAt: n, url: link(repo, runId, unit) };
+      const a = { userId: user.userId, installationId, repoId: repo.id, repo: repo.fullName, private: repo.private, runId, unitId: unit, trigger, urgency: t.urgency, collapseKey, createdAt: n, url: link(repo, runId, unit) };
       const text = trigger === 'needs-you' && s.includeText && question && n - (user.checkedAt ?? 0) < TEXT_FRESH_MS ? question : null;
       const row = { ...a, detail: { url: a.url, repo: repo.fullName } };
       if (t.urgency !== 'high' && inQuiet(s, n)) {
@@ -145,6 +154,12 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
 
   return {
     store, dispatch, send,
+
+    // The installation was removed: its alerts (sent and waiting for a digest), subscriptions and cached answers go.
+    async forgetInstallation(installationId) {
+      await store.deleteInstallation(installationId);
+      for (const k of [...access.keys()]) if (k.split(':')[1] === String(installationId)) access.delete(k);
+    },
 
     // From a sync: [{ runId, before, after }] for every run whose state changed.
     runsChanged: (installationId, repo, changes) => safely('run change', async () => {
@@ -221,7 +236,7 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
         const title = `Coordinator: ${list.length} alert${list.length > 1 ? 's' : ''} while you were away`;
         const sent = {};
         if (s.channels.email && s.email && send.email) {
-          try { await send.email.send({ to: s.email, subject: title, text: `${lines.join('\n')}\n\nAlert settings: ${config.baseUrl}/alerts\n` }); sent.email = 'sent'; } catch (e) { sent.email = 'failed'; log?.warn('digest email failed', { error: e }); }
+          try { await mail(userId, s.email, title, lines.join('\n')); sent.email = 'sent'; } catch (e) { sent.email = 'failed'; log?.warn('digest email failed', { error: e }); }
         }
         if (s.channels.push && send.push) {
           for (const sub of await store.pushSubs(userId)) {

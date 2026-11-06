@@ -21,6 +21,7 @@ try {
     app.stopAlerts();
     app.server.close();
     await app.idle();
+    await app.ingest.close();
     await db.close();
     process.exit(0);
   };
