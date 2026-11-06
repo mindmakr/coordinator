@@ -1,0 +1,135 @@
+# Coordinator service
+
+A GitHub App and a read-only web dashboard for [Coordinator](../README.md) runs, plus the GitHub trail: one tracker comment and one board card per unit, kept current. The lead pushes a run's state to the `coordinator-state` branch at pit stops (`run.mjs push`, see [durability.md](../skills/coordinator/references/durability.md)); this service reads that branch when GitHub says it changed and shows each run to the people who can read the repo, from any browser or phone.
+
+Design: [docs/design/v1.md](../docs/design/v1.md), sections 6 (GitHub as the visible trail), 7 (web HUD), 10 (hosting) and 11 (security). This is milestone 0.6 (#11); answers, notes and alerts come next (#12).
+
+Licence: [AGPL-3.0](LICENSE). The skill and its shared code stay MIT.
+
+## What it does
+
+| Part | How |
+|---|---|
+| Ingest | `POST /webhook` takes `push` events for `coordinator-state` and installation events. The signature (`X-Hub-Signature-256`) is checked on the raw body before parsing. It reads the branch with an installation token (read-only, minted per sync, never stored), validates every `runs/<run>/events.jsonl` with the skill's own event schema, replays it, masks secrets again, and stores the state. A repeated delivery id is skipped; an unchanged branch tip or log blob is not read again. A log that fails validation keeps the last good copy and shows why. |
+| Sign-in | GitHub App user authorisation (user-to-server tokens, which expire and refresh). A random `state` in a short-lived HttpOnly cookie guards the round trip. |
+| Access | Every repo page asks GitHub, with the viewer's own token, whether they can read the repo; the answer is reused for that person only, for 60 s. No access, no repo, and a repo re-created under the same name all give the same 404. |
+| Pages | Projects (repos you can read), runs of a repo, run dashboard, unit pages with their timelines, the run's maps, its project map (when the run pushed one), and the coordinator page, drawn by the skill's own renderers, so they look like the local dashboard. No scripts and no forms except sign-out and "Sync now". Questions show without answer forms ("answer in the chat for now"); evidence files stay on the person's machine and show as "file kept locally". |
+| Merges and checks | `pull_request` (closed, merged, reopened) and `check_suite` (completed) events are stored against the PR and shown in the run's and unit's timelines (badged "(GitHub)"), to viewers who can read the PR's repo too. They also refresh the tracker comments and board cards of every run that links the PR. |
+| Tracker comments | One comment per unit on each issue or PR it links, marked `<!-- coordinator:tracker run=… unit=… -->` and edited in place (template: the skill's `lib/tracker.mjs`, so the lead writes the same text). State, tries and scores, open questions, merge and check results, and a link to the unit's page. The last gap, cause and question headers appear only when the comment is in the run's own repo and that repo is private; elsewhere it is status only. Every piece of run text sits in an inline code span, so it renders no Markdown, HTML, links or mentions. Unchanged text is never re-sent; a deleted comment is re-made. Only repos in the run's project are written (below). |
+| Board | When `coordinator.json` on the state branch names an organisation board, each unit's card gets **Run** (text) and **Unit state** (building, judging, passed, stopped, needs you); the two fields are created on first use. With a `status` map, the board's own Status follows too. Cards not on the board are left alone; nothing else is created or renamed. |
+| Manual sync | "Sync now" on a repo page (rate limited), or `npm run sync -- <installation-id>` (`--all`, `--force`). |
+
+Shared code: [src/core.mjs](src/core.mjs) imports the skill's `scripts/lib` (event schema, replay, rules, view, renderers, maps, tracker template, secret masking). Nothing is copied; the container image carries that folder beside the service. Extra pages add themselves to `REPO_PAGES` in [src/pages.mjs](src/pages.mjs): `scope: 'repo'` for a page beside a repo's runs, `scope: 'run'` for one under a run. The project map is one: `/r/<owner>/<repo>/run/<run>/map`, read from `runs/<run>/map/events.jsonl` on the state branch (`run.mjs map <run> --pit-stop`, then `push`), checked and replayed with the skill's own `lib/map/log.mjs`, linked from the run's header next to Maps. A map log that fails keeps the last good map and says why.
+
+### coordinator.json (optional, on the state branch)
+
+```json
+{
+  "repos": ["acme/mobile"],
+  "trackers": true,
+  "board": { "owner": "acme", "number": 3,
+             "status": { "building": "In progress", "judging": "In review", "passed": "Done", "stopped": "Blocked", "needs you": "Blocked" } }
+}
+```
+
+**Writes stay in the project.** Comments and board fields go only to the state repo and to linked repos that agree on both sides: the state branch's `coordinator.json` lists the repo in `repos`, and that repo's own default branch has a `coordinator.json` with `"primary": "<state repo>"` (for example `{ "primary": "acme/web" }` in acme/mobile). The run log and the state branch can be written by anyone who can push to the state repo, so they cannot be trusted to name other repos on their own; the second side can only be written by someone who can push to the linked repo's default branch and pass its branch protection. A link to any other repo, even one the App is installed on, is shown read-only to viewers who can read it and never written to. The agreement is re-checked at most every 60 seconds, so a repo that withdraws gets no further edits after that.
+
+`"trackers": false` turns the comments off for that repo. Without `board`, no board is touched. Boards owned by a personal account are not reachable by an App; use an organisation board. `TRACKERS=off` or `BOARD=off` in the environment turns either off everywhere.
+
+## Run it locally
+
+Needs Node 20+ and Docker (for Postgres).
+
+```bash
+cd service
+npm ci
+docker compose up -d db            # Postgres on 127.0.0.1:5452
+cp .env.example .env               # fill in the GitHub App values and SESSION_SECRET
+node --env-file=.env src/main.mjs  # http://localhost:3000
+```
+
+Without `DATABASE_URL` the service keeps everything in memory, which is enough to look around. `docker compose up --build` runs the service in a container too.
+
+To get webhooks on a laptop, point the App's webhook URL at a tunnel (for example `gh webhook forward` or smee.io) or skip webhooks and use `npm run sync -- <installation-id>`.
+
+### Tests
+
+```bash
+npm test                                                                   # unit and HTTP tests, in-memory database
+TEST_DATABASE_URL=postgres://coordinator:coordinator-dev@127.0.0.1:5452/coordinator npm test   # also the Postgres adapter
+```
+
+The Postgres test drops and re-creates the service's tables in that database, so use a throwaway one. The tests use a fake GitHub (`test/helpers.mjs`) and runs made with the skill's own CLI. They cover the webhook signature, ingest idempotency and every kind of malformed log, the permission check (a reader, a writer and an outsider; an outsider gets 404), escaping on every page, CSRF and origin checks, cookies and rate limits.
+
+## Settings
+
+All from the environment; [.env.example](.env.example) lists them. Nothing secret goes in the database or the logs: GitHub tokens are encrypted at rest (AES-256-GCM, key derived from `SESSION_SECRET`), the session cookie is stored only as a hash, and log lines carry no headers, cookies or query strings.
+
+| Variable | Needed | What |
+|---|---|---|
+| `BASE_URL` | yes | Public origin, `https://…` outside localhost |
+| `SESSION_SECRET` | yes | 32+ random characters (`openssl rand -base64 48`) |
+| `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_WEBHOOK_SECRET` | yes | From the App |
+| `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE` | yes | The App's PEM (one line with `\n`, or a mounted file) |
+| `DATABASE_URL` | for real use | Postgres connection string |
+| `GITHUB_APP_SLUG` | no | Shows an "install the App" link |
+| `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` (last entry) for rate limits |
+| `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 60, design 10.3), `SESSION_DAYS`, `MAX_CONNECTIONS` | no | Defaults 3000, `coordinator-state`, 60, 7, 1000 |
+| `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off for every repo |
+| `RESYNC_MINUTES` | no | How often every installation is re-read (default 15, 0 turns it off) |
+
+## Register the GitHub App
+
+[app-manifest.json](app-manifest.json) asks for the least each part needs. Every installation token is also narrowed when it is minted to the one job it is for (`SCOPES` in [src/github.mjs](src/github.mjs)), so the ingest token can only read, and the comment token cannot touch the board or the code.
+
+| Permission | Level | Used by | Why |
+|---|---|---|---|
+| Metadata | read | everything | Required by GitHub |
+| Contents | read | ingest | Read the `coordinator-state` branch (GitHub grants contents per repo, not per branch; the service only ever reads that branch) |
+| Issues | write | tracker comments | Create and edit the one tracker comment per unit (issue comments) |
+| Pull requests | write | tracker comments, merge events | Comments on PRs; `pull_request` events |
+| Checks | read | check events | `check_suite` events |
+| Organization projects | write | board | Set the Run, Unit state and Status fields; create the two coordinator fields once. Leave it out to run without a board |
+
+Events: `push`, `pull_request`, `check_suite` (installation events always arrive). Contents stays read until answers and notes from the web (the next release) need to write to the state branch.
+
+1. Replace `https://coordinator.example.com` in the manifest with your `BASE_URL`.
+2. Save this as a local HTML file, paste the manifest into the `value`, and open it (for an organisation, use `https://github.com/organizations/<org>/settings/apps/new`):
+
+   ```html
+   <form action="https://github.com/settings/apps/new" method="post">
+     <input type="hidden" name="manifest" value='PASTE app-manifest.json HERE'>
+     <button>Create the Coordinator App</button>
+   </form>
+   ```
+3. GitHub creates the App and redirects to `BASE_URL/?code=…`. Exchange the code within an hour:
+   `gh api -X POST /app-manifests/<code>/conversions` returns `id`, `slug`, `client_id`, `client_secret`, `webhook_secret` and `pem`. Put them in the environment, never in the repo.
+4. In the App's settings, keep "Expire user authorization tokens" on.
+5. Install the App on the repos whose runs you want to see.
+
+## Deploy on Dokploy
+
+One container plus Postgres:
+
+1. Create a Postgres database in the Dokploy project and copy its internal connection string.
+2. Create an application from this repository, build type Dockerfile, Dockerfile path `service/Dockerfile`, build context the repository root (`.`).
+3. Environment: everything in the table above, with `DATABASE_URL` from step 1, `BASE_URL` set to the domain, and `TRUST_PROXY=1`. Mount the App key as a file and set `GITHUB_APP_PRIVATE_KEY_FILE`, or paste it into `GITHUB_APP_PRIVATE_KEY`.
+4. Domain: add it with HTTPS (Let's Encrypt), container port 3000.
+5. Deploy. Migrations run at start. `GET /healthz` answers `ok`.
+6. Point the App's webhook at `https://<domain>/webhook`, then run `npm run sync -- --all` from the container's terminal once to pick up repos installed before the service was up.
+
+Logs go to stdout as JSON lines. Deleting the database loses nothing but sessions and the audit log: a sync rebuilds every run from the repos.
+
+## Security notes
+
+- Webhooks: the HMAC SHA-256 is always checked first, in constant time, with a 5 MB body cap. A delivery that verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses, so someone else's misconfigured hook must not block ours. Only refused deliveries are counted (30 a minute per address, then 429 for refused ones only).
+- Every installation is re-read every `RESYNC_MINUTES` (15), so a missed or failed delivery heals on its own; an unchanged branch costs one ref read.
+- One run log cannot fan out: a run with more than 50 units is refused, at most 10 links per unit are written to, and comment writes are capped at 200 per installation per 10 minutes (the rest wait for the next sync).
+- Sign-in: 30 tries per 10 minutes per address; `state` compared in constant time; PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
+- Cookies: HttpOnly, SameSite=Lax, `Secure` and `__Host-` prefixed on https.
+- Every POST needs this site's `Origin` and the session's CSRF token.
+- Every page: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `no-store`, `nosniff`, `X-Frame-Options: DENY`, HSTS on https.
+- An unknown repo is checked with GitHub exactly like a known one the viewer cannot read, so response time does not reveal which repos the service knows.
+- Run state, lessons, `coordinator.json` and maps nested deeper than 64 levels are refused with a sync error, never a crash.
+- Every repo and run query is scoped by installation id (`src/db/index.mjs` refuses a call without one); permission answers are cached per person, never shared.
+- Uninstalling the App deletes that installation's rows at once.

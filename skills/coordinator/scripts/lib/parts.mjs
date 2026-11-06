@@ -96,6 +96,8 @@ function evidenceItem(e, repo, ctx, key) {
     const pre = `<pre>${linkify(e.text, repo)}</pre>`;
     body = LONG(e.text) ? toggle(`${key}-${e.id}`, `${esc(e.label ?? e.kind)} · ${e.text.split('\n').length} lines`, pre, 'raw pre') : pre;
   } else if (e.url) body = `<p>${linkify(e.url, repo)}</p>`;
+  // ctx.artHref returning null: the file exists only on the person's machine (the web copy).
+  else if (e.file && !ctx.artHref(e.file)) body = `<p class="cause">${esc(e.file.split('/').pop())}: file kept locally</p>`;
   else if (e.file && e.type === 'image') {
     const src = ctx.embed ? ctx.embed(e.file) : ctx.artHref(e.file);
     const full = ctx.artHref(e.file);
