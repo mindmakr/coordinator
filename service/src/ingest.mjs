@@ -60,7 +60,9 @@ export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).slice(0,
 // (markTrailPending bumps the run's trailSeq) and cleared only by a retrail that rebuilt the whole run
 // cleanly, and then only if trailSeq still holds what it read first: a deferral recorded meanwhile
 // (by another process sharing the database) is never overwritten by a clean finish.
-export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null }) {
+// onChange (optional, c12 doorbell and alerts): (installationId, repo, [{ runId, before, after }]) after a sync
+// that changed runs; it must not throw (the server runs its work in the background).
+export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null, onChange = null }) {
   const chains = new Map(); // one sync or trail refresh per repo at a time; a second waits for the first
   const serial = (k, fn) => {
     const next = (chains.get(k) ?? Promise.resolve()).catch(() => {}).then(fn);
@@ -93,6 +95,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
         .filter((e) => isSafeId(e.runId)).slice(0, LIMITS.runs);
       const have = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
       const out = { repo: repo.fullName, head, runs: logs.length, updated: [], failed: [] };
+      const changes = [];
       for (const e of logs) {
         const prev = have.get(e.runId);
         if (prev?.eventsSha === e.sha && !force) continue; // same bytes, same result
@@ -106,6 +109,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
           await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: r.seq, state: r.state, error: null });
           await db.setUnitRefs(installationId, repo.id, e.runId, refsOf(r.state));
           out.updated.push(e.runId);
+          changes.push({ runId: e.runId, before: prev?.state ?? null, after: r.state });
         }
       }
       await db.dropRunsExcept(installationId, repo.id, logs.map((e) => e.runId));
@@ -126,6 +130,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
       const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons.error, config.error].filter(Boolean);
       await db.setRepoSync(installationId, repo.id, { headSha: head, error: errors.length ? errors.join('; ') : null, lessons: lessons.value, config: config.value });
       const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
+      if (onChange && changes.length) onChange(installationId, fresh ?? repo, changes);
       const retried = await retrail(installationId, fresh, out.updated);
       if (retried.length) out.retried = retried;
       return out;

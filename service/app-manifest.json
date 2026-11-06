@@ -19,11 +19,17 @@
     "issues": "write",
     "pull_requests": "write",
     "checks": "read",
-    "organization_projects": "write"
+    "organization_projects": "write",
+    "secret_scanning_alerts": "read",
+    "security_events": "read",
+    "vulnerability_alerts": "read"
   },
   "default_events": [
     "push",
     "pull_request",
-    "check_suite"
+    "check_suite",
+    "secret_scanning_alert",
+    "code_scanning_alert",
+    "dependabot_alert"
   ]
 }

@@ -12,6 +12,10 @@ import { refsOf } from './ingest.mjs';
 import { limiter } from './ratelimit.mjs';
 import { parseCookies, sessions as makeSessions } from './session.mjs';
 import { verifySignature, webhooks as makeWebhooks } from './webhook.mjs';
+import { doorbell as makeDoorbell } from './doorbell.mjs';
+import { alerts as makeAlerts } from './alerts/index.mjs';
+import { alertRoutes } from './alerts/routes.mjs';
+import { senders as makeSenders } from './alerts/senders.mjs';
 
 const MAX_WEBHOOK = 5 * 1024 * 1024;
 const MAX_FORM = 4 * 1024;
@@ -30,12 +34,21 @@ function readBody(req, max) {
   });
 }
 
-export function createApp({ config, db, gh, log, now = Date.now }) {
+// senders (tests): { email, push, github } in place of the ones built from the settings.
+export function createApp({ config, db, gh, log, now = Date.now, senders = null }) {
   const github = trail({ db, gh, config, log, now });
-  const ingest = ingester({ db, gh, branch: config.stateBranch, log, trail: github });
-  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log });
+  // c12: the doorbell rings and alerts are worked out for every run a sync changed.
+  const bell = makeDoorbell({ config, db, gh, log, now });
+  const alerts = makeAlerts({ db, config, log, now, send: senders ?? makeSenders({ config, gh }) });
+  const onChange = (installationId, repo, changes) => {
+    bell.ring(installationId, repo.id, changes.map((c) => c.runId));
+    background(() => alerts.runsChanged(installationId, repo, changes));
+  };
+  const ingest = ingester({ db, gh, branch: config.stateBranch, log, trail: github, onChange });
+  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log, alerts });
   const auth = makeSessions({ db, gh, config, log, now });
   const acl = makeAccess({ gh, db, ttlMs: config.accessTtlMs, now });
+  const alertPages = alertRoutes({ alerts, acl, db, config, send: alerts.send, now, log });
   const limits = {
     webhookFailures: limiter({ max: 30, windowMs: 60_000, now }),
     auth: limiter({ max: 30, windowMs: 10 * 60_000, now }),
@@ -182,6 +195,7 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
     if (req.method === 'POST' && p === '/webhook') return webhook(req, res);
     if (req.method === 'GET' && p === '/healthz') return send(res, 200, 'ok');
     if (req.method === 'GET' && p === '/favicon.ico') return send(res, 204, '');
+    if (p.startsWith('/doorbell') && await bell.route(req, res, url, clientIp(req))) return; // c12: its own limits
     if (limited(res, 'pages', clientIp(req))) return;
     if (req.method === 'GET' && p === '/login') {
       if (limited(res, 'auth', clientIp(req))) return;
@@ -206,6 +220,8 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
       return redirect(res, 303, '/', [await auth.end(user)]);
     }
     if (req.method === 'GET' && p === '/') return home(res, user);
+    // c12: the alerts pages (src/alerts/routes.mjs).
+    if (await alertPages.route(req, res, url, { user, form, html, send, redirect, readBody, validCsrf: auth.validCsrf, message: (t, x) => messagePage(t, x, user) })) return;
     const m = ROUTE.exec(p);
     if (m) return repoRoute(req, res, url, m, user);
     return notFound(res, user);
@@ -242,8 +258,16 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
   }
   let timer = null;
   let running = false;
+  let alertTimer = null;
+  let sweeping = false;
   return {
-    server, ingest, resyncAll,
+    server, ingest, resyncAll, alerts, doorbell: bell,
+    // c12: the alerts sweep (leads gone quiet, digests due), every ALERT_SWEEP_SECONDS.
+    startAlerts(everyMs) {
+      alertTimer = setInterval(() => { if (!sweeping) { sweeping = true; background(() => alerts.sweep().finally(() => { sweeping = false; })); } }, everyMs);
+      alertTimer.unref?.();
+    },
+    stopAlerts() { if (alertTimer) clearInterval(alertTimer); alertTimer = null; bell.close(); },
     // Starts the periodic resync (main.mjs; RESYNC_MINUTES, default 15). One pass at a time.
     startResync(everyMs) {
       timer = setInterval(() => {

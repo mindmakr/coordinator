@@ -163,10 +163,11 @@ async function testDb() {
   return guard(await postgresDb(url, { max: 3, schema: `t_${process.pid}_${++schemas}_${Date.now() % 100000}` }));
 }
 
-export async function startApp({ gh = fakeGitHub(), db = null, over = {}, now } = {}) {
+// senders (c12): fake alert senders { email, push, github }; without them email and push are off (no settings).
+export async function startApp({ gh = fakeGitHub(), db = null, over = {}, now, senders } = {}) {
   db ??= await testDb();
   const cfg = config(over);
-  const app = createApp({ config: cfg, db, gh, log: silent, now: now ?? Date.now });
+  const app = createApp({ config: cfg, db, gh, log: silent, now: now ?? Date.now, senders });
   await new Promise((ok) => app.server.listen(0, '127.0.0.1', ok));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   return { app, gh, db, cfg, base, close: async () => { await new Promise((ok) => app.server.close(ok)); await app.idle(); await db.close(); } };

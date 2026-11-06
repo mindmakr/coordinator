@@ -43,7 +43,9 @@
 //                  history, plans, proposals, side study); --html writes coordinator.html in the state folder
 //   run.mjs serve <run> [--port P]  the live dashboard (forms, unit pages, live updates) on 127.0.0.1, behind a per-start token;
 //                  /maps the run's maps, /coordinator the self view, /run/<other> another run read-only
-//   run.mjs watch <run>             one line per new or changed answer and per note from the person; never exits
+//   run.mjs watch <run> [--remote [--every S]]   one line per new or changed answer and per note from the person; never exits.
+//                  --remote also pulls the run from its state branch every S seconds (10-60, default 30), and at once
+//                  when the service's doorbell rings (COORDINATOR_SERVICE); lines starting "remote:" are about that link
 //   run.mjs next <run>     prints what to do and records any stops
 //   run.mjs show <run>     prints the compact text HUD (situation, needs you, time left, units, budget, next step)
 //   run.mjs hud <run>      rewrites hud.html, maps.html and units/<unit>.html beside state.json now and prints its path
@@ -72,6 +74,8 @@ import { buildBrief } from './lib/briefs.mjs';
 import { allows, decide, decideUnit, stats } from './lib/rules.mjs';
 import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
+import { bellConfig, listen } from './lib/doorbell.mjs';
+import { remoteWatch } from './lib/remote.mjs';
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
@@ -96,7 +100,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -422,12 +426,24 @@ const commands = {
   },
   // Polls every 2 s (fs.watch misses renames on some systems); the state file is
   // replaced atomically, so a read never sees half a write.
-  watch([run]) {
+  // --remote: answers made away from this machine (web HUD, comment commands) arrive by pull.
+  watch([run], o) {
     let prev = load(run);
     for (const line of events(null, prev)) console.log(line);
     setInterval(() => {
       try { const s = load(run); for (const line of events(prev, s)) console.log(line); prev = s; } catch { /* mid-replace on Windows: next tick */ }
     }, 2000);
+    if (o.remote !== undefined) {
+      if (o.remote !== true) throw new Error('--remote takes no value');
+      const say = (line) => console.log(`remote: ${line}`);
+      const bell = bellConfig({ base: baseDir('project'), project: projectDir() });
+      if (!bell.service) say(`doorbell off: ${bell.why}; polling only`);
+      remoteWatch({
+        everyMs: num(o.every, 30, 10, 60) * 1000, say,
+        pullOnce: () => pull({ run, dir: runDir(run), base: baseDir('project'), project: projectDir(), after: derived, restore: { map: mapRestore(runDir(run)) } }),
+        startBell: bell.service ? (ring) => listen({ service: bell.service, repo: bell.repo, run, onRing: ring, say }) : null,
+      });
+    }
     return null;
   },
   // Returns this round's actions (a stop shows once, here) and records the stops.
