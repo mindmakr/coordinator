@@ -1,0 +1,8 @@
+{
+  "name": "coordinator",
+  "description": "A lead that runs work through builders and blind critics until it meets a bar.",
+  "owner": { "name": "mindmakr" },
+  "plugins": [
+    { "name": "coordinator", "source": "./", "description": "Ask everything up front, then run work unattended through builders and blind critics until it meets a bar you can check." }
+  ]
+}

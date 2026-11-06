@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+// Flags a diff that games the bar: focused, skipped, deleted or renamed-away
+// tests, removed, weakened or trivialized assertions, tests excluded in runner
+// config, rewritten snapshots, suppressed checks, ignored failures, and files
+// outside the fence. Exit 0 = clean, 1 = hits (a FAIL), 2 = usage.
+//
+//   detect.mjs --base <ref> [--head <ref>] [--run <run> [--unit <unit>]] [--fence a,b] [--allow rule[:path],…]
+//   detect.mjs --diff-file <file> [same options]
+// --run adds the fence paths recorded on the run (run.mjs init --paths).
+// --unit records the result on that unit; on a run with --paths, a PASS verdict needs it clean.
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse } from './lib/args.mjs';
+import { allowed, detect, parseDiff } from './lib/gaming.mjs';
+import { baseDir, readJson, safeId, update } from './lib/store.mjs';
+
+const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+const git = (args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 });
+
+// A ref must be a real commit; a leading '-' would be read as a git option.
+function commit(ref, name) {
+  if (typeof ref !== 'string' || !ref || ref.startsWith('-') || /\s/.test(ref)) throw new Error(`bad --${name}: ${ref}`);
+  return git(['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`]).trim();
+}
+
+try {
+  const { opt } = parse(process.argv.slice(2), ['base', 'head', 'run', 'unit', 'fence', 'allow', 'diff-file']);
+  if (opt.unit && !opt.run) throw new Error('--unit needs --run');
+  const file = opt.run ? join(baseDir('project'), 'runs', safeId(opt.run, 'run'), 'state.json') : null;
+  if (file && !existsSync(file)) throw new Error(`no run: ${opt.run}`);
+  const fence = list(opt.fence).concat(file ? readJson(file, null).paths ?? [] : []);
+  let diff; let base = null; let head = null;
+  if (opt['diff-file']) diff = readFileSync(opt['diff-file'], 'utf8');
+  else {
+    if (!opt.base) throw new Error('need --base <ref> or --diff-file <file>');
+    if (opt.unit && !opt.head) throw new Error('--unit needs an explicit --head (the PR head the critic will judge)');
+    base = commit(opt.base, 'base');
+    head = commit(opt.head ?? 'HEAD', 'head');
+    diff = git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--unified=0', '-M', `${base}...${head}`]);
+  }
+  const files = parseDiff(diff).length;
+  const allow = list(opt.allow);
+  const hits = detect(diff, { fence }).filter((h) => !allowed(h, allow));
+  if (opt.unit) {
+    // An empty diff proves nothing: it would let a PASS through unchecked.
+    if (!files) throw new Error('empty diff: nothing was checked (is --head the builder\'s commit?)');
+    update(file, null, (s) => {
+      if (s.closed) throw new Error(`run ${opt.run} is closed`);
+      const u = s.units.find((x) => x.id === safeId(opt.unit, 'unit'));
+      if (!u) throw new Error(`no unit ${opt.unit} in run ${opt.run}`);
+      if (u.status !== 'judging') throw new Error(`unit ${opt.unit} is ${u.status}; detect is recorded while judging`);
+      u.detect = { round: u.rounds.length + 1, clean: hits.length === 0, base, head, files, allow, hits: hits.length, at: new Date().toISOString() };
+    });
+  }
+  console.log(JSON.stringify({ clean: hits.length === 0, base, head, files, fence, allowed: allow, hits }, null, 2));
+  process.exit(hits.length ? 1 : 0);
+} catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
