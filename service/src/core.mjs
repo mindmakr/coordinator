@@ -13,6 +13,8 @@ export { selfModel } from '../../skills/coordinator/scripts/lib/self.mjs';
 export { selfPage } from '../../skills/coordinator/scripts/lib/selfpage.mjs';
 export { page, chip, stamp, blk, esc } from '../../skills/coordinator/scripts/lib/parts.mjs';
 export { maskSecrets } from '../../skills/coordinator/scripts/lib/secrets.mjs';
+export { mapPage as projectMapPage } from '../../skills/coordinator/scripts/lib/map/page.mjs';
+export { fromText as mapFromText } from '../../skills/coordinator/scripts/lib/map/log.mjs';
 export { mapsPage } from '../../skills/coordinator/scripts/lib/mapspage.mjs';
 export { unitRefs } from '../../skills/coordinator/scripts/lib/maps.mjs';
 export { isTracker, marker, trackerBody, unitState } from '../../skills/coordinator/scripts/lib/tracker.mjs';

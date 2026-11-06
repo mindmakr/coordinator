@@ -3,26 +3,28 @@
 // local dashboard. Read-only: no answer forms (that is c12), no scripts. Every
 // string from a run is escaped by those renderers; the few bits drawn here use
 // the same esc().
-import { blk, chip, decide, esc, hud, mapsPage, page, runView, selfModel, selfPage, stamp, unitPage } from './core.mjs';
+import { blk, chip, decide, esc, hud, mapsPage, page, projectMapPage, runView, selfModel, selfPage, stamp, unitPage } from './core.mjs';
 
 const enc = encodeURIComponent;
 export const repoBase = (fullName) => `/r/${fullName.split('/').map(enc).join('/')}`;
 
-// Pages of a repo beside its runs, by path segment: /r/<owner>/<repo>/<id>.
-// render(user, repo, rows, nowMs) → HTML. c21's project map adds itself here.
+// Extra pages, by path segment. scope 'repo': /r/<owner>/<repo>/<id>, render(user, repo, rows, nowMs);
+// scope 'run': /r/<owner>/<repo>/run/<run>/<id>, render(user, repo, row, nowMs), shown when has(row).
 export const REPO_PAGES = {
-  coordinator: { label: 'Coordinator', render: (user, repo, rows, nowMs) => coordinatorPage(user, repo, rows, nowMs) },
+  coordinator: { scope: 'repo', label: 'Coordinator', render: (user, repo, rows, nowMs) => coordinatorPage(user, repo, rows, nowMs) },
+  map: { scope: 'run', label: 'Project map', has: (row) => !!(row.map || row.mapError), render: (user, repo, row) => projectMapView(user, repo, row) },
 };
 
 export const READ_ONLY_HINT = 'This page is read-only for now: answer in the chat with the lead. Answering from here comes in the next release.';
 
-function ctxFor(fullName, run = null) {
+function ctxFor(fullName, run = null, row = null) {
   const base = repoBase(fullName);
   const runBase = run ? `${base}/run/${enc(run)}` : null;
   return {
     live: null, theme: null, run, store: run, base: runBase ?? base, home: runBase ?? base, embed: null, readOnly: true,
     readOnlyHint: READ_ONLY_HINT,
     maps: runBase ? `${runBase}/maps` : null,
+    mapHref: runBase && row && REPO_PAGES.map.has(row) ? `${runBase}/map` : null,
     runHref: (id) => `${base}/run/${enc(id)}`,
     unitHref: (id) => `${runBase}/unit/${enc(id)}`,
     // Evidence files never leave the person's machine (durability.md): shown as "file kept locally".
@@ -31,7 +33,8 @@ function ctxFor(fullName, run = null) {
       { path: '/', label: 'Projects', href: '/' },
       { path: base, label: fullName, href: base },
       ...(run ? [{ path: runBase, label: run, href: runBase }, { path: `${runBase}/maps`, label: 'Maps', href: `${runBase}/maps` }] : []),
-      ...Object.entries(REPO_PAGES).map(([id, p]) => ({ path: id === 'coordinator' ? '/coordinator' : `${base}/${id}`, label: p.label, href: `${base}/${id}` })),
+      ...(run && row ? Object.entries(REPO_PAGES).filter(([, p]) => p.scope === 'run' && p.has(row)).map(([id, p]) => ({ path: `${runBase}/${id}`, label: p.label, href: `${runBase}/${id}` })) : []),
+      ...Object.entries(REPO_PAGES).filter(([, p]) => p.scope === 'repo').map(([id, p]) => ({ path: id === 'coordinator' ? '/coordinator' : `${base}/${id}`, label: p.label, href: `${base}/${id}` })),
     ],
   };
 }
@@ -116,16 +119,30 @@ export function runsPage(user, repo, rows, nowMs = Date.now()) {
 const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName }), gh); };
 
 export function runPage(user, repo, row, nowMs = Date.now(), gh = []) {
-  return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId)), user, repo.fullName);
+  return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row)), user, repo.fullName);
 }
 
 export function unitView(user, repo, row, unitId, nowMs = Date.now(), gh = []) {
-  const html = unitPage(viewOf(repo, row, nowMs, gh), unitId, nowMs, ctxFor(repo.fullName, row.runId));
+  const html = unitPage(viewOf(repo, row, nowMs, gh), unitId, nowMs, ctxFor(repo.fullName, row.runId, row));
   return html === null ? null : withBar(html, user, repo.fullName);
 }
 
 export function mapsView(user, repo, row, nowMs = Date.now(), gh = []) {
-  return withBar(mapsPage(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId)), user, repo.fullName);
+  return withBar(mapsPage(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row)), user, repo.fullName);
+}
+
+// The run's project map (lib/map/page.mjs), from the copy the run pushed. A log that never
+// replayed shows why, as the local dashboard does; one that broke later keeps the last good map.
+export function projectMapView(user, repo, row) {
+  const ctx = ctxFor(repo.fullName, row.runId, row);
+  if (!row.map) {
+    const body = `<a class="back" href="${esc(ctx.home)}">← ${esc(row.runId)} dashboard</a><header class="run"><h1>Project map · not readable</h1></header>`
+      + `<div class="needs"><p><b>The map's log could not be read.</b></p><p>${esc(row.mapError ?? '')}</p></div>`;
+    return withBar(page({ title: `Map · ${row.runId}`, body, ctx, path: `${ctx.base}/map` }), user, repo.fullName);
+  }
+  const html = projectMapPage(row.map, ctx, row.runId);
+  const note = row.mapError ? `<p class="meta">The latest map log was refused, showing the last good copy: ${esc(row.mapError)}</p>` : '';
+  return withBar(html.replace('<main id="app">', () => `<main id="app">${note}`), user, repo.fullName);
 }
 
 export function coordinatorPage(user, repo, rows, nowMs = Date.now()) {

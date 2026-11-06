@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,8 @@ export const XSS = '<script>alert("x")</script>';
 
 // Builds run `id` with the CLI and returns its events.jsonl bytes.
 // links: GitHub refs for u1 ('acme/web#12' or a URL; a /pull/ URL is a PR); file: attach an evidence file to u1.
-export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = false, issues = [], prs = [], file = false } = {}) {
+// mapOut: an object that gets .map, the run's project map log (run.mjs map --pit-stop over a tiny project).
+export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = false, issues = [], prs = [], file = false, mapOut = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'coord-svc-'));
   const cli = (...a) => {
     const r = spawnSync(process.execPath, [RUN_MJS, ...a], { cwd: dir, env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
@@ -36,6 +37,14 @@ export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = fals
     cli('start', id, 'u1');
     cli('built', id, 'u1', '--report', 'done');
     cli('verdict', id, 'u1', 'fail', '--evidence', 'test red', '--gap', `still wrong ${XSS}`, '--cause', 'stale cache', '--score', '4');
+    if (mapOut) {
+      const root = join(dir, 'project', 'src');
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, 'a.ts'), "import { b } from './b';\nexport const a = () => b() + process.env.API_TOKEN_NAME;\n");
+      writeFileSync(join(root, 'b.ts'), "export function b() { return '<script>alert(1)</script>'; }\n");
+      cli('map', id, '--root', join(dir, 'project'), '--pit-stop');
+      mapOut.map = readFileSync(join(dir, 'runs', id, 'pit-stop', 'map', 'events.jsonl'));
+    }
     if (closed) cli('close', id, '--outcome', 'stopped', '--reason', 'test');
     return readFileSync(join(dir, 'runs', id, 'events.jsonl'));
   } finally { rmSync(dir, { recursive: true, force: true }); }

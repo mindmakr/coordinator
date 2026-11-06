@@ -4,11 +4,12 @@
 // Idempotent: the branch tip and each log's blob sha are compared first, so a
 // redelivered webhook or a repeated sync changes nothing. A log that fails
 // validation keeps the last good state and records why; other runs go on.
-import { isSafeId, maskSecrets, parseLog, replay, unitRefs, validRun } from './core.mjs';
+import { isSafeId, mapFromText, maskSecrets, parseLog, replay, unitRefs, validRun } from './core.mjs';
 
 const RUN_LOG = /^runs\/([^/]+)\/events\.jsonl$/;
+const MAP_LOG = /^runs\/([^/]+)\/map\/events\.jsonl$/;
 const MARKER = '.coordinator-state';
-export const LIMITS = { logBytes: 8 * 1024 * 1024, runs: 500, lessonsBytes: 1024 * 1024, configBytes: 64 * 1024 };
+export const LIMITS = { mapBytes: 16 * 1024 * 1024, logBytes: 8 * 1024 * 1024, runs: 500, lessonsBytes: 1024 * 1024, configBytes: 64 * 1024 };
 
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const maskDeep = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(maskDeep) : isObj(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskDeep(x)])) : v);
@@ -24,6 +25,11 @@ export function readLog(runId, buf) {
     if (state.id !== runId) return { error: `the log describes run ${JSON.stringify(String(state.id).slice(0, 64))}, not ${runId}` };
     return { state: maskDeep(state), seq: log.events.length };
   } catch (e) { return { error: maskSecrets(String(e.message)).slice(0, 500) }; }
+}
+
+// The project map a run pushed (lib/map), or an error message. Never throws.
+export function readMap(buf) {
+  try { return { map: maskDeep(mapFromText(buf.toString('utf8'), 'map/events.jsonl')) }; } catch (e) { return { error: maskSecrets(String(e.message)).slice(0, 500) }; }
 }
 
 // The issues and PRs each unit links, as rows for db.setUnitRefs.
@@ -76,6 +82,17 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
         }
       }
       await db.dropRunsExcept(installationId, repo.id, logs.map((e) => e.runId));
+      // Each run's project map, when it pushed one: same rules, keyed by its own blob.
+      const runIds = new Set(logs.map((e) => e.runId));
+      const rows = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
+      for (const e of entries.filter((x) => x.type === 'blob' && MAP_LOG.test(x.path))) {
+        const runId = MAP_LOG.exec(e.path)[1];
+        const prev = rows.get(runId);
+        if (!runIds.has(runId) || !prev || (prev.mapSha === e.sha && !force)) continue;
+        const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : readMap(await gh.blob(token, repo.fullName, e.sha));
+        await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? prev.map ?? null, mapError: r.error ?? null });
+        if (r.error) log?.warn('map log rejected', { repo: repo.fullName, run: runId, reason: r.error });
+      }
       const lessons = await readLessons(token, repo, entries);
       const config = await readJson(token, repo, entries, 'coordinator.json', LIMITS.configBytes);
       await db.setRepoSync(installationId, repo.id, { headSha: head, error: tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons, config: isObj(config) ? config : null });

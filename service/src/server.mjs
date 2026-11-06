@@ -16,7 +16,7 @@ import { verifySignature, webhooks as makeWebhooks } from './webhook.mjs';
 const MAX_WEBHOOK = 5 * 1024 * 1024;
 const MAX_FORM = 4 * 1024;
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
-const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\/unit\/([^/]+)|\/(maps))?)?\/?$/;
+const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\/unit\/([^/]+)|\/(maps)|\/([a-z][a-z-]{0,30}))?)?\/?$/;
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
@@ -93,8 +93,9 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
 
   // A repo page: the person must be signed in and able to read the repo on GitHub; otherwise 404.
   async function repoRoute(req, res, url, m, user) {
-    const [, owner, name, kind, runRaw, unitRaw, maps] = m;
-    if (kind && kind !== 'sync' && !Object.hasOwn(REPO_PAGES, kind)) return notFound(res, user);
+    const [, owner, name, kind, runRaw, unitRaw, maps, runKind] = m;
+    if (kind && kind !== 'sync' && REPO_PAGES[kind]?.scope !== 'repo') return notFound(res, user);
+    if (runKind && (!Object.hasOwn(REPO_PAGES, runKind) || REPO_PAGES[runKind].scope !== 'run')) return notFound(res, user);
     const fullName = `${decodeURIComponent(owner)}/${decodeURIComponent(name)}`;
     const run = runRaw === undefined ? null : decodeURIComponent(runRaw);
     const unit = unitRaw === undefined ? null : decodeURIComponent(unitRaw);
@@ -121,6 +122,7 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
     if (run === null) return html(res, 200, runsPage(user, repo, await db.runs(repo.installationId, repo.id), n));
     const row = await db.run(repo.installationId, repo.id, run);
     if (!row?.state) return notFound(res, user);
+    if (runKind) return REPO_PAGES[runKind].has(row) ? html(res, 200, REPO_PAGES[runKind].render(user, repo, row, n)) : notFound(res, user);
     const gh = await githubEvents(user, repo, row.state);
     const out = maps ? mapsView(user, repo, row, n, gh) : unit === null ? runPage(user, repo, row, n, gh) : unitView(user, repo, row, unit, n, gh);
     return out === null ? notFound(res, user) : html(res, 200, out);

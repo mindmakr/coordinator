@@ -30,7 +30,7 @@ export async function migrate(pool) {
 }
 
 const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons, config: r.config ?? null, private: r.private ?? null } : null);
-const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at) } : null);
+const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at), mapSha: r.map_sha ?? null, map: r.map ?? null, mapError: r.map_error ?? null } : null);
 
 export async function postgresDb(url, { max = 10 } = {}) {
   const pool = new pg.Pool({ connectionString: url, max });
@@ -75,6 +75,10 @@ export async function postgresDb(url, { max = 10 } = {}) {
       await q(`INSERT INTO runs (installation_id, repo_id, run_id, events_sha, seq, state, error) VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (installation_id, repo_id, run_id) DO UPDATE SET events_sha = $4, seq = $5, state = $6, error = $7, updated_at = now()`,
       [installationId, repoId, runId, eventsSha ?? null, seq ?? null, state === null || state === undefined ? null : JSON.stringify(state), error ?? null]);
+    },
+    async putRunMap(installationId, repoId, runId, { mapSha, map, mapError }) {
+      await q('UPDATE runs SET map_sha = $4, map = $5, map_error = $6 WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3',
+        [installationId, repoId, runId, mapSha ?? null, map === null || map === undefined ? null : JSON.stringify(map), mapError ?? null]);
     },
     async dropRunsExcept(installationId, repoId, keep) {
       await q('DELETE FROM runs WHERE installation_id = $1 AND repo_id = $2 AND NOT (run_id = ANY($3::text[]))', [installationId, repoId, keep]);
