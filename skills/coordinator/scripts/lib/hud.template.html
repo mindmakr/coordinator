@@ -9,6 +9,8 @@
 <style>{{theme}}</style>
 <style>
 * { box-sizing: border-box; }
+html { overflow-anchor: none; } /* the page keeps the reader's place itself, by key (lib/anchor.mjs) */
+.retry { margin: 0; min-height: 0; padding: 2px 10px; font-size: 12px; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font); }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 14px 16px 40px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

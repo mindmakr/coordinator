@@ -61,7 +61,7 @@ export const dot = (state) => `<span class="dot dot-${cls(state)}" role="img" ar
 export function page({ title, body, ctx, path, closed = false }) {
   const live = ctx.live;
   const status = closed ? `<span id="live" class="live" role="status" data-state="finished">Finished${live ? '' : ' · snapshot'}</span>`
-    : live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span>'
+    : live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span><button id="live-retry" class="retry" type="button" hidden>Retry</button>'
       : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
     csp: csp(live && { nonce: esc(live.nonce) }), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }),

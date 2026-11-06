@@ -130,16 +130,16 @@ function unitCard(u, ctx, form, repo) {
   const passing = u.behaviours.filter((b) => b.status === 'pass').length;
   const html = `<h3><span>${dot(u.dot)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${flag}${chip(u.status, u.status)}</span></h3>`
     + unitLinks(u, repo)
-    + `<p class="say">${esc(u.sentence)}</p>`
+    + `<p class="say" data-a="say-${esc(u.id)}">${esc(u.sentence)}</p>`
     + triesRow(u)
     + scoreChart(u.roundList)
     + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo)) : '')
     + (u.evidenceItems.length ? toggle(`u-${u.id}-ev`, `Evidence · ${u.evidenceItems.length}`, evidenceList(u.evidenceItems, repo, ctx, `u-${u.id}-ev`)) : '')
     + (raw ? toggle(`u-${u.id}-raw`, 'Gap and evidence', `<dl>${raw}</dl>`) : '')
-    + `<div class="unit-next"><b>Next:</b> ${esc(u.next)}</div>`
+    + `<div class="unit-next" data-a="next-${esc(u.id)}"><b>Next:</b> ${esc(u.next)}</div>`
     + u.personNotes.slice(-2).map((n) => `<p class="from" data-a="from-${esc(n.at)}"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('')
     + (form ? toggle(`u-${u.id}-note`, 'Add a note on this unit', noteForm(form, u.id)) : '')
-    + `<div class="row"><a class="open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
+    + `<div class="row" data-a="open-${esc(u.id)}"><a class="open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
   return blk(`unit-${u.id}`, html, 'section', ` class="card${u.finished ? ' fin' : ''}" id="unit-${esc(u.id)}"`);
 }
 

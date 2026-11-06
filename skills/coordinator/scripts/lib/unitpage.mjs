@@ -27,7 +27,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
     blk('head', `<header class="run"><h1>${dot(u.dot)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${chip(u.status, u.status)}`
       + `<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span></header>`
-      + unitLinks(u, r) + triesRow(u) + scoreChart(u.roundList) + `<p class="say">${esc(u.sentence)}</p><div class="next"><b>Next</b>${esc(u.next)}</div>`),
+      + unitLinks(u, r) + triesRow(u) + scoreChart(u.roundList) + `<p class="say" data-a="say">${esc(u.sentence)}</p><div class="next" data-a="next"><b>Next</b>${esc(u.next)}</div>`),
     '<h2 data-a="h-Bar">Bar and behaviours</h2>',
     blk('behaviours', `<section class="card"><p>${linkify(u.bar, r)}</p>${behaviourList(u.behaviours, r, u.evidenceItems, ctx, `p-${u.id}`)}</section>`),
     '<h2 data-a="h-Evidence">Evidence and artifacts</h2>',

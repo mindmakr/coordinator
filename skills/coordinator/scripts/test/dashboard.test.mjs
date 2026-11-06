@@ -370,6 +370,41 @@ test('answered questions leave the open count; a legacy decision note is the ans
   assert.ok(labels.includes('q2 answered: No'));
 });
 
+test('reader just below a list that grows: the next keyed leaf is the anchor, not the straddling container', () => {
+  // Evidence, Behaviours, Notes on a card, and the unit page's Evidence: same shape.
+  for (const list of ['u-u5-ev', 'u-u5-beh', 'p-notes', 'p-u5-ev']) for (let off = 5; off <= 50; off += 5) {
+    const rows = (n) => Array.from({ length: n }, (_, i) => ({ key: `a:${list}-E${i + 1}`, top: -off - 28 * (n - i), bottom: -off - 28 * (n - i) + 24, leaf: true }));
+    const before = [{ key: 'k:unit-u5', top: -900, bottom: 600, leaf: false }, { key: `a:d-${list}`, top: -400, bottom: -off, leaf: false }, ...rows(5),
+      { key: 'a:next-u5', top: 10 - off, bottom: 28 - off, leaf: true }, { key: 'a:open-u5', top: 40 - off, bottom: 58 - off, leaf: true }, { key: 'a:say-u6', top: 200, bottom: 240, leaf: true }];
+    const anchor = pickAnchor(before);
+    // The first line after the list that starts at or below the viewport top.
+    assert.equal(anchor.key, off <= 10 ? 'a:next-u5' : off <= 40 ? 'a:open-u5' : 'a:say-u6', `${list} at -${off}`);
+    const below = new Set(['a:next-u5', 'a:open-u5', 'a:say-u6']);
+    const grown = before.map((i) => (below.has(i.key) ? { ...i, top: i.top + 126, bottom: i.bottom + 126 } : i));
+    assert.equal(scrollDelta(anchor, grown), 126, `${list} at -${off}: scroll by what the list grew`);
+  }
+  assert.equal(pickAnchor([{ key: 'a:hidden', top: 0, bottom: 0, leaf: true }, { key: 'a:row', top: 20, bottom: 40, leaf: true }]).key, 'a:row', 'a collapsed or filtered row is never the anchor');
+  assert.equal(scrollDelta({ key: 'a:x', top: 10 }, [{ key: 'a:x', top: 10.6 }]), 0, 'under 1 px is left alone');
+  // Every growing list is followed by a keyed leaf, so there is always an anchor below it.
+  setup('gl1');
+  run('behave', 'gl1', 'u1', '--text', 'It should total');
+  run('evidence', 'gl1', 'u1', '--kind', 'log', '--text', 'ok');
+  run('note', 'gl1', '--kind', 'person', '--text', 'hi', '--unit', 'u1');
+  const dash = readFileSync(join(runDir('gl1'), 'hud.html'), 'utf8');
+  for (const k of ['d-u-u1-beh', 'd-u-u1-ev']) assert.ok(dash.indexOf(`data-a="${k}"`) < dash.indexOf('data-a="next-u1"'), k);
+  const pg = readFileSync(join(runDir('gl1'), 'units', 'u1.html'), 'utf8');
+  for (const [blockKey, after] of [['behaviours', 'h-Evidence'], ['evidence', 'h-Rounds'], ['notes', 'h-timeline']]) {
+    assert.ok(pg.indexOf(`data-k="${blockKey}"`) < pg.indexOf(`data-a="${after}"`), blockKey);
+  }
+  assert.match(dash, /html \{ overflow-anchor: none; \}/, 'one mechanism: the browser\'s own anchoring is off');
+  const s = state('gl1');
+  const live = hud(view(s, decide(s)), Date.now(), { token: 't', nonce: 'n' });
+  assert.doesNotMatch(live, /nativeAnchor/);
+  assert.match(live, /<button id="live-retry" class="retry" type="button" hidden>Retry<\/button>/);
+  assert.match(live, /Disconnected — if the server restarted, open the new link it printed/);
+  assert.match(live, /if \(refused \|\| failures >= 5\) \{ status\('disconnected', DEAD\); return; \}/, 'no endless retries with a dead token');
+});
+
 test('the footer version matches the plugin', () => {
   const plugin = JSON.parse(readFileSync(join(scripts, '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
   assert.equal(plugin.version, VERSION);

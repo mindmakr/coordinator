@@ -86,7 +86,7 @@
   // Every keyed element (blocks, headings, cards, rows) with where it sits now.
   const places = () => [...app.querySelectorAll('[data-k],[data-a]')].map((el) => {
     const r = el.getBoundingClientRect();
-    return { key: el.dataset.a ? `a:${el.dataset.a}` : `k:${el.dataset.k}`, top: r.top, bottom: r.bottom };
+    return { key: el.dataset.a ? `a:${el.dataset.a}` : `k:${el.dataset.k}`, top: r.top, bottom: r.bottom, leaf: !el.querySelector('[data-k],[data-a]') };
   });
   let restoring = true; // until the saved place is back, scrolling does not overwrite it
   addEventListener('scroll', () => {
@@ -112,30 +112,33 @@
   const localTimes = (root) => root.querySelectorAll('time[datetime]').forEach(localTime);
   setInterval(() => localTimes(document), 30000);
 
-  // In place: kept nodes keep the browser's own scroll anchoring working. Where the
-  // browser has none, the keyed anchor (lib/anchor.mjs) corrects the scroll, after the filters ran.
-  const nativeAnchor = !!(window.CSS && CSS.supports && CSS.supports('overflow-anchor', 'auto'));
+  // One mechanism keeps the reader's place: the page turns the browser's own scroll
+  // anchoring off (CSS) and, after every update, scrolls by how far the anchor moved.
   let pending = false; let latest = null;
   function patch(html) {
     latest = html; pending = false;
-    const anchor = nativeAnchor ? null : pickAnchor(places());
+    const anchor = pickAnchor(places());
     const tpl = document.createElement('template'); tpl.innerHTML = html;
     unhighlight(app); // the morph compares plain text; highlights come back with the filters
     morph(app, tpl.content, { busy, skipped: () => { pending = true; }, added: applyOpen });
     localTimes(app);
     applyTimeline();
-    const delta = anchor ? scrollDelta(anchor, places()) : 0;
+    const delta = scrollDelta(anchor, places());
     if (delta) scrollBy(0, delta);
   }
   document.addEventListener('focusout', () => setTimeout(() => { if (pending && latest) patch(latest); }, 0));
 
   // Live updates: Server-Sent Events, reconnect with backoff, a watchdog on the heartbeat.
+  // A refused token (the server restarted) or five failed tries in a row stop the retries;
+  // the Retry button starts again.
   const badge = document.getElementById('live');
+  const again = document.getElementById('live-retry');
   const closed = body.dataset.closed === '1';
-  const status = (state, text) => { if (badge && !closed) { badge.dataset.state = state; badge.textContent = text; } };
-  let failures = 0;
-  let delay = 1000; let es = null; let seen = 0;
+  const status = (state, text) => { if (badge && !closed) { badge.dataset.state = state; badge.textContent = text; } if (again) again.hidden = state !== 'disconnected'; };
+  const DEAD = 'Disconnected — if the server restarted, open the new link it printed';
+  let failures = 0; let delay = 1000; let es = null; let seen = 0; let timer = 0;
   function connect() {
+    clearTimeout(timer);
     status('connecting', 'Connecting…');
     es = new EventSource(`/events?t=${encodeURIComponent(token)}&p=${encodeURIComponent(path)}`);
     es.onopen = () => { delay = 1000; failures = 0; seen = Date.now(); status('live', 'Live'); };
@@ -143,13 +146,17 @@
     es.addEventListener('patch', (e) => { seen = Date.now(); status('live', 'Live'); try { patch(JSON.parse(e.data).html); } catch { /* bad frame: wait for the next */ } });
     es.onerror = () => retry();
   }
-  function retry() {
-    if (es) es.close();
+  async function retry() {
+    if (es) { es.close(); es = null; }
     failures++;
-    // After five tries in a row it says so plainly, and keeps trying every 30 s.
-    if (failures > 5) status('disconnected', 'Disconnected · retrying'); else status('reconnecting', `Reconnecting in ${Math.round(delay / 1000)} s…`);
-    setTimeout(connect, delay); delay = Math.min(delay * 2, 30000);
+    // EventSource hides the status code: ask the page itself whether the token still works.
+    let refused = false;
+    try { refused = (await fetch(location.href, { cache: 'no-store' })).status === 403; } catch { /* server down */ }
+    if (refused || failures >= 5) { status('disconnected', DEAD); return; }
+    status('reconnecting', `Reconnecting in ${Math.round(delay / 1000)} s…`);
+    timer = setTimeout(connect, delay); delay = Math.min(delay * 2, 30000);
   }
+  if (again) again.addEventListener('click', () => { failures = 0; delay = 1000; connect(); });
   setInterval(() => { if (es && es.readyState === 1 && Date.now() - seen > 45000) retry(); }, 5000);
 
   applyOpen(document);
