@@ -42,11 +42,11 @@
 //   run.mjs self [--json] [--html]  the coordinator's own view across every run here (age, learning, memory, stats,
 //                  history, plans, proposals, side study); --html writes coordinator.html in the state folder
 //   run.mjs serve <run> [--port P]  the live dashboard (forms, unit pages, live updates) on 127.0.0.1, behind a per-start token;
-//                  /coordinator is the self view, /run/<other> another run read-only
+//                  /maps the run's maps, /coordinator the self view, /run/<other> another run read-only
 //   run.mjs watch <run>             one line per new or changed answer and per note from the person; never exits
 //   run.mjs next <run>     prints what to do and records any stops
 //   run.mjs show <run>     prints the compact text HUD (situation, needs you, time left, units, budget, next step)
-//   run.mjs hud <run>      rewrites hud.html and units/<unit>.html beside state.json now and prints its path
+//   run.mjs hud <run>      rewrites hud.html, maps.html and units/<unit>.html beside state.json now and prints its path
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
 //   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--fresh] [--force] [--pit-stop [--dest dir]]
@@ -77,6 +77,7 @@ import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mj
 import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
+import { mapsPage } from './lib/mapspage.mjs';
 import { answer, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
@@ -131,6 +132,7 @@ function derived(s) {
   const v = view(s, plan, Date.now(), { repo: repoFor(s) });
   const theme = themeFor(s);
   writeAtomic(hudFile(s.id), hud(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
+  writeAtomic(join(runDir(s.id), 'maps.html'), mapsPage(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
   for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), staticCtx(runDir(s.id), 1, theme)));
 }
 
@@ -389,8 +391,8 @@ const commands = {
       page: (path, live) => {
         const theme = themeFor(load(run));
         if (path === '/coordinator') return selfPage(selfModel({ ...loadSelf(), current: run }), Date.now(), liveCtx(live, run, theme));
-        // /run/<other>[/unit/<u>]: another run of this folder, read-only; /run/<served> is the served run.
-        const m = /^\/run\/([^/]+)(\/unit\/.+|\/map)?$/.exec(path);
+        // /run/<other>[/unit/<u>|/maps|/map]: another run of this folder, read-only; /run/<served> is the served run.
+        const m = /^\/run\/([^/]+)(\/unit\/.+|\/maps|\/map)?$/.exec(path);
         const id = m ? m[1] : run;
         if (m && !isSafeId(id)) return null;
         if (m && !exists(id)) return null;
@@ -400,6 +402,7 @@ const commands = {
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
         if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), ctx) : null;
+        if (rest === '/maps') return mapsPage(v, Date.now(), ctx);
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
       },
       version: selfVersion,
