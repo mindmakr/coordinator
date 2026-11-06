@@ -1,0 +1,25 @@
+{
+  "name": "Coordinator",
+  "description": "Follow coordinator runs from anywhere: reads the coordinator-state branch and shows each run to the people who can read the repo.",
+  "url": "https://coordinator.example.com",
+  "hook_attributes": {
+    "url": "https://coordinator.example.com/webhook",
+    "active": true
+  },
+  "redirect_url": "https://coordinator.example.com/",
+  "callback_urls": [
+    "https://coordinator.example.com/auth/callback"
+  ],
+  "public": false,
+  "request_oauth_on_install": false,
+  "setup_on_update": false,
+  "default_permissions": {
+    "metadata": "read",
+    "contents": "read",
+    "issues": "read",
+    "pull_requests": "read"
+  },
+  "default_events": [
+    "push"
+  ]
+}

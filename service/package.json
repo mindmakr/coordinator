@@ -1,0 +1,18 @@
+{
+  "name": "coordinator-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub App and read-only web dashboard for Coordinator runs",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "sync": "node src/cli.mjs sync",
+    "migrate": "node src/cli.mjs migrate",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "pg": "8.13.1"
+  }
+}

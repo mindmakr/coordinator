@@ -1,2 +1,3 @@
 .coordinator/
 node_modules/
+.env
