@@ -46,7 +46,8 @@ export function liveCtx({ token, nonce }, run, theme = null, other = null) {
     artHref: (file) => `${base}/artifacts/${file.split('/').map(encodeURIComponent).join('/')}?${t}`,
     runHref: (id) => (id === run ? `/?${t}` : `/run/${encodeURIComponent(id)}?${t}`),
     // The header's page links; a new page adds itself here and to lib/serve.mjs PAGE.
-    pages: [{ path: '/', label: run ?? 'Run', href: `/?${t}` }, { path: '/maps', label: 'Maps', href: `/maps?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
+    // On another run's pages they name and link that run, not the served one.
+    pages: [{ path: base || '/', label: other ?? run ?? 'Run', href: base ? `${base}?${t}` : `/?${t}` }, { path: `${base}/maps`, label: 'Maps', href: `${base}/maps?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
   };
 }
 

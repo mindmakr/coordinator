@@ -13,7 +13,8 @@ import { VERSION } from './version.mjs';
 
 export { esc };
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
-const CLIENT = readFileSync(new URL('./live.client.js', import.meta.url), 'utf8');
+// The live page's script: updates, then the map panels (lib/maptips.mjs).
+const CLIENT = ['./live.client.js', './maptips.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
 const SERVED = [matches, morph, findMatches, highlight, unhighlight];
 

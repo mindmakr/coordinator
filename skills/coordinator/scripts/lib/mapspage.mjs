@@ -5,6 +5,7 @@
 import { liveCtx, staticCtx } from './hud.mjs';
 import { blk, esc, page, stamp } from './parts.mjs';
 import { behaviourSvg, flowSvg, heatSvg, mindSvg, relevanceSvg } from './mapsvg.mjs';
+import { unitTips } from './maptips.mjs';
 
 export const MAPS = [
   { id: 'mind', title: 'Mind map', about: 'The goal at the centre, then units, their behaviours and evidence, coloured by status.', render: mindSvg },
@@ -24,6 +25,8 @@ export function mapsPage(v, nowMs = Date.now(), ctx = null) {
     toc,
     ...MAPS.map((m) => `<h2 id="map-${m.id}" data-a="h-${m.id}">${esc(m.title)}</h2>`
       + blk(`map-${m.id}`, `<p class="meta">${esc(m.about)}</p>${m.render(v, ctx, nowMs)}`, 'section', ` class="maps" aria-labelledby="map-${m.id}"`)),
+    // One stats panel per unit, shared by every map's box for that unit (lib/maptips.mjs).
+    blk('map-tips', unitTips(v, ctx, nowMs)),
   ].join('\n');
   return page({ title: `Maps · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/maps`, closed: !v.open });
 }

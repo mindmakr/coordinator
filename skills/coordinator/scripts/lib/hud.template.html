@@ -178,9 +178,12 @@ section.self .card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
 section.self .card li { margin: 4px 0; overflow-wrap: anywhere; }
 header.run a.open { margin-left: auto; font-size: 14px; font-weight: 600; }
 .map-scroll:focus-visible { outline: 3px solid var(--run); outline-offset: 2px; }
-.map-scroll { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-top: 8px; }
-svg.map { display: block; height: auto; max-width: 100%; margin: 0 auto; font: 13px var(--font); }
-svg.map.mind { max-width: min(100%, 820px); }
+.map-scroll { overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-top: 8px; }
+.map-scroll.mind { max-height: 80vh; }
+svg.map { display: block; max-width: none; margin: 0 auto; font: 13px var(--font); }
+.map-hint { display: none; margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.map-hint.wide { display: block; }
+@media (max-width: 640px) { .map-hint { display: block; } }
 svg.map text { fill: var(--ink); }
 svg.map .b { font-weight: 700; } svg.map .sm { font-size: 12px; } svg.map .xs { font-size: 10.5px; }
 svg.map .muted { fill: var(--muted); } svg.map .h { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); } svg.map .warn { fill: var(--wait); }
@@ -189,6 +192,7 @@ svg.map .edge.after { stroke: var(--muted); stroke-width: 2; }
 svg.map .edge.crit { stroke: var(--run); stroke-width: 3.5; }
 svg.map .edge.follow-up, svg.map .edge.inferred { stroke-dasharray: 4 4; }
 svg.map .edge.named { stroke: var(--pass); stroke-width: 2; }
+svg.map .elabel { paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
 svg.map .arrow { fill: var(--muted); } svg.map .arrow.crit { fill: var(--run); }
 svg.map .nd { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
 svg.map .nd.crit { stroke: var(--run); stroke-width: 3.5; }
@@ -215,6 +219,23 @@ svg.map .hc { stroke: none; }
 .h-busy.l3, .h-fail.l3 { fill: color-mix(in oklab, var(--m) 68%, var(--card)); background: color-mix(in oklab, var(--m) 68%, var(--card)); }
 .h-busy.l4, .h-fail.l4 { fill: var(--m); background: var(--m); }
 .h-wait { fill: color-mix(in oklab, var(--wait) 35%, var(--card)); background: color-mix(in oklab, var(--wait) 35%, var(--card)); }
+/* Map panels (lib/maptips.mjs): shown by per-box :has rules; the live script pins and places them. */
+svg.map .hl, .graph .n { transition: opacity .15s; }
+:where(svg.map:has(a.u:is(:hover, :focus))) .hl, :where(body:has(.tip[id^="tip-u"]:focus-within)) svg.map .hl { opacity: .22; }
+body[data-tips=off] svg.map .hl { opacity: 1; }
+.tip { visibility: hidden; transition: visibility 0s linear .35s; position: fixed; z-index: 20; right: 16px; bottom: 16px; width: min(340px, calc(100vw - 32px)); max-height: 60vh; overflow: auto;
+  padding: 10px 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 6px 24px color-mix(in oklab, var(--ink) 18%, transparent); font-size: 13px; overflow-wrap: anywhere; }
+.tip:hover, .tip:focus-within, .tip.pinned { visibility: visible; transition-delay: 0s; }
+/* The grace delay lets a pointer reach the panel; keyboard focus moves on at once. */
+body:has(:is(a.u, .tip *):focus-visible) .tip { transition: none; }
+body[data-tips=off] .tip:not(.pinned):not(:focus-within) { visibility: hidden !important; transition: none; }
+.tip p { margin: 0 0 6px; } .tip-t { color: var(--muted); }
+.tip-mark { display: inline-block; min-width: 1.4em; text-align: center; border-radius: 4px; background: var(--cb, var(--none-bg)); color: var(--c, var(--ink)); }
+.tip dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+.tip dt { color: var(--muted); font-weight: 400; margin: 0; } .tip dd { margin: 0; color: var(--ink); }
+.tip-open { display: inline-block; margin-top: 8px; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { svg.map .hl, .graph .n { transition: none; } }
 .map-say { margin: 8px 0 0; font-size: 14px; overflow-wrap: anywhere; }
 .map-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-size: 12px; color: var(--muted); }
 .map-legend span { display: inline-flex; align-items: center; gap: 5px; }
