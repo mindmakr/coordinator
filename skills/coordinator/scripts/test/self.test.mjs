@@ -56,8 +56,10 @@ test('the model: age, stats, history, plans with who each unit waits on, proposa
   assert.equal(m.learning.lessons[0].promote, true);
   assert.deepEqual(m.study.runs, [{ run: 'r-b', used: 0, cap: 2, open: true }], 'old state: default study cap');
   assert.equal(m.learning.lessons[0].sources.length, 0, 'an old lesson without sources loads');
+  assert.equal(m.stats.basis, 'all runs, open included');
+  assert.deepEqual(m.stats.closed, { runs: 1, units: 3, passRate: 67, medianRoundsToPass: 1, p80RoundsToPass: 3, stoppedShare: 33 });
   const t = selfText(m);
-  for (const w of ['2 runs (1 open)', 'pass rate 67%', 'median 1, p80 3', 'v2 open · waits on v1', 'r-a partial', '[upstream]', '0 studies']) assert.ok(t.includes(w), w);
+  for (const w of ['(all runs, open included)', 'stopped 33% · 3 units in 1 closed run (as run.mjs stats)', '2 runs (1 open)', 'pass rate 67%', 'median 1, p80 3', 'v2 open · waits on v1', 'r-a partial', '[upstream]', '0 studies']) assert.ok(t.includes(w), w);
 });
 
 test('the model with nothing: no runs, no lessons, no COORDINATOR.md', () => {
@@ -66,6 +68,13 @@ test('the model with nothing: no runs, no lessons, no COORDINATOR.md', () => {
   const html = selfPage(m, Date.now(), staticCtx('', 0));
   assert.match(html, /No run yet/); assert.match(html, /No COORDINATOR\.md/);
   assert.match(selfText(m), /no open run/);
+  assert.match(selfText(m), /no closed run yet \(run\.mjs stats counts closed runs only\)/);
+  const one = selfModel({ runs: [oldRun('r1', [unit('u1', 'pass', ['pass'])])], lessons: { global: [{ id: 'l1', tag: 'code', text: 't', seen: 1, used: 0 }] } });
+  const page1 = selfPage(one, Date.now(), staticCtx('', 0));
+  assert.match(page1, /1 lesson ·/); assert.match(page1, /across 1 run in/); assert.match(page1, /1 of 1 unit finished/);
+  assert.match(page1, /Counted over 1 finished unit in all runs, open included\. No closed run yet/);
+  const t = selfText(one);
+  assert.match(t, /1 run \(1 open\) · 1 unit ·/); assert.match(t, /1 lesson ·/); assert.match(t, /1 finished unit \(all runs/);
 });
 
 test('the page: one keyed section per SECTIONS entry; state text escaped; COORDINATOR.md code spans', () => {
@@ -105,7 +114,11 @@ test('cli: study needs sources, keeps to the per-run cap; lessons take --source;
   const t = run('self');
   assert.equal(t.code, 0);
   assert.match(t.raw, /1 study/); assert.match(t.raw, /\[upstream\] upstream: stale check too eager/); assert.match(t.raw, /\[design\]/);
-  assert.equal(run('self', '--json').out.study.log[0].topic, 'CSP nonces');
+  const js = run('self', '--json').out;
+  assert.equal(js.study.log[0].topic, 'CSP nonces');
+  const st = run('stats').out;
+  assert.equal(js.stats.closed.units, st.units, 'the closed-runs figure is the one run.mjs stats prints');
+  assert.equal(js.stats.closed.stoppedShare, Math.round(st.stoppedShare * 100));
   const f = run('self', '--html').out.file;
   assert.ok(existsSync(f)); assert.match(readFileSync(f, 'utf8'), /Side study/);
   assert.equal(run('self', '--json', '--html').code, 1);

@@ -3,6 +3,7 @@
 // the live page patches in place. To add a section, add an entry: { id, title,
 // render(model, ctx) }. Same shell, theme and escaping rules as the dashboard.
 import { anchor, linkify, webUrl } from './links.mjs';
+import { count } from './self.mjs';
 import { badge, blk, chip, esc, hash, keyed, page, stamp, toggle } from './parts.mjs';
 
 const LESSONS_SHOWN = 12;
@@ -36,7 +37,7 @@ function lessonItem(l, ctx, m, repo) {
 function learning(m, ctx) {
   const L = m.learning.lessons;
   if (!L.length) return empty('No lessons yet. The retro at the end of each run adds them (lessons.mjs add).');
-  const head = `<p class="meta">${L.length} lessons · ${m.learning.promoted} seen 3 or more times and ready to promote into the references · tags: ${m.learning.tags.map((t) => esc(t)).join(', ')}</p>`;
+  const head = `<p class="meta">${count(L.length, 'lesson')} · ${m.learning.promoted} seen 3 or more times and ready to promote into the references · tags: ${m.learning.tags.map((t) => esc(t)).join(', ')}</p>`;
   const list = (xs) => `<ul class="plain">${xs.map((l) => lessonItem(l, ctx, m, null)).join('')}</ul>`;
   return head + list(L.slice(0, LESSONS_SHOWN)) + (L.length > LESSONS_SHOWN ? toggle('self-more-lessons', `More lessons · ${L.length - LESSONS_SHOWN}`, list(L.slice(LESSONS_SHOWN))) : '');
 }
@@ -56,7 +57,11 @@ function memory(m, ctx) {
 function stats(m, ctx) {
   const s = m.stats;
   if (!s.units) return empty('No finished unit yet: the numbers start with the first pass or stop.');
-  const cards = `<div class="budget">${stat('Pass rate', pct(s.passRate), 'Finished units that passed.')}`
+  const c = s.closed;
+  const basis = `<p class="meta">Counted over ${count(s.units, 'finished unit')} in all runs, open included. `
+    + (c.runs ? `Closed runs only, as <code>run.mjs stats</code> counts: pass rate ${pct(c.passRate)}, rounds to pass median ${num(c.medianRoundsToPass)} (p80 ${num(c.p80RoundsToPass)}), stopped ${pct(c.stoppedShare)} of ${count(c.units, 'unit')} in ${count(c.runs, 'closed run')}.</p>`
+      : 'No closed run yet, so <code>run.mjs stats</code> has nothing to count.</p>');
+  const cards = basis + `<div class="budget">${stat('Pass rate', pct(s.passRate), 'Finished units that passed.')}`
     + stat('Rounds to pass', `${num(s.medianRoundsToPass)} <span class="cause">median · p80 ${num(s.p80RoundsToPass)}</span>`, 'Tries a passing unit needed.')
     + stat('Stopped', pct(s.stoppedShare), 'Finished units the rules stopped. Over 20% means the bars or splits need work.')
     + stat('Time per unit', num(s.minutesPerUnit, ' min'), 'Median, from a unit’s first build to its last verdict.')
@@ -78,7 +83,7 @@ function plans(m, ctx) {
     const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}"><b>${esc(u.id)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${chip(u.status, u.status)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
     const needs = p.needsYou.length ? `<p class="from"><b>Needs you:</b> ${p.needsYou.map((q) => `${esc(q.id)} ${esc(q.text)}`).join(' · ')}</p>` : '';
     return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${chip(p.decision, p.decision)}</h3>`
-      + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.done} of ${p.total} units finished</span></div>${meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
+      + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.done} of ${count(p.total, 'unit')} finished</span></div>${meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
       + `<div class="unit-next"><b>Next:</b> ${p.next.length ? esc(p.next.join(' · ')) : 'wait for the running agents'}</div>${needs}${left}</section>`;
   }).join('')}</div>`;
 }
@@ -115,7 +120,7 @@ export const SECTIONS = [
 export function selfPage(m, nowMs = Date.now(), ctx) {
   const toc = `<nav class="toc" aria-label="Sections">${SECTIONS.map((s) => `<a href="#self-${s.id}">${esc(s.title)}</a>`).join('')}</nav>`;
   const body = [
-    blk('head', `<header class="run"><h1>Coordinator</h1><span class="meta">across ${m.age.runs} ${m.age.runs === 1 ? 'run' : 'runs'} in this project · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    blk('head', `<header class="run"><h1>Coordinator</h1><span class="meta">across ${count(m.age.runs, 'run')} in this project · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
     toc,
     ...SECTIONS.map((s) => `<h2 id="self-${s.id}" data-a="h-${s.id}">${esc(s.title)}</h2>${blk(`self-${s.id}`, s.render(m, ctx), 'section', ` class="self" aria-labelledby="self-${s.id}"`)}`),
   ].join('\n');

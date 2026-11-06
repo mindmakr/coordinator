@@ -48,7 +48,7 @@ About the coordinator itself, across every run in the state folder. `S/run.mjs s
 
 - **Age:** first run, number of runs (and how many are open), units, hours at work (each run's start to its close or last event).
 - **Plans:** each open run: its decision, units finished, the next steps, and for each unit left what it waits on (its builder, a critic, the unit it stacks on, the lead, or you), and open questions.
-- **Working stats:** pass rate and stopped share of finished units, rounds to pass (median and p80), median time per unit (first build to last verdict), the suggested `--max-rounds`, and a table of the same per run (the trend).
+- **Working stats:** counted over all runs, open included (the page says so), with the closed-runs-only figures that `run.mjs stats` prints beside them: pass rate and stopped share of finished units, rounds to pass (median and p80), median time per unit (first build to last verdict), the suggested `--max-rounds`, and a table of the same per run (the trend).
 - **Learning:** every lesson of both scopes, best first: tag, text, seen, used, **promote** once seen 3 or more times, the runs it came from (links) and its sources.
 - **Memory:** `COORDINATOR.md` by section, and your answers from past runs (with the decision notes that closed questions).
 - **History:** closed runs with outcome, units passed and stopped, start and close, each linking to its dashboard.
