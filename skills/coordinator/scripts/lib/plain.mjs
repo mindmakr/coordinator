@@ -15,14 +15,6 @@ export function duration(min) {
   return r ? `${h} h ${r} min` : `${h} h`;
 }
 
-// Questions are numbered q1, q2, … in the order they were logged; a decision
-// note with `answers: "q2"` closes one. Older runs have neither field.
-export function questions(run) {
-  const notes = run.notes ?? [];
-  const answered = new Set(notes.filter((n) => n.kind === 'decision' && n.answers).map((n) => n.answers));
-  return notes.filter((n) => n.kind === 'question').map((n, i) => ({ id: `q${i + 1}`, text: n.text, recommend: n.recommend ?? null, at: n.at, open: !answered.has(`q${i + 1}`) }));
-}
-
 export function situation(run) {
   const note = (run.notes ?? []).filter((n) => n.kind === 'situation').at(-1);
   if (note) return { text: note.text, at: note.at, computed: false };
