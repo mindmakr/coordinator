@@ -18,7 +18,12 @@
 
   // Open toggles, by their data-d key, for every page of this run.
   const openSet = new Set(load(key('open'), []));
-  const applyOpen = (root) => root.querySelectorAll('details[data-d]').forEach((d) => { d.open = openSet.has(d.dataset.d); });
+  const applyOpen = (root) => {
+    if (root.nodeType !== 1 && root !== document) return;
+    const all = [...root.querySelectorAll('details[data-d]')];
+    if (root.matches && root.matches('details[data-d]')) all.push(root);
+    all.forEach((d) => { d.open = openSet.has(d.dataset.d); });
+  };
   document.addEventListener('toggle', (e) => {
     const d = e.target; if (!d.dataset || !d.dataset.d) return;
     if (d.open) openSet.add(d.dataset.d); else openSet.delete(d.dataset.d);
@@ -42,7 +47,7 @@
       const ok = matches({ at: li.dataset.at, badge: li.dataset.badge, unit: li.dataset.unit, label: '', who: '', text: li.textContent }, f, now);
       li.hidden = !ok; if (ok) shown++;
     }
-    rows.sort((a, b) => (f.sort === 'oldest' ? 1 : -1) * a.dataset.at.localeCompare(b.dataset.at)).forEach((li) => list.appendChild(li));
+    body.dataset.sort = f.sort; // CSS reverses the list: rows never move, so the scroll anchor holds
     const count = tools.querySelector('[data-tl-count]');
     if (count) count.textContent = `${shown} of ${rows.length} events`;
   }
@@ -57,13 +62,17 @@
     tools.addEventListener('submit', (e) => e.preventDefault());
   }
 
+  // Show finished units (passed, stopped) or not: the checkbox drives the CSS; remembered here.
+  const fin = document.getElementById('show-finished');
+  if (fin) { fin.checked = load(key('finished'), true); fin.addEventListener('change', () => save(key('finished'), fin.checked)); }
+
   // Forms: typing in "Other" picks Other; a form being filled is never swapped.
   app.addEventListener('input', (e) => {
     const form = e.target.form; if (!form || form.matches('[data-tl]')) return;
     form.dataset.dirty = '1';
     if (e.target.name === 'other') { const o = form.querySelector('input[value="__other"]'); if (o) o.checked = true; }
   });
-  const busy = (el) => { const a = document.activeElement; return (a && a !== body && el.contains(a) && a.form) || el.querySelector('form[data-dirty]'); };
+  const busy = (form) => !!form.dataset.dirty || form.contains(document.activeElement);
 
   // Scroll: restored after a reload, held steady across a patch.
   const scrollKey = key(`scroll:${path}`);
@@ -98,51 +107,41 @@
   const localTimes = (root) => root.querySelectorAll('time[datetime]').forEach(localTime);
   setInterval(() => localTimes(document), 30000);
 
-  const keyed = (el) => [...el.children].filter((c) => c.dataset && c.dataset.k);
-  let pending = null;
-  function sync(oldParent, newParent) {
-    const olds = new Map(keyed(oldParent).map((c) => [c.dataset.k, c]));
-    const news = keyed(newParent);
-    let after = null;
-    for (const n of news) {
-      const o = olds.get(n.dataset.k); olds.delete(n.dataset.k);
-      if (!o) { const ref = after ? after.nextSibling : (keyed(oldParent)[0] || null); oldParent.insertBefore(n, ref); applyOpen(n); after = n; continue; }
-      after = o;
-      if (o.dataset.h === n.dataset.h) continue;
-      if (busy(o)) { pending = true; continue; }
-      const nested = keyed(n).length && keyed(n).length === n.children.length && keyed(o).length;
-      if (nested) { sync(o, n); o.dataset.h = n.dataset.h; } else { o.replaceWith(n); applyOpen(n); after = n; }
-    }
-    for (const o of olds.values()) if (!busy(o)) o.remove();
-  }
-  let latest = null;
+  // In place: kept nodes keep the browser's own scroll anchoring working. Where the
+  // browser has none, the keyed anchor (lib/anchor.mjs) corrects the scroll, after the filters ran.
+  const nativeAnchor = !!(window.CSS && CSS.supports && CSS.supports('overflow-anchor', 'auto'));
+  let pending = false; let latest = null;
   function patch(html) {
     latest = html; pending = false;
-    const anchor = pickAnchor(places()); // by key: the block it sits in may be replaced
+    const anchor = nativeAnchor ? null : pickAnchor(places());
     const tpl = document.createElement('template'); tpl.innerHTML = html;
-    sync(app, tpl.content);
+    morph(app, tpl.content, { busy, skipped: () => { pending = true; }, added: applyOpen });
     localTimes(app);
-    const delta = scrollDelta(anchor, places());
-    if (delta) scrollBy(0, delta);
     applyTimeline();
+    const delta = anchor ? scrollDelta(anchor, places()) : 0;
+    if (delta) scrollBy(0, delta);
   }
   document.addEventListener('focusout', () => setTimeout(() => { if (pending && latest) patch(latest); }, 0));
 
   // Live updates: Server-Sent Events, reconnect with backoff, a watchdog on the heartbeat.
   const badge = document.getElementById('live');
-  const status = (state, text) => { if (badge) { badge.dataset.state = state; badge.textContent = text; } };
+  const closed = body.dataset.closed === '1';
+  const status = (state, text) => { if (badge && !closed) { badge.dataset.state = state; badge.textContent = text; } };
+  let failures = 0;
   let delay = 1000; let es = null; let seen = 0;
   function connect() {
     status('connecting', 'Connecting…');
     es = new EventSource(`/events?t=${encodeURIComponent(token)}&p=${encodeURIComponent(path)}`);
-    es.onopen = () => { delay = 1000; seen = Date.now(); status('live', 'Live'); };
+    es.onopen = () => { delay = 1000; failures = 0; seen = Date.now(); status('live', 'Live'); };
     es.addEventListener('ping', () => { seen = Date.now(); });
     es.addEventListener('patch', (e) => { seen = Date.now(); status('live', 'Live'); try { patch(JSON.parse(e.data).html); } catch { /* bad frame: wait for the next */ } });
     es.onerror = () => retry();
   }
   function retry() {
     if (es) es.close();
-    status('reconnecting', `Reconnecting in ${Math.round(delay / 1000)} s…`);
+    failures++;
+    // After five tries in a row it says so plainly, and keeps trying every 30 s.
+    if (failures > 5) status('disconnected', 'Disconnected · retrying'); else status('reconnecting', `Reconnecting in ${Math.round(delay / 1000)} s…`);
     setTimeout(connect, delay); delay = Math.min(delay * 2, 30000);
   }
   setInterval(() => { if (es && es.readyState === 1 && Date.now() - seen > 45000) retry(); }, 5000);

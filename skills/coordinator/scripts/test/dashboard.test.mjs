@@ -113,7 +113,7 @@ test('evidence: text masked and capped, files checked and copied, urls only http
   for (const [t, n] of [['u1', '../state.json'], ['u1', '..'], ['..', 'state.json'], ['u1', 'E9-other.png'], ['u2', 'E2-shot.png']]) assert.equal(artifact(s, t, n), null, `${t}/${n}`);
   const html = readFileSync(join(runDir('e1'), 'units', 'u1.html'), 'utf8');
   assert.match(html, /<img class="thumb" src="data:image\/png;base64,/, 'the snapshot embeds small screenshots');
-  assert.match(html, /<details class="raw pre" data-d="p-u1-ev-E1">/, 'long test output is collapsed');
+  assert.match(html, /<details class="raw pre" data-d="p-u1-ev-E1" data-a="d-p-u1-ev-E1">/, 'long test output is collapsed');
 });
 
 test('links: http(s), owner/repo#n, #n, shas and branches; nothing else', () => {
@@ -302,7 +302,7 @@ test('scroll anchor: found again by key when the block it sits in is replaced', 
   // The keys are stable across renders: a replaced timeline block renders the same row keys.
   setup('sa1');
   run('note', 'sa1', '--kind', 'decision', '--text', 'first');
-  const key = (html) => /<li data-a="(ev\|[^"]+\|decision\|)"/.exec(html)[1];
+  const key = (html) => /<li data-a="(ev\|[^"]+\|decision\|[^"]*)"/.exec(html)[1];
   const blockHash = (html) => /data-k="timeline" data-h="([^"]+)"/.exec(html)[1];
   const one = readFileSync(join(runDir('sa1'), 'hud.html'), 'utf8');
   run('note', 'sa1', '--kind', 'decision', '--text', 'second');
@@ -347,6 +347,27 @@ test('with no --repo and no git remote, #n links against the GitHub links alread
   assert.match(readFileSync(join(runDir('rp1'), 'hud.html'), 'utf8'), /fix <a href="https:\/\/github.com\/acme\/shop\/issues\/7"/);
   assert.equal(run('link', 'rp1', 'u1', '--pr', '#9').code, 0, 'a bare #n resolves the same way');
   assert.equal(state('rp1').units[0].links[0].url, 'https://github.com/acme/shop/pull/9');
+});
+
+test('answered questions leave the open count; a legacy decision note is the answer', () => {
+  setup('aq1');
+  run('note', 'aq1', '--kind', 'question', '--text', 'Keep cross-view narrowed to the permission holders? Owner to confirm.', '--recommend', 'yes');
+  run('ask', 'aq1', '--question', 'Merge u1 now?', '--header', 'Merge', '--option', 'Yes', '--option', 'No');
+  run('note', 'aq1', '--kind', 'decision', '--text', 'Keep it narrowed to holders of the permission', '--answers', 'q1');
+  const html = readFileSync(join(runDir('aq1'), 'hud.html'), 'utf8');
+  const card = /<section class="card" data-a="list-Questions">([\s\S]*?)<\/section>/.exec(html)[1];
+  assert.match(card, /<h3>Questions <span class="chip" title="open questions">1<\/span><\/h3>/, 'only q2 is open');
+  assert.doesNotMatch(card.split('Answered ·')[0], /Owner to confirm/, 'the decided question is not listed as open');
+  assert.match(card, /<details class="raw" data-d="answered-questions"[^>]*><summary>Answered · 1<\/summary>/);
+  assert.match(card, /<b>q1<\/b> Keep cross-view narrowed to the permission holders\? Owner to confirm\.<p class="ans"><b>Answered:<\/b> Keep it narrowed to holders of the permission <span class="cause">— by lead, <time datetime=/);
+  run('answer', 'aq1', 'q2', '--choice', 'No');
+  run('use-answer', 'aq1', 'q2');
+  const after = readFileSync(join(runDir('aq1'), 'hud.html'), 'utf8');
+  assert.match(after, /<h3>Questions <span class="chip" title="open questions">0<\/span><\/h3><p class="empty">None open\.<\/p>/);
+  assert.match(after, /<b>q2<\/b> Merge<p class="ans"><b>Answered:<\/b> No <span class="cause">— by you,/);
+  const labels = runTimeline(state('aq1')).map((e) => e.text);
+  assert.ok(labels.includes('q1 answered: Keep it narrowed to holders of the permission'));
+  assert.ok(labels.includes('q2 answered: No'));
 });
 
 test('the footer version matches the plugin', () => {

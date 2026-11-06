@@ -17,7 +17,10 @@ A live dashboard, and a bar made of behaviours with evidence attached. From the 
 - **Retrying / Quiet, not "needs attention":** the unit badge says the lead is handling it (failed twice in a row; agent silent), with the reason on hover and a legend. Only Needs you and question cards address the person.
 - **Local times:** the live pages show times in the viewer's locale and zone (relative within 24 h, full local time on hover); the snapshot keeps ISO with UTC spelled out. Every time is a `<time datetime>`.
 - **Brand:** "Coordinator by mindmakr" mark, favicon, page titles ("<run> · Coordinator by mindmakr") and footer with the version.
-- **Your place is kept:** a live update or a reload keeps the first heading, card or timeline row on screen where it was, found by its key even when the block around it is replaced.
+- **Your place is kept:** live updates change the page in place (keyed rows, cards and sections; kept nodes stay), so the browser's scroll anchoring holds the reader's row; a keyed anchor is the fallback, and a reload restores the place once images and fonts have loaded. Event keys carry a hash of the text and a number, so two events never share one.
+- **Status at a glance:** a connection pill (Live, Reconnecting, Disconnected, Finished), a status dot per unit, active units first and finished ones dimmed (with Show finished), no pulsing under reduced motion.
+- **Self-explaining numbers:** "Tries used: 2 of 4", "Score per try (0–10)" with a tooltip per dot (try, result, score, cause), one try as words, budget cards that explain themselves; only limits that block work turn red.
+- **Answered questions leave the open list:** the Questions card counts open ones only; answered and decided ones move to a collapsed Answered group that leads with the answer.
 - **Bar changes are on the record:** after freeze, removing or rewording a behaviour needs `--reason` (logged as a bar note), and none changes while its unit is being judged. Behaviours set at `add` show on the timeline under their own kind.
 - With no `--repo` and no GitHub remote, `#n` resolves against the GitHub links already in the run.
 - **Snapshot:** `hud.html` is now a static read-only snapshot (no meta refresh, so open sections stay open); one page per unit beside it; small screenshots embedded.

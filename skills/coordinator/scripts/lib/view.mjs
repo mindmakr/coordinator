@@ -1,6 +1,6 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
-import { attention, attentionLabel, clip, sentence, situation, timeLeft } from './plain.mjs';
+import { attention, attentionLabel, clip, dotState, sentence, situation, timeLeft } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
 import { unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
@@ -59,7 +59,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       const d = next.get(u.id);
       return {
         id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, after: u.after ?? null,
-        sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
+        sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)), dot: dotState(u, d), finished: ['passed', 'stopped'].includes(dotState(u, d)),
         rounds: u.rounds.length, maxRounds: run.budget.maxRounds,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
@@ -74,7 +74,16 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
     integration: integ.map((r) => r.verdict),
     next: nextStep(run, plan),
     decisions: pick('decision'),
-    questions: qs.map((q) => `${q.id}${q.open ? '' : ` (${q.status})`}: ${q.text}${q.recommend ? ` · recommended: ${q.recommend}` : ''}${q.answer ? ` · answer: ${answerText(q.answer)}` : ''}`),
+    // Only open questions are "questions"; the rest are answered: by the person or the lead, or closed by a decision note.
+    questions: qs.filter((q) => q.open).map((q) => `${q.id}: ${q.text}${q.recommend ? ` · recommended: ${q.recommend}` : ''}`),
+    answeredQuestions: qs.filter((q) => !q.open).map((q) => {
+      const d = notes.filter((n) => n.kind === 'decision' && n.answers === q.id).at(-1) ?? null;
+      return {
+        id: q.id, title: q.header || clip(String(q.text).split('\n')[0], 90), status: q.status,
+        answer: q.answer ? answerText(q.answer) : (d?.text ?? ''), by: q.answer ? q.answer.by : 'lead', at: q.answer?.at ?? d?.at ?? null,
+        decision: d && (!q.answer || d.text !== answerText(q.answer)) ? d.text : null,
+      };
+    }),
     followUps: pick('follow-up'),
     timeline,
   };

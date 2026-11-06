@@ -27,9 +27,9 @@ function noteEvents(run, keep) {
   const notes = (run.notes ?? []).filter((n) => n.kind !== 'question' && keep(n));
   const qs = questions(run).filter(keep);
   return [
-    ...notes.map((n) => ev(n.at, NOTE_BADGE[n.kind] ?? 'info', n.kind, n.unit, { who: n.unit ?? '', text: n.text })),
+    ...notes.map((n) => ev(n.at, NOTE_BADGE[n.kind] ?? 'info', n.kind, n.unit, { who: n.unit ?? '', text: n.answers ? `${n.answers} answered: ${n.text}` : n.text })),
     ...qs.map((q) => ev(q.at, 'question', 'question', q.unit, { who: q.id, text: q.text })),
-    ...qs.flatMap((q) => q.history.map((a) => ev(a.at, 'answer', 'answer', q.unit, { who: `${q.id} · ${a.by}`, text: answerText(a) }))),
+    ...qs.flatMap((q) => q.history.map((a) => ev(a.at, 'answer', 'answer', q.unit, { who: a.by, text: `${q.id} answered: ${answerText(a)}` }))),
   ];
 }
 

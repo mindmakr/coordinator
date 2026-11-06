@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs';
 import { anchor, esc, linkify } from './links.mjs';
 import { css, DARK, LIGHT } from './theme.mjs';
 import { pickAnchor, scrollDelta } from './anchor.mjs';
+import { morph } from './morph.mjs';
+import { DOTS } from './plain.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
 
@@ -21,10 +23,16 @@ export const chip = (label, kind = '') => `<span class="chip${kind ? ` s-${cls(k
 export const badge = (b, label) => `<span class="badge k-${cls(b)}">${esc(label ?? b)}</span>`;
 
 // A block the live page compares by hash and swaps only when it changed.
-const hash = (s) => createHash('sha1').update(s).digest('base64url').slice(0, 10);
+export const hash = (s) => createHash('sha1').update(s).digest('base64url').slice(0, 10);
 export const blk = (key, html, tag = 'div', attrs = '') => `<${tag} data-k="${esc(key)}" data-h="${hash(html)}"${attrs}>${html}</${tag}>`;
 // A toggle whose open state the live page remembers.
-export const toggle = (key, summary, body, cls2 = 'raw') => `<details class="${cls2}" data-d="${esc(key)}"><summary>${summary}</summary>${body}</details>`;
+// Stable, unique keys for rows: what the row says, numbered when two say the same.
+// The live page matches rows by these keys, so a row keeps its node across updates.
+export function keyed(items, keyOf) {
+  const seen = new Map();
+  return items.map((it) => { const k = keyOf(it); const n = (seen.get(k) ?? 0) + 1; seen.set(k, n); return [it, n > 1 ? `${k}~${n}` : k]; });
+}
+export const toggle = (key, summary, body, cls2 = 'raw') => `<details class="${cls2}" data-d="${esc(key)}" data-a="d-${esc(key)}"><summary>${summary}</summary>${body}</details>`;
 
 // Connected nodes: one hub, three ends. Neutral ink, so it sits on any theme.
 const MARK = '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 10 4.5 4.5M10 10l5.5-5.5M10 10v6"/></g><g fill="currentColor"><circle cx="10" cy="10" r="2.8"/><circle cx="4.5" cy="4.5" r="2"/><circle cx="15.5" cy="4.5" r="2"/><circle cx="10" cy="16.5" r="2"/></g>';
@@ -45,16 +53,19 @@ export function csp(live) {
 }
 
 // The whole page. `body` goes inside <main id="app">, which the live page patches.
-export function page({ title, body, ctx, path }) {
+export const dot = (state) => `<span class="dot dot-${cls(state)}" role="img" aria-label="${esc(DOTS[state] ?? state)}" title="${esc(DOTS[state] ?? state)}"></span>`;
+
+export function page({ title, body, ctx, path, closed = false }) {
   const live = ctx.live;
-  const status = live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span>'
-    : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
+  const status = closed ? `<span id="live" class="live" role="status" data-state="finished">Finished${live ? '' : ' · snapshot'}</span>`
+    : live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span>'
+      : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
     csp: csp(live && { nonce: esc(live.nonce) }), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }),
     top: `<div class="top">${brand()}<div class="tools">${status}${THEME_TOGGLE}</div></div>`,
     body, footer: footer(),
-    attrs: live ? ` data-run="${esc(ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"` : '',
-    script: live ? `<script nonce="${esc(live.nonce)}">const matches = ${matches.toString()};\nconst pickAnchor = ${pickAnchor.toString()};\nconst scrollDelta = ${scrollDelta.toString()};\n${CLIENT}</script>` : '',
+    attrs: live ? ` data-run="${esc(ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
+    script: live ? `<script nonce="${esc(live.nonce)}">const matches = ${matches.toString()};\nconst pickAnchor = ${pickAnchor.toString()};\nconst scrollDelta = ${scrollDelta.toString()};\nconst morph = ${morph.toString()};\n${CLIENT}</script>` : '',
   };
   return SHELL.replace(/\{\{(\w+)\}\}/g, (_, k) => parts[k] ?? '');
 }
@@ -63,7 +74,7 @@ export function behaviourList(list, repo, evidence = [], ctx = null, key = '') {
   if (!list.length) return '<p class="empty">No behaviours yet.</p>';
   return `<ul class="behaviours">${list.map((b) => {
     const ev = ctx ? evidence.filter((e) => e.behaviour === b.id) : [];
-    return `<li>${chip(b.status, b.status === 'unchecked' ? '' : b.status)} <b>${esc(b.id)}</b> ${linkify(b.text, repo)}`
+    return `<li data-a="b-${esc(b.id)}">${chip(b.status, b.status === 'unchecked' ? '' : b.status)} <b>${esc(b.id)}</b> ${linkify(b.text, repo)}`
       + `${b.evidence ? `<div class="bev">${linkify(b.evidence, repo)}</div>` : ''}`
       + `${ev.length ? evidenceList(ev, repo, ctx, `${key}-${b.id}`) : ''}</li>`;
   }).join('')}</ul>`;
@@ -89,10 +100,10 @@ function evidenceItem(e, repo, ctx, key) {
 
 export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class="evlist">${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>` : '');
 
-export function eventRow(e, repo) {
+export function eventRow(e, repo, key, fin = false) {
   const score = e.score === null || e.score === undefined ? '' : ` · ${e.score}`;
   const cause = e.cause ? ` <span class="cause">cause: ${esc(e.cause)}</span>` : '';
-  return `<li data-a="${esc(`ev|${e.at}|${e.label}|${e.who}`)}" data-at="${esc(e.at)}" data-badge="${esc(e.badge)}" data-unit="${esc(e.unit ?? '')}">${stamp(e.at)}`
+  return `<li${fin ? ' class="fin"' : ''} data-a="${esc(key)}" data-at="${esc(e.at)}" data-badge="${esc(e.badge)}" data-unit="${esc(e.unit ?? '')}">${stamp(e.at)}`
     + `<span>${badge(e.badge, e.label)}</span>`
     + `<span>${e.who ? `<b>${esc(e.who)}${esc(score)}</b> ` : ''}${linkify(e.text, repo)}${cause}</span></li>`;
 }

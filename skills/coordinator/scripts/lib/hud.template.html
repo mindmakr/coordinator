@@ -26,8 +26,24 @@ a { color: var(--run); }
 .themes input:focus-visible + label { outline: 2px solid var(--run); outline-offset: 1px; }
 .live { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
 .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-.live[data-state="live"]::before { background: var(--pass); }
-.live[data-state="reconnecting"]::before { background: var(--wait); }
+.live { padding: 2px 10px 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); }
+.live[data-state="live"]::before { background: var(--pass); animation: pulse 2s ease-in-out infinite; }
+.live[data-state="reconnecting"]::before, .live[data-state="connecting"]::before { background: var(--wait); animation: pulse 1.2s ease-in-out infinite; }
+.live[data-state="disconnected"]::before { background: var(--fail); }
+.live[data-state="finished"]::before { background: var(--ink); }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: 1px; flex: none; background: var(--muted); }
+.dot-working { background: var(--pass); animation: pulse 2s ease-in-out infinite; }
+.dot-waiting, .dot-retrying { background: var(--wait); }
+.dot-stale { background: var(--fail); }
+.dot-passed { background: var(--ink); }
+.dot-stopped { background: color-mix(in oklab, var(--muted) 70%, var(--card)); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .live::before, .dot { animation: none !important; } }
+.card.fin { background: color-mix(in oklab, var(--card) 55%, var(--bg)); }
+.card.fin > *, .timeline li.fin { opacity: .78; }
+:root:has(#show-finished:not(:checked)) .card.fin, :root:has(#show-finished:not(:checked)) .timeline li.fin { display: none; }
+body[data-sort="oldest"] .timeline { display: flex; flex-direction: column-reverse; }
+.legend .fchip { margin-right: 8px; }
 header.run { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; margin-top: 16px; }
 h1 { font-size: 22px; margin: 0; overflow-wrap: anywhere; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 10px; }
@@ -79,6 +95,10 @@ details.raw summary { font-weight: 400; color: var(--muted); }
 .bar { height: 8px; background: var(--none-bg); border-radius: 4px; overflow: hidden; margin-top: 4px; }
 .bar i { display: block; height: 100%; background: var(--bar); }
 .bar i.hot { background: var(--bar-hot); }
+.bar i.calm { background: color-mix(in oklab, var(--muted) 55%, var(--card)); }
+.spark-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+svg.spark circle:focus-visible { outline: none; stroke: var(--run); stroke-width: 2; }
+.score-one { margin: 8px 0 0; }
 .budget { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
 .budget .card { padding: 10px 14px; font-size: 13px; }
 svg.spark { display: block; }
@@ -108,6 +128,8 @@ img.thumb { display: block; max-width: min(100%, 320px); max-height: 200px; marg
 .fchip span { display: inline-block; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; color: var(--ink); background: var(--card); }
 .fchip input:checked + span { background: var(--run-bg); border-color: var(--run); color: var(--run); font-weight: 600; }
 .fchip input:focus-visible + span { outline: 2px solid var(--run); outline-offset: 1px; }
+.answered { opacity: .82; padding-left: 18px; }
+.answered li { margin: 8px 0; }
 .round { border-top: 1px solid var(--line); padding: 10px 0; }
 .round h4 { margin: 0; font-size: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .needs ul:has(> .q) { padding-left: 0; }

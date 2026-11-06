@@ -8,8 +8,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
-import { badge, behaviourList, blk, chip, cls, esc, eventRow, evidenceList, page, stamp, timelineTools, toggle } from './parts.mjs';
-import { trend } from './view.mjs';
+import { badge, behaviourList, blk, chip, cls, dot, esc, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
+import { clip } from './plain.mjs';
 
 export { esc };
 const pct = (used, max) => (max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0);
@@ -41,22 +41,37 @@ export function liveCtx({ token, nonce }, run, theme = null) {
   };
 }
 
-function bar(used, max) {
+// tone: 'hot' when a limit is blocking work, 'calm' when a full bar is simply done.
+function bar(used, max, tone = '', title = '') {
   const p = pct(used, max);
-  return `<div class="bar"><i class="${p >= 90 ? 'hot' : ''}" style="width:${p}%"></i></div>`;
+  return `<div class="bar"${title ? ` title="${esc(title)}"` : ''}><i class="${tone}" style="width:${p}%"></i></div>`;
 }
 
-// Scores on a 0-10 scale, one dot per round coloured by verdict.
-function sparkline(scores) {
-  const W = 120; const H = 32; const pad = 4;
-  const n = scores.length;
-  const x = (i) => (n === 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (n - 1));
-  const y = (s) => H - pad - (s / 10) * (H - 2 * pad);
-  const pts = scores.map((s, i) => (s.score === null ? null : [x(i), y(s.score), s.verdict])).filter(Boolean);
+// What one try came to, for a dot's tooltip and screen readers.
+const tryLabel = (r) => `Try ${r.n}: ${r.verdict === 'pass' ? 'passed' : 'failed'}${typeof r.score === 'number' ? `, ${r.score}/10` : ''}${r.verdict === 'pass' ? '' : (r.cause || r.gap) ? ` — ${clip(r.cause || r.gap, 70)}` : ''}`;
+
+// Scores per try on a 0-10 scale, one focusable dot per try coloured by verdict.
+// One try reads better as words than as a lone dot.
+export function scoreChart(rounds) {
+  if (!rounds.length) return '';
+  const last = rounds.at(-1);
+  if (rounds.length === 1) return `<p class="cause score-one">${esc(last.verdict === 'pass' ? 'Passed on try 1' : 'Failed try 1')}${typeof last.score === 'number' ? ` (${last.score}/10)` : ''}${last.verdict !== 'pass' && (last.cause || last.gap) ? ` — ${esc(clip(last.cause || last.gap, 70))}` : ''}</p>`;
+  const W = 120; const H = 32; const pad = 5;
+  const x = (i) => pad + (i * (W - 2 * pad)) / (rounds.length - 1);
+  const y = (sc) => H - pad - (sc / 10) * (H - 2 * pad);
+  const pts = rounds.map((r, i) => (typeof r.score === 'number' ? [x(i), y(r.score), r] : null)).filter(Boolean);
   const line = pts.length > 1 ? `<polyline points="${pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(' ')}"/>` : '';
-  const dots = pts.map(([a, b, v]) => `<circle class="${v === 'pass' ? 'p' : 'f'}" cx="${a.toFixed(1)}" cy="${b.toFixed(1)}" r="3"/>`).join('');
-  return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="scores ${esc(trend(scores))}"><line x1="0" x2="${W}" y1="${y(10)}" y2="${y(10)}"/>${line}${dots}</svg>`;
+  const dots = pts.map(([a, b, r]) => `<circle class="${r.verdict === 'pass' ? 'p' : 'f'}" cx="${a.toFixed(1)}" cy="${b.toFixed(1)}" r="3.5" tabindex="0" role="img" aria-label="${esc(tryLabel(r))}"><title>${esc(tryLabel(r))}</title></circle>`).join('');
+  return `<div class="spark-row"><span class="cause">Score per try (0–10)</span><svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="group" aria-label="Score per try (0–10)">${line}${dots}</svg>`
+    + `<span class="cause">last ${typeof last.score === 'number' ? `${last.score}/10` : '–'}</span></div>`;
 }
+
+const BUDGET_HELP = {
+  time: 'Time used of the run’s time budget. When it runs out, every unit stops.',
+  units: 'Units planned, against the cap. A full bar is normal: every planned unit exists.',
+  'added after freeze': 'Units added after the plan was frozen, against the cap on scope creep.',
+  'integration rounds': 'Integration checks used, against the cap.',
+};
 
 const hidden = (live, fields) => [['t', live.token], ...(live.back ? [['back', live.back]] : []), ...fields].map(([k, val]) => `<input type="hidden" name="${k}" value="${esc(val)}">`).join('');
 const recommended = ' <span class="chip s-pass">Recommended</span>';
@@ -91,7 +106,7 @@ export function questionItem(q, live, repo = null) {
   const changes = q.history.length - 1;
   const ans = q.answer ? `<p class="ans"><b>Answer:</b> ${esc(answerText(q.answer))} <span class="cause">by ${esc(q.answer.by)}, ${stamp(q.answer.at)}${changes > 0 ? `, changed ${changes} ${changes === 1 ? 'time' : 'times'}` : ''}</span></p>` : '';
   const body = live && ['open', 'answered'].includes(q.status) ? answerForm(q, live) : optionList(q);
-  return `<li class="q" id="${esc(q.id)}">${head}${rec}${ans}${body}</li>`;
+  return `<li class="q" id="${esc(q.id)}" data-a="q-${esc(q.id)}">${head}${rec}${ans}${body}</li>`;
 }
 
 // The unit's own links (--link at add, then each `run.mjs link`), http(s) only.
@@ -102,24 +117,30 @@ export function unitLinks(u, repo) {
   return `<div class="links">${all.map((l) => `<span>${badge(l.kind === 'merge' ? 'merge' : 'link', l.kind)} ${one(l)}${l.label ? ` ${esc(l.label)}` : ''}</span>`).join('')}</div>`;
 }
 
+// "Tries used: 2 of 4", with what a try is on hover. Full on a finished unit is calm, not alarming.
+export function triesRow(u) {
+  const help = `Each try is one build plus one independent review; the unit stops after ${u.maxRounds}.`;
+  const tone = u.finished ? 'calm' : pct(u.rounds, u.maxRounds) >= 75 ? 'hot' : '';
+  return `<div class="row" title="${esc(help)}"><span>Tries used: ${u.rounds} of ${u.maxRounds}${u.after ? ` · after ${esc(u.after)}` : ''}</span></div>${bar(u.rounds, u.maxRounds, tone, help)}`;
+}
+
 function unitCard(u, ctx, form, repo) {
   const flag = u.attention ? `<span class="chip flag" title="${esc(`The lead is on it: ${u.attention}`)}">${esc(u.attentionLabel)}</span> ` : '';
   const raw = [u.gap && `<dt>Last gap</dt><dd>${linkify(u.gap, repo)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${linkify(u.evidence, repo)}</dd>`].filter(Boolean).join('');
   const passing = u.behaviours.filter((b) => b.status === 'pass').length;
-  const html = `<h3><span>${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${flag}${chip(u.status, u.status)}</span></h3>`
+  const html = `<h3><span>${dot(u.dot)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${flag}${chip(u.status, u.status)}</span></h3>`
     + unitLinks(u, repo)
     + `<p class="say">${esc(u.sentence)}</p>`
-    + `<div class="row"><span>round ${u.rounds}/${u.maxRounds}${u.after ? ` · after ${esc(u.after)}` : ''}</span><span>${esc(trend(u.scores) || 'no score yet')}</span></div>`
-    + bar(u.rounds, u.maxRounds)
-    + (u.scores.length ? `<div class="row">${sparkline(u.scores)}</div>` : '')
+    + triesRow(u)
+    + scoreChart(u.roundList)
     + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo)) : '')
     + (u.evidenceItems.length ? toggle(`u-${u.id}-ev`, `Evidence · ${u.evidenceItems.length}`, evidenceList(u.evidenceItems, repo, ctx, `u-${u.id}-ev`)) : '')
     + (raw ? toggle(`u-${u.id}-raw`, 'Gap and evidence', `<dl>${raw}</dl>`) : '')
     + `<div class="unit-next"><b>Next:</b> ${esc(u.next)}</div>`
-    + u.personNotes.slice(-2).map((n) => `<p class="from"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('')
+    + u.personNotes.slice(-2).map((n) => `<p class="from" data-a="from-${esc(n.at)}"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('')
     + (form ? toggle(`u-${u.id}-note`, 'Add a note on this unit', noteForm(form, u.id)) : '')
     + `<div class="row"><a class="open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
-  return blk(`unit-${u.id}`, html, 'section', ` class="card" id="unit-${esc(u.id)}"`);
+  return blk(`unit-${u.id}`, html, 'section', ` class="card${u.finished ? ' fin' : ''}" id="unit-${esc(u.id)}"`);
 }
 
 function needsYou(v, form) {
@@ -142,12 +163,23 @@ export function goalBlock(v, ctx) {
 }
 
 function list(title, items, repo) {
-  const body = items.length ? `<ul>${items.map((t) => `<li>${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None.</p>';
-  return `<section class="card"><h3>${esc(title)} <span class="chip">${items.length}</span></h3>${body}</section>`;
+  const body = items.length ? `<ul>${keyed(items, (t) => `l-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None.</p>';
+  return `<section class="card" data-a="list-${esc(title)}"><h3>${esc(title)} <span class="chip">${items.length}</span></h3>${body}</section>`;
 }
 
-export function timelineList(events, repo) {
-  return events.length ? events.slice(0, TIMELINE_MAX).map((e) => eventRow(e, repo)).join('') : '<li class="empty">Nothing yet.</li>';
+// Open questions only, counted; answered ones in a dimmed, collapsed group with the answer first.
+function questionsCard(v, repo) {
+  const open = v.questions.length ? `<ul>${keyed(v.questions, (t) => `l-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None open.</p>';
+  const done = v.answeredQuestions.map((q) => `<li data-a="aq-${esc(q.id)}"><b>${esc(q.id)}</b> ${esc(q.title)}`
+    + `<p class="ans"><b>Answered:</b> ${linkify(q.answer, repo)} <span class="cause">— by ${q.by === 'person' ? 'you' : esc(q.by)}${q.at ? `, ${stamp(q.at)}` : ''}</span></p>`
+    + `${q.decision ? `<p class="cause">Decision: ${linkify(q.decision, repo)}</p>` : ''}</li>`).join('');
+  return `<section class="card" data-a="list-Questions"><h3>Questions <span class="chip" title="open questions">${v.questions.length}</span></h3>${open}`
+    + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, `<ul class="answered">${done}</ul>`) : '') + '</section>';
+}
+
+export function timelineList(events, repo, finished = new Set()) {
+  // Each row's key holds its time, kind, who, a hash of its text, and a number if two still match.
+  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit))).join('') : '<li class="empty">Nothing yet.</li>';
 }
 
 export function hud(v, nowMs = Date.now(), ctx = null) {
@@ -164,18 +196,18 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),
     '<h2 data-a="h-Budget">Budget</h2>',
-    blk('budget', v.budget.map((b) => `<div class="card"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max)}</div>`).join(''), 'div', ' class="budget"'),
+    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join(''), 'div', ' class="budget"'),
     '<h2 data-a="h-Units">Units</h2>',
-    '<p class="legend"><b>Needs you</b> = waiting on you; <b>Retrying</b> = the lead is on it; <b>Quiet</b> = the lead is checking on a silent agent.</p>',
-    blk('units', v.units.length ? v.units.map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
+    '<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <b>Needs you</b> = waiting on you; <b>Retrying</b> = the lead is on it; <b>Quiet</b> = the lead is checking on a silent agent. Score dots: red = failed try, green = passed try.</p>',
+    blk('units', v.units.length ? [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)].map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
     blk('integration', v.integration.length ? `<h2>Integration</h2><p>${v.integration.map((x) => chip(x, x)).join(' → ')}</p>` : ''),
     '<h2 data-a="h-Decisions">Decisions, questions and follow-ups</h2>',
-    blk('lists', [list('Decisions', v.decisions, r), list('Questions', v.questions, r), list('Follow-ups', v.followUps, r),
+    blk('lists', [list('Decisions', v.decisions, r), questionsCard(v, r), list('Follow-ups', v.followUps, r),
       list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
     '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
-    blk('timeline', timelineList(v.timeline, r), 'ol', ' class="timeline" data-tl-list'),
+    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id))), 'ol', ' class="timeline" data-tl-list'),
   ].join('\n');
-  return page({ title: v.id, body, ctx, path: '/' });
+  return page({ title: v.id, body, ctx, path: '/', closed: !v.open });
 }
 

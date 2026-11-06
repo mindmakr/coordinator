@@ -2,12 +2,11 @@
 // and behaviours with their evidence, every round, notes and questions for it,
 // its links and its own timeline. Same shell, same rules as the dashboard.
 import { linkify } from './links.mjs';
-import { liveCtx, noteForm, questionItem, staticCtx, timelineList, unitLinks } from './hud.mjs';
-import { behaviourList, blk, chip, esc, evidenceList, page, stamp, timelineTools } from './parts.mjs';
-import { trend } from './view.mjs';
+import { liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
+import { behaviourList, blk, chip, dot, esc, evidenceList, hash, keyed, page, stamp, timelineTools } from './parts.mjs';
 
 function round(r, repo) {
-  const marks = (r.behaviours ?? []).map((m) => `<li>${chip(m.status, m.status)} <b>${esc(m.id)}</b>${m.evidence ? ` ${linkify(m.evidence, repo)}` : ''}</li>`).join('');
+  const marks = (r.behaviours ?? []).map((m) => `<li data-a="r${r.n}-${esc(m.id)}">${chip(m.status, m.status)} <b>${esc(m.id)}</b>${m.evidence ? ` ${linkify(m.evidence, repo)}` : ''}</li>`).join('');
   return `<div class="round" data-a="round-${r.n}"><h4>Round ${r.n} ${chip(r.verdict, r.verdict)}${r.score !== null && r.score !== undefined ? ` <span class="cause">score ${esc(r.score)}</span>` : ''}`
     + `${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''} ${stamp(r.at, 'cause')}</h4>`
     + `<dl>${r.report ? `<dt>Builder's report</dt><dd>${linkify(r.report, repo)}</dd>` : ''}`
@@ -23,12 +22,12 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   const form = ctx.live && v.open ? { ...ctx.live, back: `/unit/${u.id}` } : null; // forms come back here
   const r = v.repo;
   const loose = u.evidenceItems.filter((e) => !e.behaviour);
-  const notes = u.personNotes.map((n) => `<li>${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
+  const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
-    blk('head', `<header class="run"><h1>${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${chip(u.status, u.status)}`
-      + `<span class="meta">round ${u.rounds}/${u.maxRounds} · scores ${esc(trend(u.scores) || 'none yet')} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`
-      + unitLinks(u, r) + `<p class="say">${esc(u.sentence)}</p><div class="next"><b>Next</b>${esc(u.next)}</div>`),
+    blk('head', `<header class="run"><h1>${dot(u.dot)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${chip(u.status, u.status)}`
+      + `<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span></header>`
+      + unitLinks(u, r) + triesRow(u) + scoreChart(u.roundList) + `<p class="say">${esc(u.sentence)}</p><div class="next"><b>Next</b>${esc(u.next)}</div>`),
     '<h2 data-a="h-Bar">Bar and behaviours</h2>',
     blk('behaviours', `<section class="card"><p>${linkify(u.bar, r)}</p>${behaviourList(u.behaviours, r, u.evidenceItems, ctx, `p-${u.id}`)}</section>`),
     '<h2 data-a="h-Evidence">Evidence and artifacts</h2>',
@@ -43,5 +42,5 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     ctx.live ? timelineTools() : '',
     blk('timeline', timelineList([...u.timeline].reverse(), r), 'ol', ' class="timeline" data-tl-list'),
   ].join('\n');
-  return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `/unit/${u.id}` });
+  return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `/unit/${u.id}`, closed: !v.open });
 }
