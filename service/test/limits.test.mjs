@@ -2,17 +2,18 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
-import { readLog } from '../src/ingest.mjs';
+import { MAX_REFS_PER_UNIT, readLog } from '../src/ingest.mjs';
+import { MAX_REPOS_PER_VIEW } from '../src/server.mjs';
 import { CAPS } from '../src/trail.mjs';
-import { appendEvent, makeRun, startApp, stateFiles } from './helpers.mjs';
+import { appendEvent, makeRun, signIn, startApp, stateFiles } from './helpers.mjs';
 
 const PR = 'https://github.com/acme/web/pull/12';
 const MOBILE_PR = 'https://github.com/acme/mobile/pull/5';
 const OPTED_IN = { 'coordinator.json': { primary: 'acme/web' } };
 
-async function world({ runs = { r1: makeRun('r1', { prs: [PR, MOBILE_PR] }) } } = {}) {
+async function world({ runs = { r1: makeRun('r1', { prs: [PR, MOBILE_PR] }) }, gh, db } = {}) {
   let clock = Date.parse('2026-11-06T12:00:00Z');
-  const t = await startApp({ now: () => clock });
+  const t = await startApp({ now: () => clock, ...(gh && { gh }), ...(db && { db }) });
   t.tick = (ms) => { clock += ms; };
   t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles(runs, { repos: ['acme/mobile'] }) });
   t.gh.addRepo('acme/mobile', { id: 71, installationId: 7, defaultFiles: OPTED_IN });
@@ -55,20 +56,113 @@ test('a run with more than 50 units is refused at ingest', async () => {
   assert.match(readLog('r1', buf).error, /51 units; at most 50/);
 });
 
-test('comment writes per installation are capped; the rest wait for a later sync', async () => {
+const written = (t) => ['acme/web#12', 'acme/mobile#5'].filter((k) => (t.gh.comments.get(k) ?? []).length).length;
+const commentCounts = (t) => ['acme/web#12', 'acme/mobile#5'].map((k) => (t.gh.comments.get(k) ?? []).length);
+const owed = async (t) => (await t.db.runs(7, 70))[0].trailPending;
+
+test('comment writes per installation are capped; the deferred one lands at a later periodic resync with the tip unchanged', async () => {
   const keep = CAPS.commentWritesPerInstallation;
   CAPS.commentWritesPerInstallation = 1;
   try {
     const t = await world();
     try {
-      await t.app.ingest.syncInstallation(7);
-      const written = () => ['acme/web#12', 'acme/mobile#5'].filter((k) => (t.gh.comments.get(k) ?? []).length).length;
-      assert.equal(written(), 1, 'one write, one deferred');
+      await t.app.resyncAll();
+      assert.equal(written(t), 1, 'one write, one deferred');
+      assert.equal(await owed(t), true, 'the run is marked as owed a comment');
+      await t.app.resyncAll();
+      assert.equal(written(t), 1, 'still inside the window: still held back');
       t.tick(CAPS.windowMs + 1);
-      await t.app.ingest.syncRepo(7, { id: 70, fullName: 'acme/web' }, { force: true });
-      assert.equal(written(), 2, 'the deferred one lands later');
+      const r = await t.app.resyncAll(); // no force, the branch tip has not moved
+      assert.equal(r[0].repos.find((x) => x.repo === 'acme/web').unchanged, true);
+      assert.equal(written(t), 2, 'the deferred one lands later');
+      assert.equal(await owed(t), false, 'nothing owed any more');
+      t.tick(CAPS.windowMs + 1);
+      await t.app.resyncAll();
+      assert.deepEqual(commentCounts(t), [1, 1], 'one comment each, never a second');
     } finally { await t.close(); }
   } finally { CAPS.commentWritesPerInstallation = keep; }
+});
+
+test('a deferred comment survives a restart and lands once', async () => {
+  const keep = CAPS.commentWritesPerInstallation;
+  CAPS.commentWritesPerInstallation = 1;
+  try {
+    const t1 = await world();
+    await t1.app.resyncAll();
+    assert.equal(written(t1), 1);
+    await new Promise((ok) => t1.app.server.close(ok)); await t1.app.idle(); // the process stops; the database stays
+    const t2 = await world({ gh: t1.gh, db: t1.db });
+    try {
+      await t2.app.resyncAll();
+      assert.equal(written(t2), 2, 'the new process writes what the old one owed');
+      await t2.app.resyncAll();
+      assert.deepEqual(commentCounts(t2), [1, 1], 'no duplicate after the restart');
+    } finally { await t2.close(); }
+  } finally { CAPS.commentWritesPerInstallation = keep; }
+});
+
+test('links per unit are capped at ingest, and a page view checks access only for linked repos with events', async () => {
+  let buf = makeRun('r1');
+  const links = Array.from({ length: 2000 }, (_, i) => ({ kind: 'issue', url: `https://github.com/evil${i}/x/issues/1` }));
+  buf = appendEvent(buf, 'unit.link', { ops: [{ op: 'set', path: ['units', { id: 'u1' }, 'links'], value: links }] }, 'u1');
+  const t = await world({ runs: { r1: buf } });
+  try {
+    t.gh.addUser('tok-v', { id: 5, login: 'viewer', read: ['acme/web'] });
+    await t.app.ingest.syncInstallation(7);
+    let stored = 0;
+    for (let i = 0; i < 2000; i++) stored += (await t.db.runsReferencing(7, `evil${i}/x#1`)).length;
+    assert.equal(stored, MAX_REFS_PER_UNIT, 'only the first links of the unit are stored');
+    const cookie = await signIn(t, 'v');
+    const from = t.gh.calls.length;
+    const r = await fetch(`${t.base}/r/acme/web/run/r1`, { headers: { Cookie: cookie } });
+    assert.equal(r.status, 200);
+    assert.equal(t.gh.count('repoAccess', from), 1, 'only the state repo: no linked repo has events');
+  } finally { await t.close(); }
+});
+
+test('a page view checks at most MAX_REPOS_PER_VIEW linked repos, even when all of them have events', async () => {
+  const base = makeRun('r1');
+  const unit = readLog('r1', base).state.units[0];
+  let buf = base;
+  const keys = [];
+  for (let u = 1; u <= 5; u++) {
+    const links = Array.from({ length: MAX_REFS_PER_UNIT }, (_, i) => ({ kind: 'issue', url: `https://github.com/other${u}x${i}/x/issues/1` }));
+    keys.push(...links.map((l) => l.url.replace('https://github.com/', '').replace('/issues/', '#')));
+    if (u === 1) buf = appendEvent(buf, 'unit.link', { ops: [{ op: 'set', path: ['units', { id: 'u1' }, 'links'], value: links }] }, 'u1');
+    else buf = appendEvent(buf, 'unit.add', { ops: [{ op: 'push', path: ['units'], values: [{ ...unit, id: `u${u}`, links }] }] }, `u${u}`);
+  }
+  const t = await world({ runs: { r1: buf } });
+  try {
+    t.gh.addUser('tok-v', { id: 5, login: 'viewer', read: ['acme/web'] });
+    await t.app.ingest.syncInstallation(7);
+    for (const k of keys) await t.db.addGhEvent(7, { id: `closed:${k}`, refKey: k, kind: 'closed', at: '2026-11-06T11:00:00.000Z', detail: { label: 'Issue' } });
+    const cookie = await signIn(t, 'v');
+    const from = t.gh.calls.length;
+    const r = await fetch(`${t.base}/r/acme/web/run/r1`, { headers: { Cookie: cookie } });
+    assert.equal(r.status, 200);
+    assert.equal(t.gh.count('repoAccess', from), 1 + MAX_REPOS_PER_VIEW, `${keys.length} linked repos, ${MAX_REPOS_PER_VIEW} checked`);
+  } finally { await t.close(); }
+});
+
+test('a webhook whose Content-Length is over 5 MB is refused before the body is read', async () => {
+  const t = await world();
+  try {
+    const { request } = await import('node:http');
+    const status = await new Promise((ok, fail) => {
+      const req = request(`${t.base}/webhook`, { method: 'POST', headers: { 'Content-Length': String(6 * 1024 * 1024), 'X-GitHub-Event': 'ping' } }, (res) => { res.resume(); ok(res.statusCode); });
+      req.on('error', fail);
+      req.write('{}'); // a few bytes, never the rest: only the header can have answered
+    });
+    assert.equal(status, 413);
+  } finally { await t.close(); }
+});
+
+test('the server bounds connections and request time', async () => {
+  const t = await world();
+  try {
+    assert.ok(t.app.server.maxConnections > 0 && t.app.server.maxConnections <= 100_000);
+    assert.ok(t.app.server.requestTimeout > 0 && t.app.server.requestTimeout <= 60_000);
+  } finally { await t.close(); }
 });
 
 test('consent withdrawn after a comment exists: no further edits there, once the 60 s consent check expires', async () => {

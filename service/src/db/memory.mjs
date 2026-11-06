@@ -52,11 +52,15 @@ export function memoryDb() {
     async run(installationId, repoId, runId) { return clone(runs.get(key(installationId, repoId, runId))) ?? null; },
     async putRun(installationId, repoId, row) {
       const prev = runs.get(key(installationId, repoId, row.runId));
-      runs.set(key(installationId, repoId, row.runId), { mapSha: null, map: null, mapError: null, ...(prev && { mapSha: prev.mapSha, map: prev.map, mapError: prev.mapError }), ...clone(row), installationId, repoId, updatedAt: new Date().toISOString() });
+      runs.set(key(installationId, repoId, row.runId), { mapSha: null, map: null, mapError: null, trailPending: false, ...(prev && { mapSha: prev.mapSha, map: prev.map, mapError: prev.mapError, trailPending: prev.trailPending }), ...clone(row), installationId, repoId, updatedAt: new Date().toISOString() });
     },
     async putRunMap(installationId, repoId, runId, { mapSha, map, mapError }) {
       const r = runs.get(key(installationId, repoId, runId));
       if (r) Object.assign(r, { mapSha, map: clone(map), mapError });
+    },
+    async setTrailPending(installationId, repoId, runId, pending) {
+      const r = runs.get(key(installationId, repoId, runId));
+      if (r) r.trailPending = !!pending;
     },
     async dropRunsExcept(installationId, repoId, keep) {
       const k = new Set(keep);

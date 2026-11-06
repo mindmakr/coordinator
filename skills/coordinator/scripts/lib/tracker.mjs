@@ -42,7 +42,7 @@ export function unitState(run, u) {
 export function trackerBody(run, unitId, { url = null, detail = false, github = [] } = {}) {
   const u = run.units.find((x) => x.id === unitId);
   if (!u) return null;
-  const rounds = Array.isArray(u.rounds) ? u.rounds : [];
+  const rounds = Array.isArray(u.rounds) ? u.rounds.filter((x) => x !== null && typeof x === 'object') : [];
   const last = rounds.at(-1);
   const scores = rounds.map((x) => score(x.score)).join(' → ');
   const lines = [

@@ -42,10 +42,15 @@ export function readMap(buf) {
   try { return { map: maskDeep(mapFromText(buf.toString('utf8'), 'map/events.jsonl')) }; } catch (e) { return { error: maskSecrets(String(e.message)).slice(0, 500) }; }
 }
 
-// The issues and PRs each unit links, as rows for db.setUnitRefs.
-export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).map((x) => ({ unit: u.id, key: x.key })));
+// The issues and PRs each unit links, as rows for db.setUnitRefs: at most MAX_REFS_PER_UNIT per unit,
+// the same cap the trail writes under (trail.mjs CAPS.refsPerUnit), so one log cannot fan out into
+// thousands of rows or of access checks on a page view.
+export const MAX_REFS_PER_UNIT = 10;
+export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).slice(0, MAX_REFS_PER_UNIT).map((x) => ({ unit: u.id, key: x.key })));
 
-// trail (optional): { refreshRun(installationId, repo, runId) }, run for every run whose state changed.
+// trail (optional): { refreshRun(installationId, repo, runId) }, run for every run whose state changed,
+// and again at every later sync for a run whose last refresh held a comment back (db trailPending),
+// even when the branch tip has not moved.
 export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null }) {
   const chains = new Map(); // one sync per repo at a time; a second waits for the first
   const serial = (k, fn) => {
@@ -65,7 +70,10 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
         await db.setRepoSync(installationId, repo.id, { headSha: null, error: null, lessons: null });
         return { repo: repo.fullName, head: null, runs: 0 };
       }
-      if (!force && current?.headSha === head) return { repo: repo.fullName, head, unchanged: true };
+      if (!force && current?.headSha === head) {
+        const retried = await retrail(installationId, current, []);
+        return { repo: repo.fullName, head, unchanged: true, ...(retried.length ? { retried } : {}) };
+      }
       const tree = await gh.tree(token, repo.fullName, head);
       const entries = tree.tree ?? [];
       if (!entries.some((e) => e.path === MARKER && e.type === 'blob')) {
@@ -108,12 +116,26 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
       const config = await readSide(token, repo, entries, 'coordinator.json', LIMITS.configBytes, (j) => (isObj(j) ? maskDeep(j) : null));
       const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons.error, config.error].filter(Boolean);
       await db.setRepoSync(installationId, repo.id, { headSha: head, error: errors.length ? errors.join('; ') : null, lessons: lessons.value, config: config.value });
-      if (trail && out.updated.length) {
-        const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
-        for (const runId of out.updated) await trail.refreshRun(installationId, fresh, runId);
-      }
+      const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
+      const retried = await retrail(installationId, fresh, out.updated);
+      if (retried.length) out.retried = retried;
       return out;
     });
+  }
+
+  // Refreshes the trail of the changed runs plus every run still owed a comment, and records which
+  // ones still are. The flag lives in the read model, so a restart keeps it; the tracker rows keep
+  // the comment ids, so a retry edits or adopts the comment and never posts a second one.
+  async function retrail(installationId, repo, changed) {
+    if (!trail || !repo) return [];
+    const owed = (await db.runs(installationId, repo.id)).filter((r) => r.trailPending).map((r) => r.runId);
+    const retried = owed.filter((id) => !changed.includes(id));
+    for (const runId of [...changed, ...retried]) {
+      const r = await trail.refreshRun(installationId, repo, runId);
+      const pending = (r?.comments ?? []).some((c) => c[2] === 'deferred');
+      if (pending || owed.includes(runId)) await db.setTrailPending(installationId, repo.id, runId, pending);
+    }
+    return retried;
   }
 
   // { value, error }: never throws, whatever the file holds.

@@ -34,6 +34,7 @@ export function loadConfig(env = process.env) {
     resyncMs: int(env.RESYNC_MINUTES, 15, 0, 1440) * 60_000,
     accessTtlMs: int(env.ACCESS_TTL_SECONDS, 60, 0, 60) * 1000, // design 10.3: at most 60 s
     sessionDays: int(env.SESSION_DAYS, 7, 1, 30),
+    maxConnections: int(env.MAX_CONNECTIONS, 1000, 10, 100_000),
     sessionSecret,
     // The GitHub trail: tracker comments and board fields. "off" turns one off for every repo;
     // a repo turns its own off in coordinator.json ("trackers": false, or no "board").

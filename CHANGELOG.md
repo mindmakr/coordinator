@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Service hardening (#11, review round 4):** linked refs capped at ingest and per page view, deferred tracker comments retried at every sync and across restarts, oversized webhooks refused by header, bounded connections; the tracker template skips null rounds. Details in `service/CHANGELOG.md`.
 - **GitHub App and read-only web dashboard** (#11): `service/` (AGPL-3.0) reads the `coordinator-state` branch on push webhooks, validates each event log with the skill's schema, and shows projects, runs, run dashboards, unit pages, maps and the coordinator page, drawn by the skill's own renderers, to people who can read the repo on GitHub (checked per request with their own token; anyone else gets 404). It keeps one tracker comment per unit on each linked issue or PR and the unit's board card (Run, Unit state, Status) current, and shows merges and check results in the timelines. Sign-in through the App, Postgres read model, Dockerfile, App manifest and Dokploy notes. Details in `service/CHANGELOG.md`.
 - **Map logs read from text:** `lib/map/log.mjs` exports `fromText`, the same checks and replay as `load` with no files, so a pushed map reads the same anywhere.
 - **Tracker template** (`lib/tracker.mjs`): the one tracker comment per unit, with every piece of run text in an inline code span (no Markdown, HTML, autolinks or mentions), status only unless asked for detail; shared by the lead and the service.

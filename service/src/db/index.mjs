@@ -8,7 +8,7 @@
 // Sessions hold encrypted tokens and a hash of the cookie, never the cookie.
 
 const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'run', 'putRun', 'dropRunsExcept', 'deleteInstallation',
-  'putRunMap', 'setUnitRefs', 'runsReferencing', 'addGhEvent', 'ghEvents', 'tracker', 'putTracker'];
+  'putRunMap', 'setTrailPending', 'setUnitRefs', 'runsReferencing', 'addGhEvent', 'ghEvents', 'tracker', 'putTracker'];
 
 export function guard(db) {
   const out = { ...db };

@@ -61,3 +61,11 @@ test('hostile numbers and ids from a raw run.init never reach the comment raw', 
   s.units[0].rounds = 'not a list';
   assert.match(trackerBody(s, 'u1'), /Tries:\*\* 0 of \?/);
 });
+
+test('null and non-object entries in rounds are skipped, never thrown on', () => {
+  const s = run();
+  s.units[0].rounds = [null, 7, 'x', { verdict: 'fail', score: 4, gap: 'g' }, null];
+  const b = trackerBody(s, 'u1', { detail: true });
+  assert.match(b, /Tries:\*\* 1 of/);
+  assert.match(b, /last verdict `fail`/);
+});

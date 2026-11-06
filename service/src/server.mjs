@@ -15,6 +15,7 @@ import { verifySignature, webhooks as makeWebhooks } from './webhook.mjs';
 
 const MAX_WEBHOOK = 5 * 1024 * 1024;
 const MAX_FORM = 4 * 1024;
+export const MAX_REPOS_PER_VIEW = 20; // distinct linked repos whose access is checked for one page view
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\/unit\/([^/]+)|\/(maps)|\/([a-z][a-z-]{0,30}))?)?\/?$/;
 
@@ -80,6 +81,7 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
   // ours. Only refused requests are counted and limited.
   async function webhook(req, res) {
     const ip = clientIp(req);
+    if (Number(req.headers['content-length']) > MAX_WEBHOOK) { res.setHeader('Connection', 'close'); return send(res, 413, 'too large'); }
     const raw = await readBody(req, MAX_WEBHOOK);
     if (!verifySignature(config.github.webhookSecret, raw, req.headers['x-hub-signature-256'])) {
       if (limited(res, 'webhookFailures', ip)) return;
@@ -135,17 +137,24 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
 
   // GitHub's events for the issues and PRs the run's units link, from this installation only,
   // and only for repos this viewer can read too (a linked repo may be more private than the run's).
+  // Access is checked only for repos that have events, and for at most MAX_REPOS_PER_VIEW of them;
+  // the rest show no GitHub lines rather than cost the viewer's token one call each.
   async function githubEvents(user, repo, state) {
     const refs = refsOf(state);
     if (!refs.length) return [];
     const events = await db.ghEvents(repo.installationId, [...new Set(refs.map((r) => r.key))]);
-    const allowed = new Map();
+    const byKey = new Map();
+    for (const e of events) byKey.set(e.refKey, [...(byKey.get(e.refKey) ?? []), e]);
+    const home = repo.fullName.toLowerCase();
+    const allowed = new Map([[home, true]]);
+    let checked = 0;
     const out = [];
     for (const { unit, key } of refs) {
+      const list = byKey.get(key);
+      if (!list) continue;
       const name = key.split('#')[0];
-      if (!allowed.has(name)) allowed.set(name, name === repo.fullName.toLowerCase() || !!(await acl.readable(user, name)));
-      const list = allowed.get(name) ? events.filter((e) => e.refKey === key) : [];
-      if (list.length) out.push({ unit, events: list });
+      if (!allowed.has(name)) allowed.set(name, checked++ < MAX_REPOS_PER_VIEW && !!(await acl.readable(user, name)));
+      if (allowed.get(name)) out.push({ unit, events: list });
     }
     return out;
   }
@@ -213,6 +222,11 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
       if (req.url.split('?')[0] !== '/healthz') log.info('request', { method: req.method, path: req.url.split('?')[0].slice(0, 200), status: res.statusCode, ms: now() - t });
     });
   });
+
+  // One slow or idle client cannot hold the process: bounded connections and request time.
+  server.maxConnections = config.maxConnections ?? 1000;
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 20_000;
 
   // Every installation re-read from GitHub: a missed or failed delivery heals at the next pass.
   // Unchanged branch tips cost one ref read each.

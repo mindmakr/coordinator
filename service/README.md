@@ -74,7 +74,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `DATABASE_URL` | for real use | Postgres connection string |
 | `GITHUB_APP_SLUG` | no | Shows an "install the App" link |
 | `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` (last entry) for rate limits |
-| `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 60, design 10.3), `SESSION_DAYS` | no | Defaults 3000, `coordinator-state`, 60, 7 |
+| `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 60, design 10.3), `SESSION_DAYS`, `MAX_CONNECTIONS` | no | Defaults 3000, `coordinator-state`, 60, 7, 1000 |
 | `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off for every repo |
 | `RESYNC_MINUTES` | no | How often every installation is re-read (default 15, 0 turns it off) |
 

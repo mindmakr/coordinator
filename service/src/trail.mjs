@@ -16,6 +16,7 @@ import { SCOPES } from './github.mjs';
 import { limiter } from './ratelimit.mjs';
 import { repoBase } from './pages.mjs';
 import { projectFence } from './project.mjs';
+import { MAX_REFS_PER_UNIT } from './ingest.mjs';
 
 const enc = encodeURIComponent;
 
@@ -31,7 +32,7 @@ export function githubLines(events) {
 }
 
 // Caps on what one run log can make the App write: a hostile log is pusher-controlled.
-export const CAPS = { units: 50, refsPerUnit: 10, commentWritesPerInstallation: 200, windowMs: 10 * 60_000 };
+export const CAPS = { units: 50, refsPerUnit: MAX_REFS_PER_UNIT, commentWritesPerInstallation: 200, windowMs: 10 * 60_000 };
 
 export function trail({ db, gh, config, log, now = Date.now }) {
   const on = { trackers: config.trail?.trackers !== false, board: config.trail?.board !== false };
