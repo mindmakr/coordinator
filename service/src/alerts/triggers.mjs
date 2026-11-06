@@ -13,6 +13,8 @@ export const TRIGGERS = {
   security: { urgency: 'high', channels: ['push', 'email', 'github'], label: 'security finding' },
   'lead-quiet': { urgency: 'normal', channels: ['push'], label: 'lead went quiet' },
   'answer-changed': { urgency: 'normal', channels: ['push'], label: 'answer changed after use' },
+  // The same, for a question the lead closed by a decision rather than by using an answer.
+  'answer-changed-decided': { urgency: 'normal', channels: ['push'], label: 'answer changed after the lead decided' },
 };
 
 // A run seen for the first time only alerts for questions asked this recently,
@@ -35,8 +37,9 @@ export function runTriggers(before, after, nowMs) {
   if (!before) return out;
   // An answer that reached the lead after it used the question: pull records it as a flagged note (lib/incoming.mjs).
   const seen = new Set((before.notes ?? []).filter((n) => n.changedAfterUse).map((n) => JSON.stringify(n.changedAfterUse)));
+  const status = new Map(questions(after).map((q) => [q.id, q.status]));
   for (const n of after.notes ?? []) {
-    if (n.changedAfterUse && !seen.has(JSON.stringify(n.changedAfterUse))) out.push({ trigger: 'answer-changed', unit: n.unit ?? null, ref: String(n.changedAfterUse.q ?? '') || undefined });
+    if (n.changedAfterUse && !seen.has(JSON.stringify(n.changedAfterUse))) out.push({ trigger: status.get(n.changedAfterUse.q) === 'decided' ? 'answer-changed-decided' : 'answer-changed', unit: n.unit ?? null, ref: String(n.changedAfterUse.q ?? '') || undefined });
   }
   const units = new Map(before.units.map((u) => [u.id, u]));
   for (const u of after.units) {

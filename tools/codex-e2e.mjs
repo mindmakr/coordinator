@@ -32,7 +32,21 @@ const state = join(project, '.coordinator');
 const RUN = 'codex-e2e';
 
 const sh = (cmd, a, o = {}) => spawnSync(cmd, a, { cwd: project, encoding: 'utf8', ...o });
-const version = sh('codex', ['--version'], { cwd: undefined });
+// On Windows an npm install gives codex.cmd, which only a shell can start; the native
+// installer gives codex.exe. Prefer the .exe; for a .cmd, quote every argument for cmd.exe
+// and send the prompt on stdin, so no free text goes through the shell.
+function findCodex() {
+  if (process.platform !== 'win32') return { cmd: 'codex', shell: false };
+  const found = (spawnSync('where', ['codex'], { encoding: 'utf8' }).stdout ?? '').split(/\r?\n/).filter(Boolean);
+  const exe = found.find((p) => /\.exe$/i.test(p));
+  if (exe) return { cmd: exe, shell: false };
+  const cmd = found.find((p) => /\.(cmd|bat)$/i.test(p));
+  return cmd ? { cmd, shell: true } : { cmd: 'codex', shell: false };
+}
+const CODEX = findCodex();
+const quote = (a) => (CODEX.shell && /[\s"&|<>^%]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a);
+const codexRun = (a, o = {}) => sh(quote(CODEX.cmd), a.map(quote), { ...o, shell: CODEX.shell });
+const version = codexRun(['--version'], { cwd: undefined });
 if (version.status !== 0) { console.error('codex is not installed: npm i -g @openai/codex, then codex login'); process.exit(3); }
 
 // The project: a sum that drops cents, and a test that says so.
@@ -55,9 +69,9 @@ const prompt = [
   'Do not ask me anything. Run the loop to the end with the run.mjs script, then close the run.',
 ].join(' ');
 const t0 = Date.now();
-const codex = sh('codex', ['exec', '--cd', project, '--sandbox', sandbox, '--add-dir', root, '-c', 'shell_environment_policy.inherit=all',
-  '--json', '-o', join(root, 'last-message.txt'), ...(opt('model') ? ['-m', opt('model')] : []), prompt],
-  { env: { ...process.env, COORDINATOR_DIR: state }, stdio: ['ignore', 'pipe', 'pipe'], timeout: minutes * 60_000, maxBuffer: 256 * 1024 * 1024 });
+const codex = codexRun(['exec', '--cd', project, '--sandbox', sandbox, '--add-dir', root, '-c', 'shell_environment_policy.inherit=all',
+  '--json', '-o', join(root, 'last-message.txt'), ...(opt('model') ? ['-m', opt('model')] : []), '-'],
+  { env: { ...process.env, COORDINATOR_DIR: state }, input: prompt, timeout: minutes * 60_000, maxBuffer: 256 * 1024 * 1024 });
 writeFileSync(join(root, 'codex.jsonl'), codex.stdout ?? '');
 
 const checks = [];

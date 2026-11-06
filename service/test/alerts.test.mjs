@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { alertConfig } from '../src/alerts/config.mjs';
 import { inQuiet, settingsOf } from '../src/alerts/index.mjs';
 import { emailSender, pushSender } from '../src/alerts/senders.mjs';
-import { quietSince, runTriggers } from '../src/alerts/triggers.mjs';
+import { quietSince, runTriggers, TRIGGERS } from '../src/alerts/triggers.mjs';
 import { readLog } from '../src/ingest.mjs';
 import { appendEvent, makeRun, signIn, startApp, stateFiles } from './helpers.mjs';
 
@@ -62,6 +62,13 @@ test('triggers: a new question, an answer changed after use, a unit stopped and 
   late.notes.push({ kind: 'person', text: 'answer changed after use: q1 → client', unit: 'u1', at: new Date().toISOString(), changedAfterUse: { q: 'q1', choices: ['client'], other: null, by: 'person', at: new Date().toISOString() } });
   assert.deepEqual(runTriggers(b2, late, n).map((x) => [x.trigger, x.ref]), [['answer-changed', 'q1']]);
   assert.deepEqual(runTriggers(late, late, n), []);
+  // A question the lead closed by a decision: the alert says so, not "after use".
+  const dec = structuredClone(before);
+  dec.notes.push({ kind: 'decision', text: 'server', answers: 'q1', at: new Date().toISOString() });
+  const decLate = structuredClone(dec);
+  decLate.notes.push({ kind: 'person', text: 'answer changed after the lead decided: q1 → client', unit: 'u1', at: new Date().toISOString(), changedAfterUse: { q: 'q1', choices: ['client'], other: null, by: 'person', at: new Date().toISOString() } });
+  assert.deepEqual(runTriggers(dec, decLate, n).map((x) => [x.trigger, x.ref]), [['answer-changed-decided', 'q1']]);
+  assert.equal(TRIGGERS['answer-changed-decided'].label, 'answer changed after the lead decided');
 });
 
 test('triggers: a lead is quiet when units are mid-work and nothing moved for twice the stale budget', () => {

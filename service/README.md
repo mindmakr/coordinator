@@ -148,7 +148,7 @@ One container plus Postgres:
 3. Environment: everything in the table above, with `DATABASE_URL` from step 1, `BASE_URL` set to the domain, and `TRUST_PROXY=1`. Mount the App key as a file and set `GITHUB_APP_PRIVATE_KEY_FILE`, or paste it into `GITHUB_APP_PRIVATE_KEY`.
 4. Domain: add it with HTTPS (Let's Encrypt), container port 3000.
 5. Deploy. Migrations run at start. `GET /healthz` answers `ok`.
-6. Point the App's webhook at `https://<domain>/webhook`, then run `npm run sync -- --all` from the container's terminal once to pick up repos installed before the service was up.
+6. Point the App's webhook at `https://<domain>/webhook`. For each installation made before the service was up, run `npm run sync -- <installation-id>` once from the container's terminal. The id is the number at the end of the installation's settings page (GitHub: Settings → Applications → Installed GitHub Apps → Configure; for an organisation, Organization settings → GitHub Apps), whose address ends in `/installations/<id>`. `sync --all` only re-reads installations already in the database, so on a new database it does nothing.
 
 Logs go to stdout as JSON lines. Deleting the database loses nothing but sessions and the audit log: a sync rebuilds every run from the repos.
 

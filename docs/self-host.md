@@ -30,16 +30,36 @@ The App is made from [`service/app-manifest.json`](../service/app-manifest.json)
 
 ## 2. Run it
 
-### Docker
+### Docker Compose (one machine)
 
-From the repository root (the image carries the skill's shared code):
+The service and Postgres together, both bound to `127.0.0.1`. From the repository root:
+
+1. Copy the settings file and fill it in:
+
+   ```
+   cp service/.env.example service/.env
+   ```
+
+   Set `SESSION_SECRET` (`openssl rand -base64 48`) and the `GITHUB_*` values from step 1. Leave `DATABASE_URL` as it is: Compose replaces it with its own database (`db:5432` inside the Compose network).
+2. Build and start:
+
+   ```
+   docker compose -f service/docker-compose.yml up --build -d
+   ```
+
+3. Check it: `curl http://127.0.0.1:3000/healthz` answers `ok`. The service applied its migrations (`service/sql/001` to `007`) before it began listening; `docker compose -f service/docker-compose.yml logs service` shows a `listening` line, or `could not start` with the cause.
+4. Stop it with `docker compose -f service/docker-compose.yml down` (add `-v` to delete the database too).
+
+To reach it from the internet, put it behind a reverse proxy with HTTPS on your domain, set `BASE_URL` to that domain and `TRUST_PROXY=1`, and change the `ports` line in `docker-compose.yml` if the proxy runs elsewhere.
+
+### Docker, with your own Postgres
 
 ```
 docker build -f service/Dockerfile -t coordinator-service .
-docker run -p 3000:3000 --env-file service/.env coordinator-service
+docker run -d -p 127.0.0.1:3000:3000 --env-file service/.env coordinator-service
 ```
 
-Or `docker compose -f service/docker-compose.yml up --build` for the service and Postgres together, bound to `127.0.0.1`. Migrations run at start; `GET /healthz` answers `ok`.
+Here `DATABASE_URL` in `service/.env` must name a host the container can reach. `localhost` is the container itself, not your machine: use the database's own host name, or `host.docker.internal` for a Postgres on the same machine (Docker Desktop; on Linux add `--add-host=host.docker.internal:host-gateway`).
 
 ### Dokploy
 
@@ -47,7 +67,17 @@ Or `docker compose -f service/docker-compose.yml up --build` for the service and
 2. Create an application from this repository: build type Dockerfile, Dockerfile path `service/Dockerfile`, build context `.`.
 3. Set the environment (below), with `DATABASE_URL` from step 1, `BASE_URL` set to your domain and `TRUST_PROXY=1`. Mount the App key as a file and set `GITHUB_APP_PRIVATE_KEY_FILE`, or paste it into `GITHUB_APP_PRIVATE_KEY`.
 4. Add the domain with HTTPS, container port 3000.
-5. Deploy. Point the App's webhook at `https://<domain>/webhook`, then run `npm run sync -- --all` once from the container's terminal to pick up repos installed before the service was up.
+5. Deploy. Point the App's webhook at `https://<domain>/webhook`.
+
+### Repos installed before the service was up
+
+Their install events went nowhere, so read them once by hand, from the repository's `service/` folder, or the container's terminal (`docker compose -f service/docker-compose.yml exec service npm run sync -- <installation-id>` with Compose):
+
+```
+npm run sync -- <installation-id>
+```
+
+The installation id is the number at the end of the installation's settings page: on GitHub, **Settings → Applications → Installed GitHub Apps → Configure** next to your App (for an organisation, **Organization settings → GitHub Apps**); the address ends in `/installations/<id>`. Run it once per installation. Later installs arrive by webhook, and every installation the service knows is re-read every 15 minutes.
 
 ## Environment
 
