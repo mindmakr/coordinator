@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { pickAnchor, scrollDelta } from '../lib/anchor.mjs';
 import { artifact } from '../lib/evidence.mjs';
 import { hud } from '../lib/hud.mjs';
 import { linkify } from '../lib/links.mjs';
@@ -286,34 +285,46 @@ test('every time is a <time> with an ISO datetime; the snapshot spells out UTC; 
   assert.match(live, /data-at="\d{4}-/, 'filters still read the raw timestamp');
 });
 
-test('scroll anchor: found again by key when the block it sits in is replaced', () => {
-  // The reader is inside the timeline: its block starts above the fold, a row is first on screen.
-  const before = [{ key: 'k:units', top: -900, bottom: -300 }, { key: 'k:timeline', top: -200, bottom: 1400 }, { key: 'a:h-timeline', top: -230, bottom: -200 },
-    { key: 'a:ev|t2|decision|', top: 12, bottom: 40 }, { key: 'a:ev|t1|note|', top: 40, bottom: 70 }];
-  const anchor = pickAnchor(before);
-  assert.deepEqual(anchor, { key: 'a:ev|t2|decision|', top: 12 }, 'the first row that starts on screen, not the block');
-  // Three new decisions: the timeline block is replaced (new nodes) and the row moved down 106 px.
-  const after = [{ key: 'k:units', top: -900, bottom: -300 }, { key: 'k:timeline', top: -200, bottom: 1506 }, { key: 'a:ev|t5|decision|', top: 12, bottom: 40 },
-    { key: 'a:ev|t2|decision|', top: 118, bottom: 146 }];
-  assert.equal(scrollDelta(anchor, after), 106, 'scroll down by what the content above it grew');
-  assert.equal(scrollDelta(anchor, [{ key: 'k:units', top: 0, bottom: 10 }]), 0, 'gone: no jump');
-  assert.equal(scrollDelta(null, after), 0);
-  assert.deepEqual(pickAnchor([{ key: 'k:big', top: -50, bottom: 2000 }]), { key: 'k:big', top: -50 }, 'only a tall block on screen');
-  // The keys are stable across renders: a replaced timeline block renders the same row keys.
+test('row keys are stable across renders, so the morph keeps the nodes native scroll anchoring holds on to', () => {
   setup('sa1');
   run('note', 'sa1', '--kind', 'decision', '--text', 'first');
   const key = (html) => /<li data-a="(ev\|[^"]+\|decision\|[^"]*)"/.exec(html)[1];
-  const blockHash = (html) => /data-k="timeline" data-h="([^"]+)"/.exec(html)[1];
   const one = readFileSync(join(runDir('sa1'), 'hud.html'), 'utf8');
   run('note', 'sa1', '--kind', 'decision', '--text', 'second');
   const two = readFileSync(join(runDir('sa1'), 'hud.html'), 'utf8');
-  assert.notEqual(blockHash(one), blockHash(two), 'the block is replaced');
-  assert.ok(two.includes(`data-a="${key(one)}"`), 'its first row keeps its key');
+  assert.ok(two.includes(`data-a="${key(one)}"`), 'the first row keeps its key');
   const s = state('sa1');
   const live = hud(view(s, decide(s)), Date.now(), { token: 't', nonce: 'n' });
-  assert.match(live, /const pickAnchor = function pickAnchor/);
-  assert.doesNotMatch(live, /isConnected/, 'never by node identity');
-  assert.match(live, /document\.fonts \? document\.fonts\.ready/, 'reload restores after layout settles');
+  assert.match(live, /const morph = function morph/);
+  assert.doesNotMatch(live, /pickAnchor|scrollDelta|overflow-anchor: none/, 'no custom scroll correction: the browser\'s anchoring does it');
+  assert.match(live, /<button id="live-retry" class="retry" type="button" hidden>Retry<\/button>/);
+  assert.match(live, /Disconnected — if the server restarted, open the new link it printed/);
+  assert.match(live, /if \(refused \|\| failures >= 5\) \{ status\('disconnected', DEAD\); return; \}/, 'no endless retries with a dead token');
+});
+
+test('every data-a and data-k is unique on a rendered page', () => {
+  setup('uk1', '--repo', 'm/p');
+  run('add', 'uk1', 'u3', '--bar', 'b', '--reason', 'more', '--behaviour', 'It should total', '--behaviour', 'It should round');
+  for (const u of ['u1', 'u2']) {
+    run('behave', 'uk1', u, '--text', 'It should total'); run('behave', 'uk1', u, '--text', 'It should round');
+    run('evidence', 'uk1', u, '--kind', 'log', '--text', 'same log'); run('evidence', 'uk1', u, '--behaviour', 'B1', '--kind', 'test', '--text', 'ok');
+    run('note', 'uk1', '--kind', 'person', '--text', 'same note', '--unit', u);
+    run('ask', 'uk1', '--question', 'Same?', '--header', 'Same', '--option', 'Yes', '--option', 'No', '--unit', u);
+  }
+  run('behave', 'uk1', '--goal', '--text', 'It should ship'); run('evidence', 'uk1', '--goal', '--behaviour', 'G1', '--kind', 'log', '--text', 'same log');
+  for (const k of ['decision', 'follow-up', 'decision']) run('note', 'uk1', '--kind', k, '--text', 'the same words');
+  run('answer', 'uk1', 'q1', '--choice', 'Yes'); run('use-answer', 'uk1', 'q1');
+  const s = state('uk1'); const v = view(s, decide(s));
+  const pages = {
+    'hud.html': readFileSync(join(runDir('uk1'), 'hud.html'), 'utf8'), live: hud(v, Date.now(), { token: 't', nonce: 'n' }),
+    'units/u1.html': readFileSync(join(runDir('uk1'), 'units', 'u1.html'), 'utf8'), 'live unit': unitPage(v, 'u2', Date.now(), { token: 't', nonce: 'n' }),
+  };
+  for (const [name, html] of Object.entries(pages)) {
+    const keys = [...html.matchAll(/ data-[ak]="([^"]+)"/g)].map((m) => m[0].slice(1, 7) + m[1]);
+    const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
+    assert.deepEqual(dupes, [], `${name}: duplicate keys`);
+    assert.ok(keys.length > 20, `${name}: ${keys.length} keys`);
+  }
 });
 
 test('after freeze a behaviour is removed or reworded only with a reason, never mid-judgement', () => {
@@ -368,41 +379,6 @@ test('answered questions leave the open count; a legacy decision note is the ans
   const labels = runTimeline(state('aq1')).map((e) => e.text);
   assert.ok(labels.includes('q1 answered: Keep it narrowed to holders of the permission'));
   assert.ok(labels.includes('q2 answered: No'));
-});
-
-test('reader just below a list that grows: the next keyed leaf is the anchor, not the straddling container', () => {
-  // Evidence, Behaviours, Notes on a card, and the unit page's Evidence: same shape.
-  for (const list of ['u-u5-ev', 'u-u5-beh', 'p-notes', 'p-u5-ev']) for (let off = 5; off <= 50; off += 5) {
-    const rows = (n) => Array.from({ length: n }, (_, i) => ({ key: `a:${list}-E${i + 1}`, top: -off - 28 * (n - i), bottom: -off - 28 * (n - i) + 24, leaf: true }));
-    const before = [{ key: 'k:unit-u5', top: -900, bottom: 600, leaf: false }, { key: `a:d-${list}`, top: -400, bottom: -off, leaf: false }, ...rows(5),
-      { key: 'a:next-u5', top: 10 - off, bottom: 28 - off, leaf: true }, { key: 'a:open-u5', top: 40 - off, bottom: 58 - off, leaf: true }, { key: 'a:say-u6', top: 200, bottom: 240, leaf: true }];
-    const anchor = pickAnchor(before);
-    // The first line after the list that starts at or below the viewport top.
-    assert.equal(anchor.key, off <= 10 ? 'a:next-u5' : off <= 40 ? 'a:open-u5' : 'a:say-u6', `${list} at -${off}`);
-    const below = new Set(['a:next-u5', 'a:open-u5', 'a:say-u6']);
-    const grown = before.map((i) => (below.has(i.key) ? { ...i, top: i.top + 126, bottom: i.bottom + 126 } : i));
-    assert.equal(scrollDelta(anchor, grown), 126, `${list} at -${off}: scroll by what the list grew`);
-  }
-  assert.equal(pickAnchor([{ key: 'a:hidden', top: 0, bottom: 0, leaf: true }, { key: 'a:row', top: 20, bottom: 40, leaf: true }]).key, 'a:row', 'a collapsed or filtered row is never the anchor');
-  assert.equal(scrollDelta({ key: 'a:x', top: 10 }, [{ key: 'a:x', top: 10.6 }]), 0, 'under 1 px is left alone');
-  // Every growing list is followed by a keyed leaf, so there is always an anchor below it.
-  setup('gl1');
-  run('behave', 'gl1', 'u1', '--text', 'It should total');
-  run('evidence', 'gl1', 'u1', '--kind', 'log', '--text', 'ok');
-  run('note', 'gl1', '--kind', 'person', '--text', 'hi', '--unit', 'u1');
-  const dash = readFileSync(join(runDir('gl1'), 'hud.html'), 'utf8');
-  for (const k of ['d-u-u1-beh', 'd-u-u1-ev']) assert.ok(dash.indexOf(`data-a="${k}"`) < dash.indexOf('data-a="next-u1"'), k);
-  const pg = readFileSync(join(runDir('gl1'), 'units', 'u1.html'), 'utf8');
-  for (const [blockKey, after] of [['behaviours', 'h-Evidence'], ['evidence', 'h-Rounds'], ['notes', 'h-timeline']]) {
-    assert.ok(pg.indexOf(`data-k="${blockKey}"`) < pg.indexOf(`data-a="${after}"`), blockKey);
-  }
-  assert.match(dash, /html \{ overflow-anchor: none; \}/, 'one mechanism: the browser\'s own anchoring is off');
-  const s = state('gl1');
-  const live = hud(view(s, decide(s)), Date.now(), { token: 't', nonce: 'n' });
-  assert.doesNotMatch(live, /nativeAnchor/);
-  assert.match(live, /<button id="live-retry" class="retry" type="button" hidden>Retry<\/button>/);
-  assert.match(live, /Disconnected — if the server restarted, open the new link it printed/);
-  assert.match(live, /if \(refused \|\| failures >= 5\) \{ status\('disconnected', DEAD\); return; \}/, 'no endless retries with a dead token');
 });
 
 test('the footer version matches the plugin', () => {

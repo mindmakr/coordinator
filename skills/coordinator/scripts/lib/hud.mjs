@@ -133,11 +133,11 @@ function unitCard(u, ctx, form, repo) {
     + `<p class="say" data-a="say-${esc(u.id)}">${esc(u.sentence)}</p>`
     + triesRow(u)
     + scoreChart(u.roundList)
-    + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo)) : '')
+    + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo, [], null, `u-${u.id}`)) : '')
     + (u.evidenceItems.length ? toggle(`u-${u.id}-ev`, `Evidence · ${u.evidenceItems.length}`, evidenceList(u.evidenceItems, repo, ctx, `u-${u.id}-ev`)) : '')
     + (raw ? toggle(`u-${u.id}-raw`, 'Gap and evidence', `<dl>${raw}</dl>`) : '')
     + `<div class="unit-next" data-a="next-${esc(u.id)}"><b>Next:</b> ${esc(u.next)}</div>`
-    + u.personNotes.slice(-2).map((n) => `<p class="from" data-a="from-${esc(n.at)}"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('')
+    + u.personNotes.slice(-2).map((n) => `<p class="from" data-a="from-${esc(u.id)}-${esc(n.at)}"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('')
     + (form ? toggle(`u-${u.id}-note`, 'Add a note on this unit', noteForm(form, u.id)) : '')
     + `<div class="row" data-a="open-${esc(u.id)}"><a class="open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
   return blk(`unit-${u.id}`, html, 'section', ` class="card${u.finished ? ' fin' : ''}" id="unit-${esc(u.id)}"`);
@@ -163,13 +163,13 @@ export function goalBlock(v, ctx) {
 }
 
 function list(title, items, repo) {
-  const body = items.length ? `<ul>${keyed(items, (t) => `l-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None.</p>';
+  const body = items.length ? `<ul>${keyed(items, (t) => `l-${title}-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None.</p>';
   return `<section class="card" data-a="list-${esc(title)}"><h3>${esc(title)} <span class="chip">${items.length}</span></h3>${body}</section>`;
 }
 
 // Open questions only, counted; answered ones in a dimmed, collapsed group with the answer first.
 function questionsCard(v, repo) {
-  const open = v.questions.length ? `<ul>${keyed(v.questions, (t) => `l-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None open.</p>';
+  const open = v.questions.length ? `<ul>${keyed(v.questions, (t) => `l-Questions-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None open.</p>';
   const done = v.answeredQuestions.map((q) => `<li data-a="aq-${esc(q.id)}"><b>${esc(q.id)}</b> ${esc(q.title)}`
     + `<p class="ans"><b>Answered:</b> ${linkify(q.answer, repo)} <span class="cause">— by ${q.by === 'person' ? 'you' : esc(q.by)}${q.at ? `, ${stamp(q.at)}` : ''}</span></p>`
     + `${q.decision ? `<p class="cause">Decision: ${linkify(q.decision, repo)}</p>` : ''}</li>`).join('');

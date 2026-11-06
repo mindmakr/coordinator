@@ -5,7 +5,6 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { anchor, esc, linkify } from './links.mjs';
 import { css, DARK, LIGHT } from './theme.mjs';
-import { pickAnchor, scrollDelta } from './anchor.mjs';
 import { findMatches, highlight, unhighlight } from './highlight.mjs';
 import { morph } from './morph.mjs';
 import { DOTS } from './plain.mjs';
@@ -16,7 +15,7 @@ export { esc };
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
 const CLIENT = readFileSync(new URL('./live.client.js', import.meta.url), 'utf8');
 // Pure functions the page runs from the same source the tests check.
-const SERVED = [matches, pickAnchor, scrollDelta, morph, findMatches, highlight, unhighlight];
+const SERVED = [matches, morph, findMatches, highlight, unhighlight];
 
 export const cls = (s) => String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '');
 export const when = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
@@ -77,7 +76,7 @@ export function behaviourList(list, repo, evidence = [], ctx = null, key = '') {
   if (!list.length) return '<p class="empty">No behaviours yet.</p>';
   return `<ul class="behaviours">${list.map((b) => {
     const ev = ctx ? evidence.filter((e) => e.behaviour === b.id) : [];
-    return `<li data-a="b-${esc(b.id)}">${chip(b.status, b.status === 'unchecked' ? '' : b.status)} <b>${esc(b.id)}</b> ${linkify(b.text, repo)}`
+    return `<li data-a="${esc(`${key || "b"}-${b.id}`)}">${chip(b.status, b.status === 'unchecked' ? '' : b.status)} <b>${esc(b.id)}</b> ${linkify(b.text, repo)}`
       + `${b.evidence ? `<div class="bev">${linkify(b.evidence, repo)}</div>` : ''}`
       + `${ev.length ? evidenceList(ev, repo, ctx, `${key}-${b.id}`) : ''}</li>`;
   }).join('')}</ul>`;

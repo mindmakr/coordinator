@@ -47,7 +47,7 @@
       const ok = matches({ at: li.dataset.at, badge: li.dataset.badge, unit: li.dataset.unit, label: '', who: '', text: li.textContent }, f, now);
       li.hidden = !ok; if (ok) shown++;
     }
-    body.dataset.sort = f.sort; // CSS reverses the list: rows never move, so the scroll anchor holds
+    body.dataset.sort = f.sort; // CSS reverses the list: rows never move, so scroll anchoring holds
     unhighlight(list);
     const q = f.q.trim();
     const hits = q ? highlight(rows.filter((li) => !li.hidden), q, document) : 0;
@@ -83,15 +83,10 @@
   const scrollKey = key(`scroll:${path}`);
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   let t = 0;
-  // Every keyed element (blocks, headings, cards, rows) with where it sits now.
-  const places = () => [...app.querySelectorAll('[data-k],[data-a]')].map((el) => {
-    const r = el.getBoundingClientRect();
-    return { key: el.dataset.a ? `a:${el.dataset.a}` : `k:${el.dataset.k}`, top: r.top, bottom: r.bottom, leaf: !el.querySelector('[data-k],[data-a]') };
-  });
   let restoring = true; // until the saved place is back, scrolling does not overwrite it
   addEventListener('scroll', () => {
     if (restoring) return;
-    clearTimeout(t); t = setTimeout(() => save(scrollKey, { y: scrollY, anchor: pickAnchor(places()) }), 150);
+    clearTimeout(t); t = setTimeout(() => save(scrollKey, scrollY), 150);
   }, { passive: true });
 
   // Times: the viewer's locale and zone. Relative within 24 h, local date-time otherwise;
@@ -112,19 +107,16 @@
   const localTimes = (root) => root.querySelectorAll('time[datetime]').forEach(localTime);
   setInterval(() => localTimes(document), 30000);
 
-  // One mechanism keeps the reader's place: the page turns the browser's own scroll
-  // anchoring off (CSS) and, after every update, scrolls by how far the anchor moved.
+  // The reader's place during an update is the browser's own scroll anchoring
+  // (overflow-anchor: auto). It works because the morph keeps every node it can.
   let pending = false; let latest = null;
   function patch(html) {
     latest = html; pending = false;
-    const anchor = pickAnchor(places());
     const tpl = document.createElement('template'); tpl.innerHTML = html;
     unhighlight(app); // the morph compares plain text; highlights come back with the filters
     morph(app, tpl.content, { busy, skipped: () => { pending = true; }, added: applyOpen });
     localTimes(app);
     applyTimeline();
-    const delta = scrollDelta(anchor, places());
-    if (delta) scrollBy(0, delta);
   }
   document.addEventListener('focusout', () => setTimeout(() => { if (pending && latest) patch(latest); }, 0));
 
@@ -162,15 +154,13 @@
   applyOpen(document);
   localTimes(document);
   applyTimeline();
-  // Restore once layout has settled (images and fonts), by the saved anchor's key, else the saved offset.
+  // After a reload: back to the saved offset once layout has settled (images and fonts).
   const saved = load(scrollKey, null);
   const settle = () => new Promise((ok) => (document.readyState === 'complete' ? ok() : addEventListener('load', ok, { once: true })))
     .then(() => (document.fonts ? document.fonts.ready : null)).then(() => new Promise((ok) => requestAnimationFrame(ok)));
   settle().then(() => {
-    const y = typeof saved === 'number' ? saved : saved && saved.y; // 0.5.0 before this stored a bare number
+    const y = typeof saved === 'number' ? saved : saved && saved.y; // round 2-4 builds stored { y, anchor }
     if (y) scrollTo(0, y);
-    const delta = saved && saved.anchor ? scrollDelta(saved.anchor, places()) : 0;
-    if (delta) scrollBy(0, delta);
   }).finally(() => { restoring = false; });
   connect();
 })();

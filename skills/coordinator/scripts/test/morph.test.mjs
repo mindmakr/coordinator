@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { scrollDelta } from '../lib/anchor.mjs';
 import { scoreChart } from '../lib/hud.mjs';
 import { findMatches, highlight, unhighlight } from '../lib/highlight.mjs';
 import { morph } from '../lib/morph.mjs';
@@ -48,8 +47,6 @@ test('appending to a long list keeps every row node, so the reader at Decision 2
   assert.ok(after.includes(reader), 'the reader\'s row is the same node');
   assert.deepEqual(added.map((n) => n.text), ['Decision 46', 'Decision 47', 'Decision 48']);
   assert.equal(app.text.includes('Decisions 48'), true, 'changed text is updated in place');
-  // The browser keeps a kept node where it was; where it cannot, the keyed fallback asks for no jump.
-  assert.equal(scrollDelta({ key: 'a:l-d24', top: 300 }, [{ key: 'a:l-d24', top: 300 }]), 0);
 });
 
 test('rows inserted above the reader (the timeline, newest first) are added; the rest stay put', () => {
