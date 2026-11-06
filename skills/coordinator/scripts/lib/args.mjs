@@ -1,11 +1,12 @@
 // Argument parsing and input cleaning shared by the CLIs.
 // Accepts `--key value`, `--key=value` and `--flag`. A value may start with
 // dashes (`--- FAIL: TestX`): only `--name` shaped words are treated as flags.
+// A flag listed in `repeat` may be given more than once and is read as a list.
 import { maskSecrets } from './secrets.mjs';
 
 const FLAG = /^--([a-z][a-z0-9-]*)(?:=([\s\S]*))?$/;
 
-export function parse(argv, allowed = null) {
+export function parse(argv, allowed = null, repeat = []) {
   const pos = [];
   const opt = {};
   for (let i = 0; i < argv.length; i++) {
@@ -13,11 +14,14 @@ export function parse(argv, allowed = null) {
     if (!m) { pos.push(argv[i]); continue; }
     const [, key, inline] = m;
     if (allowed && !allowed.includes(key)) throw new Error(`unknown option --${key}${allowed.length ? ` (allowed: ${allowed.map((k) => `--${k}`).join(' ')})` : ''}`);
-    if (key in opt) throw new Error(`--${key} given twice`);
-    if (inline !== undefined) { opt[key] = inline; continue; }
-    const next = argv[i + 1];
-    if (next === undefined || FLAG.test(next)) opt[key] = true;
-    else { opt[key] = next; i++; }
+    if (key in opt && !repeat.includes(key)) throw new Error(`--${key} given twice`);
+    let value = inline;
+    if (value === undefined) {
+      const next = argv[i + 1];
+      if (next === undefined || FLAG.test(next)) value = true;
+      else { value = next; i++; }
+    }
+    opt[key] = repeat.includes(key) ? [...(opt[key] ?? []), value] : value;
   }
   return { pos, opt };
 }

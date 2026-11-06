@@ -71,6 +71,8 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 
 **Watching a run.** Each run keeps a `hud.html` beside its state. It opens with the situation in plain words, a **Needs you** box with the lead's recommendation (or "Nothing needs you"), and a rough time left; each unit says in one sentence what it is for, how it went and what happens next. Then the unit board, scores per round, budget bars, a timeline, and the decisions, questions and follow-ups. It is rewritten on every change and reloads itself, with no scripts and no network, so you can open it straight from disk. In Claude Code the lead can publish it as a private Artifact. `run.mjs show <run>` prints the same at a glance in text.
 
+**Answering from the HUD.** `run.mjs serve <run>` serves the same page on 127.0.0.1 with answer forms: each question's options as cards, the recommended one first, an Other box, and a note box per unit. The lead asks through the question tool and mirrors each question there, so you can answer in either place and change your answer until the lead uses it. `run.mjs watch <run>`, running in the lead's background, prints each answer and note as it arrives, so the lead hears at once.
+
 ## What's inside
 
 ```
@@ -92,7 +94,7 @@ skills/coordinator/
     ├── run.mjs                 run state and the loop's decisions
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
-    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, plain, hud
+    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, plain, hud, questions, serve
     └── test/                   node:test suites
 ```
 

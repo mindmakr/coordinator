@@ -15,8 +15,15 @@
 //                  on a run with --paths, pass needs a clean detect.mjs --unit result
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C]   only when next says integrate
-//   run.mjs note <run> --kind situation|decision|follow-up|question|bar|info --text T
+//   run.mjs note <run> --kind situation|decision|follow-up|question|bar|info|person --text T
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
+//                  [--unit U] (person: a note from the person about one unit)
+//   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
+//   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
+//   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
+//   run.mjs questions <run>         every question with its options, answer, history and status
+//   run.mjs serve <run> [--port P]  the HUD with answer forms on 127.0.0.1, behind a per-start token
+//   run.mjs watch <run>             one line per new or changed answer and per note from the person; never exits
 //   run.mjs next <run>     prints what to do and records any stops
 //   run.mjs show <run>     prints the compact text HUD (situation, needs you, time left, units, budget, next step)
 //   run.mjs hud <run>      rewrites hud.html beside state.json now and prints its path
@@ -29,14 +36,18 @@ import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { allows, decide, decideUnit, stats } from './lib/rules.mjs';
 import { baseDir, isSafeId, readJson, safeId, update, withLock, writeAtomic } from './lib/store.mjs';
 import { hud } from './lib/hud.mjs';
+import { answer, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
+import { serve } from './lib/serve.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes'],
   add: ['bar', 'after', 'reason', 'title', 'link'], verdict: ['evidence', 'gap', 'cause', 'score'], strategy: ['text'],
-  integrate: ['evidence', 'gap', 'cause'], note: ['kind', 'text', 'recommend', 'answers'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  integrate: ['evidence', 'gap', 'cause'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
 };
+const REPEAT = { ask: ['option'], answer: ['choice'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -177,7 +188,9 @@ const commands = {
     });
   },
   note([run], o) {
-    const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'question', 'bar', 'info'], '--kind');
+    const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'question', 'bar', 'info', 'person'], '--kind');
+    if (kind === 'person') return change(run, (s) => personNote(s, { text: o.text, unit: o.unit }));
+    if (o.unit !== undefined) throw new Error('--unit goes with --kind person (or ask)');
     if (o.recommend !== undefined && kind !== 'question') throw new Error('--recommend goes with --kind question');
     if (o.answers !== undefined && kind !== 'decision') throw new Error('--answers goes with --kind decision');
     return change(run, (s) => {
@@ -191,6 +204,33 @@ const commands = {
       }
       s.notes.push(note);
     }, { closedOk: kind === 'follow-up' });
+  },
+  ask([run], o) { let id; const s = change(run, (st) => { id = ask(st, o); }); return { ...s, asked: id }; },
+  answer([run, id], o) { return change(run, (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person' })); },
+  'use-answer'([run, id]) { return change(run, (s) => useAnswer(s, id)); },
+  questions([run]) { return questions(load(run)).map(({ open, ...q }) => q); },
+  serve([run], o) {
+    load(run);
+    const write = (fn) => (form) => { let anchor; change(run, (s) => { anchor = fn(s, form); }); return anchor; };
+    serve({
+      port: num(o.port, 0, 0, 65_535),
+      page: (live) => { const s = load(run); return hud(view(s, decide(s)), Date.now(), live); },
+      post: {
+        '/answer': write((s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person' }); return id; }),
+        '/note': write((s, f) => { personNote(s, { text: f.get('text'), unit: f.get('unit') || undefined }); return f.get('unit') ? `unit-${f.get('unit')}` : ''; }),
+      },
+    }).then(({ url }) => console.log(JSON.stringify({ url, note: 'local only; stop with Ctrl+C' })), (e) => { console.error(`error: ${e.message}`); process.exit(1); });
+    return null;
+  },
+  // Polls every 2 s (fs.watch misses renames on some systems); the state file is
+  // replaced atomically, so a read never sees half a write.
+  watch([run]) {
+    let prev = load(run);
+    for (const line of events(null, prev)) console.log(line);
+    setInterval(() => {
+      try { const s = load(run); for (const line of events(prev, s)) console.log(line); prev = s; } catch { /* mid-replace on Windows: next tick */ }
+    }, 2000);
+    return null;
   },
   // Returns this round's actions (a stop shows once, here) and records the stops.
   // Stops cascade (a stopped unit stops the units stacked on it), so apply them
@@ -239,9 +279,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|add|freeze|start|beat|built|reset|verdict|strategy|integrate|note|next|show|hud|close|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|add|freeze|start|beat|built|reset|verdict|strategy|integrate|note|ask|answer|use-answer|questions|serve|watch|next|show|hud|close|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
-  const { pos, opt } = parse(rest, FLAGS[cmd] ?? []);
+  const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision }, null, 2));
+  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

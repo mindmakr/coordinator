@@ -1,6 +1,7 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
-import { attention, clip, questions, sentence, situation, timeLeft } from './plain.mjs';
+import { attention, clip, sentence, situation, timeLeft } from './plain.mjs';
+import { answerText, questions } from './questions.mjs';
 
 const MINUTE = 60_000;
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale'];
@@ -29,10 +30,12 @@ export function view(run, plan, nowMs = Date.now()) {
   const notes = run.notes ?? [];
   const pick = (kind) => notes.filter((n) => n.kind === kind).map((n) => n.text);
   const qs = questions(run);
+  const personNotes = notes.filter((n) => n.kind === 'person').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at }));
   const timeline = [
     ...run.units.flatMap((u) => u.rounds.map((r) => ({ at: r.at, kind: r.verdict, who: `${u.id} r${r.n}`, score: r.score, text: r.verdict === 'pass' ? (r.evidence ?? '') : r.gap, cause: r.cause ?? null }))),
     ...integ.map((r, i) => ({ at: r.at, kind: r.verdict, who: `integration r${i + 1}`, score: null, text: r.verdict === 'pass' ? (r.evidence ?? '') : r.gap, cause: r.cause ?? null })),
-    ...notes.map((n) => ({ at: n.at, kind: n.kind, who: '', score: null, text: n.text, cause: null })),
+    ...notes.map((n) => ({ at: n.at, kind: n.kind, who: n.unit ?? '', score: null, text: n.text, cause: null })),
+    ...qs.flatMap((q) => q.history.map((a) => ({ at: a.at, kind: 'answer', who: `${q.id} · ${a.by}`, score: null, text: answerText(a), cause: null }))),
   ].filter((e) => e.at).sort((a, b) => b.at.localeCompare(a.at));
   return {
     id: run.id, tag: run.tag, goal: run.goal, bar: run.bar, fence: run.fence,
@@ -40,6 +43,8 @@ export function view(run, plan, nowMs = Date.now()) {
     open: !run.closed, started: run.createdAt,
     situation: situation(run),
     needsYou: run.closed ? [] : qs.filter((q) => q.open),
+    answered: run.closed ? [] : qs.filter((q) => q.status === 'answered'),
+    asks: qs, personNotes,
     timeLeft: timeLeft(run, plan, nowMs),
     budget: [
       { name: 'time', used: Math.max(0, Math.round((end - Date.parse(run.createdAt)) / MINUTE)), max: run.budget.maxMinutes, unit: 'min' },
@@ -58,12 +63,13 @@ export function view(run, plan, nowMs = Date.now()) {
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
         evidence: last?.evidence ?? null,
         next: label(d),
+        personNotes: personNotes.filter((n) => n.unit === u.id),
       };
     }),
     integration: integ.map((r) => r.verdict),
     next: nextStep(run, plan),
     decisions: pick('decision'),
-    questions: qs.map((q) => `${q.id}${q.open ? '' : ' (answered)'}: ${q.text}${q.recommend ? ` · recommended: ${q.recommend}` : ''}`),
+    questions: qs.map((q) => `${q.id}${q.open ? '' : ` (${q.status})`}: ${q.text}${q.recommend ? ` · recommended: ${q.recommend}` : ''}${q.answer ? ` · answer: ${answerText(q.answer)}` : ''}`),
     followUps: pick('follow-up'),
     timeline,
   };
@@ -78,10 +84,12 @@ export function text(v) {
   const needs = v.needsYou.length
     ? v.needsYou.map((q, i) => `${i ? ' '.repeat(11) : 'needs you  '}${q.id}: ${clip(q.text, 120)}${q.recommend ? ` → recommended: ${clip(q.recommend, 80)}` : ''}`)
     : ['needs you  nothing'];
+  const answered = v.answered.map((q) => `answered   ${q.id}: ${clip(answerText(q.answer), 100)} (by ${q.answer.by}; the lead has not used it yet)`);
   const lines = [
     `${v.id} [${v.tag}] · ${v.phase} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
     `situation  ${clip(v.situation.text, 240)}`,
     ...needs,
+    ...answered,
     `time left  ${v.timeLeft}`,
     '',
     `budget  ${budget}`,

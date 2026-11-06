@@ -28,6 +28,11 @@ From here the run is **unattended**. Do not ask the person anything until the re
 
 `S/run.mjs init <run> --tag <domain> --goal … --bar … --fence "<scope in words>" --paths <dir,dir>`, then `add` each unit (`--after` for stacked work; `--title "#1206 Security gaps"` and `--link <issue or PR URL>` so the HUD names it plainly), then `freeze`. Then record the intake answers (step 1.8) on the run. `--paths` is the fence as path prefixes; the detector reads it. Every change also rewrites the run's HUD, `hud.html`: tell the person where it is, once (`references/hud.md`).
 
+**Hear the person at once.** Start two background commands and keep them running until the finish:
+
+- `S/run.mjs watch <run>`: one line per new or changed answer and per note from the person. Run it where its lines wake you (a Monitor in Claude Code; elsewhere a background command whose output you check after each agent report). On a line: read it with `S/run.mjs questions <run>` or `show`, act on it, then `S/run.mjs use-answer <run> qN`. A note from the person is their word on the run: follow it inside the fence and the approvals, log scope changes as usual.
+- `S/run.mjs serve <run>`: the answer page on 127.0.0.1. Give the person the URL it prints, once. It holds a token: don't paste it anywhere else (`references/guardrails.md`).
+
 ## 3. Loop
 
 Repeat `S/run.mjs next <run>` and act on each unit:
@@ -57,11 +62,13 @@ The run-level `decision` from `next`:
 | `done-with-gaps` | Integration ran out of budget or hit the same gap twice. Finish with outcome `partial`, listing the gaps. |
 | `stopped` | No unit passed. Finish with outcome `stopped`, listing each stop. |
 
-**A question comes up mid-run?** If the recorded decisions answer it, follow them. If not and the step is reversible, take the safest choice that fits the decisions, log it with `note --kind question --recommend "<your choice>"`, and carry on: it shows in the HUD's Needs you box and goes in the report for the person to confirm. When the person answers, record it with `note --kind decision --answers q<N>`. Stop and ask only for an unapproved gated action, through the question tool as in step 1.7.
+**A question comes up mid-run?** If the recorded decisions answer it, follow them. If not and the step is reversible, take the safest choice that fits the decisions, log it with `S/run.mjs ask <run> --question "…" --header "<≤12 chars>" --option "<your choice>|<why>" --option "<other>|<what it means>" [--unit U]` (2–4 options, your choice first), and carry on: it shows in the HUD's Needs you box with its options and goes in the report for the person to confirm. Stop and ask only for an unapproved gated action, through the question tool as in step 1.7.
+
+**Every question goes to both places.** Ask it through the question tool and mirror it with `S/run.mjs ask` (same options, same order), so the person can answer in the chat or on the answer page. Record the tool's answer with `S/run.mjs answer <run> qN --choice "<label>"` (or `--other "<their words>"`). Whichever answer comes first wins; a later change, from either place, is honoured until you run `use-answer`. Act on the latest answer, then `use-answer`, so it can no longer change under you.
 
 ## 4. Finish
 
-Do the actions approved at intake (for example, merge when the review is READY) and record each one. Then:
+Do the actions approved at intake (for example, merge when the review is READY) and record each one. Act on any answer still waiting (`questions`), then stop `watch` and `serve`. Then:
 
 - **Report**, as short as the content allows and at most 12 lines (replies follow `references/craft.md`): the outcome, the links, the bar and its evidence, the units stopped and why, the questions you decided on the person's behalf, the follow-ups, and the actions you took.
 - **Retro:** `references/learning.md`, then `S/run.mjs close <run> --outcome …`.

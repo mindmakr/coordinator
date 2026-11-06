@@ -280,7 +280,7 @@ test('add takes --title and an http(s) --link; note takes situation, --recommend
   let html = readFileSync(join(dir, 'runs', 'r50', 'hud.html'), 'utf8');
   assert.match(html, /One builder on the security gaps\./);
   assert.match(html, /u · #1206 Security gaps <a href="https:\/\/github.com\/o\/r\/issues\/1206"/);
-  assert.match(html, /<b>q1<\/b> Merge it\?<br><span class="rec">Recommended: yes/);
+  assert.match(html, /<b>q1<\/b> Merge it\?<\/p><p class="rec">Recommended: yes/);
   assert.equal(run('note', 'r50', '--kind', 'decision', '--text', 'merge approved', '--answers', 'q1').code, 0);
   html = readFileSync(join(dir, 'runs', 'r50', 'hud.html'), 'utf8');
   assert.match(html, /Nothing needs you\./);

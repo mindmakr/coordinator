@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 (2026-11-06)
+
+The person answers the lead's questions and adds notes from the HUD, and the lead hears about it at once.
+
+- **Questions shaped like the question tool:** `run.mjs ask <run> --question Q --header H --option "label|description" …` (2–4 options, the recommended one first, free text always allowed, `--multi`, `--unit`). The older `note --kind question` still works and shows as a question with no options.
+- **Answers you can change until used:** `run.mjs answer <run> qN --choice … --other … --by person|lead` records an answer; `use-answer` marks it acted on, after which it is refused. Every answer is kept in the question's history. `run.mjs questions <run>` lists them all.
+- **Notes from the person:** `note --kind person --text T [--unit U]`, shown on the unit card and in "Notes from you".
+- **The answer page:** `run.mjs serve <run> [--port P]` serves the HUD with answer forms and note boxes on 127.0.0.1 only, behind a token made at each start; a POST also needs the page's own origin. Writes use the same locked state code as the CLI. It reloads like the file but never while a form is being filled in (one inline script, allowed by a per-response nonce). `hud.html` on disk stays script-free and read-only, and says how to get the answer page.
+- **The lead hears at once:** `run.mjs watch <run>` prints one line per new or changed answer and per note, polling every 2 s; the lead runs it in the background so an answer wakes it (`references/commands/run.md`).
+- Older state files load: questions without options or history read as before.
+
 ## 0.3.0 (2026-11-06)
 
 The HUD explains the run in plain words (#7).
