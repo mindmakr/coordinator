@@ -82,18 +82,24 @@ export function sessions({ db, gh, config, log, now = Date.now }) {
     validCsrf: (s, value) => !!s && same(value, s.csrf),
     // Step 1: where to send the browser, and the cookie that remembers the state.
     begin(next) {
+      const verifier = randomBytes(32).toString('base64url');
+      const challenge = createHash('sha256').update(verifier).digest('base64url');
       const state = randomBytes(24).toString('base64url');
-      const value = `${state}.${Buffer.from(safeNext(next)).toString('base64url')}`;
-      return { location: gh.authorizeUrl(state, redirectUri), cookie: cookie(stateName, value, 600) };
+      const value = `${state}.${Buffer.from(safeNext(next)).toString('base64url')}.${verifier}`;
+      return { location: gh.authorizeUrl(state, redirectUri, challenge), cookie: cookie(stateName, value, 600) };
     },
     // Step 2: GitHub sent the browser back. Throws on a missing or wrong state.
     async finish(query, cookies) {
-      const [state, nextB64] = String(cookies[stateName] ?? '').split('.');
+      const [state, nextB64, verifier] = String(cookies[stateName] ?? '').split('.');
       if (!state || !same(query.get('state'), state)) throw Object.assign(new Error('sign-in expired or was not started here; try again'), { status: 400 });
       const code = query.get('code');
       if (!code || code.length > 100) throw Object.assign(new Error('GitHub did not return a code'), { status: 400 });
-      const t = await gh.exchangeCode(code, redirectUri);
+      if (!verifier || !/^[A-Za-z0-9_-]{43}$/.test(verifier)) throw Object.assign(new Error('sign-in expired or was not started here; try again'), { status: 400 });
+      const t = await gh.exchangeCode(code, redirectUri, verifier);
       const user = await gh.user(t.token);
+      // A new session every sign-in; any session this browser held before is dropped.
+      const old = cookies[name];
+      if (old && /^[A-Za-z0-9_-]{43}$/.test(old)) await db.dropSession(hash(old));
       const id = randomBytes(32).toString('base64url');
       const days = config.sessionDays * 86_400_000;
       await db.putSession({

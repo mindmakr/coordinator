@@ -12,7 +12,15 @@ const MARKER = '.coordinator-state';
 export const LIMITS = { mapBytes: 16 * 1024 * 1024, logBytes: 8 * 1024 * 1024, runs: 500, lessonsBytes: 1024 * 1024, configBytes: 64 * 1024 };
 
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
-export const maskDeep = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(maskDeep) : isObj(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskDeep(x)])) : v);
+export const MAX_DEPTH = 64;
+// Masks every string; anything nested deeper than MAX_DEPTH is refused with an Error, never a stack overflow.
+export function maskDeep(v, depth = 0) {
+  if (depth > MAX_DEPTH) throw new Error(`nested deeper than ${MAX_DEPTH} levels`);
+  if (typeof v === 'string') return maskSecrets(v);
+  if (Array.isArray(v)) return v.map((x) => maskDeep(x, depth + 1));
+  if (isObj(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskDeep(x, depth + 1)]));
+  return v;
+}
 
 // The run a log describes, or an error message. Never throws.
 export function readLog(runId, buf) {
@@ -93,9 +101,11 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
         await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? prev.map ?? null, mapError: r.error ?? null });
         if (r.error) log?.warn('map log rejected', { repo: repo.fullName, run: runId, reason: r.error });
       }
-      const lessons = await readLessons(token, repo, entries);
-      const config = await readJson(token, repo, entries, 'coordinator.json', LIMITS.configBytes);
-      await db.setRepoSync(installationId, repo.id, { headSha: head, error: tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons, config: isObj(config) ? config : null });
+      // Lessons and coordinator.json are optional: one that cannot be read is left out and named in the sync error.
+      const lessons = await readSide(token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes, (j) => (Array.isArray(j) ? maskDeep(j.filter(isObj)) : null));
+      const config = await readSide(token, repo, entries, 'coordinator.json', LIMITS.configBytes, (j) => (isObj(j) ? maskDeep(j) : null));
+      const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons.error, config.error].filter(Boolean);
+      await db.setRepoSync(installationId, repo.id, { headSha: head, error: errors.length ? errors.join('; ') : null, lessons: lessons.value, config: config.value });
       if (trail && out.updated.length) {
         const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
         for (const runId of out.updated) await trail.refreshRun(installationId, fresh, runId);
@@ -104,14 +114,14 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     });
   }
 
-  async function readJson(token, repo, entries, path, max) {
+  // { value, error }: never throws, whatever the file holds.
+  async function readSide(token, repo, entries, path, max, shape) {
     const e = entries.find((x) => x.path === path && x.type === 'blob');
-    if (!e || e.size > max) return null;
-    try { return JSON.parse((await gh.blob(token, repo.fullName, e.sha)).toString('utf8')); } catch { return null; }
-  }
-  async function readLessons(token, repo, entries) {
-    const j = await readJson(token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes);
-    return Array.isArray(j) ? maskDeep(j.filter(isObj)) : null;
+    if (!e) return { value: null };
+    if (e.size > max) return { value: null, error: `${path}: larger than ${max} bytes` };
+    try { return { value: shape(JSON.parse((await gh.blob(token, repo.fullName, e.sha)).toString('utf8'))) }; } catch (err) {
+      return { value: null, error: `${path}: ${maskSecrets(String(err.message)).slice(0, 200)}` };
+    }
   }
 
   // Every repo the installation can reach now: new ones added, gone ones removed, each synced.

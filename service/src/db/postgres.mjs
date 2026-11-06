@@ -32,14 +32,20 @@ export async function migrate(pool) {
 const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons, config: r.config ?? null, private: r.private ?? null } : null);
 const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at), mapSha: r.map_sha ?? null, map: r.map ?? null, mapError: r.map_error ?? null } : null);
 
-export async function postgresDb(url, { max = 10 } = {}) {
-  const pool = new pg.Pool({ connectionString: url, max });
+// schema (tests): a throwaway schema of its own, dropped on close.
+export async function postgresDb(url, { max = 10, schema = null } = {}) {
+  if (schema !== null && !/^[a-z_][a-z0-9_]{0,40}$/.test(schema)) throw new Error('bad schema name');
+  if (schema) { const c = new pg.Client({ connectionString: url }); await c.connect(); await c.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`); await c.end(); }
+  const pool = new pg.Pool({ connectionString: url, max, ...(schema ? { options: `-c search_path=${schema}` } : {}) });
   await migrate(pool);
   const q = (text, values) => pool.query(text, values);
   return {
     kind: 'postgres',
     pool,
-    close: () => pool.end(),
+    async close() {
+      if (schema) await pool.query(`DROP SCHEMA ${schema} CASCADE`).catch(() => {});
+      await pool.end();
+    },
     async seenDelivery(id) { return (await q('SELECT 1 FROM deliveries WHERE id = $1', [id])).rowCount > 0; },
     async recordDelivery(id) {
       await q('INSERT INTO deliveries (id) VALUES ($1) ON CONFLICT DO NOTHING', [id]);

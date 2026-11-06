@@ -75,8 +75,9 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
 
   return {
     appJwt,
-    authorizeUrl: (state, redirectUri) => `${web}/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, state, allow_signup: 'false' })}`,
-    exchangeCode: (code, redirectUri) => oauth({ code, redirect_uri: redirectUri }),
+    // PKCE (S256): the challenge goes out with the browser, the verifier only with the exchange.
+    authorizeUrl: (state, redirectUri, challenge) => `${web}/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, state, allow_signup: 'false', code_challenge: challenge, code_challenge_method: 'S256' })}`,
+    exchangeCode: (code, redirectUri, verifier) => oauth({ code, redirect_uri: redirectUri, code_verifier: verifier }),
     refresh: (refreshToken) => oauth({ grant_type: 'refresh_token', refresh_token: refreshToken }),
 
     // As the App, for ingest.
@@ -92,6 +93,15 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
     async blob(token, full, sha) {
       const j = ok(await call(token, 'GET', `/repos/${enc(full)}/git/blobs/${encodeURIComponent(sha)}`));
       if (j.encoding !== 'base64') throw new Error(`blob ${sha}: unexpected encoding`);
+      return Buffer.from(j.content, 'base64');
+    },
+
+    // A file on the repo's default branch, or null (the project fence reads coordinator.json there).
+    async defaultBranchFile(token, full, path) {
+      const r = await call(token, 'GET', `/repos/${enc(full)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`);
+      if (r.status === 404) return null;
+      const j = ok(r);
+      if (j?.type !== 'file' || j.encoding !== 'base64') return null;
       return Buffer.from(j.content, 'base64');
     },
 

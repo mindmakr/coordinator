@@ -36,7 +36,7 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
   const auth = makeSessions({ db, gh, config, log, now });
   const acl = makeAccess({ gh, db, ttlMs: config.accessTtlMs, now });
   const limits = {
-    webhook: limiter({ max: 300, windowMs: 60_000, now }),
+    webhookFailures: limiter({ max: 30, windowMs: 60_000, now }),
     auth: limiter({ max: 30, windowMs: 10 * 60_000, now }),
     sync: limiter({ max: 6, windowMs: 10 * 60_000, now }),
     pages: limiter({ max: 600, windowMs: 60_000, now }),
@@ -74,11 +74,15 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
     return f;
   }
 
+  // Signed deliveries are never rate limited (GitHub would retry and then disable the hook);
+  // only refused ones count, and an address over the limit is turned away before its body is read.
   async function webhook(req, res) {
-    if (limited(res, 'webhook', clientIp(req))) return;
+    const ip = clientIp(req);
+    if (limits.webhookFailures.blocked(ip)) return send(res, 429, 'too many requests', { 'Retry-After': '60' });
     const raw = await readBody(req, MAX_WEBHOOK);
     if (!verifySignature(config.github.webhookSecret, raw, req.headers['x-hub-signature-256'])) {
-      log.warn('webhook signature refused', { ip: clientIp(req) });
+      limits.webhookFailures.hit(ip);
+      log.warn('webhook signature refused', { ip });
       return send(res, 401, 'bad signature');
     }
     let payload;

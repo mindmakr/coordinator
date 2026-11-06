@@ -4,7 +4,8 @@
 // a linked PR merged, closed or finished its checks, so the trail stays
 // current when no lead is running.
 //
-// Only issues and PRs in repos of the same installation are touched. A comment
+// Only issues and PRs in the run's project are touched (src/project.mjs: the
+// state repo, plus linked repos that opted in on their own default branch). A comment
 // carries the last gap, cause and question headers only when it lands in the
 // state repo itself and that repo is private; anywhere else it carries status
 // only, so nothing from a private run leaks to another repo's readers.
@@ -13,6 +14,7 @@ import { boardConfig, boardSession } from './board.mjs';
 import { isTracker, sha256, trackerBody, unitRefs, unitState } from './core.mjs';
 import { SCOPES } from './github.mjs';
 import { repoBase } from './pages.mjs';
+import { projectFence } from './project.mjs';
 
 const enc = encodeURIComponent;
 
@@ -29,6 +31,7 @@ export function githubLines(events) {
 
 export function trail({ db, gh, config, log }) {
   const on = { trackers: config.trail?.trackers !== false, board: config.trail?.board !== false };
+  const fence = projectFence({ gh });
 
   async function findOurs(token, ref, runId, unitId) {
     for await (const c of gh.issueComments(token, ref.repo, ref.n)) {
@@ -63,11 +66,12 @@ export function trail({ db, gh, config, log }) {
       const board = on.board ? boardConfig(repo.config) : null;
       const trackersOn = on.trackers && repo.config?.trackers !== false;
       if (!board && !trackersOn) return out;
-      let commentToken; let session;
+      let commentToken; let session; let readToken;
+      const token = async () => (readToken ??= await gh.installationToken(installationId, SCOPES.read));
       for (const u of state.units) {
         for (const ref of unitRefs(u)) {
           const target = await db.repoByName(ref.repo);
-          if (!target || target.installationId !== installationId) continue; // not ours to write
+          if (!(await fence.allows(repo, target, token))) { out.skipped = [...(out.skipped ?? []), ref.key]; continue; } // outside the project: read-only
           const events = await db.ghEvents(installationId, [ref.key]);
           if (trackersOn) {
             const detail = target.id === repo.id && target.private === true;

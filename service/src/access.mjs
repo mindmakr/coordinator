@@ -1,6 +1,6 @@
 // Who may see what. A person sees a repo's runs only while GitHub, asked with
 // that person's own token, says they can read the repo. Answers are cached per
-// person and repo for a short time (ACCESS_TTL_SECONDS, at most 300), never
+// person and repo for a short time (ACCESS_TTL_SECONDS, at most 60), never
 // shared between people. Anything else is answered as "not found", so a page
 // never confirms that a private repo exists.
 
@@ -14,17 +14,19 @@ export function access({ gh, db, ttlMs = 60_000, now = Date.now }) {
   const cached = (k) => { const e = cache.get(k); return e && e.until > now() ? e : null; };
 
   // The repo row when this person may read it, else null.
+  // A repo the service does not know is asked about the same way (and cached the same way), so the
+  // time to answer cannot tell an unknown repo from a known one the viewer cannot read.
   async function readable(session, fullName) {
+    if (!session) return null;
     const repo = await db.repoByName(fullName);
-    if (!repo || !session) return null;
-    const k = `${session.userId}\u0000repo\u0000${repo.installationId}:${repo.id}`;
+    const k = `${session.userId}\u0000repo\u0000${repo ? `${repo.installationId}:${repo.id}` : `?${String(fullName).toLowerCase()}`}`;
     const hit = cached(k);
-    if (hit) return hit.v ? repo : null;
+    if (hit) return hit.v && repo ? repo : null;
     const token = await session.token();
     if (!token) return null;
-    const r = await gh.repoAccess(token, repo.fullName);
+    const r = await gh.repoAccess(token, repo?.fullName ?? fullName);
     // The id must match too: a repo deleted and re-created under the same name is another repo.
-    const ok = !!r.repo && Number(r.repo.id) === repo.id && r.repo.permissions?.pull === true;
+    const ok = !!repo && !!r.repo && Number(r.repo.id) === repo.id && r.repo.permissions?.pull === true;
     remember(k, ok);
     return ok ? repo : null;
   }

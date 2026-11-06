@@ -30,7 +30,7 @@ export function loadConfig(env = process.env) {
     trustProxy: env.TRUST_PROXY === '1',
     databaseUrl: env.DATABASE_URL || null,
     stateBranch: env.STATE_BRANCH || 'coordinator-state',
-    accessTtlMs: int(env.ACCESS_TTL_SECONDS, 60, 0, 300) * 1000,
+    accessTtlMs: int(env.ACCESS_TTL_SECONDS, 60, 0, 60) * 1000, // design 10.3: at most 60 s
     sessionDays: int(env.SESSION_DAYS, 7, 1, 30),
     sessionSecret,
     // The GitHub trail: tracker comments and board fields. "off" turns one off for every repo;

@@ -117,3 +117,18 @@ test('isolation: every repo and run query needs an installation id', async () =>
   assert.equal((await db.runs(2, 70)).length, 0);
   assert.equal(await db.run(2, 70, 'r1'), null);
 });
+
+test('deeply nested lessons or coordinator.json never stop a sync: runs are stored and the repo names the file', async () => {
+  const deep = (n) => Buffer.from(`[${'{"a":'.repeat(n)}1${'}'.repeat(n)}]`);
+  const deepObj = (n) => Buffer.from(`${'{"a":'.repeat(n)}1${'}'.repeat(n)}`);
+  for (const [path, buf] of [['lessons/lessons.json', deep(100_000)], ['coordinator.json', deepObj(10_000)], ['lessons/lessons.json', deep(80)]]) {
+    const t = setup({});
+    t.gh.setFiles('acme/web', { ...stateFiles({ r1: good }), [path]: buf });
+    await t.prep();
+    const out = await t.ingest.syncRepo(7, REPO);
+    assert.deepEqual(out.updated, ['r1'], `${path}: the run is stored`);
+    const repo = (await t.db.repos(7))[0];
+    assert.ok(repo.error.startsWith(`${path}: `), `${path}: named in the sync error (${repo.error})`);
+    assert.equal(repo.headSha, out.head, 'the sync is recorded');
+  }
+});

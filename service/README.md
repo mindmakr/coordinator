@@ -15,7 +15,7 @@ Licence: [AGPL-3.0](LICENSE). The skill and its shared code stay MIT.
 | Access | Every repo page asks GitHub, with the viewer's own token, whether they can read the repo; the answer is reused for that person only, for 60 s. No access, no repo, and a repo re-created under the same name all give the same 404. |
 | Pages | Projects (repos you can read), runs of a repo, run dashboard, unit pages with their timelines, the run's maps, its project map (when the run pushed one), and the coordinator page, drawn by the skill's own renderers, so they look like the local dashboard. No scripts and no forms except sign-out and "Sync now". Questions show without answer forms ("answer in the chat for now"); evidence files stay on the person's machine and show as "file kept locally". |
 | Merges and checks | `pull_request` (closed, merged, reopened) and `check_suite` (completed) events are stored against the PR and shown in the run's and unit's timelines (badged "(GitHub)"), to viewers who can read the PR's repo too. They also refresh the tracker comments and board cards of every run that links the PR. |
-| Tracker comments | One comment per unit on each issue or PR it links, marked `<!-- coordinator:tracker run=… unit=… -->` and edited in place (template: the skill's `lib/tracker.mjs`, so the lead writes the same text). State, tries and scores, open questions, merge and check results, and a link to the unit's page. The last gap, cause and question headers appear only when the comment is in the run's own repo and that repo is private; elsewhere it is status only. Unchanged text is never re-sent; a deleted comment is re-made; mentions never ping. Only repos of the same installation are written. |
+| Tracker comments | One comment per unit on each issue or PR it links, marked `<!-- coordinator:tracker run=… unit=… -->` and edited in place (template: the skill's `lib/tracker.mjs`, so the lead writes the same text). State, tries and scores, open questions, merge and check results, and a link to the unit's page. The last gap, cause and question headers appear only when the comment is in the run's own repo and that repo is private; elsewhere it is status only. Every piece of run text sits in an inline code span, so it renders no Markdown, HTML, links or mentions. Unchanged text is never re-sent; a deleted comment is re-made. Only repos in the run's project are written (below). |
 | Board | When `coordinator.json` on the state branch names an organisation board, each unit's card gets **Run** (text) and **Unit state** (building, judging, passed, stopped, needs you); the two fields are created on first use. With a `status` map, the board's own Status follows too. Cards not on the board are left alone; nothing else is created or renamed. |
 | Manual sync | "Sync now" on a repo page (rate limited), or `npm run sync -- <installation-id>` (`--all`, `--force`). |
 
@@ -25,11 +25,14 @@ Shared code: [src/core.mjs](src/core.mjs) imports the skill's `scripts/lib` (eve
 
 ```json
 {
+  "repos": ["acme/mobile"],
   "trackers": true,
   "board": { "owner": "acme", "number": 3,
              "status": { "building": "In progress", "judging": "In review", "passed": "Done", "stopped": "Blocked", "needs you": "Blocked" } }
 }
 ```
+
+**Writes stay in the project.** Comments and board fields go only to the state repo and to linked repos that agree on both sides: the state branch's `coordinator.json` lists the repo in `repos`, and that repo's own default branch has a `coordinator.json` with `"primary": "<state repo>"` (for example `{ "primary": "acme/web" }` in acme/mobile). The run log and the state branch can be written by anyone who can push to the state repo, so they cannot be trusted to name other repos on their own; the second side can only be written by someone who can push to the linked repo's default branch and pass its branch protection. A link to any other repo, even one the App is installed on, is shown read-only to viewers who can read it and never written to. The agreement is re-checked every 5 minutes.
 
 `"trackers": false` turns the comments off for that repo. Without `board`, no board is touched. Boards owned by a personal account are not reachable by an App; use an organisation board. `TRACKERS=off` or `BOARD=off` in the environment turns either off everywhere.
 
@@ -71,7 +74,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `DATABASE_URL` | for real use | Postgres connection string |
 | `GITHUB_APP_SLUG` | no | Shows an "install the App" link |
 | `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` (last entry) for rate limits |
-| `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 300), `SESSION_DAYS` | no | Defaults 3000, `coordinator-state`, 60, 7 |
+| `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 60, design 10.3), `SESSION_DAYS` | no | Defaults 3000, `coordinator-state`, 60, 7 |
 | `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off for every repo |
 
 ## Register the GitHub App
@@ -118,10 +121,12 @@ Logs go to stdout as JSON lines. Deleting the database loses nothing but session
 
 ## Security notes
 
-- Webhooks: HMAC SHA-256 checked in constant time before parsing; 5 MB body cap; 300 per minute per address.
-- Sign-in: 30 tries per 10 minutes per address; `state` compared in constant time; after sign-in only this service's own page paths are followed.
+- Webhooks: HMAC SHA-256 checked in constant time before parsing; 5 MB body cap. Signed deliveries are never rate limited; an address with 30 refused deliveries in a minute is turned away before its body is read.
+- Sign-in: 30 tries per 10 minutes per address; `state` compared in constant time; PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
 - Cookies: HttpOnly, SameSite=Lax, `Secure` and `__Host-` prefixed on https.
 - Every POST needs this site's `Origin` and the session's CSRF token.
 - Every page: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `no-store`, `nosniff`, `X-Frame-Options: DENY`, HSTS on https.
+- An unknown repo is checked with GitHub exactly like a known one the viewer cannot read, so response time does not reveal which repos the service knows.
+- Run state, lessons, `coordinator.json` and maps nested deeper than 64 levels are refused with a sync error, never a crash.
 - Every repo and run query is scoped by installation id (`src/db/index.mjs` refuses a call without one); permission answers are cached per person, never shared.
 - Uninstalling the App deletes that installation's rows at once.

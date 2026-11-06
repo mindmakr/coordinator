@@ -8,10 +8,15 @@ const PR = 'https://github.com/acme/web/pull/12';
 const MOBILE_PR = 'https://github.com/acme/mobile/pull/5';
 const comments = (t, key) => t.gh.comments.get(key) ?? [];
 
-async function world({ runOpts = {}, config = null, webPrivate = true } = {}) {
+// The project: acme/web (state) lists acme/mobile, and acme/mobile names acme/web as its primary.
+const PROJECT = { repos: ['acme/mobile'] };
+const OPTED_IN = { 'coordinator.json': { primary: 'acme/web' } };
+
+async function world({ runOpts = {}, config = PROJECT, webPrivate = true, mobileFiles = OPTED_IN, extraRepos = [] } = {}) {
   const t = await startApp();
-  t.gh.addRepo('acme/web', { id: 70, installationId: 7, private: webPrivate, files: stateFiles({ r1: makeRun('r1', { prs: [PR, MOBILE_PR], issues: ['acme/elsewhere#3'], ...runOpts }) }, config) });
-  t.gh.addRepo('acme/mobile', { id: 71, installationId: 7, private: true });
+  t.gh.addRepo('acme/web', { id: 70, installationId: 7, private: webPrivate, files: stateFiles({ r1: makeRun('r1', { prs: [PR, MOBILE_PR], issues: ['acme/elsewhere#3', ...extraRepos.map((x) => x.ref)], ...runOpts }) }, config) });
+  t.gh.addRepo('acme/mobile', { id: 71, installationId: 7, private: true, defaultFiles: mobileFiles });
+  for (const x of extraRepos) t.gh.addRepo(x.name, { id: x.id, installationId: 7, defaultFiles: x.defaultFiles ?? {} });
   t.gh.addRepo('other/lib', { id: 90, installationId: 9 });
   t.gh.addUser('tok-reader', { id: 1, login: 'reader', read: ['acme/web'] });
   t.gh.addUser('tok-both', { id: 2, login: 'both', read: ['acme/web', 'acme/mobile'] });
@@ -31,6 +36,7 @@ test('tracker comments: one per unit on each linked issue or PR of this installa
     assert.equal(web.length, 1); assert.equal(mobile.length, 1);
     assert.ok(web[0].body.startsWith('<!-- coordinator:tracker run=r1 unit=u1 -->'));
     assert.match(web[0].body, /\*\*State:\*\* needs you|\*\*State:\*\* building/);
+    assert.match(web[0].body, /`Totals`/, 'run text in code spans');
     assert.match(web[0].body, /http:\/\/localhost:3999\/r\/acme\/web\/run\/r1\/unit\/u1/);
     assert.equal(comments(t, 'acme/elsewhere#3').length, 0, 'a repo the App is not installed on is never written');
     const tokenCalls = t.gh.calls.filter((c) => c[0] === 'installationToken' && c[2]?.issues === 'write');
@@ -86,7 +92,7 @@ test('tracker comments are edited in place, never re-sent unchanged, re-made if 
 });
 
 test('coordinator.json "trackers": false turns the comments off for that repo', async () => {
-  const t = await world({ config: { trackers: false } });
+  const t = await world({ config: { ...PROJECT, trackers: false } });
   try { assert.equal(comments(t, 'acme/web#12').length, 0); } finally { await t.close(); }
 });
 
@@ -102,8 +108,8 @@ test('merge and check webhooks feed the timeline and the tracker comment', async
     assert.match(await r.text(), /ignored/);
     await t.app.idle();
     const body = comments(t, 'acme/web#12')[0].body;
-    assert.match(body, /PR acme\/web\\#12 merged/);
-    assert.match(body, /checks failure/);
+    assert.match(body, /`PR acme\/web#12 merged`/);
+    assert.match(body, /`PR acme\/web#12 checks failure`/);
 
     const cookie = await signIn(t, 'reader');
     const run = await (await fetch(`${t.base}/r/acme/web/run/r1`, { headers: { Cookie: cookie } })).text();
@@ -183,4 +189,33 @@ test('maps page renders; evidence files show as kept locally; the needs-you hint
     assert.equal(/href="(null|#evidence-is-local)"/.test(unit.html + maps.html), false, 'no dead links');
     assert.equal((await get('/r/acme/web/nope')).status, 404, 'an unknown repo page');
   } finally { await t.close(); }
+});
+
+test('writes stay in the project: an installation repo a run links without both sides agreeing gets no comment and no board change', async () => {
+  const config = { ...PROJECT, repos: ['acme/mobile', 'acme/listed'], board: { owner: 'acme', number: 3 } };
+  const extra = [
+    { name: 'acme/secret', id: 80, ref: 'acme/secret#5', defaultFiles: { 'coordinator.json': { primary: 'acme/web' } } }, // agrees, but not listed
+    { name: 'acme/listed', id: 81, ref: 'acme/listed#6' }, // listed, but never agreed
+  ];
+  const t = await startApp();
+  t.gh.makeBoard({ items: ['acme/secret#5', 'acme/listed#6', 'acme/mobile#5', 'acme/web#12'] });
+  t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles({ r1: makeRun('r1', { prs: [PR, MOBILE_PR], issues: extra.map((x) => x.ref) }) }, config) });
+  t.gh.addRepo('acme/mobile', { id: 71, installationId: 7, defaultFiles: OPTED_IN });
+  for (const x of extra) t.gh.addRepo(x.name, { id: x.id, installationId: 7, defaultFiles: x.defaultFiles ?? {} });
+  await t.db.upsertInstallation({ id: 7, account: 'acme' });
+  try {
+    await t.app.ingest.syncInstallation(7);
+    assert.equal(comments(t, 'acme/secret#5').length, 0, 'not listed: no comment');
+    assert.equal(comments(t, 'acme/listed#6').length, 0, 'listed without consent: no comment');
+    assert.equal(comments(t, 'acme/web#12').length, 1, 'the state repo');
+    assert.equal(comments(t, 'acme/mobile#5').length, 1, 'a repo that opted in');
+    const touched = new Set(t.gh.board.values.map(([item]) => item));
+    assert.equal(touched.has('I-acme/secret#5') || touched.has('I-acme/listed#6'), false, 'no board change outside the project');
+    assert.ok(touched.has('I-acme/web#12') && touched.has('I-acme/mobile#5'));
+  } finally { await t.close(); }
+});
+
+test('a repo that withdraws (its primary no longer names the state repo) gets no more writes', async () => {
+  const t = await world({ mobileFiles: { 'coordinator.json': { primary: 'acme/other' } } });
+  try { assert.equal(comments(t, 'acme/mobile#5').length, 0); } finally { await t.close(); }
 });

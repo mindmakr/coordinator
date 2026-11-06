@@ -1,8 +1,8 @@
 // The tracker comment: one per unit on each issue or PR it links, edited in
 // place (design 6.1). It is a view of the run, never a source of truth, and it
 // is the same text whoever writes it (the lead through gh, or the service).
-// Run text is untrusted: it is escaped for GitHub Markdown, and @mentions are
-// broken so a comment never pings anyone. `detail` adds the last gap, cause and
+// Run text is untrusted: every piece of it goes in an inline code span, where
+// GitHub renders no Markdown, no HTML, no autolinked URL and no @mention. `detail` adds the last gap, cause and
 // question headers; leave it off when the comment lands in a repo whose readers
 // may not read the run (a public repo, or another repo than the state's).
 import { questions } from './questions.mjs';
@@ -11,12 +11,15 @@ export const marker = (run, unit) => `<!-- coordinator:tracker run=${run} unit=$
 export const isTracker = (body, run, unit) => String(body ?? '').startsWith(marker(run, unit));
 
 const MAX = 200;
+// One line of untrusted text as an inline code span: whitespace collapsed, clipped, and fenced
+// with one more backtick than the longest run inside, so it cannot close the span early.
 export function md(text, max = MAX) {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
   const clipped = t.length > max ? `${t.slice(0, max - 1)}…` : t;
-  return clipped.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
-    .replace(/[\\`*_[\]|~#!]/g, '\\$&')
-    .replace(/@/g, '@​');
+  if (!clipped) return '';
+  const fence = '`'.repeat(Math.max(0, ...(clipped.match(/`+/g) ?? []).map((x) => x.length)) + 1);
+  const pad = /^`|`$/.test(clipped) || /^ .* $/.test(clipped) ? ' ' : '';
+  return `${fence}${pad}${clipped}${pad}${fence}`;
 }
 
 // A unit's state on the board and in the comment: building, judging, passed, stopped or needs you.
@@ -37,7 +40,7 @@ export function trackerBody(run, unitId, { url = null, detail = false, github = 
   const scores = rounds.map((r) => (typeof r.score === 'number' ? r.score : '–')).join(' → ');
   const lines = [
     marker(run.id, u.id),
-    `**Coordinator** · run \`${md(run.id, 64)}\` · unit \`${md(u.id, 64)}\`${u.title ? `: ${md(u.title, 120)}` : ''}`,
+    `**Coordinator** · run ${md(run.id, 64)} · unit ${md(u.id, 64)}${u.title ? `: ${md(u.title, 120)}` : ''}`,
     '',
     `- **State:** ${unitState(run, u)}${run.closed ? ` (run closed: ${md(run.closed.outcome, 40)})` : ''}`,
     `- **Tries:** ${rounds.length} of ${run.budget?.maxRounds ?? '?'}${scores ? ` · scores ${scores}` : ''}${last ? ` · last verdict ${md(last.verdict, 20)}` : ''}`,

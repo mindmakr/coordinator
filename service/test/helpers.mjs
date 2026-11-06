@@ -93,6 +93,11 @@ export function fakeGitHub() {
       if (query.includes('CoordinatorSet')) { board.values.push([v.item, v.field, v.value]); return {}; }
       throw new Error(`unexpected graphql ${query.slice(0, 40)}`);
     },
+    async defaultBranchFile(token, full, path) {
+      calls.push(['defaultBranchFile', full, path]);
+      const f = repoOf(full)?.defaultFiles?.[path];
+      return f === undefined ? null : Buffer.from(typeof f === 'string' ? f : JSON.stringify(f));
+    },
     issueComments(token, full, n) { calls.push(['issueComments', full, n]); return it(comments.get(`${full}#${n}`) ?? []); },
     async createComment(token, full, n, body) {
       calls.push(['createComment', full, n, token]);
@@ -105,14 +110,14 @@ export function fakeGitHub() {
       for (const list of comments.values()) { const c = list.find((x) => x.id === id); if (c) { c.body = body; return true; } }
       return false;
     },
-    addRepo(fullName, { id, installationId, files = null, private: priv = true }) { repos.set(fullName, { id, installationId, private: priv, files: files && new Map(Object.entries(files)) }); },
+    addRepo(fullName, { id, installationId, files = null, private: priv = true, defaultFiles = {} }) { repos.set(fullName, { id, installationId, private: priv, defaultFiles, files: files && new Map(Object.entries(files)) }); },
     setFiles(fullName, files) { repoOf(fullName).files = new Map(Object.entries(files)); },
     // calls of one kind since index `from`
     count: (kind, from = 0) => calls.slice(from).filter((c) => c[0] === kind).length,
     addUser(token, { id, login, read = [] }) { users.set(token, { id, login, read: new Set(read) }); },
 
-    authorizeUrl: (state, redirect) => `https://github.example/login/oauth/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirect)}`,
-    async exchangeCode(code) { calls.push(['exchangeCode']); return { token: `tok-${code}`, refresh: `ref-${code}`, expiresAt: Date.now() + 8 * 3600_000, refreshExpiresAt: null }; },
+    authorizeUrl: (state, redirect, challenge) => `https://github.example/login/oauth/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirect)}&code_challenge=${challenge}&code_challenge_method=S256`,
+    async exchangeCode(code, redirect, verifier) { calls.push(['exchangeCode', code, verifier]); return { token: `tok-${code}`, refresh: `ref-${code}`, expiresAt: Date.now() + 8 * 3600_000, refreshExpiresAt: null }; },
     async refresh(r) { return { token: r.replace('ref-', 'tok-'), refresh: r, expiresAt: Date.now() + 8 * 3600_000, refreshExpiresAt: null }; },
     async installationToken(id, perms) { calls.push(['installationToken', id, perms]); return `inst-${id}`; },
     installationRepos(token) { const id = Number(token.slice(5)); return it([...repos].filter(([, r]) => r.installationId === id).map(([full_name, r]) => ({ id: r.id, full_name, private: r.private ?? true }))); },
@@ -149,12 +154,22 @@ export const config = (over = {}) => ({
   ...over,
 });
 
-export async function startApp({ gh = fakeGitHub(), db = guard(memoryDb()), over = {}, now } = {}) {
+// With TEST_DATABASE_URL set, every app gets Postgres in a throwaway schema of its own; else memory.
+let schemas = 0;
+async function testDb() {
+  const url = process.env.TEST_DATABASE_URL;
+  if (!url) return guard(memoryDb());
+  const { postgresDb } = await import('../src/db/postgres.mjs');
+  return guard(await postgresDb(url, { max: 3, schema: `t_${process.pid}_${++schemas}_${Date.now() % 100000}` }));
+}
+
+export async function startApp({ gh = fakeGitHub(), db = null, over = {}, now } = {}) {
+  db ??= await testDb();
   const cfg = config(over);
   const app = createApp({ config: cfg, db, gh, log: silent, now });
   await new Promise((ok) => app.server.listen(0, '127.0.0.1', ok));
   const base = `http://127.0.0.1:${app.server.address().port}`;
-  return { app, gh, db, cfg, base, close: () => new Promise((ok) => app.server.close(ok)) };
+  return { app, gh, db, cfg, base, close: async () => { await new Promise((ok) => app.server.close(ok)); await app.idle(); await db.close(); } };
 }
 
 // Signs in through the real OAuth routes against the fake GitHub; returns the cookie header.
