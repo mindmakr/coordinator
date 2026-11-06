@@ -20,6 +20,7 @@ A live dashboard, and a bar made of behaviours with evidence attached. From the 
 - **Your place is kept:** live updates change the page in place (keyed rows, cards and sections; kept nodes stay), so the browser's scroll anchoring holds the reader's row; a keyed anchor is the fallback, and a reload restores the place once images and fonts have loaded. Event keys carry a hash of the text and a number, so two events never share one.
 - **Status at a glance:** a connection pill (Live, Reconnecting, Disconnected, Finished), a status dot per unit, active units first and finished ones dimmed (with Show finished), no pulsing under reduced motion.
 - **Self-explaining numbers:** "Tries used: 2 of 4", "Score per try (0–10)" with a tooltip per dot (try, result, score, cause), one try as words, budget cards that explain themselves; only limits that block work turn red.
+- **Search highlights:** every match in the visible timeline rows is marked (case, accent and diacritic insensitive, text nodes only), with an "n matches" count; kept across live updates.
 - **Answered questions leave the open list:** the Questions card counts open ones only; answered and decided ones move to a collapsed Answered group that leads with the answer.
 - **Bar changes are on the record:** after freeze, removing or rewording a behaviour needs `--reason` (logged as a bar note), and none changes while its unit is being judged. Behaviours set at `add` show on the timeline under their own kind.
 - With no `--repo` and no GitHub remote, `#n` resolves against the GitHub links already in the run.

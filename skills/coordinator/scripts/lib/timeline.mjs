@@ -65,8 +65,9 @@ export function matches(e, f, nowMs) {
   if (win && !(age > (win[0] || -Infinity) && age <= win[1])) return false; // a clock a little ahead still counts as recent
   if (f.kinds && f.kinds.length && !f.kinds.includes(e.badge)) return false;
   if (f.units && f.units.length && !f.units.includes(e.unit || '')) return false;
-  const q = String(f.q || '').trim().toLowerCase();
-  return !q || `${e.label} ${e.who} ${e.text} ${e.cause || ''}`.toLowerCase().includes(q);
+  const fold = (s) => String(s).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); // case, accents and diacritics
+  const q = fold(String(f.q || '').trim());
+  return !q || fold(`${e.label} ${e.who} ${e.text} ${e.cause || ''}`).includes(q);
 }
 
 export function filter(events, f, nowMs) {

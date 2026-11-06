@@ -48,6 +48,11 @@
       li.hidden = !ok; if (ok) shown++;
     }
     body.dataset.sort = f.sort; // CSS reverses the list: rows never move, so the scroll anchor holds
+    unhighlight(list);
+    const q = f.q.trim();
+    const hits = q ? highlight(rows.filter((li) => !li.hidden), q, document) : 0;
+    const mc = tools.querySelector('[data-tl-matches]');
+    if (mc) mc.textContent = q ? `${hits} ${hits === 1 ? 'match' : 'matches'}` : '';
     const count = tools.querySelector('[data-tl-count]');
     if (count) count.textContent = `${shown} of ${rows.length} events`;
   }
@@ -115,6 +120,7 @@
     latest = html; pending = false;
     const anchor = nativeAnchor ? null : pickAnchor(places());
     const tpl = document.createElement('template'); tpl.innerHTML = html;
+    unhighlight(app); // the morph compares plain text; highlights come back with the filters
     morph(app, tpl.content, { busy, skipped: () => { pending = true; }, added: applyOpen });
     localTimes(app);
     applyTimeline();

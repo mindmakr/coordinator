@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { anchor, esc, linkify } from './links.mjs';
 import { css, DARK, LIGHT } from './theme.mjs';
 import { pickAnchor, scrollDelta } from './anchor.mjs';
+import { findMatches, highlight, unhighlight } from './highlight.mjs';
 import { morph } from './morph.mjs';
 import { DOTS } from './plain.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
@@ -14,6 +15,8 @@ import { VERSION } from './version.mjs';
 export { esc };
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
 const CLIENT = readFileSync(new URL('./live.client.js', import.meta.url), 'utf8');
+// Pure functions the page runs from the same source the tests check.
+const SERVED = [matches, pickAnchor, scrollDelta, morph, findMatches, highlight, unhighlight];
 
 export const cls = (s) => String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '');
 export const when = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
@@ -65,7 +68,7 @@ export function page({ title, body, ctx, path, closed = false }) {
     top: `<div class="top">${brand()}<div class="tools">${status}${THEME_TOGGLE}</div></div>`,
     body, footer: footer(),
     attrs: live ? ` data-run="${esc(ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
-    script: live ? `<script nonce="${esc(live.nonce)}">const matches = ${matches.toString()};\nconst pickAnchor = ${pickAnchor.toString()};\nconst scrollDelta = ${scrollDelta.toString()};\nconst morph = ${morph.toString()};\n${CLIENT}</script>` : '',
+    script: live ? `<script nonce="${esc(live.nonce)}">${SERVED.map((f) => `const ${f.name} = ${f.toString()};`).join('\n')}\n${CLIENT}</script>` : '',
   };
   return SHELL.replace(/\{\{(\w+)\}\}/g, (_, k) => parts[k] ?? '');
 }
@@ -112,7 +115,7 @@ export function eventRow(e, repo, key, fin = false) {
 export function timelineTools(units = []) {
   const chips = (name, values) => values.map((v) => `<label class="fchip"><input type="checkbox" name="${name}" value="${esc(v)}"><span>${esc(v || 'run')}</span></label>`).join('');
   return '<form class="tl-tools" data-tl role="search">'
-    + '<label class="grow">Search<input type="search" name="q" placeholder="Search the timeline"></label>'
+    + '<label class="grow">Search <span class="cause" data-tl-matches aria-live="polite"></span><input type="search" name="q" placeholder="Search the timeline"></label>'
     + `<label>When<select name="range">${RANGES.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>`
     + '<label>Order<select name="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>'
     + `<fieldset><legend>Kinds</legend>${chips('kind', BADGES)}</fieldset>`

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { scrollDelta } from '../lib/anchor.mjs';
 import { scoreChart } from '../lib/hud.mjs';
+import { findMatches, highlight, unhighlight } from '../lib/highlight.mjs';
 import { morph } from '../lib/morph.mjs';
 import { DOTS, dotState } from '../lib/plain.mjs';
 
@@ -120,4 +121,46 @@ test('each score dot says its try, result and score; one try reads as words', ()
   assert.equal((html.match(/<title>/g) ?? []).length, 3);
   assert.equal(scoreChart([{ n: 1, verdict: 'pass', score: 9 }]), '<p class="cause score-one">Passed on try 1 (9/10)</p>');
   assert.equal(scoreChart([]), '');
+});
+
+const doc = { createElement: (t) => new Node(1, t.toUpperCase()), createTextNode: (v) => new Node(3, null, v) };
+Node.prototype.appendChild = function appendChild(c) { return this.insertBefore(c, null); };
+const marks = (n) => all(n).filter((x) => x.tagName === 'MARK');
+const row = (key, text) => h('li', { 'data-a': key, 'data-at': key }, h('time', { datetime: key }, 'now'), h('span', {}, h('b', {}, 'u1 '), text));
+
+test('search highlights: text nodes only, so an injected term is highlighted as text', () => {
+  const r = row('e1', 'refused <img src=x onerror=alert(1)> at the gate');
+  const n = highlight([r], '<IMG SRC=X ONERROR', doc);
+  assert.equal(n, 1);
+  const [m] = marks(r);
+  assert.equal(m.text, '<img src=x onerror');
+  assert.equal(all(r).some((x) => x.tagName === 'IMG'), false, 'no element was made from the text');
+  assert.equal(r.text, 'nowu1 refused <img src=x onerror=alert(1)> at the gate', 'the text reads the same');
+  unhighlight(r);
+  assert.equal(marks(r).length, 0);
+  assert.equal(r.childNodes[1].childNodes.length, 2, 'cleared back to one text node');
+});
+
+test('search highlights: case, accents and Arabic/Urdu diacritics; never inside <time>', () => {
+  assert.deepEqual(findMatches('Café CAFE cafe', 'cafe'), [[0, 4], [5, 9], [10, 14]]);
+  assert.deepEqual(findMatches('مُحَمَّد دفع', 'محمد'), [[0, 8]], 'harakat are ignored, and kept inside the match');
+  assert.deepEqual(findMatches('ادائیگی ہو گئی', 'ادائیگی'), [[0, 7]]);
+  assert.deepEqual(findMatches('anything', '  '), []);
+  const r = row('e2', 'now and now');
+  assert.equal(highlight([r], 'now', doc), 2, 'the <time> text is not searched');
+});
+
+test('search highlights come back after a live patch, on the same row node', () => {
+  const tl = (...rows) => h('ol', { 'data-k': 'timeline', 'data-h': rows.length }, ...rows);
+  const app = frag(tl(row('e1', 'totals off by one')));
+  const kept = app.childNodes[0].childNodes[0];
+  highlight([kept], 'totals', doc);
+  assert.equal(marks(app).length, 1);
+  // The page's patch: unhighlight, morph, then the filters (and highlights) again.
+  unhighlight(app);
+  morph(app, frag(tl(row('e2', 'new totals check'), row('e1', 'totals off by one'))), hooks());
+  const n = highlight(app.childNodes[0].childNodes, 'totals', doc);
+  assert.equal(n, 2);
+  assert.equal(app.childNodes[0].childNodes[1], kept, 'the highlighted row is the same node');
+  assert.equal(marks(kept)[0].text, 'totals');
 });
