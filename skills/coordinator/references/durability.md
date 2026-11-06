@@ -5,8 +5,9 @@ A run can outlive a context window, a crash, or the person going away. The state
 ## State
 
 - `.coordinator/runs/<run>/state.json` holds the goal, bar, fence, budget, units, rounds, notes and decisions.
+- State written by an older version still loads: fields added later (such as a round's `cause`) are optional.
 - Every write is atomic: the script writes a temporary file and renames it over the real one, behind a lock file. Two writers cannot corrupt the state; a lock older than 30 s is taken over.
-- `.coordinator/runs/<run>/workbench.md` is rewritten after every change. People read it from anywhere, so nobody has to interrupt the loop to ask how it's going.
+- `.coordinator/runs/<run>/workbench.md` and `hud.html` are rewritten after every change, inside the same lock. People read them from anywhere, so nobody has to interrupt the loop to ask how it's going (`hud.md`).
 - Add `.coordinator/` to `.gitignore`. It is working state, not a deliverable.
 
 ## Background agents

@@ -13,14 +13,20 @@
    - whether the run may open issues or PRs upstream for skill improvements (`references/upstream.md`).
 
    Infer what you can first.
-7. **Ask them all in one batch**, with your recommendation first on each. Show the draft goal, bar, fence, references and staffing in the same message so the person can correct them too.
+7. **Ask them all in one batch, through the harness's question tool** (AskUserQuestion in Claude Code), never as prose in the reply:
+   - each question opens with a tiny context line, so it can be answered cold: `<run> · <what it decides>`;
+   - your recommended option comes first, marked as recommended;
+   - put the draft goal, bar, fence, references and staffing in the reply just before the call, and make "Is this draft right?" one of the questions;
+   - the tool takes a few questions per call (four in Claude Code): send the rest in the next call, straight away.
+
+   With no question tool, send one numbered list: each question with its options, the recommended one first. Only you ask. Builders, critics and integrators report questions and blockers to you.
 8. Keep every answer: right after `init` (step 2) each one is recorded with `S/run.mjs note <run> --kind decision --text "…"`. Approvals for gated actions are recorded the same way and cover this run only.
 
 From here the run is **unattended**. Do not ask the person anything until the report.
 
 ## 2. Set up
 
-`S/run.mjs init <run> --tag <domain> --goal … --bar … --fence "<scope in words>" --paths <dir,dir>`, then `add` each unit (`--after` for stacked work), then `freeze`. Then record the intake answers (step 1.8) on the run. `--paths` is the fence as path prefixes; the detector reads it.
+`S/run.mjs init <run> --tag <domain> --goal … --bar … --fence "<scope in words>" --paths <dir,dir>`, then `add` each unit (`--after` for stacked work), then `freeze`. Then record the intake answers (step 1.8) on the run. `--paths` is the fence as path prefixes; the detector reads it. Every change also rewrites the run's HUD, `hud.html`: tell the person where it is, once (`references/hud.md`).
 
 ## 3. Loop
 
@@ -29,7 +35,7 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 | Action | Do |
 |---|---|
 | `build` | `start`, then send a builder (`references/briefs.md`) in the background. On its report: `built`. |
-| `judge` | Code: run `S/detect.mjs --run <run> --unit <unit> --base <base> --head <the builder's commit>` first (it records which commits it checked, and refuses an empty diff). A hit is a FAIL with that gap, unless the change is legitimate (e.g. an intended snapshot update): then rerun with `--allow <rule>:<path>` and record why with `note --kind decision`. On a run with `--paths`, a PASS is refused without a clean result for this round. Then send a critic. Record with `verdict` (`--score` is required on a fail). |
+| `judge` | Code: run `S/detect.mjs --run <run> --unit <unit> --base <base> --head <the builder's commit>` first (it records which commits it checked, and refuses an empty diff). A hit is a FAIL with that gap, unless the change is legitimate (e.g. an intended snapshot update): then rerun with `--allow <rule>:<path>` and record why with `note --kind decision`. On a run with `--paths`, a PASS is refused without a clean result for this round. Then send a critic. Record with `verdict`, copying the critic's `SCORE`, `GAP` and `CAUSE` into `--score`, `--gap` and `--cause` (score and gap are required on a fail). |
 | `change-strategy` | Pick a different approach, `strategy --text`, then build. |
 | `check-stale` | Ask the agent. No answer and `phase: building`: `start` again and send a fresh builder. `phase: judging`: `beat` and send a fresh critic (the build is kept). |
 | `wait` | Nothing. A notification will come; never poll. |
@@ -44,16 +50,16 @@ The run-level `decision` from `next`:
 |---|---|
 | `split` | Add units, then `freeze`. |
 | `continue` | Act on the units as above. |
-| `integrate` | Send the integrator, then `integrate pass|fail`. |
+| `integrate` | Send the integrator, then `integrate pass|fail` (with `--gap` and `--cause` on a fail). |
 | `done` | Finish (step 4) with outcome `done`. |
 | `done-with-gaps` | Integration ran out of budget or hit the same gap twice. Finish with outcome `partial`, listing the gaps. |
 | `stopped` | No unit passed. Finish with outcome `stopped`, listing each stop. |
 
-**A question comes up mid-run?** If the recorded decisions answer it, follow them. If not and the step is reversible, take the safest choice that fits the decisions, log it with `note --kind question`, and carry on: it goes in the report for the person to confirm. Stop and ask only for an unapproved gated action.
+**A question comes up mid-run?** If the recorded decisions answer it, follow them. If not and the step is reversible, take the safest choice that fits the decisions, log it with `note --kind question`, and carry on: it goes in the report for the person to confirm. Stop and ask only for an unapproved gated action, through the question tool as in step 1.7.
 
 ## 4. Finish
 
 Do the actions approved at intake (for example, merge when the review is READY) and record each one. Then:
 
-- **Report**, at most 12 lines: the outcome, the links, the bar and its evidence, the units stopped and why, the questions you decided on the person's behalf, the follow-ups, and the actions you took.
+- **Report**, as short as the content allows and at most 12 lines (replies follow `references/craft.md`): the outcome, the links, the bar and its evidence, the units stopped and why, the questions you decided on the person's behalf, the follow-ups, and the actions you took.
 - **Retro:** `references/learning.md`, then `S/run.mjs close <run> --outcome …`.

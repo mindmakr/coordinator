@@ -101,3 +101,16 @@ test('gaps in non-Latin scripts are compared too', () => {
   assert.equal(sameGap('登录按钮 在手机上 无法使用', '登录按钮 在手机上 无法使用'), true);
   assert.equal(sameGap('زر الدخول لا يعمل', 'الرسوم تحسب مرتين'), false);
 });
+
+test('same gap compares causes when both rounds have one, wording otherwise', () => {
+  const r = (gap, cause) => ({ verdict: 'fail', gap, cause });
+  assert.equal(sameGap(r('ICU plural keys misread', 'hand-rolled ICU parser'), r('rich-text tags ignored', 'Hand rolled ICU parser')), true, 'different symptoms, one cause');
+  assert.equal(sameGap(r('total off by one cycle', 'cycle boundary'), r('total off by one cycle', 'timezone')), false, 'same words, different causes');
+  assert.equal(sameGap(r('total off by one cycle', 'cycle boundary'), r('the total is off by one cycle')), true, 'one cause missing: wording decides');
+  assert.equal(sameGap('total off by one cycle', r('total is off by one cycle', null)), true, 'plain strings still work');
+});
+
+test('two rounds with one cause ask for a new strategy even when the gap text differs', () => {
+  const rounds = [{ ...fail('placeholder-as-error breaks i18next plurals', 6), cause: 'hand-rolled ICU scan' }, { ...fail('rich-text tags pass unchecked', 7), cause: 'hand-rolled ICU scan' }];
+  assert.equal(decideUnit(unit(rounds), run([]), T0).action, 'change-strategy');
+});

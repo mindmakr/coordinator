@@ -18,7 +18,7 @@ export function render(run, plan) {
   for (const u of run.units) {
     const last = u.rounds.at(-1);
     const n = next[u.id];
-    lines.push(`| ${u.id} | ${u.status} | ${u.rounds.length} | ${last?.score ?? ''} | ${cell(last?.gap)} | ${cell(n ? `${n.action}${n.reason ? `: ${n.reason}` : ''}` : '')} |`);
+    lines.push(`| ${u.id} | ${u.status} | ${u.rounds.length} | ${last?.score ?? ''} | ${cell(last?.gap)}${last?.cause ? ` (cause: ${cell(last.cause)})` : ''} | ${cell(n ? `${n.action}${n.reason ? `: ${n.reason}` : ''}` : '')} |`);
   }
   const integ = run.integration?.rounds ?? [];
   if (integ.length) lines.push('', `**Integration:** ${integ.map((r) => r.verdict).join(' → ')}${integ.at(-1)?.gap ? ` (gap: ${cell(integ.at(-1).gap)})` : ''}`);

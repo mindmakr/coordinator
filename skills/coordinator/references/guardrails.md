@@ -18,7 +18,7 @@ Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `
 
 ## Loop stops, enforced by `run.mjs next`
 
-- **Same gap twice in a row:** the reply is `change-strategy`. After one change of strategy, the same gap again means `stop` (stuck).
+- **Same gap twice in a row:** the reply is `change-strategy`. Two rounds are the same gap when the critic gave both the same `CAUSE` tag (`verdict --cause`), even if the wording differs; when either round has no cause, most of the gap's words must match. After one change of strategy, the same gap again means `stop` (stuck).
 - **No progress:** the score has not beaten the best earlier score for 2 rounds, so `stop`.
 - **The budget is spent**, rounds or time: `stop`. Time is checked first, so even a waiting unit stops.
 - **What it builds on stopped:** a stacked unit (`--after`) stops too, instead of waiting forever.
@@ -35,7 +35,7 @@ Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `
 
 ## Actions that need a person
 
-Merging, deploying, a push to a protected or release branch, a force push, deleting data or branches, schema changes on shared databases, spending or new paid services, messages to people or public posts, and changing CI. Ask once, with the evidence, and record the answer with `run.mjs note --kind decision`. A standing permission the person gave for this run, such as "merge when the review says READY", is recorded the same way and applies only to this run.
+Merging, deploying, a push to a protected or release branch, a force push, deleting data or branches, schema changes on shared databases, spending or new paid services, messages to people or public posts, and changing CI. Ask once through the question tool (`commands/run.md` step 1.7), with the evidence, and record the answer with `run.mjs note --kind decision`. A standing permission the person gave for this run, such as "merge when the review says READY", is recorded the same way and applies only to this run.
 
 ## Safety
 
