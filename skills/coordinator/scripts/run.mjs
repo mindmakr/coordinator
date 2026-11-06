@@ -49,9 +49,10 @@
 //   run.mjs hud <run>      rewrites hud.html and units/<unit>.html beside state.json now and prints its path
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
-//   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--pit-stop [--dest dir]]
+//   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--fresh] [--force] [--pit-stop [--dest dir]]
 //                  the project map (modules, helpers, settings, surfaces, reuse) into the run's map/ and map.html;
-//                  --pit-stop also copies the log, snapshot and summary into the repo (default <root>/coordinator/runs/<run>/map)
+//                  --fresh starts a new log (the old map/ is kept aside); --force records a build cut short by the cap;
+//                  --pit-stop stages the log and summary in the run's pit-stop/map (push carries them), or copies them to --dest
 //   run.mjs touches <run> <path> [--json]   what that file touches, from the map, for a builder's brief
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
@@ -84,7 +85,7 @@ import { selfPage } from './lib/selfpage.mjs';
 import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
-import { build as buildMap, defaultDest, hasMap, mapHtml, pitStop, rerender as mapView, touchesOf } from './lib/map/index.mjs';
+import { build as buildMap, defaultDest, hasMap, mapHtml, mapView, pitStop, touchesOf } from './lib/map/index.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget'],
@@ -475,25 +476,25 @@ const commands = {
       } catch (e) { return { run: d, createdAt: '', error: `unreadable: ${e.message}` }; }
     }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
-  // The project map (references/map.md): from the code into the run's folder; into the repo only with --pit-stop.
+  // The project map (references/map.md): from the code into the run's folder; never into the project's tree unless --dest says so.
   map([run], o) {
     const s = load(run);
     const root = resolve(typeof o.root === 'string' ? o.root : projectDir());
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
     if (o.unit !== undefined) unitOf(s, o.unit);
     if (o.dest !== undefined && o['pit-stop'] !== true) throw new Error('--dest goes with --pit-stop');
-    const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)) });
+    const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)), fresh: o.fresh === true, force: o.force === true });
     commands.hud([run]); // the dashboard links to the map
     const b = snap.build;
     return {
       build: b.n, files: b.scanned, seconds: Math.round(b.ms.total / 100) / 10, partial: b.partial, stats: b.stats, page: mapHtml(runDir(run)),
-      ...(o['pit-stop'] === true ? { pitStop: pitStop(runDir(run), typeof o.dest === 'string' ? o.dest : defaultDest(root, run)) } : {}),
+      ...(o['pit-stop'] === true ? { pitStop: pitStop(runDir(run), typeof o.dest === 'string' ? o.dest : defaultDest(runDir(run))) } : {}),
     };
   },
   touches([run, path], o) {
     load(run);
     if (!path) throw new Error('usage: run.mjs touches <run> <path> [--json]');
-    const out = touchesOf(runDir(run), path, o.json === true);
+    const out = touchesOf(run, runDir(run), path, o.json === true);
     if (o.json === true) return out;
     process.stdout.write(out);
     return null;

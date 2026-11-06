@@ -113,7 +113,7 @@ Each change also writes `hud.html` and a page per unit beside the state: a stati
 
 ## Project map
 
-`run.mjs map <run>` maps the code the run works on, with Node built-ins only: modules and imports (tsconfig paths and workspace packages resolved), shared helpers and who uses them, env vars and settings keys with where they are read and written, routes, screens and message keys tied to the services behind them, and functions with the same shape that could be shared. Other languages get an import scan. The dashboard links to it as a filterable graph. `run.mjs touches <run> <path>` prints what one file touches, for a builder's brief. It stays in the run's folder until a pit stop: `run.mjs map <run> --pit-stop` copies the log, snapshot and summary into the repo for you to commit. Details and limits: [`references/map.md`](skills/coordinator/references/map.md).
+`run.mjs map <run>` maps the code the run works on, with Node built-ins only: modules and imports (tsconfig paths and workspace packages resolved), shared helpers and who uses them, env vars and settings keys with where they are read and written, routes, screens and message keys tied to the services behind them, and functions with the same shape that could be shared. Other languages get an import scan. The dashboard links to it as a filterable graph. `run.mjs touches <run> <path>` prints what one file touches, for a builder's brief. It stays in the run's folder; `run.mjs map <run> --pit-stop` stages its log and summary for the state branch. Details and limits: [`references/map.md`](skills/coordinator/references/map.md).
 
 ## What's inside
 

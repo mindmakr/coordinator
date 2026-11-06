@@ -77,7 +77,7 @@ The Coordinator mark stays in the foreground colour, so it fits any theme.
 
 ## The project map
 
-When the run has a map (`S/run.mjs map <run>`), the header links **Project map →** to `map.html` in the snapshot and `/map` on the live dashboard: the import graph with its filters, surfaces, settings, shared helpers and reuse candidates (`map.md`).
+When the run has a map (`S/run.mjs map <run>`), the header links **Project map →** to `map.html` in the snapshot and `/map` (or `/run/<run>/map` for another run) on the live dashboard: the import graph with its filters, surfaces, settings, shared helpers and reuse candidates (`map.md`).
 
 ## Hearing the person: `S/run.mjs watch <run>`
 

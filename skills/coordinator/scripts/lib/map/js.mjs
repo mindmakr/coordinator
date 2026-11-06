@@ -54,13 +54,19 @@ export function shape(body) {
     }).replace(/\s+/g, ' ').trim();
 }
 
+// The names a stretch of code refers to (not property names after a dot).
+export const idsIn = (text) => new Set(text.match(/(?<![\w$.])[A-Za-z_$][\w$]*/g) ?? []);
+
+// Function bodies: hashed for reuse (when big enough), and every named body's
+// identifiers (`uses`), so a route handler can be traced one call deep.
 function functions(code, bare, lineOf) {
-  const out = []; const seen = new Set();
+  const out = []; const seen = new Set(); const uses = new Map();
   const add = (name, open) => {
     if (open < 0 || seen.has(open) || bare[open] !== '{') return;
     const end = match(bare, open);
     if (end < 0) return;
     seen.add(open);
+    if (name !== 'anonymous' && !uses.has(name)) uses.set(name, idsIn(bare.slice(open, end)));
     const body = code.slice(open + 1, end - 1);
     const first = lineOf(open); const last = lineOf(end - 1);
     if (last - first + 1 < MIN_BODY.lines) return;
@@ -80,7 +86,8 @@ function functions(code, bare, lineOf) {
   for (const m of bare.matchAll(/^[ \t]*(?:(?:public|private|protected|static|async|override|readonly)\s+)*([\w$]+)\s*(?:<[^>{}()]*>)?\s*\(/gm)) {
     if (!KEYWORDS.has(m[1])) add(m[1], bodyAfter(m.index + m[0].length - 1));
   }
-  return out.sort((a, b) => a.line - b.line);
+  out.sort((a, b) => a.line - b.line);
+  return { fns: out, uses };
 }
 
 // The top-level keys of the object literal opening at `open`.
@@ -143,7 +150,9 @@ export function analyse(src, file = '') {
   for (const m of bare.matchAll(/\b(?:module\.)?exports\.([\w$]+)\s*=/g)) exports.push({ name: m[1], kind: 'const', line: at(m.index) });
   for (const m of bare.matchAll(/\bmodule\.exports\s*=\s*\{/g)) for (const k of objectKeys(bare, m.index + m[0].length - 1)) exports.push({ name: k, kind: 'const', line: at(m.index) });
 
-  const fns = functions(code, bare, lineOf);
+  const { fns, uses } = functions(code, bare, lineOf);
+  // A variable stands for what its initialiser names (`const costSvc = new CostTypeService()`), so a handler reaches the import through it.
+  for (const m of bare.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]+)?=(?!>)\s*([^;\n]{1,200})/g)) if (!uses.has(m[1])) uses.set(m[1], idsIn(m[2]));
   // A named export of a local function is a function export.
   const fnNames = new Set(fns.map((f) => f.name));
   for (const e of exports) if (e.kind === 'const' && fnNames.has(typeof e.local === 'string' ? e.local : e.name)) e.kind = 'function';
@@ -208,16 +217,21 @@ export function analyse(src, file = '') {
     const recv = identBefore(before, before.length).name;
     const client = CLIENT.test(recv) && !SERVER.test(recv);
     if (client && (/^(\/|https?:|\$\{)/.test(path) || /^[\w-]+\/[\w${}:./-]*$/.test(path))) calls.push({ method, path: path.startsWith('/') || /^(https?:|\$\{)/.test(path) ? path : `/${path}`, line: at(m.index) });
-    else if (!client && path.startsWith('/') && (SERVER.test(recv) || /(^|\/)(routes?|server|api|controllers?|handlers?)(\/|\.|$)/.test(file))) routes.push({ method, path, line: at(m.index) });
+    else if (!client && path.startsWith('/') && (SERVER.test(recv) || /(^|\/)(routes?|server|api|controllers?|handlers?)(\/|\.|$)/.test(file))) {
+      // What the handler refers to: the call's own arguments, so services come from the handler, not the whole file.
+      const open = i + arg[0].indexOf('(');
+      const close = match(bare, open);
+      routes.push({ method, path, line: at(m.index), ids: [...idsIn(bare.slice(open, close < 0 ? open + 2000 : close))] });
+    }
   }
-  for (const m of bare.matchAll(/\.\s*route\s*\(\s*\{/g)) {
+  for (const m of isTest ? [] : bare.matchAll(/\.\s*route\s*\(\s*\{/g)) {
     const end = match(bare, m.index + m[0].length - 1);
     const obj = code.slice(m.index, end < 0 ? m.index + 400 : end);
     const url = /\b(?:url|path)\s*:\s*(['"`])([^'"`\n]+)\1/.exec(obj);
     const meth = /\bmethod\s*:\s*(\[[^\]]*\]|(['"])\w+\2)/.exec(obj);
-    if (url) for (const x of (meth ? meth[1].match(/\w+/g) : ['ALL'])) routes.push({ method: x.toUpperCase(), path: url[2], line: at(m.index) });
+    if (url) for (const x of (meth ? meth[1].match(/\w+/g) : ['ALL'])) routes.push({ method: x.toUpperCase(), path: url[2], line: at(m.index), ids: [...idsIn(bare.slice(m.index, end < 0 ? m.index + 400 : end))] });
   }
-  for (const m of code.matchAll(/\bfetch\s*\(\s*(['"`])([^'"`\n]+)\1(?:\s*,\s*\{[^}]*?method\s*:\s*(['"])(\w+)\3)?/g)) calls.push({ method: (m[4] ?? 'GET').toUpperCase(), path: m[2], line: at(m.index) });
+  for (const m of isTest ? [] : code.matchAll(/\bfetch\s*\(\s*(['"`])([^'"`\n]+)\1(?:\s*,\s*\{[^}]*?method\s*:\s*(['"])(\w+)\3)?/g)) calls.push({ method: (m[4] ?? 'GET').toUpperCase(), path: m[2], line: at(m.index) });
   // register(plugin, { prefix }) (Fastify) and use('/prefix', router) (Express).
   // A register without a prefix still chains: the plugin's routes sit under its parent's prefix.
   for (const m of code.matchAll(/\.\s*register\s*\(\s*([\w$]+)\s*(?:,\s*\{([^{}]*)\})?\s*\)/g)) mounts.push({ ident: m[1], prefix: /\bprefix\s*:\s*(['"`])([^'"`\n]+)\1/.exec(m[2] ?? '')?.[2] ?? '' });
@@ -237,5 +251,5 @@ export function analyse(src, file = '') {
   }
   for (const m of code.matchAll(/\b(?:formatMessage\s*\(\s*\{\s*id\s*:\s*|i18nKey\s*=\s*\{?\s*)(['"`])([\w.:-]+)\1/g)) msgs.push({ key: m[2].replace(':', '.'), ns: null, line: at(m.index) });
 
-  return { imports, exports, fns, env, settings, routes, calls, mounts, msgs, ns: [...ns], lines: lineOf(src.length) };
+  return { imports, exports, fns, uses, env, settings, routes, calls, mounts, msgs, ns: [...ns], lines: lineOf(src.length) };
 }

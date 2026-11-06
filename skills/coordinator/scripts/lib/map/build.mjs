@@ -144,18 +144,28 @@ export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
     const svc = direct.filter((x) => SERVICE.test(x));
     return (svc.length ? svc : direct).slice(0, 20);
   };
+  // A handler's services: the imported files whose bindings it names, directly
+  // or through a function of the same file it calls (one step). File-wide
+  // imports only when the handler names none (an inline plugin, say).
+  const handled = (f, ids) => {
+    const a = info.get(f);
+    const names = new Set(ids);
+    for (const id of ids) for (const x of a.uses?.get(id) ?? []) names.add(x);
+    const hit = sorted((edges.get(f) ?? []).filter(({ imp }) => !imp.type && Object.keys(imp.locals ?? {}).some((l) => names.has(l))).map((e) => e.to));
+    return hit.length ? hit.slice(0, 20) : behind(f);
+  };
   const surfaces = [];
   for (const [f, a] of info) {
     if (a.lang !== 'js') continue;
     for (const r of a.routes) {
       for (const pre of [...new Set(prefixes(f))]) {
         const path = `${pre}${r.path}`.replace(/\/+/g, '/').replace(/(.)\/$/, '$1') || '/';
-        surfaces.push({ id: `route:${r.method} ${path} ${f}`, kind: 'route', method: r.method, path, file: f, line: r.line, services: behind(f) });
+        surfaces.push({ id: `route:${r.method} ${path} ${f}`, kind: 'route', method: r.method, path, file: f, line: r.line, services: handled(f, r.ids ?? []) });
       }
     }
   }
   for (const s of fileSurfaces(files.filter((f) => info.has(f)), exportsOf)) {
-    surfaces.push({ id: `${s.kind}:${s.method ? `${s.method} ` : ''}${s.path} ${s.file}`, kind: s.kind, ...(s.method ? { method: s.method } : {}), path: s.path, file: s.file, line: 1, services: behind(s.file) });
+    surfaces.push({ id: `${s.kind}:${s.method ? `${s.method} ` : ''}${s.path} ${s.file}`, kind: s.kind, ...(s.method ? { method: s.method } : {}), path: s.path, file: s.file, line: 1, services: s.method && info.get(s.file).uses?.has(s.method) ? handled(s.file, [s.method]) : behind(s.file) });
   }
   // Screens reach routes through their client calls, up to two import steps deep.
   const byLast = new Map(); // routes by their last path segment
@@ -194,7 +204,7 @@ export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
   for (const [k, v] of keys) {
     const by = sorted(used.get(k) ?? []);
     if (!by.length) unused++;
-    if (by.length || v.missing.length) surfaces.push({ id: `message:${k}`, kind: 'message', key: k, usedBy: by, ...(v.missing.length ? { missing: v.missing } : {}) });
+    if (by.length || v.missing.length) surfaces.push({ id: `message:${k}`, kind: 'message', usedBy: by, ...(v.missing.length ? { missing: v.missing } : {}) });
   }
 
   // Reuse candidates: function bodies with the same shape, in more than one place.

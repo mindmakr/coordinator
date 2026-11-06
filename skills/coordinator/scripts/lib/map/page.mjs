@@ -180,5 +180,5 @@ export function mapPage(snap, ctx, run) {
     '<h2>Reuse candidates</h2>',
     blk('map-reuse', toggle('map-reuse', `Functions with the same shape · ${snap.reuse.length}`, rows(snap.reuse, (r) => [`${r.lines}`, r.fns.map((f) => { const [file, rest] = f.split('#'); const [name, line] = rest.split(':'); return `${fileLink(snap, file, Number(line), `${file}#${name}`)}`; }).join('<br>')], ['Lines', 'Where']))),
   ].join('\n');
-  return page({ title: `Map · ${run}`, body, ctx, path: '/map' });
+  return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map` });
 }

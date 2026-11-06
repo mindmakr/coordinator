@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -13,6 +13,7 @@ import { mapPage } from '../lib/map/page.mjs';
 import { exportTarget, jsonc } from '../lib/map/resolve.mjs';
 import { callMatches } from '../lib/map/surfaces.mjs';
 import { text, touches } from '../lib/map/touches.mjs';
+import { build as buildRun, mapView, pitStopFiles } from '../lib/map/index.mjs';
 import { staticCtx } from '../lib/hud.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +29,7 @@ const map = buildMap(copy);
 const byId = (list, id) => list.find((x) => x.id === id);
 
 test('modules: relative, tsconfig paths, workspace exports, CommonJS and the .js → .ts swap', () => {
-  assert.deepEqual(byId(map.modules, 'src/routes/employer.ts').imports, ['src/services/employer.service.ts'], '@/ alias from tsconfig paths');
+  assert.deepEqual(byId(map.modules, 'src/routes/employer.ts').imports, ['src/services/employer.service.ts', 'src/services/ewa.service.ts'], '@/ alias from tsconfig paths');
   assert.deepEqual(byId(map.modules, 'src/server.ts').imports, ['src/routes/employer.ts'], './routes/employer.js resolves to the .ts file');
   assert.deepEqual(byId(map.modules, 'src/services/employer.service.ts').imports, ['packages/shared/src/index.ts', 'packages/shared/src/money.ts'], 'package exports, dist → src');
   assert.deepEqual(byId(map.modules, 'src/lib/legacy.js').imports, ['src/services/employer.service.ts', 'src/services/ewa.service.ts']);
@@ -57,11 +58,12 @@ test('shared helpers list who uses them; settings say where they are read and wr
 test('surfaces: prefixed Fastify routes with their services, app-router pages and handlers, message keys', () => {
   const patch = byId(map.surfaces, 'route:PATCH /v1/employer/settings src/routes/employer.ts');
   assert.ok(patch, 'register(…, { prefix }) applies to the plugin file');
-  assert.deepEqual(patch.services, ['src/services/employer.service.ts']);
+  assert.deepEqual(patch.services, ['src/services/employer.service.ts'], 'what the handler names, not every import of the file');
+  assert.deepEqual(byId(map.surfaces, 'route:POST /v1/employer/disburse src/routes/employer.ts').services, ['src/services/ewa.service.ts'], 'through a local function, one call deep');
   assert.ok(byId(map.surfaces, 'route:GET /api/health app/api/health/route.ts'));
   const screen = byId(map.surfaces, 'screen:/employer app/(dashboard)/employer/page.tsx');
   assert.deepEqual(screen.calls, ['route:GET /v1/employer/settings src/routes/employer.ts'], 'the screen reaches the route through its client call');
-  assert.deepEqual(byId(map.surfaces, 'message:employer.subtitle'), { id: 'message:employer.subtitle', kind: 'message', key: 'employer.subtitle', usedBy: ['app/(dashboard)/employer/page.tsx'], missing: ['ar'] });
+  assert.deepEqual(byId(map.surfaces, 'message:employer.subtitle'), { id: 'message:employer.subtitle', kind: 'message', usedBy: ['app/(dashboard)/employer/page.tsx'], missing: ['ar'] });
   assert.equal(byId(map.surfaces, 'message:employer.unused'), undefined, 'unused keys with every locale are counted, not listed');
   assert.deepEqual(map.meta.messages, { keys: 3, unused: 1, unknownLookups: 0, catalogs: ['messages ar/en 3'] });
 });
@@ -164,6 +166,8 @@ test('touches: what a file imports, who reaches it, helpers, settings, surfaces 
   const t = touches(snap, 'src/services/employer.service.ts');
   assert.deepEqual(t.importedBy, ['src/lib/legacy.js', 'src/routes/employer.ts', 'src/services/ewa.service.ts']);
   assert.equal(t.reach, 4, 'legacy, routes, ewa and server within three steps');
+  assert.equal(t.surfaces[0].direct, true, 'direct surfaces first');
+  assert.ok(t.surfaces.filter((x) => !x.direct).every((x, i, a) => i === 0 || a[i - 1].steps <= x.steps), 'then by import distance');
   assert.deepEqual(t.helpersHere.map((h) => h.name), ['changeEmployerSettings', 'loadEmployer']);
   assert.deepEqual(t.settings.map((s) => s.id), ['env:BANK_PROVIDER', 'key:settings.autoDisburse', 'key:settings.payday']);
   assert.ok(t.surfaces.some((s) => s.id.startsWith('route:PATCH /v1/employer/settings') && s.direct));
@@ -183,7 +187,7 @@ test('the map page: inline SVG graph, CSS-only filters, no script, escaped text,
   assert.ok(!/<script/i.test(html), 'the static page carries no script');
   assert.match(html, /script-src|default-src 'none'/);
   assert.ok(html.includes('&lt;b&gt;x&lt;/b&gt;') && !html.includes('<b>x</b>'));
-  assert.ok(html.includes(`https://github.com/acme/app/blob/${'a'.repeat(40)}/src/routes/employer.ts#L6`));
+  assert.ok(html.includes(`https://github.com/acme/app/blob/${'a'.repeat(40)}/src/routes/employer.ts#L11`));
   assert.match(html, /id="f-a\d+" checked/); assert.match(html, /id="f-w10"/); assert.match(html, /id="f-cycles"/);
   assert.match(html, /:root:has\(#f-a0:not\(:checked\)\)/);
   assert.match(html, /href="hud.html">← r1 dashboard/);
@@ -217,22 +221,55 @@ test('run.mjs map writes the map beside the run, links it from the dashboard, an
   assert.equal(cli('map', 'nope', '--root', copy).code, 1);
 });
 
-test('--pit-stop copies the log, snapshot and summary into the repo, and refuses a log written elsewhere', () => {
+test('--pit-stop stages the log and summary in the run\'s folder, never the project tree; --dest copies them and refuses a foreign log', () => {
+  const def = cli('map', 'm1', '--root', copy, '--pit-stop');
+  assert.equal(def.code, 0, def.err);
+  const staged = join(state, 'runs', 'm1', 'pit-stop', 'map');
+  assert.deepEqual(JSON.parse(def.out).pitStop.files, ['events.jsonl', 'map.md'], 'map.json is rebuilt from the log, so it does not ship');
+  assert.ok(existsSync(join(staged, 'events.jsonl')) && existsSync(join(staged, 'map.md')) && !existsSync(join(staged, 'map.json')));
+  assert.ok(!existsSync(join(copy, 'coordinator')), 'nothing written into the mapped project');
   const dest = join(dir, 'repo-map');
-  const r = cli('map', 'm1', '--root', copy, '--pit-stop', '--dest', dest);
-  assert.equal(r.code, 0, r.err);
-  assert.deepEqual(JSON.parse(r.out).pitStop.files, ['events.jsonl', 'map.json', 'map.md']);
+  assert.equal(cli('map', 'm1', '--root', copy, '--pit-stop', '--dest', dest).code, 0);
   assert.equal(readFileSync(join(dest, 'events.jsonl'), 'utf8'), readFileSync(join(state, 'runs', 'm1', 'map', 'events.jsonl'), 'utf8'));
   assert.equal(cli('map', 'm1', '--root', copy, '--pit-stop', '--dest', dest).code, 0, 'a later pit stop extends the same log');
   writeFileSync(join(dest, 'events.jsonl'), `${readFileSync(join(dest, 'events.jsonl'), 'utf8')}{"v":1,"seq":999}\n`);
   const refused = cli('map', 'm1', '--root', copy, '--pit-stop', '--dest', dest);
   assert.equal(refused.code, 1); assert.match(refused.err, /pit stop refused/);
-  const def = cli('map', 'm1', '--root', copy, '--pit-stop');
-  assert.equal(def.code, 0, def.err);
-  assert.ok(existsSync(join(copy, 'coordinator', 'runs', 'm1', 'map', 'map.json')), 'default: <root>/coordinator/runs/<run>/map');
+  const files = pitStopFiles(join(state, 'runs', 'm1'), 'm1');
+  assert.deepEqual(Object.keys(files), ['runs/m1/map/events.jsonl', 'runs/m1/map/map.md'], 'what push will carry to the state branch');
 });
 
-test('the live dashboard serves /map behind the token', async () => {
+test('a build cut short by the time cap is refused over a full map unless --force', () => {
+  const runDir = join(state, 'runs', 'm1');
+  const before = readFileSync(join(runDir, 'map', 'events.jsonl'), 'utf8');
+  let t = 0;
+  const opts = { root: copy, maxSeconds: 1, ctx: staticCtx(runDir, 0), now: () => (t += 400) }; // a clock that runs out mid-scan
+  assert.throws(() => buildRun('m1', runDir, opts), /stopped at the 1 s cap.*--force/);
+  assert.equal(readFileSync(join(runDir, 'map', 'events.jsonl'), 'utf8'), before, 'nothing recorded');
+  t = 0;
+  const snap = buildRun('m1', runDir, { ...opts, force: true });
+  assert.equal(snap.build.partial, true);
+  assert.equal(snap.modules.length, map.modules.length, 'a forced partial build removes nothing');
+});
+
+test('a corrupt log is named, with --fresh as the way out; the page says so too', () => {
+  const log = join(state, 'runs', 'm1', 'map', 'events.jsonl');
+  const good = readFileSync(log, 'utf8');
+  writeFileSync(log, `${good}not json\n`);
+  const t = cli('touches', 'm1', 'src/server.ts');
+  assert.equal(t.code, 1); assert.match(t.err, /is not JSON.*run.mjs map m1 --fresh/);
+  const html = mapView('m1', join(state, 'runs', 'm1'), staticCtx(join(state, 'runs', 'm1'), 0));
+  assert.match(html, /Project map · not readable/); assert.match(html, /is not JSON/); assert.match(html, /--fresh/);
+  const fresh = cli('map', 'm1', '--root', copy, '--fresh');
+  assert.equal(fresh.code, 0, fresh.err);
+  assert.equal(JSON.parse(fresh.out).build, 1, 'a new log');
+  assert.ok(readdirSync(join(state, 'runs', 'm1')).some((n) => n.startsWith('map.old-')), 'the broken map is kept aside');
+});
+
+test('the live dashboard serves /map and /run/<id>/map behind the token', async () => {
+  assert.equal(cli('init', 'm2', '--goal', 'g', '--bar', 'b', '--fence', 'f').code, 0);
+  assert.equal(cli('map', 'm2', '--root', copy).code, 0);
+  assert.equal(cli('init', 'm3', '--goal', 'g', '--bar', 'b', '--fence', 'f').code, 0);
   const child = spawn(process.execPath, [join(scripts, 'run.mjs'), 'serve', 'm1'], { env: { ...process.env, COORDINATOR_DIR: state } });
   try {
     const url = await new Promise((ok, fail) => {
@@ -248,5 +285,9 @@ test('the live dashboard serves /map behind the token', async () => {
     assert.match(html, /href="\/\?t=/, 'back link keeps the token');
     assert.match(await (await fetch(url)).text(), /href="\/map\?t=[^"]+">Project map →/);
     assert.equal((await fetch(`${u.origin}/map`)).status, 403, 'no token, no map');
+    const other = await fetch(`${u.origin}/run/m2/map${u.search}`);
+    assert.equal(other.status, 200, 'another run\'s map at /run/<id>/map');
+    assert.match(await other.text(), /href="\/run\/m2\?t=[^"]+">← m2 dashboard[\s\S]*Project map · project/, 'its back link goes to that run');
+    assert.equal((await fetch(`${u.origin}/run/m3/map${u.search}`)).status, 404, 'a run with no map has no map page');
   } finally { child.kill(); }
 });

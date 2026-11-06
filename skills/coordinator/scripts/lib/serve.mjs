@@ -17,8 +17,7 @@ import { csp } from './parts.mjs';
 export const HOST = '127.0.0.1';
 const MAX_BODY = 64 * 1024;
 const ID = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
-const PAGE = new RegExp(`^/(?:coordinator|map|run/${ID}(?:/unit/${ID}|/map)?|unit/${ID})?const ID = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
-const PAGE = new RegExp();
+const PAGE = new RegExp(`^/(?:coordinator|map|run/${ID}(?:/unit/${ID}|/map)?|unit/${ID})?$`);
 const ART = new RegExp(`^(?:/run/(${ID}))?/artifacts/([A-Za-z0-9_][A-Za-z0-9._-]{0,63})/([^/]+)$`);
 
 const sameToken = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
