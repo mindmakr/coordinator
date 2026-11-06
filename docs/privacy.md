@@ -21,10 +21,11 @@ Coordinator runs on your machine. The hosted service at [app.coordinator.mindmak
 |---|---|---|
 | A copy of each run on the state branch, masked again, and its project map | To draw the dashboard | While the run is on the branch. Removed at the next sync after it leaves, and at once if you uninstall |
 | Installed repos: name, private or public, branch tip, `coordinator.json`, project lessons | To know what to read and where to write | Until the repo is removed from the installation, or the App is uninstalled |
-| Which issues and PRs each unit links, and the tracker comment and board card made for each | To edit the same comment and card each time | Same as the run |
+| Which issues and PRs each unit links | To keep their trackers and timelines current | Same as the run |
+| For each tracker comment and board card made: the issue or PR, run and unit, the comment id and a hash of what was last written | To edit the same comment and card each time | Until the App is uninstalled (kept after the run leaves the branch, so a run that comes back reuses its comment) |
 | Merges, closes and check results of linked PRs | To show them in the run's timeline | 180 days |
 | Your session: GitHub user id and login, your GitHub token encrypted (AES-256-GCM) | To sign you in and ask GitHub what you can read | Until you sign out, or 7 days |
-| Audit log: sign-ins, refused access, installs and removals, with the login involved | Security | 90 days |
+| Audit log (below) | Security, and so installation admins can see what happened | 90 days, also after an uninstall |
 | Webhook delivery ids | To skip repeats | 14 days |
 | Your alert settings: time zone, quiet hours, channels, whether alerts may include a question's text, and the repos you follow | To send you alerts the way you asked | Until you change them. A followed repo is dropped when it leaves the installation |
 | Your alert email address, only after you confirm it from the link we send (the link expires in 24 hours; until then the address waits as pending) | Email alerts | Until you clear the field |
@@ -33,7 +34,28 @@ Coordinator runs on your machine. The hosted service at [app.coordinator.mindmak
 | Comment commands handled: installation and comment id | To act on each comment once | 30 days |
 | "May this person read this repo", per person | So every page doesn't ask GitHub again | In memory, at most 60 seconds, never shared between people |
 
-Uninstalling the App deletes that installation's rows at once: runs, repos, links, trackers, merges and checks, and the repos you followed there. Your alert settings, email, push subscriptions and alert history are yours rather than the installation's, and stay as above. Your repo keeps its state branch.
+Uninstalling the App deletes that installation's rows at once: runs, repos, links, trackers, merges and checks, handled comment commands, and the repos you followed there. Your alert settings, email, push subscriptions and alert history are yours rather than the installation's, and stay as above; so does the audit log, for its 90 days. Your repo keeps its state branch.
+
+### The audit log
+
+Each entry has a time, a kind, the installation (when there is one), the GitHub login involved (when there is one) and a few details. Nothing else.
+
+| Kind | Details kept |
+|---|---|
+| `sign-in`, `sign-out` | The login |
+| `access.refused` | The repo someone signed in tried to open without read access |
+| `write.answer`, `write.note` | An answer or note made on the web: repo, run, what it was, the commit and event number |
+| `write.refused` | An answer or note refused for want of push access: repo, run, kind |
+| `command.answer`, `command.note` | The same for a comment command |
+| `command.refused` | A comment command from someone without push access: repo, run |
+| `doorbell.refused` | A doorbell token asked for a repo the person cannot read: the repo |
+| `installation.created`, `.deleted`, `.suspend` and other installation actions | Who installed, removed or changed the App |
+| `installation.repositories` | How many repos were added and removed |
+| `sync.manual` | A sync run by an operator, and whether it was forced |
+| `alert.sent` | Trigger, run, unit and channels of an alert sent to the login |
+| `alerts.watch` | A repo someone started or stopped following |
+| `alerts.access-lost` | A followed repo dropped because the person lost read access |
+| `alerts.email-confirmed` | That someone confirmed an alert email (the address itself is not in the log) |
 
 A security alert (secret scanning, code scanning, Dependabot) is kept only as its kind and number, inside the alert made for you.
 
@@ -43,7 +65,7 @@ A security alert (secret scanning, code scanning, Dependabot) is kept only as it
 
 **Not done:** no model calls, no analytics or tracking, no advertising, no selling or sharing of data.
 
-Server logs carry the request path, status and timing, never headers, cookies or query strings. They are kept for **[TO BE SET AT DEPLOY: log retention period]**.
+Server logs are JSON lines: one per request (method, path, status and timing; never headers, cookies, query strings or bodies), plus a few events. A sign-in logs the login ("signed in"), a refused token refresh logs the login, and a webhook whose signature fails logs the client IP address it came from. Secrets are masked in every line as a second net. They are kept for **[TO BE SET AT DEPLOY: log retention period]**.
 
 ## Who can see a run
 

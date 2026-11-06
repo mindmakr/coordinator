@@ -181,7 +181,7 @@ footer.colophon p { margin: 0; }
   <p class="motto">What your agents did, what they are doing next, and the evidence for it.</p>
   <div class="dateline">
     <span><time datetime="2026-11-06">Friday, 6 November 2026</time></span>
-    <span>Version 0.5 edition</span>
+    <span>Version 1.0 edition</span>
     <span>Free to install</span>
   </div>
   <nav class="sections" aria-label="Sections">
@@ -296,7 +296,7 @@ footer.colophon p { margin: 0; }
     </article>
     <article>
       <h3><span class="tag now">By design</span> Any harness with sub-agents</h3>
-      <p>The skill is plain Markdown and Node scripts. It asks for three things from a harness: agents it can delegate to, a way to run a script, and a way to ask you a question. Where there is no question tool it falls back to a numbered list; where there are no Artifacts it gives you the file path. So far it is packaged and released for Claude Code only.</p>
+      <p>The skill is plain Markdown and Node scripts. It asks for three things from a harness: agents it can delegate to, a way to run a script, and a way to ask you a question. Where there is no question tool it falls back to a numbered list; where there are no Artifacts it gives you the file path.</p>
     </article>
     <article>
       <h3><span class="tag next">1.0</span> OpenAI Codex CLI</h3>
@@ -337,8 +337,8 @@ footer.colophon p { margin: 0; }
       <p>Lessons are stored per person or per project, merged, ranked by use and pruned, and quoted into the next run's briefs. Past runs set the budgets. A lesson seen three times is proposed as a change to the skill, for a person to review.</p>
     </article>
     <article>
-      <h3><span class="tag planned">Planned</span> Maps</h3>
-      <p>Mind, flow and heat maps of a run (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>), a map of the project's code and settings (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>), and a page about the coordinator itself: its lessons, stats and history (<a href="https://github.com/mindmakr/coordinator/issues/19">#19</a>).</p>
+      <h3><span class="tag now">Today</span> Maps</h3>
+      <p>Since 0.6: mind, flow and heat maps of a run, with a status mark and a stats panel on every unit (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>), a map of the project's code and settings (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>), and a page about the coordinator itself: its lessons, stats and history (<a href="https://github.com/mindmakr/coordinator/issues/19">#19</a>).</p>
     </article>
     <article>
       <h3><span class="tag now">Today</span> Durable state</h3>
@@ -378,23 +378,23 @@ footer.colophon p { margin: 0; }
   <header>
     <p class="kicker">Coming soon</p>
     <h2 id="coming-h">On the drawing board: add-ons for the questions a lead gets asked</h2>
-    <p class="standfirst">None of these exist yet. Each is marked with where it stands: on the 1.0 plan with an issue, or proposed and open for discussion.</p>
+    <p class="standfirst">Some of these shipped in 0.6; the rest are proposed and open for discussion. Each is marked with where it stands.</p>
   </header>
   <div class="grid2">
     <div>
-      <h3><span class="tag planned">On the 1.0 plan</span> Security review in every run</h3>
+      <h3><span class="tag now">Since 0.6</span> Security review in every run</h3>
       <p>A security pass as a second critic on every code change: secret, dependency and static scans on what the change adds, and authorisation checks read from the diff. Risk areas named in a project's <code>COORDINATOR.md</code> add a specialist critic that must also pass (<a href="https://github.com/mindmakr/coordinator/issues/13">#13</a>).</p>
     </div>
     <div>
       <h3><span class="tag planned">Proposed</span> Compliance and auditing</h3>
-      <p>An audit trail a reviewer can follow from a requirement to the behaviour that tests it and the evidence that it passed, and compliance checklists as bars. The 1.0 service design keeps an audit log of its own; compliance packs have no issue yet. <a href="#wanted">Tell us what you need.</a></p>
+      <p>An audit trail a reviewer can follow from a requirement to the behaviour that tests it and the evidence that it passed, and compliance checklists as bars. The hosted service keeps an audit log of its own; compliance packs have no issue yet. <a href="#wanted">Tell us what you need.</a></p>
     </div>
     <div>
-      <h3><span class="tag planned">On the 1.0 plan</span> Code and implementation maps</h3>
+      <h3><span class="tag now">Since 0.6</span> Code and implementation maps</h3>
       <p>A map of the code the coordinator works on: modules and imports, shared helpers and who reuses them, near-duplicates worth merging, so builders and critics see what a change touches before they touch it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>). Run maps: mind, flow and heat (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>).</p>
     </div>
     <div>
-      <h3><span class="tag planned">On the 1.0 plan</span> Settings and surfaces</h3>
+      <h3><span class="tag now">Since 0.6</span> Settings and surfaces</h3>
       <p>Each settings key mapped to where it is read and written, and each route, screen and message tied to the services behind it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>).</p>
     </div>
     <div>
@@ -406,7 +406,7 @@ footer.colophon p { margin: 0; }
       <p>Third-party packages and services a project calls, where it calls them, and which run touched them. No issue yet.</p>
     </div>
   </div>
-  <p class="note" style="margin-top:1rem">The road to 1.0, in order. <strong>Today (0.5):</strong> the live dashboard with behaviours and evidence, answer forms and <code>watch</code>. <strong>Planned:</strong> <a href="https://github.com/mindmakr/coordinator/issues/9">an event log behind the local dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/10">run state kept in your own repository</a> · <a href="https://github.com/mindmakr/coordinator/issues/11">a GitHub App and a read-only web dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/12">answers, notes and alerts from anywhere</a> · <a href="https://github.com/mindmakr/coordinator/issues/13">built-in sub-skills</a> · <a href="https://github.com/mindmakr/coordinator/issues/14">the 1.0 release</a>. The design is a draft under review (<a href="https://github.com/mindmakr/coordinator/issues/15">#15</a>).</p>
+  <p class="note" style="margin-top:1rem">The road to 1.0. <strong>0.5:</strong> the live dashboard with behaviours and evidence. <strong>0.6:</strong> <a href="https://github.com/mindmakr/coordinator/issues/9">an event log</a>, <a href="https://github.com/mindmakr/coordinator/issues/10">run state kept in your own repository</a>, <a href="https://github.com/mindmakr/coordinator/issues/13">built-in sub-skills with a security pass</a>, and maps. <strong>1.0:</strong> <a href="https://github.com/mindmakr/coordinator/issues/11">a GitHub App and a web dashboard</a> with <a href="https://github.com/mindmakr/coordinator/issues/12">answers, notes and alerts from anywhere</a>, as a hosted beta, and OpenAI Codex CLI as a second harness (<a href="https://github.com/mindmakr/coordinator/issues/14">#14</a>).</p>
 </section>
 
 <section class="band" id="wanted" aria-labelledby="wanted-h">
@@ -419,7 +419,7 @@ footer.colophon p { margin: 0; }
     <div class="cols">
       <p>If you build a model, a coding tool or an open-source agent, your users are already running teams of agents. What they lack is a lead: someone to ask the questions up front, keep the builder and the critic apart, and stop the run when it stops making sense.</p>
       <p>Coordinator is that lead, written as an open skill under the MIT licence. It runs on Claude Code today and is designed for any harness that can delegate to sub-agents. Each harness that supports it widens what it can do for your users and theirs.</p>
-      <p>It is maintained by one author. Support would go to the work that one person cannot do alone: testing runs across models and harnesses, building and maintaining adapters for more harnesses, and the hosted dashboard planned for 1.0.</p>
+      <p>It is maintained by one author. Support would go to the work that one person cannot do alone: testing runs across models and harnesses, building and maintaining adapters for more harnesses, and the hosted dashboard.</p>
       <p>We are not asking for endorsement. We are asking for help, and we will say plainly, on this page and in the repository, who is helping and how.</p>
       <p><em>Asif Raja, by mindmakr</em></p>
     </div>
@@ -445,7 +445,7 @@ footer.colophon p { margin: 0; }
 </main>
 
 <footer class="colophon">
-  <p>Coordinator by mindmakr · Version 0.5.0 · <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT licence</a></p>
+  <p>Coordinator by mindmakr · Version 1.0.0 · <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT licence</a></p>
   <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a> · <a href="https://github.com/mindmakr/coordinator">github.com/mindmakr/coordinator</a></p>
   <p>Docs: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/install.md">Install</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/connect.md">Connect</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Self-host</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/permissions.md">Permissions</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">Privacy</a> · The hosted service: <a href="https://github.com/mindmakr/coordinator/blob/main/service/LICENSE">AGPL-3.0</a></p>
 </footer>

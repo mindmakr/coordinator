@@ -180,14 +180,17 @@ service/                        the GitHub App and web dashboard (AGPL-3.0, its 
 
 ## Coming soon
 
-Out in 0.5: behaviours and evidence on the bar, and the live dashboard with a page per unit ([Dashboard](#dashboard)). Planned, not built yet: the rest of the road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14).
+The road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14). What shipped and what is next:
 
 | Add-on | Status |
 |---|---|
 | Follow and answer a run from a phone, with alerts | Built for 1.0, hosted beta ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12)) |
-| Security pass as a second critic on every code change | On the 1.0 plan ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
-| Run maps: mind, flow, heat and goal relevance | On the 1.0 plan ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
-| Project map: code, settings, surfaces and reuse | Built, unreleased ([Project map](#project-map), [#21](https://github.com/mindmakr/coordinator/issues/21)) |
+| OpenAI Codex CLI as a second harness | Built for 1.0; a full end-to-end run still to pass ([codex.md](skills/coordinator/references/codex.md)) |
+| Security pass as a second critic on every code change | Shipped in 0.6 ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
+| Run maps: mind, flow, heat and goal relevance | Shipped in 0.6, labels and stats panels in 1.0 ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
+| Project map: code, settings, surfaces and reuse | Shipped in 0.6 ([Project map](#project-map), [#21](https://github.com/mindmakr/coordinator/issues/21)) |
+| A short-lived doorbell token for this App alone (device login) | Next; today the doorbell uses your `gh` token ([permissions](docs/permissions.md#the-doorbell-and-your-gh-token)) |
+| Slack alerts | After 1.0 |
 | Compliance and audit trails, API flows, caller and callee graphs, function and external dependency maps | Proposed; [tell us what you need](https://github.com/mindmakr/coordinator/issues/new/choose) |
 
 ## Contributing
