@@ -111,6 +111,10 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 
 Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once.
 
+## Project map
+
+`run.mjs map <run>` maps the code the run works on, with Node built-ins only: modules and imports (tsconfig paths and workspace packages resolved), shared helpers and who uses them, env vars and settings keys with where they are read and written, routes, screens and message keys tied to the services behind them, and functions with the same shape that could be shared. Other languages get an import scan. The dashboard links to it as a filterable graph. `run.mjs touches <run> <path>` prints what one file touches, for a builder's brief. It stays in the run's folder; `run.mjs map <run> --pit-stop` stages its log and summary for the state branch. Details and limits: [`references/map.md`](skills/coordinator/references/map.md).
+
 ## What's inside
 
 ```
@@ -129,6 +133,7 @@ skills/coordinator/
 │   ├── guardrails.md           budgets, fence, stop rules, gated actions
 │   ├── durability.md           the event log and snapshot, pit-stop push/pull, heartbeats, resume
 │   ├── hud.md                  the text view, the live dashboard and the snapshot
+│   ├── map.md                  the project map: commands, storage, view, limits
 │   ├── learning.md             retro, lessons, budget tuning
 │   ├── upstream.md             contributing improvements back
 │   └── domains/                code · content (writing, design, research, data, prompts)
@@ -139,6 +144,7 @@ skills/coordinator/
     ├── lib/                    pure modules: rules, store, events, eventschema, schema, statesync, gaming, secrets, args,
     │                           workbench, view, plain, questions, hud, unitpage, parts, links, theme, timeline,
     │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study
+    │   └── map/                the project map: scan, resolve, build, event log, page, touches
     └── test/                   node:test suites
 ```
 
@@ -161,7 +167,7 @@ Out in 0.5: behaviours and evidence on the bar, and the live dashboard with a pa
 | Follow and answer a run from a phone, with alerts | On the 1.0 plan ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12), [#18](https://github.com/mindmakr/coordinator/issues/18)) |
 | Security pass as a second critic on every code change | On the 1.0 plan ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
 | Run maps: mind, flow, heat and goal relevance | On the 1.0 plan ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
-| Project map: code, settings, surfaces and reuse | On the 1.0 plan ([#21](https://github.com/mindmakr/coordinator/issues/21)) |
+| Project map: code, settings, surfaces and reuse | Built, unreleased ([Project map](#project-map), [#21](https://github.com/mindmakr/coordinator/issues/21)) |
 | Compliance and audit trails, API flows, caller and callee graphs, function and external dependency maps | Proposed; [tell us what you need](https://github.com/mindmakr/coordinator/issues/new/choose) |
 
 ## Contributing

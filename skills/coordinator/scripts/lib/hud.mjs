@@ -4,7 +4,7 @@
 // Without `ctx.live` it is the static hud.html: no scripts, no network, a
 // read-only snapshot. With it (lib/serve.mjs) it is the live dashboard: forms,
 // and one script, allowed by a per-response nonce, that patches blocks in place.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
@@ -23,6 +23,7 @@ export function staticCtx(runDir, depth = 0, theme = null) {
   return {
     live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, pages: [],
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
+    mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
     // Small screenshots go inline, so the snapshot shows them without loading anything.
@@ -196,7 +197,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const form = ctx.live && v.open && !ctx.readOnly ? ctx.live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}</header>`),
+    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}</header>`),
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     blk('goal', goalBlock(v, ctx)),
     blk('needs', needsYou(v, form)),

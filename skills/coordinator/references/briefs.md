@@ -14,6 +14,7 @@ Goal: <the unit's goal, as an outcome>
 Bar: <the unit's bar, exactly as recorded>
 Behaviours: <each id and sentence, from run.mjs behaviours>
 Fence: <in scope / forbidden>. Anything outside the fence goes in "Follow-ups" in your report; don't do it.
+<When the run has a project map: the output of `run.mjs touches <run> <path>` for each file the unit will change (`map.md`), then "This is a pointer, not the whole truth: check the callers yourself before changing a shared helper or setting.">"
 Where: <worktree or branch, or the output path>. Work only there.
 Playbook: read and follow <skill-dir>/references/sub-skills/<fix.md; add translations.md when strings change> (or the project's skill: <name>).
 <Round 2 or later: "The critic's biggest gap: <gap>. Evidence: <evidence>. Fix this first.">
