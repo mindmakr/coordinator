@@ -111,7 +111,7 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 
 **From anywhere (beta, self-host):** [`service/`](service/README.md) is a GitHub App and a read-only web dashboard. It reads the `coordinator-state` branch that `run.mjs push` writes and shows each run, drawn by the same renderers, to the people who can read the repo on GitHub. One container plus Postgres; the App manifest and Dokploy notes are in its README.
 
-Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once.
+Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once; with `--remote` it also pulls answers made on the web or by comment commands from the state branch (within a minute, or seconds with the service's doorbell).
 
 ## Project map
 

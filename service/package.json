@@ -5,7 +5,9 @@
   "description": "GitHub App and web dashboard for Coordinator runs: read runs, answer and add notes",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/main.mjs",
     "sync": "node src/cli.mjs sync",
@@ -13,6 +15,8 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "pg": "8.13.1"
+    "nodemailer": "10.1.7",
+    "pg": "8.13.1",
+    "web-push": "3.6.7"
   }
 }

@@ -5,6 +5,8 @@
 - **Answers and notes from anywhere** (#12, first half): the web dashboard takes answers and notes, committed to the run's event log on the `coordinator-state` branch with the person's own token, only from people with push access (readers see the forms disabled, with the reason); `/coordinator answer qN <option>` / `"text"` and `/coordinator note <text>` work in issue and PR comments. Both write the same `answer` / `note` event `run.mjs` does, so the lead's `pull` fast-forwards onto it. The dashboard's forms take a `ctx.form` (token field name, path prefix, disabled reason) so a hosted copy can carry them without the live script. Details in `service/CHANGELOG.md`.
 - **Plugin icon:** `.claude-plugin/icon.png` (512 px, the dashboard's mark), so `claude plugin validate` no longer warns ICON_MISSING.
 - **Service follow-ups from the c11 review:** owed trail writes survive a crash, trail sequence values never repeat, and a stale same-named repo row cannot hide a page. Details in `service/CHANGELOG.md`.
+- **`watch --remote`** (#12): `run.mjs watch <run> --remote [--every 10-60]` also pulls the run from its state branch every 30 s, so answers and notes made away from this machine arrive within a minute, and at once when the coordinator service's doorbell rings (`COORDINATOR_SERVICE` or `"service"` in `.coordinator/coordinator.json`; the person's `gh` login mints a short-lived doorbell token). Node built-ins only (`lib/doorbell.mjs`, `lib/remote.mjs`).
+- **Service: alerts and the doorbell** (#12): web push, email and GitHub mentions for every alert trigger, with per-person quiet hours, digests, collapse and minimal content; an SSE doorbell that carries only "run X changed". Details in `service/CHANGELOG.md`.
 
 ## 0.6.0 (2026-11-06)
 

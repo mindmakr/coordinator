@@ -1,6 +1,7 @@
 // Settings come from the environment only (.env.example lists them). Secrets
 // are never logged and never written to the database.
 import { readFileSync } from 'node:fs';
+import { alertConfig } from './alerts/config.mjs';
 
 const need = (env, k) => {
   const v = env[k];
@@ -39,6 +40,8 @@ export function loadConfig(env = process.env) {
     // The GitHub trail: tracker comments and board fields. "off" turns one off for every repo;
     // a repo turns its own off in coordinator.json ("trackers": false, or no "board").
     trail: { trackers: env.TRACKERS !== 'off', board: env.BOARD !== 'off' },
+    // c12: alerts (SMTP, VAPID) and the doorbell; all optional.
+    alerts: alertConfig(env),
     github: {
       appId: need(env, 'GITHUB_APP_ID'),
       appSlug: env.GITHUB_APP_SLUG || null,

@@ -79,6 +79,34 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 60, design 10.3), `SESSION_DAYS`, `MAX_CONNECTIONS` | no | Defaults 3000, `coordinator-state`, 60, 7, 1000 |
 | `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off for every repo |
 | `RESYNC_MINUTES` | no | How often every installation is re-read (default 15, 0 turns it off) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | no | Email alerts. Unset `SMTP_HOST`: no email (alerts skip it). Port 587 by default; `SMTP_SECURE=1` for TLS from the start (465) |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | no | Web push alerts (`npx web-push generate-vapid-keys`). Both keys or neither; the subject is a `mailto:` or `https:` URL |
+| `ALERT_SWEEP_SECONDS` | no | How often leads gone quiet are looked for and due digests are sent (default 60) |
+| `DOORBELL_MAX_STREAMS` | no | Open doorbell streams at most (default 500; 0 turns the doorbell off) |
+
+## Alerts and the doorbell
+
+**Alerts** (design 9). People pick the repos they hear about on `/alerts` (each checked with their own GitHub access, and re-checked whenever they open the page), and set there: an email address (used only after they follow the confirmation link), channels (web push, email, GitHub mention), their time zone and quiet hours, and whether a question's text may be included.
+
+| Trigger | Channels | Urgency |
+|---|---|---|
+| A new open question | push, email, GitHub mention | normal |
+| A unit stopped | push, email | normal |
+| A run closed | email | low |
+| A linked PR merged | push | low |
+| Checks went red on a linked PR | push | normal |
+| A secret, code scanning or Dependabot alert on a run's repo | push, email, GitHub mention | high: ignores quiet hours |
+| A lead went quiet (units mid-work, no sign of life on the branch for twice the run's stale budget) | push | normal |
+| An answer changed after the lead used it | push | normal |
+
+- Content is minimal: repo, run, unit, what happened and a link to the page. A question's text is added to push and email only for people who opted in and whose access was confirmed in the last 7 days; a GitHub mention never carries it, and goes only on an issue or PR in the state repo itself.
+- One alert per thing: the same trigger on the same unit within 15 minutes bumps the first alert's count.
+- Low and normal alerts in quiet hours wait; when the hours end, one digest goes by email and push.
+- Every alert, and what happened on each channel ("sent", "off", "not configured", "no address", "failed"), is listed on `/alerts` and in the audit log. A channel that is not configured is skipped; the rest still go.
+- Push subscriptions are accepted only for the browsers' own push services (Google, Mozilla, Apple, Microsoft), since the service posts to them.
+- For security alerts, give the App "Secret scanning alerts", "Code scanning alerts" and "Dependabot alerts" (read) and the matching events; they are optional.
+
+**The doorbell** (design 3.2, option C) lets `run.mjs watch <run> --remote` pull within seconds of a change instead of at its next poll (every 30 s). `POST /doorbell/token?repo=owner/name` with the person's GitHub token as a Bearer returns a doorbell token for that one repo, valid 15 minutes, if GitHub says they can read it; the GitHub token is used for that check and not kept. `GET /doorbell?run=<run>` with that token is a Server-Sent Events stream of `changed` events carrying only `{ "run": "<id>" }`; it ends when the token expires, and the skill mints a new one (and so re-checks access). Without the doorbell, or when it fails, polling still delivers within 60 s.
 
 ## Register the GitHub App
 
@@ -93,7 +121,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | Checks | read | check events | `check_suite` events |
 | Organization projects | write | board | Set the Run, Unit state and Status fields; create the two coordinator fields once. Leave it out to run without a board |
 
-Events: `push`, `pull_request`, `check_suite`, `issue_comment` (installation events always arrive). An App registered before 0.7 needs Contents raised to write and the `issue_comment` event added in its settings; each installation then accepts the new permission.
+Events: `push`, `pull_request`, `check_suite`, `issue_comment`, and for security alerts `secret_scanning_alert`, `code_scanning_alert`, `dependabot_alert` (installation events always arrive). An App registered before 0.7 needs Contents raised to write, the three security alert permissions added, and these events added in its settings; each installation then accepts the new permissions.
 
 1. Replace `https://coordinator.example.com` in the manifest with your `BASE_URL`.
 2. Save this as a local HTML file, paste the manifest into the `value`, and open it (for an organisation, use `https://github.com/organizations/<org>/settings/apps/new`):
