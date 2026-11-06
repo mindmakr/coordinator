@@ -43,8 +43,12 @@ test('critical path: the stacked chain with the most work; unfinished units coun
   assert.equal(c.minutes, 180); assert.equal(c.left, 2);
   assert.deepEqual(criticalPath([unit('x', { after: 'y' }), unit('y', { after: 'x' })], T0).path.length, 2, 'a cycle ends the walk');
   assert.deepEqual(criticalPath([], T0).path, []);
-  const running = unit('r', { status: 'building', timeline: [ev(0, 'start')] });
-  assert.equal(criticalPath([running], T0 + 90 * 60_000).minutes, 90 + 30, 'a running unit counts to now, plus the default 30');
+  assert.equal(criticalPath([done('a', 60), unit('b')], T0).stacked, false, 'no stacking, no path');
+  assert.deepEqual(criticalPath([done('a', 60), unit('b')], T0).path, []);
+  const f = done('f', 60);
+  const running = unit('r', { after: 'f', status: 'building', timeline: [ev(0, 'start')] });
+  assert.equal(criticalPath([f, running], T0 + 20 * 60_000).minutes, 60 + 60, 'running 20 min of a 60 min median: 40 left, so it weighs 60');
+  assert.equal(criticalPath([f, running], T0 + 90 * 60_000).minutes, 60 + 90, 'past the median: its time so far, nothing added');
 });
 
 test('flow graph: stacking edges, one node per shared issue, cross-repo links, follow-ups attached', () => {
@@ -131,6 +135,10 @@ test('rendering: state text escaped, only http(s) links leave the page, every no
   const shapes = svg.match(/<(a|g role="img")\b/g).length;
   assert.ok(shapes >= 6, 'nodes are links or labelled images');
   assert.match(mapsPage(viewOf([]), T0, staticCtx('', 0)), /No units yet/);
+  assert.match(html, /No stacked work/, 'one unit: no critical path shown');
+  assert.match(html, /<div class="map-scroll" tabindex="0" role="region" aria-label="Flow map/);
+  const fu = flowSvg(v, staticCtx('', 0), T0);
+  assert.ok(fu.indexOf('edge follow-up') > fu.indexOf('nd ref'), 'follow-up edges drawn above the issue nodes');
 });
 
 test('layout stays inside its box for 1 to 12 units', () => {

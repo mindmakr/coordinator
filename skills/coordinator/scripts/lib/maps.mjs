@@ -45,14 +45,17 @@ export function spent(u, nowMs) {
 
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const h = s.length >> 1; return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; };
 
-// The chain of stacked units (--after) with the most work in it: minutes spent,
-// plus, for each unit not finished, the median minutes a finished unit took (30 if none).
+// The chain of stacked units (--after) with the most work in it. A finished unit
+// weighs the minutes it took; an unfinished one the median a finished unit took
+// (30 if none), or its minutes so far once past that: spent + max(0, median − spent).
 // Each unit stacks on at most one other, so every chain is a walk back through `after`.
+// With no stacking there is no path (stacked: false): every unit can run at once.
 export function criticalPath(units, nowMs = Date.now()) {
-  if (!units.length) return { path: [], minutes: 0, left: 0, estimate: DEFAULT_MINUTES };
+  if (!units.length) return { path: [], minutes: 0, left: 0, estimate: DEFAULT_MINUTES, stacked: false };
   const byId = new Map(units.map((u) => [u.id, u]));
   const estimate = Math.round(median(units.filter((u) => FINISHED.includes(u.status)).map((u) => spent(u, nowMs)).filter((m) => m > 0)) ?? DEFAULT_MINUTES);
-  const weight = (u) => spent(u, nowMs) + (FINISHED.includes(u.status) ? 0 : estimate);
+  const weight = (u) => { const s = spent(u, nowMs); return FINISHED.includes(u.status) ? s : s + Math.max(0, estimate - s); };
+  if (!units.some((u) => u.after && byId.has(u.after) && u.after !== u.id)) return { path: [], minutes: 0, left: 0, estimate, stacked: false };
   const chain = (u) => { const out = []; const seen = new Set(); for (let c = u; c && !seen.has(c.id); c = byId.get(c.after)) { seen.add(c.id); out.unshift(c); } return out; };
   let best = null;
   for (const u of units) {
@@ -60,7 +63,7 @@ export function criticalPath(units, nowMs = Date.now()) {
     const w = c.reduce((n, x) => n + weight(x), 0);
     if (!best || w > best.minutes || (w === best.minutes && c.length > best.path.length)) best = { path: c.map((x) => x.id), minutes: w, left: c.filter((x) => !FINISHED.includes(x.status)).length };
   }
-  return { ...best, estimate };
+  return { ...best, estimate, stacked: true };
 }
 
 // Goal at the centre, then units, behaviours and evidence. Evidence hangs off its behaviour, else its unit.

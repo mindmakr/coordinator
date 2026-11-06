@@ -22,7 +22,7 @@ export function link(href, label, inner, external = false) {
   if (!url) return `<g role="img" aria-label="${esc(label)}"><title>${esc(label)}</title>${inner}</g>`;
   return `<a href="${esc(url)}"${external ? ' target="_blank" rel="noopener noreferrer"' : ''} aria-label="${esc(label)}"><title>${esc(label)}</title>${inner}</a>`;
 }
-const svg = (w, h, label, body, cls = '') => `<div class="map-scroll"><svg class="map${cls}" viewBox="0 0 ${Math.ceil(w)} ${Math.ceil(h)}" width="${Math.ceil(w)}" style="min-width:${Math.min(Math.ceil(w), Math.ceil(w * 0.62))}px" role="group" aria-label="${esc(label)}" xmlns="http://www.w3.org/2000/svg">${body}</svg></div>`;
+const svg = (w, h, label, body, cls = '') => `<div class="map-scroll" tabindex="0" role="region" aria-label="${esc(label)}"><svg class="map${cls}" viewBox="0 0 ${Math.ceil(w)} ${Math.ceil(h)}" width="${Math.ceil(w)}" style="min-width:${Math.min(Math.ceil(w), Math.ceil(w * 0.62))}px" role="group" aria-label="${esc(label)}" xmlns="http://www.w3.org/2000/svg">${body}</svg></div>`;
 const txt = (x, y, s, cls = '', anchor = '') => `<text x="${r1(x)}" y="${r1(y)}"${cls ? ` class="${cls}"` : ''}${anchor ? ` text-anchor="${anchor}"` : ''}>${esc(s)}</text>`;
 const empty = (t) => `<p class="empty">${esc(t)}</p>`;
 const legend = (items) => `<p class="map-legend">${items.map(([c, l]) => `<span><i class="sw ${c}" aria-hidden="true"></i>${esc(l)}</span>`).join('')}</p>`;
@@ -116,9 +116,12 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const fuX = x; if (fus.length) x += FW + GX;
   for (const n of stack(fus, FH, 8)) pos.set(n.id, { x: fuX, y: n.y, w: FW, h: FH, n });
   const width = x - GX + P; const height = Math.max(...[...pos.values()].map((p) => p.y + p.h)) + P;
-  const edges = g.edges.map((e) => { const a = pos.get(e.from); const b = pos.get(e.to); return curve(a.x + a.w, a.y + a.h / 2, b.x, b.y + b.h / 2, `${e.kind}${e.crit ? ' crit' : ''}`, e.crit ? 'flow-arrow-crit' : 'flow-arrow'); });
+  const edge = (e) => { const a = pos.get(e.from); const b = pos.get(e.to); return curve(a.x + a.w, a.y + a.h / 2, b.x, b.y + b.h / 2, `${e.kind}${e.crit ? ' crit' : ''}`, e.crit ? 'flow-arrow-crit' : 'flow-arrow'); };
+  // Follow-up edges cross the issue column, so they go above its nodes.
+  const edges = g.edges.filter((e) => e.kind !== 'follow-up').map(edge);
+  const late = g.edges.filter((e) => e.kind === 'follow-up').map(edge).join('');
   const heads = [txt(P, 20, D ? 'Units, stacked left to right' : 'Units', 'h'), refs.length ? txt(refX, 20, 'Issues and PRs', 'h') : '', fus.length ? txt(fuX, 20, 'Follow-ups', 'h') : ''].join('');
-  const nodes = [...pos.values()].map(({ x: nx, y, w, h, n }) => {
+  const nodeOf = ({ x: nx, y, w, h, n }) => {
     if (n.kind === 'unit') {
       const label = `${n.unit}: ${said(n.status)}${n.crit ? ', on the critical path' : ''}${n.title ? ` — ${clip(n.title, 120)}` : ''}`;
       return link(ctx.unitHref(n.unit), label, `<rect class="nd ${st(n.status)}${n.crit ? ' crit' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="8"/>${txt(nx + 10, y + 19, clip(n.label, 20), 'b')}${txt(nx + 10, y + 36, clip(n.title, 26), 'sm muted')}`);
@@ -126,11 +129,13 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
     if (n.kind === 'follow-up') return link(n.url ?? ctx.home, `Follow-up${n.units.length ? ` from ${n.units.join(', ')}` : ''}: ${clip(n.text, 200)}`, `<rect class="nd fu" x="${nx}" y="${y}" width="${w}" height="${h}" rx="6"/>${txt(nx + 10, y + 16, n.label, 'xs muted')}${txt(nx + 10, y + 32, clip(n.text, 36), 'sm')}`, !!n.url);
     const what = n.kind === 'pr' ? 'PR' : 'Issue';
     return link(n.url, `${what} ${n.repo}#${n.label.split('#')[1]}${n.cross ? ' (another repo)' : ''}, linked by ${n.units.join(', ')}`, `<rect class="nd ref${n.cross ? ' cross' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 20, clip(`${what} ${n.label}`, 26), 'sm')}`, true);
-  }).join('');
+  };
+  const placed = [...pos.values()];
+  const nodes = placed.filter((p) => p.n.kind !== 'follow-up').map(nodeOf).join('') + `<g aria-hidden="true">${late}</g>` + placed.filter((p) => p.n.kind === 'follow-up').map(nodeOf).join('');
   const defs = '<defs>' + [['flow-arrow', 'arrow'], ['flow-arrow-crit', 'arrow crit']].map(([id, cls]) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="${cls}" d="M0 0 10 5 0 10z"/></marker>`).join('') + '</defs>';
   const c = g.critical;
-  const say = c.path.length
-    ? `<p class="map-say"><b>Critical path:</b> ${c.path.map((id) => `<a href="${esc(ctx.unitHref(id))}">${esc(id)}</a>`).join(' → ')} <span class="cause">· about ${esc(duration(c.minutes))} of work, ${esc(count(c.left, 'unit'))} left (an unfinished unit counts as ${esc(duration(c.estimate))}, the median of finished ones)</span></p>` : '';
+  const say = !c.stacked ? '<p class="map-say cause">No stacked work: the units run side by side, so there is no critical path.</p>' : c.path.length
+    ? `<p class="map-say"><b>Critical path:</b> ${c.path.map((id) => `<a href="${esc(ctx.unitHref(id))}">${esc(id)}</a>`).join(' → ')} <span class="cause">· about ${esc(duration(c.minutes))} of work, ${esc(count(c.left, 'unit'))} left (an unfinished unit counts as ${esc(duration(c.estimate))}, the median of finished ones, or its time so far if longer)</span></p>` : '';
   return say + svg(width, height, 'Flow map: stacked units, linked issues and PRs, follow-ups, and the critical path', `${defs}${heads}<g aria-hidden="true">${edges.join('')}</g>${nodes}`, ' flow')
     + legend([['ln-after', 'stacked (--after)'], ['ln-crit', 'critical path'], ['ln-link', 'linked issue or PR'], ['ln-fu', 'follow-up'], ['ref cross', 'another repo']]);
 }

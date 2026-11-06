@@ -10,7 +10,7 @@ export const LIGHT = {
   bg: '#f6f6f3', card: '#ffffff', ink: '#1c1c1a', muted: '#62625c', line: '#e2e2dc',
   pass: '#1f7a3e', 'pass-bg': '#e3f3e8', fail: '#b3261e', 'fail-bg': '#fbe7e5',
   run: '#1d5fbf', 'run-bg': '#e5eefb', wait: '#8a5a00', 'wait-bg': '#fbf0d9', 'none-bg': '#ededea',
-  bar: '#1d5fbf', 'bar-hot': '#b3261e', 'on-run': '#ffffff', note: '#6b4fbb', 'note-bg': '#efeafb',
+  bar: '#1d5fbf', 'bar-hot': '#b3261e', 'on-run': '#ffffff', note: '#6b4fbb', 'note-bg': '#efeafb', ev: '#0e7490',
   radius: '10px', gap: '12px', font: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', scheme: 'light',
 };
@@ -19,7 +19,7 @@ export const DARK = {
   bg: '#141413', card: '#1e1e1c', ink: '#ecece6', muted: '#a2a29a', line: '#33332f',
   pass: '#6fd38f', 'pass-bg': '#18311f', fail: '#ff8a80', 'fail-bg': '#3a1a17',
   run: '#8ab4f8', 'run-bg': '#1a2638', wait: '#f2c46d', 'wait-bg': '#352a12', 'none-bg': '#2a2a27',
-  bar: '#8ab4f8', 'bar-hot': '#ff8a80', 'on-run': '#141413', note: '#c4b5fd', 'note-bg': '#2a2340', scheme: 'dark',
+  bar: '#8ab4f8', 'bar-hot': '#ff8a80', 'on-run': '#141413', note: '#c4b5fd', 'note-bg': '#2a2340', ev: '#22d3ee', scheme: 'dark',
 };
 
 // HUD token ← the project's names, first found wins.
