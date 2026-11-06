@@ -4,7 +4,7 @@
 //
 //   run.mjs init <run> --goal G --bar B --fence F [--paths a,b] [--tag T] [--max-rounds 4]
 //                      [--max-minutes 240] [--max-units 6] [--max-added 2] [--stale-minutes 45]
-//   run.mjs add <run> <unit> --bar B [--after U] [--reason R]      (--reason required after freeze)
+//   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL]   (--reason required after freeze)
 //   run.mjs freeze <run>
 //   run.mjs start <run> <unit>      only when next says build, or check-stale with phase building
 //   run.mjs beat <run> <unit>       builder or critic still working
@@ -15,9 +15,10 @@
 //                  on a run with --paths, pass needs a clean detect.mjs --unit result
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C]   only when next says integrate
-//   run.mjs note <run> --kind decision|follow-up|question|bar|info --text T
+//   run.mjs note <run> --kind situation|decision|follow-up|question|bar|info --text T
+//                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
 //   run.mjs next <run>     prints what to do and records any stops
-//   run.mjs show <run>     prints the compact text HUD (units, scores, budget, next step)
+//   run.mjs show <run>     prints the compact text HUD (situation, needs you, time left, units, budget, next step)
 //   run.mjs hud <run>      rewrites hud.html beside state.json now and prints its path
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
@@ -33,8 +34,8 @@ import { render } from './lib/workbench.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes'],
-  add: ['bar', 'after', 'reason'], verdict: ['evidence', 'gap', 'cause', 'score'], strategy: ['text'],
-  integrate: ['evidence', 'gap', 'cause'], note: ['kind', 'text'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  add: ['bar', 'after', 'reason', 'title', 'link'], verdict: ['evidence', 'gap', 'cause', 'score'], strategy: ['text'],
+  integrate: ['evidence', 'gap', 'cause'], note: ['kind', 'text', 'recommend', 'answers'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
 };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
@@ -119,7 +120,9 @@ const commands = {
         s.addedAfterFreeze++;
         s.notes.push({ kind: 'scope', text: `added ${unit}: ${reason}`, at: now() });
       }
-      s.units.push({ id: unit, bar: text(o.bar, 'bar'), after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null });
+      const link = optText(o.link, 300);
+      if (link && !/^https?:\/\/\S+$/i.test(link)) throw new Error('--link must be an http(s) URL');
+      s.units.push({ id: unit, bar: text(o.bar, 'bar'), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null });
     });
   },
   freeze([run]) { return change(run, (s) => { if (!s.units.length) throw new Error('add units first'); s.frozen = true; }); },
@@ -174,8 +177,20 @@ const commands = {
     });
   },
   note([run], o) {
-    const kind = oneOf(o.kind, ['decision', 'follow-up', 'question', 'bar', 'info'], '--kind');
-    return change(run, (s) => { s.notes.push({ kind, text: text(o.text, 'text', 1000), at: now() }); }, { closedOk: kind === 'follow-up' });
+    const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'question', 'bar', 'info'], '--kind');
+    if (o.recommend !== undefined && kind !== 'question') throw new Error('--recommend goes with --kind question');
+    if (o.answers !== undefined && kind !== 'decision') throw new Error('--answers goes with --kind decision');
+    return change(run, (s) => {
+      const note = { kind, text: text(o.text, 'text', kind === 'situation' ? 400 : 1000), at: now() };
+      if (o.recommend !== undefined) note.recommend = text(o.recommend, 'recommend', 300);
+      if (o.answers !== undefined) {
+        const asked = s.notes.filter((n) => n.kind === 'question').length;
+        const m = /^q(\d+)$/.exec(String(o.answers));
+        if (!m || +m[1] < 1 || +m[1] > asked) throw new Error(`--answers must name a logged question (q1-q${asked})`);
+        note.answers = o.answers;
+      }
+      s.notes.push(note);
+    }, { closedOk: kind === 'follow-up' });
   },
   // Returns this round's actions (a stop shows once, here) and records the stops.
   // Stops cascade (a stopped unit stops the units stacked on it), so apply them

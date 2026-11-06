@@ -3,7 +3,7 @@
 Answer "how are we getting on?" from the state, not from memory, and pick a run back up after a break.
 
 1. Run `S/run.mjs list`. With no run named, take the most recent open one.
-2. Run `S/run.mjs show <run>`. It prints the text HUD: the budget used, and each unit's status, round, score trend, last gap and next action (`references/hud.md`). If the person wants the page, give them `hud.html` (or republish it, in Claude Code).
+2. Run `S/run.mjs show <run>`. It prints the text HUD: the situation, what needs the person, a rough time left, the budget used, and each unit's status, round, score trend, last gap and next action (`references/hud.md`). If the person wants the page, give them `hud.html` (or republish it, in Claude Code).
 3. For each unit in `building`, check its real state (the branch head, the PR, the output file), not just the agent's last message.
 4. Reply in four lines or fewer, after a context line when several pieces of work are active (`references/craft.md`):
    - what is done;

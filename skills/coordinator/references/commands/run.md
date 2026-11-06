@@ -26,7 +26,7 @@ From here the run is **unattended**. Do not ask the person anything until the re
 
 ## 2. Set up
 
-`S/run.mjs init <run> --tag <domain> --goal … --bar … --fence "<scope in words>" --paths <dir,dir>`, then `add` each unit (`--after` for stacked work), then `freeze`. Then record the intake answers (step 1.8) on the run. `--paths` is the fence as path prefixes; the detector reads it. Every change also rewrites the run's HUD, `hud.html`: tell the person where it is, once (`references/hud.md`).
+`S/run.mjs init <run> --tag <domain> --goal … --bar … --fence "<scope in words>" --paths <dir,dir>`, then `add` each unit (`--after` for stacked work; `--title "#1206 Security gaps"` and `--link <issue or PR URL>` so the HUD names it plainly), then `freeze`. Then record the intake answers (step 1.8) on the run. `--paths` is the fence as path prefixes; the detector reads it. Every change also rewrites the run's HUD, `hud.html`: tell the person where it is, once (`references/hud.md`).
 
 ## 3. Loop
 
@@ -42,6 +42,8 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 | `stop` | Recorded by `next` just now. Its gap goes in the report. |
 | `done` / `stopped` | Nothing: the unit passed, or was stopped in an earlier round. |
 
+**After each verdict and each merge**, write the situation in one or two plain sentences: `S/run.mjs note <run> --kind situation --text "Security gaps: failed twice on the same route gate; a new approach is next. Roles: being checked."` It heads the HUD. Say what is happening and what comes next, in the person's words, not unit ids alone.
+
 Briefs for agents outside a git worktree of this repo carry `COORDINATOR_DIR` from `S/run.mjs where`.
 
 The run-level `decision` from `next`:
@@ -55,7 +57,7 @@ The run-level `decision` from `next`:
 | `done-with-gaps` | Integration ran out of budget or hit the same gap twice. Finish with outcome `partial`, listing the gaps. |
 | `stopped` | No unit passed. Finish with outcome `stopped`, listing each stop. |
 
-**A question comes up mid-run?** If the recorded decisions answer it, follow them. If not and the step is reversible, take the safest choice that fits the decisions, log it with `note --kind question`, and carry on: it goes in the report for the person to confirm. Stop and ask only for an unapproved gated action, through the question tool as in step 1.7.
+**A question comes up mid-run?** If the recorded decisions answer it, follow them. If not and the step is reversible, take the safest choice that fits the decisions, log it with `note --kind question --recommend "<your choice>"`, and carry on: it shows in the HUD's Needs you box and goes in the report for the person to confirm. When the person answers, record it with `note --kind decision --answers q<N>`. Stop and ask only for an unapproved gated action, through the question tool as in step 1.7.
 
 ## 4. Finish
 

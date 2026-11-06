@@ -267,3 +267,21 @@ test('verdict --cause is stored and drives change-strategy; show and hud.html fo
   assert.equal(h.code, 0);
   assert.equal(existsSync(h.out.file), true);
 });
+
+test('add takes --title and an http(s) --link; note takes situation, --recommend and --answers', () => {
+  run('init', 'r50', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  assert.equal(run('add', 'r50', 'u', '--bar', 'b', '--link', 'javascript:alert(1)').code, 1, 'only web links');
+  assert.equal(run('add', 'r50', 'u', '--bar', 'b', '--title', '#1206 Security gaps', '--link', 'https://github.com/o/r/issues/1206').code, 0);
+  run('freeze', 'r50');
+  assert.equal(run('note', 'r50', '--kind', 'situation', '--text', 'One builder on the security gaps.').code, 0);
+  assert.equal(run('note', 'r50', '--kind', 'info', '--text', 'x', '--recommend', 'y').code, 1, '--recommend is for questions');
+  assert.equal(run('note', 'r50', '--kind', 'question', '--text', 'Merge it?', '--recommend', 'yes').code, 0);
+  assert.equal(run('note', 'r50', '--kind', 'decision', '--text', 'no', '--answers', 'q2').code, 1, 'no such question');
+  let html = readFileSync(join(dir, 'runs', 'r50', 'hud.html'), 'utf8');
+  assert.match(html, /One builder on the security gaps\./);
+  assert.match(html, /u · #1206 Security gaps <a href="https:\/\/github.com\/o\/r\/issues\/1206"/);
+  assert.match(html, /<b>q1<\/b> Merge it\?<br><span class="rec">Recommended: yes/);
+  assert.equal(run('note', 'r50', '--kind', 'decision', '--text', 'merge approved', '--answers', 'q1').code, 0);
+  html = readFileSync(join(dir, 'runs', 'r50', 'hud.html'), 'utf8');
+  assert.match(html, /Nothing needs you\./);
+});
