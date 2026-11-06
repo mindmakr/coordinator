@@ -27,13 +27,16 @@ test('labels: every unit box carries a status mark and its id, with the title cl
   for (const [id, m] of [['u1', MARKS.pass], ['u2', MARKS.fail], ['u3', MARKS.building]]) assert.ok(html.includes(`>${m} ${id}`), `${id} labelled with ${m}`);
   assert.ok(html.includes('Sign-in redesign with…'), 'a long title is clipped with an ellipsis');
   assert.ok(html.includes('Sign-in redesign with a long title that needs clipping'), 'the full title is in the hover text');
-  assert.ok(html.includes('waits on (stacked with --after)'), 'the meaningful edge has a legend');
+  assert.match(html, /class="xs muted elabel[^"]*"[^>]*>waits on<\/text>/, 'the waits-on edge says so');
+  assert.match(html, /marker-start="url\(#flow-arrow/, 'and points to the unit it waits for');
+  assert.match(html, /<text[^>]*>linked by u1<\/text>/, 'an issue box names the unit that links it');
+  assert.ok(html.includes('waits on: the arrow points'), 'the legend explains it');
   for (const s of Object.keys(MARKS)) assert.match(html, new RegExp(`${MARKS[s]}</b>${s}`), `legend names ${s}`);
 });
 
-test('panel: one tooltip per unit, described by every box of that unit, with its stats', () => {
+test('panel: one non-modal dialog per unit, described by every box of that unit, with its stats', () => {
   const html = mapsPage(viewOf(units()), T0 + 200 * 60_000);
-  assert.equal((html.match(/role="tooltip"/g) ?? []).length, 3);
+  assert.equal((html.match(/role="dialog"/g) ?? []).length, 3);
   assert.ok((html.match(/aria-describedby="tip-u0"/g) ?? []).length >= 3, 'mind, flow and relevance boxes point at the panel');
   const tip = unitTip(units()[0], 0, staticCtx('', 0), T0 + 200 * 60_000);
   assert.match(tip, /<dt>Round<\/dt><dd>2\/3<\/dd>/);
@@ -43,7 +46,7 @@ test('panel: one tooltip per unit, described by every box of that unit, with its
   assert.match(tip, /href="https:\/\/github.com\/acme\/web\/pull\/7" target="_blank" rel="noopener noreferrer">PR acme\/web#7/);
   assert.ok(!tip.includes('javascript:'), 'only http(s) links');
   assert.match(tip, /href="units\/u1.html">Open u1/);
-  assert.match(html, /body:not\(\[data-tips=off\]\):has\(\.u0:is\(:hover,:focus\)\) #tip-u0\{display:block\}/, 'CSS shows it on hover and focus');
+  assert.match(html, /body:not\(\[data-tips=off\]\):has\(\.u0:is\(:hover,:focus\)\) #tip-u0\{visibility:visible;transition-delay:0s\}/, 'CSS shows it on hover and focus');
   assert.match(html, /svg\.map:has\(\.u1:is\(:hover,:focus\)\) :is\(\.u1,\.c1,\.e1\)\{opacity:1\}/, 'and lights what it connects to');
   assert.match(html, /class="edge after [^"]*\be0\b[^"]*\be1\b/, 'the waits-on edge lights with either end');
 });
@@ -76,7 +79,7 @@ test('project map: each module has a panel with its files and helpers; names esc
     settings: [], surfaces: [], reuse: [], build: {},
   };
   const html = mapPage(snap, staticCtx('', 0), 'r');
-  assert.equal((html.match(/role="tooltip"/g) ?? []).length, 2);
+  assert.equal((html.match(/role="dialog"/g) ?? []).length, 2);
   assert.match(html, /aria-describedby="tip-n\d"/);
   assert.match(html, /<dt>Helpers \(1\)<\/dt>/);
   assert.match(html, /<dt>File<\/dt><dd><code>src\/b\.js<\/code>/);

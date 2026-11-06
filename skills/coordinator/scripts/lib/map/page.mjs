@@ -127,7 +127,7 @@ export function moduleTips(snap, gr) {
     const n = gr.nodes.get(k);
     const files = snap.modules.filter((m) => gr.key(m.id) === k).map((m) => (gr.level === 'file' ? m.id : m.id.slice(k.length + 1) || m.id));
     const helpers = snap.helpers.filter((h) => gr.key(h.file) === k).map((h) => h.name);
-    return `<div class="tip" id="tip-n${i}" role="tooltip"><p class="tip-h"><b>${esc(k)}</b></p><dl>`
+    return `<div class="tip" id="tip-n${i}" role="dialog" aria-modal="false" aria-labelledby="tip-n${i}-h"><p class="tip-h" id="tip-n${i}-h"><b>${esc(k)}</b></p><dl>`
       + row(gr.level === 'file' ? 'File' : `Files (${n.files})`, list(files)) + row('Tests', n.tests ? esc(String(n.tests)) : '')
       + row(`Helpers (${helpers.length})`, list(helpers)) + row('Surfaces', esc([n.routes && `${n.routes} routes`, n.screens && `${n.screens} screens`].filter(Boolean).join(', ')))
       + row('Settings', n.settings ? esc(`${n.settings} use${n.settings === 1 ? '' : 's'}`) : '') + row('Imports', esc(`${n.out.size} out, ${n.in.size} in`)) + '</dl></div>';
@@ -138,7 +138,7 @@ export function moduleTips(snap, gr) {
 function styles(gr, areaIds) {
   const per = gr.keys.map((k, i) => `:root .graph:has(#n${i}:hover) .x${i},:root .graph:has(a:focus #n${i},#n${i}:focus) .x${i}{stroke:var(--run);opacity:1}`
     + `.graph:has(#n${i}:hover,a:focus #n${i},#n${i}:focus) :is(#n${i},.c${i}){opacity:1}`
-    + `body:not([data-tips=off]):has(#n${i}:hover,a:focus #n${i},#n${i}:focus) #tip-n${i}{display:block}`).join('');
+    + `body:not([data-tips=off]):has(#n${i}:hover,a:focus #n${i},#n${i}:focus) #tip-n${i}{visibility:visible;transition-delay:0s}`).join('');
   const areas = [...areaIds.values()].map((i) => `:root:has(#f-a${i}:not(:checked)) :is(.a${i},.ea${i},.eb${i}){display:none}`).join('');
   return `<style>
 .mapbox{overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);max-height:70vh}

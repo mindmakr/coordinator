@@ -25,7 +25,12 @@ export function link(href, label, inner, external = false, attrs = '') {
   return `<a href="${esc(url)}"${external ? ' target="_blank" rel="noopener noreferrer"' : ''} aria-label="${esc(label)}"${attrs}><title>${esc(label)}</title>${inner}</a>`;
 }
 const cls = (c) => (c ? ` class="${c}"` : '');
-const svg = (w, h, label, body, cls = '') => `<div class="map-scroll" tabindex="0" role="region" aria-label="${esc(label)}"><svg class="map${cls}" viewBox="0 0 ${Math.ceil(w)} ${Math.ceil(h)}" width="${Math.ceil(w)}" style="min-width:${Math.min(Math.ceil(w), Math.ceil(w * 0.62))}px" role="group" aria-label="${esc(label)}" xmlns="http://www.w3.org/2000/svg">${body}</svg></div>`;
+// Drawn at its own size, never shrunk, so labels stay readable (13 px ids, 10.5 px at the smallest);
+// a map wider than its box scrolls inside it, with a hint (on a phone above PHONE px, everywhere above WIDE px).
+const PHONE = 356; const WIDE = 1086;
+const svg = (w, h, label, body, cls = '') => { const W = Math.ceil(w); const H = Math.ceil(h);
+  const hint = W > PHONE ? `<p class="map-hint${W > WIDE ? ' wide' : ''}" aria-hidden="true">↔ Scroll inside the map to see all of it.</p>` : '';
+  return `${hint}<div class="map-scroll${cls}" tabindex="0" role="region" aria-label="${esc(label)}"><svg class="map${cls}" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="group" aria-label="${esc(label)}" xmlns="http://www.w3.org/2000/svg">${body}</svg></div>`; };
 const txt = (x, y, s, cls = '', anchor = '') => `<text x="${r1(x)}" y="${r1(y)}"${cls ? ` class="${cls}"` : ''}${anchor ? ` text-anchor="${anchor}"` : ''}>${esc(s)}</text>`;
 const empty = (t) => `<p class="empty">${esc(t)}</p>`;
 const legend = (items) => `<p class="map-legend">${items.map(([c, l]) => `<span><i class="sw ${c}" aria-hidden="true"></i>${esc(l)}</span>`).join('')}</p>`;
@@ -109,14 +114,14 @@ export function mindSvg(v, ctx) {
     + marksLegend();
 }
 
-const UW = 172; const UH = 46; const RW = 176; const RH = 32; const FW = 240; const FH = 40; const GX = 64; const GY = 14; const P = 16; const TOP = 34;
+const UW = 172; const UH = 46; const RW = 176; const RH = 44; const FW = 240; const FH = 40; const GX = 64; const GY = 14; const P = 16; const TOP = 34;
 
 // Places nodes in a column near a target y each, top to bottom, never overlapping. No target (Infinity): at the end.
 function stack(list, h, gap) {
   let y = TOP;
   return [...list].sort((a, b) => a.want - b.want).map((n) => { const at = Number.isFinite(n.want) ? Math.max(y, n.want) : y; y = at + h + gap; return { ...n, y: at }; });
 }
-const curve = (x1, y1, x2, y2, cls, end = '') => { const dx = Math.max(24, (x2 - x1) / 2); return `<path class="edge ${cls}"${end ? ` marker-end="url(#${end})"` : ''} d="M${r1(x1)} ${r1(y1)} C${r1(x1 + dx)} ${r1(y1)} ${r1(x2 - dx)} ${r1(y2)} ${r1(x2)} ${r1(y2)}"/>`; };
+const curve = (x1, y1, x2, y2, cls, end = '', at = 'end') => { const dx = Math.max(24, (x2 - x1) / 2); return `<path class="edge ${cls}"${end ? ` marker-${at}="url(#${end})"` : ''} d="M${r1(x1)} ${r1(y1)} C${r1(x1 + dx)} ${r1(y1)} ${r1(x2 - dx)} ${r1(y2)} ${r1(x2)} ${r1(y2)}"/>`; };
 
 export function flowSvg(v, ctx, nowMs = Date.now()) {
   const g = flowGraph(v, nowMs);
@@ -145,7 +150,13 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const fuX = x; if (fus.length) x += FW + GX;
   for (const n of stack(fus, FH, 8)) pos.set(n.id, { x: fuX, y: n.y, w: FW, h: FH, n });
   const width = x - GX + P; const height = Math.max(...[...pos.values()].map((p) => p.y + p.h)) + P;
-  const edge = (e) => { const a = pos.get(e.from); const b = pos.get(e.to); return curve(a.x + a.w, a.y + a.h / 2, b.x, b.y + b.h / 2, `${e.kind}${e.crit ? ' crit' : ''} ${near([ui(e.from), ui(e.to)], 'e')}`, e.crit ? 'flow-arrow-crit' : 'flow-arrow'); };
+  // A stacked unit waits on the one before it: that edge points back to it and says so.
+  const edge = (e) => {
+    const a = pos.get(e.from); const b = pos.get(e.to); const c = near([ui(e.from), ui(e.to)], 'e');
+    const x1 = a.x + a.w; const y1 = a.y + a.h / 2; const x2 = b.x; const y2 = b.y + b.h / 2;
+    const path = curve(x1, y1, x2, y2, `${e.kind}${e.crit ? ' crit' : ''} ${c}`, e.crit ? 'flow-arrow-crit' : 'flow-arrow', e.kind === 'after' ? 'start' : 'end');
+    return e.kind === 'after' ? path + `<text class="xs muted elabel ${c}" x="${r1((x1 + x2) / 2)}" y="${r1((y1 + y2) / 2 - 6)}" text-anchor="middle">waits on</text>` : path;
+  };
   // Follow-up edges cross the issue column, so they go above its nodes.
   const edges = g.edges.filter((e) => e.kind !== 'follow-up').map(edge);
   const late = g.edges.filter((e) => e.kind === 'follow-up').map(edge).join('');
@@ -156,9 +167,9 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
       const label = `${n.unit}: ${status ? `${status}, ` : ''}${said(n.status)}${n.crit ? ', on the critical path' : ''}${n.title ? ` — ${clip(n.title, 120)}` : ''}`;
       return link(ctx.unitHref(n.unit), label, `<rect class="nd ${st(n.status)}${n.crit ? ' crit' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="8"/>${txt(nx + 10, y + 19, `${mark(status)} ${clip(n.label, 18)}`, 'b')}${txt(nx + 10, y + 36, clip(n.title, 24), 'sm muted')}`, false, boxAttrs(ix.get(n.unit)));
     }
-    if (n.kind === 'follow-up') return link(n.url ?? ctx.home, `Follow-up${n.units.length ? ` from ${n.units.join(', ')}` : ''}: ${clip(n.text, 200)}`, `<rect class="nd fu" x="${nx}" y="${y}" width="${w}" height="${h}" rx="6"/>${txt(nx + 10, y + 16, n.label, 'xs muted')}${txt(nx + 10, y + 32, clip(n.text, 36), 'sm')}`, !!n.url, cls(near(links.get(n.id) ?? [])));
+    if (n.kind === 'follow-up') return link(n.url ?? ctx.home, `Follow-up${n.units.length ? ` from ${n.units.join(', ')}` : ''}: ${clip(n.text, 200)}`, `<rect class="nd fu" x="${nx}" y="${y}" width="${w}" height="${h}" rx="6"/>${txt(nx + 10, y + 16, clip(`${n.label}${n.units.length ? ` · from ${n.units.join(', ')}` : ''}`, 42), 'xs muted')}${txt(nx + 10, y + 32, clip(n.text, 36), 'sm')}`, !!n.url, cls(near(links.get(n.id) ?? [])));
     const what = n.kind === 'pr' ? 'PR' : 'Issue';
-    return link(n.url, `${what} ${n.repo}#${n.label.split('#')[1]}${n.cross ? ' (another repo)' : ''}, linked by ${n.units.join(', ')}`, `<rect class="nd ref${n.cross ? ' cross' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 20, clip(`${what} ${n.label}`, 26), 'sm')}`, true, cls(near(links.get(n.id) ?? [])));
+    return link(n.url, `${what} ${n.repo}#${n.label.split('#')[1]}${n.cross ? ' (another repo)' : ''}, linked by ${n.units.join(', ')}`, `<rect class="nd ref${n.cross ? ' cross' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 18, clip(`${what} ${n.label}`, 26), 'sm')}${txt(nx + 12, y + 34, clip(`linked by ${n.units.join(', ')}`, 30), 'xs muted')}`, true, cls(near(links.get(n.id) ?? [])));
   };
   const placed = [...pos.values()];
   const nodes = placed.filter((p) => p.n.kind !== 'follow-up').map(nodeOf).join('') + `<g aria-hidden="true">${late}</g>` + placed.filter((p) => p.n.kind === 'follow-up').map(nodeOf).join('');
@@ -167,7 +178,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const say = !c.stacked ? '<p class="map-say cause">No stacked work: the units run side by side, so there is no critical path.</p>' : c.path.length
     ? `<p class="map-say"><b>Critical path:</b> ${c.path.map((id) => `<a href="${esc(ctx.unitHref(id))}">${esc(id)}</a>`).join(' → ')} <span class="cause">· about ${esc(duration(c.minutes))} of work, ${esc(count(c.left, 'unit'))} left (an unfinished unit counts as ${esc(duration(c.estimate))}, the median of finished ones, or its time so far if longer)</span></p>` : '';
   return say + svg(width, height, 'Flow map: stacked units, linked issues and PRs, follow-ups, and the critical path', `${defs}${heads}<g aria-hidden="true">${edges.join('')}</g>${nodes}`, ' flow')
-    + legend([['ln-after', 'waits on (stacked with --after)'], ['ln-crit', 'critical path'], ['ln-link', 'links an issue or PR'], ['ln-fu', 'filed a follow-up'], ['ref cross', 'another repo']])
+    + legend([['ln-after', 'waits on: the arrow points to the unit it waits for (--after)'], ['ln-crit', 'critical path'], ['ln-link', 'links an issue or PR'], ['ln-fu', 'filed a follow-up'], ['ref cross', 'another repo']])
     + marksLegend();
 }
 
@@ -231,7 +242,7 @@ export function relevanceSvg(v, ctx) {
   const tY = new Map(r.targets.map((t, i) => [t.id, TOP + i * (H + G)]));
   const uY = new Map([...on.map((u, i) => [u.unit, TOP + i * (H + G)]), ...off.map((u, i) => [u.unit, TOP + (on.length + i) * (H + G) + (on.length ? 30 : 0)])]);
   const edges = r.units.flatMap((u) => u.serves.map((s) => curve(P + TW, tY.get(s.target) + H / 2, ux, uY.get(u.unit) + H / 2, `${s.how === 'named' ? 'named' : 'inferred'} ${near([ix.get(u.unit)], 'e')}`)));
-  const targets = r.targets.map((t) => link(ctx.home, `${t.label}: ${said(t.status)} — ${clip(t.text, 200)}`, `<rect class="nd ${st(t.status)}" x="${P}" y="${tY.get(t.id)}" width="${TW}" height="${H}" rx="8"/>${txt(P + 10, tY.get(t.id) + 25, clip(`${t.label}: ${t.text}`, 36), 'sm')}`, false, cls(near(servedBy.get(t.id))))).join('');
+  const targets = r.targets.map((t) => link(ctx.home, `${t.label}: ${said(t.status)} — ${clip(t.text, 200)}`, `<rect class="nd ${st(t.status)}" x="${P}" y="${tY.get(t.id)}" width="${TW}" height="${H}" rx="8"/>${txt(P + 10, tY.get(t.id) + 17, clip(`${t.label}: ${t.text}`, 36), 'sm')}${txt(P + 10, tY.get(t.id) + 33, clip(servedBy.get(t.id).length ? `served by ${r.units.filter((u) => u.serves.some((x) => x.target === t.id)).map((u) => u.unit).join(', ')}` : 'no unit serves it', 44), 'xs muted')}`, false, cls(near(servedBy.get(t.id))))).join('');
   const units = r.units.map((u) => {
     const y = uY.get(u.unit);
     const how = u.off ? 'off goal' : u.distance === 0 ? `named · ${u.serves.length} of ${r.targets.length}` : `inferred · ${u.serves.length} of ${r.targets.length}`;

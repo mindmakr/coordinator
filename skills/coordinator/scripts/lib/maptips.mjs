@@ -12,7 +12,7 @@ import { spent, unitRefs } from './maps.mjs';
 // One mark per unit status (lib/schema.mjs).
 export const MARKS = { pass: '✓', fail: '✗', stopped: '■', open: '○', building: '▶', judging: '◆' };
 export const mark = (status) => MARKS[status] ?? '•';
-export const marksLegend = () => `<p class="map-legend" aria-label="Status marks">${Object.entries(MARKS).map(([s, m]) => `<span><b aria-hidden="true">${m}</b>${s}</span>`).join('')}<span class="cause">Hover, focus or tap a unit for its stats; Escape closes.</span></p>`;
+export const marksLegend = () => `<p class="map-legend" aria-label="Status marks">${Object.entries(MARKS).map(([s, m]) => `<span><b aria-hidden="true">${m}</b>${s}</span>`).join('')}<span class="cause">Hover, focus or tap a unit for its stats; Tab from a unit enters its panel; Escape closes.</span></p>`;
 
 export const tipId = (i) => `tip-u${i}`;
 export const unitIndex = (v) => new Map(v.units.map((u, i) => [u.id, i]));
@@ -30,8 +30,8 @@ export function unitTip(u, i, ctx, nowMs) {
     .map((r) => `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(`${r.kind === 'pr' ? 'PR' : 'Issue'} ${r.repo}#${r.n}`)}</a>`).join(', ');
   const minutes = spent(u, nowMs);
   const gap = u.gap ? `${esc(clip(u.gap, 220))}${u.cause ? ` <span class="cause">cause: ${esc(clip(u.cause, 80))}</span>` : ''}` : u.cause ? `cause: ${esc(clip(u.cause, 80))}` : '';
-  return `<div class="tip" id="${tipId(i)}" role="tooltip" data-u="${i}">`
-    + `<p class="tip-h"><b class="tip-mark st-${esc(String(u.dot ?? '').replace(/[^a-z-]/g, ''))}" aria-hidden="true">${mark(u.status)}</b> <b>${esc(u.id)}</b> <span class="cause">${esc(state(u))}</span></p>`
+  return `<div class="tip" id="${tipId(i)}" role="dialog" aria-modal="false" aria-labelledby="${tipId(i)}-h" data-u="${i}">`
+    + `<p class="tip-h" id="${tipId(i)}-h"><b class="tip-mark st-${esc(String(u.dot ?? '').replace(/[^a-z-]/g, ''))}" aria-hidden="true">${mark(u.status)}</b> <b>${esc(u.id)}</b> <span class="cause">${esc(state(u))}</span></p>`
     + (u.title ? `<p class="tip-t">${esc(clip(u.title, 200))}</p>` : '')
     + '<dl>'
     + row('Round', esc(`${u.rounds ?? 0}/${u.maxRounds ?? '?'}`))
@@ -43,10 +43,13 @@ export function unitTip(u, i, ctx, nowMs) {
     + `</dl><a class="tip-open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
 }
 
+// The panel shows at once and hides a moment after the pointer leaves its box, so the pointer can reach it.
+export const SHOW = 'visibility:visible;transition-delay:0s';
+
 // One panel per unit for the whole page, and the rules that show each one and light its links.
 export function unitTips(v, ctx, nowMs) {
   if (!v.units.length) return '';
-  const rules = v.units.map((_, i) => `body:not([data-tips=off]):has(.u${i}:is(:hover,:focus)) #${tipId(i)}{display:block}`
+  const rules = v.units.map((_, i) => `body:not([data-tips=off]):has(.u${i}:is(:hover,:focus)) #${tipId(i)}{${SHOW}}`
     + `svg.map:has(.u${i}:is(:hover,:focus)) :is(.u${i},.c${i},.e${i}){opacity:1}`).join('');
   return `<div class="tips">${v.units.map((u, i) => unitTip(u, i, ctx, nowMs)).join('')}</div><style>${rules}</style>`;
 }
