@@ -73,8 +73,9 @@ export function holds(s, act) {
 
 // Applies one action through the CLI's own checks, keeping the time it was made away.
 // An answer to a question the lead has already used (or closed by a decision) cannot change it:
-// the lead keeps the used answer, and the change is recorded as a person's note flagged
-// "answer changed after use" (design 9), shown with the notes and alerted by the service.
+// the lead keeps the used answer (or its decision), and the change is recorded as a person's note
+// flagged changedAfterUse (design 9), shown with the notes and alerted by the service. The note's
+// words say which: "answer changed after use", or "answer changed after the lead decided".
 export function replayAct(s, act) {
   if (holds(s, act)) return;
   if (act.note) {
@@ -84,7 +85,10 @@ export function replayAct(s, act) {
     const q = s.notes.length ? questionAt(s, act.q) : null;
     const status = questions(s).find((x) => x.id === act.q)?.status;
     if (q && (status === 'used' || status === 'decided')) {
-      personNote(s, { text: clip(`answer changed after use: ${act.q} → ${answerText(act.entry)} (the lead keeps the answer it used)`, 1000), unit: q.unit ?? undefined });
+      const text = status === 'used'
+        ? `answer changed after use: ${act.q} → ${answerText(act.entry)} (the lead keeps the answer it used)`
+        : `answer changed after the lead decided: ${act.q} → ${answerText(act.entry)} (the lead keeps its decision)`;
+      personNote(s, { text: clip(text, 1000), unit: q.unit ?? undefined });
       Object.assign(s.notes.at(-1), { at: act.entry.at, changedAfterUse: lateOf(act) });
     } else {
       answer(s, act.q, { choices: act.entry.choices ?? [], other: act.entry.other ?? null, by: act.entry.by });

@@ -67,11 +67,15 @@ Or `docker compose -f service/docker-compose.yml up --build` for the service and
 | `MAX_CONNECTIONS` | no | Default 1000 |
 | `RESYNC_MINUTES` | no | Re-read every installation this often. Default 15; 0 turns it off |
 | `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off everywhere |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | no | Email alerts. Without `SMTP_HOST`, no email. Port 587 by default; `SMTP_SECURE=1` for TLS from the start (465) |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | no | Web push alerts (`npx web-push generate-vapid-keys`). Both keys or neither; the subject is a `mailto:` or `https:` URL |
+| `ALERT_SWEEP_SECONDS` | no | How often quiet leads are looked for and due digests sent. Default 60 |
+| `DOORBELL_MAX_STREAMS` | no | Open doorbell streams at most. Default 500; 0 turns the doorbell off |
 | `GITHUB_API_URL`, `GITHUB_WEB_URL` | no | Another GitHub host. Defaults `https://api.github.com` and `https://github.com`; other hosts are untested |
 
 ## Backups
 
-Back up Postgres if you want to keep sign-ins and the audit log. Nothing else needs it: every run is rebuilt from the repos' `coordinator-state` branches on the next sync.
+Back up Postgres if you want to keep sign-ins, alert settings and the audit log. Nothing else needs it: every run is rebuilt from the repos' `coordinator-state` branches on the next sync.
 
 ## Upgrades
 

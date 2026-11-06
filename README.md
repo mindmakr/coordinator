@@ -79,7 +79,7 @@ Then add `.coordinator/` to your project's `.gitignore`. The full guide is [docs
 
 ## Follow runs from anywhere (hosted beta)
 
-Install the Coordinator GitHub App from [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com) and every run the lead pushes to your repo's `coordinator-state` branch shows on the web, to the people who can read that repo. Each issue and PR a run works on gets one tracker comment, kept current. Builders and critics still run on your machine. Free during the beta.
+Install the Coordinator GitHub App from [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com) and every run the lead pushes to your repo's `coordinator-state` branch shows on the web, to the people who can read that repo. Answer the lead's questions and add notes there or in an issue comment (`/coordinator answer q3 b`), and get web push, email or GitHub alerts when a run needs you. Each issue and PR a run works on gets one tracker comment, kept current. Builders and critics still run on your machine. Free during the beta.
 
 | Doc | What |
 |---|---|
@@ -123,7 +123,7 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 - **The coordinator's own page** (`/coordinator`, linked from the header; `run.mjs self` in text): across every run in the project, its age, lessons with their sources, memory (`COORDINATOR.md` and your past answers), pass rate, rounds to pass and time per unit with the trend, history, what each open run waits on, its proposals, and the side studies it ran while waiting (`init --study-budget`). Other runs open read-only at `/run/<run>`.
 - **Looks like your project:** `init --theme app/globals.css` (or `Theme:` in `COORDINATOR.md`) maps your design system's colours, fonts and radius onto it. Light, dark or system.
 
-**From anywhere (beta, self-host):** [`service/`](service/README.md) is a GitHub App and a read-only web dashboard. It reads the `coordinator-state` branch that `run.mjs push` writes and shows each run, drawn by the same renderers, to the people who can read the repo on GitHub. One container plus Postgres; the App manifest and Dokploy notes are in its README.
+**From anywhere (beta, self-host):** [`service/`](service/README.md) is a GitHub App and a web dashboard that takes answers, notes and alerts. It reads the `coordinator-state` branch that `run.mjs push` writes and shows each run, drawn by the same renderers, to the people who can read the repo on GitHub. One container plus Postgres; the App manifest and Dokploy notes are in its README.
 
 Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once; with `--remote` it also pulls answers made on the web or by comment commands from the state branch (within a minute, or seconds with the service's doorbell).
 
@@ -184,7 +184,7 @@ Out in 0.5: behaviours and evidence on the bar, and the live dashboard with a pa
 
 | Add-on | Status |
 |---|---|
-| Follow and answer a run from a phone, with alerts | On the 1.0 plan ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12), [#18](https://github.com/mindmakr/coordinator/issues/18)) |
+| Follow and answer a run from a phone, with alerts | Built for 1.0, hosted beta ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12)) |
 | Security pass as a second critic on every code change | On the 1.0 plan ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
 | Run maps: mind, flow, heat and goal relevance | On the 1.0 plan ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
 | Project map: code, settings, surfaces and reuse | Built, unreleased ([Project map](#project-map), [#21](https://github.com/mindmakr/coordinator/issues/21)) |

@@ -38,7 +38,7 @@ on:
 
 **Self-hosted:** register your own App from the manifest instead. See [Self-host](self-host.md).
 
-Once installed, the App reads `coordinator-state` whenever it changes, and every 15 minutes as a safety net. You see the runs of every repo you can read on GitHub, and nothing else; GitHub decides, with your own sign-in. [Permissions](permissions.md) lists what the App can do and why.
+Once installed, the App reads `coordinator-state` whenever it changes, and every 15 minutes as a safety net. People with push access can answer the lead's questions and add notes on the web, or in an issue or PR comment (`/coordinator answer q3 b`, `/coordinator note "…"`); each becomes one commit on `coordinator-state`, and the lead picks it up at its next `pull` or through `run.mjs watch --remote`. Alerts (web push, email, GitHub mentions) are set per person at `/alerts`. You see the runs of every repo you can read on GitHub, and nothing else; GitHub decides, with your own sign-in. [Permissions](permissions.md) lists what the App can do and why.
 
 ## 3. coordinator.json on the state branch (optional)
 
