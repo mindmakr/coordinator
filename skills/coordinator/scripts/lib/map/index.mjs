@@ -1,6 +1,7 @@
 // The map commands behind run.mjs: build and record a map in the run's folder
 // (map/events.jsonl, map/map.json, map/map.md, and map.html beside hud.html),
 // stage it at a pit stop, and answer "what does this file touch".
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { esc } from '../links.mjs';
@@ -25,6 +26,9 @@ export const defaultDest = (runDir) => join(runDir, 'pit-stop', 'map');
 // as runs/<run>/map/events.jsonl and map.md. The map keeps its own files and its own lock
 // (map/events.jsonl.lock), apart from the run's events.jsonl and state.json.
 const copyPath = (run, name) => `runs/${run}/map/${name}`;
+const sha = (x) => createHash('sha256').update(x).digest('hex');
+// The hash a log's opening map.reset line replaces, or null.
+const resetOf = (log) => { try { const e = JSON.parse(String(log).slice(0, String(log).indexOf('\n'))); return e.kind === 'map.reset' ? e.replaces : null; } catch { return null; } };
 
 // push's attach hook: the staged files, masked line by line with push's redactor; refused,
 // like the run's own log, when the copy has map events the staged log lacks.
@@ -33,7 +37,9 @@ export const mapAttach = (runDir) => ({ run, red, read }) => {
   if (!existsSync(join(stage, 'events.jsonl'))) return {}; // no pit stop yet
   const log = readFileSync(join(stage, 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => `${JSON.stringify(red(JSON.parse(l)))}\n`).join('');
   const theirs = read(copyPath(run, 'events.jsonl'));
-  if (theirs && !log.startsWith(theirs.toString('utf8'))) throw new Error(`refused: the copy of ${run}'s project map has events this pit stop lacks (written from another machine); run.mjs pull ${run} first; nothing pushed`);
+  if (theirs && !log.startsWith(theirs.toString('utf8')) && resetOf(log) !== sha(theirs)) {
+    throw new Error(`refused: the copy of ${run}'s project map has events this pit stop lacks (written from another machine); run.mjs pull ${run} first, or start the map over with run.mjs map ${run} --reset-stage after pulling; nothing pushed`);
+  }
   const out = { [copyPath(run, 'events.jsonl')]: log };
   if (existsSync(join(stage, 'map.md'))) out[copyPath(run, 'map.md')] = red(readFileSync(join(stage, 'map.md'), 'utf8'));
   return out;
@@ -49,17 +55,26 @@ export const mapRestore = (runDir) => ({ run, read }) => {
   return withLock(local, () => {
     const mine = existsSync(local) ? readFileSync(local, 'utf8') : '';
     if (mine.startsWith(copy)) return mine.length === copy.length ? 'up-to-date' : 'local-ahead';
-    if (!copy.startsWith(mine)) return `kept the local map: it and the copy differ (run.mjs map ${run} --fresh starts over)`;
+    // A reset replaces the history this machine holds (its log or its stage): the old one moves aside.
+    const stage = join(defaultDest(runDir), 'events.jsonl');
+    const reset = !copy.startsWith(mine) && resetOf(copy) && [mine, existsSync(stage) ? readFileSync(stage, 'utf8') : null].some((x) => x && sha(x) === resetOf(copy));
+    if (!copy.startsWith(mine) && !reset) {
+      // The stage now mirrors the copy, so `--reset-stage` names exactly the history it replaces.
+      writeAtomic(stage, copy);
+      return `kept the local map: it and the copy differ; run.mjs map ${run} --reset-stage replaces the copy with a new history, or move map/ aside and pull to take the copy`;
+    }
+    if (reset) renameSync(mapDir(runDir), `${mapDir(runDir)}.old-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    mkdirSync(mapDir(runDir), { recursive: true });
     writeAtomic(local, copy); // map.json catches up on the next read
     const md = read(copyPath(run, 'map.md'));
     if (md) writeAtomic(join(mapDir(runDir), 'map.md'), md);
     for (const [name, content] of [['events.jsonl', copy], ['map.md', md]]) if (content) writeAtomic(join(defaultDest(runDir), name), content);
-    return mine ? 'fast-forward' : 'restored';
+    return reset ? 'reset' : mine ? 'fast-forward' : 'restored';
   });
 };
 
 // A broken log is named, with the way out.
-const recover = (run, e) => new Error(`${e.message}. To start the map over: run.mjs map ${run} --fresh (the old map/ folder is kept beside it)`);
+const recover = (run, e) => new Error(`${e.message}. To start the map over: run.mjs map ${run} --fresh (the old map/ folder is kept beside it), or --reset-stage if this map was staged or pushed`);
 function loadMap(run, runDir) {
   try { return load(mapDir(runDir)); } catch (e) { throw recover(run, e); }
 }
@@ -67,17 +82,29 @@ function loadMap(run, runDir) {
 // --fresh moves the old map aside (map.old-<time>) and starts a new log.
 // A partial build (stopped at the time cap) over a full map is refused unless --force:
 // recorded, it would replace full records with thinner ones.
-export function build(run, runDir, { root, maxSeconds, unit = null, ctx, fresh = false, force = false, now }) {
-  if (fresh && existsSync(mapDir(runDir))) renameSync(mapDir(runDir), `${mapDir(runDir)}.old-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+//
+// --reset-stage (implies --fresh) is the sanctioned new history: the old map and the staged
+// pit stop move aside, the new log opens with map.reset naming the SHA-256 of the staged log
+// it replaces, and the new map is staged at once. push accepts it over a copy with that hash;
+// pull accepts it over a local log or stage with that hash.
+export function build(run, runDir, { root, maxSeconds, unit = null, ctx, fresh = false, force = false, resetStage = false, now }) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const stage = join(defaultDest(runDir), 'events.jsonl');
+  const replaces = resetStage && existsSync(stage) ? sha(readFileSync(stage)) : '';
+  if ((fresh || resetStage) && existsSync(mapDir(runDir))) renameSync(mapDir(runDir), `${mapDir(runDir)}.old-${stamp}`);
+  if (resetStage && existsSync(defaultDest(runDir))) renameSync(defaultDest(runDir), `${defaultDest(runDir)}.old-${stamp}`);
   const built = buildMap(root, { maxSeconds, ...(now ? { now } : {}) });
-  if (built.meta.partial && !force && hasMap(runDir)) {
-    const prev = loadMap(run, runDir).build;
-    if (prev && !prev.partial) throw new Error(`map not recorded: this build stopped at the ${maxSeconds} s cap after ${built.meta.scanned} files, and build ${prev.n} is complete. Raise --max-seconds, or pass --force to record it (a partial build adds and updates records, never removes them)`);
+  const prev = built.meta.partial && hasMap(runDir) ? loadMap(run, runDir).build : null;
+  if (prev && !prev.partial) {
+    if (!force) throw new Error(`map not recorded: this build stopped at the ${maxSeconds} s cap after ${built.meta.scanned} files, and build ${prev.n} is complete. Raise --max-seconds, or pass --force to record it (a partial build adds and updates records, never removes them)`);
+    // Message usage counted over part of the code would overstate unused keys: keep the complete build's figures.
+    built.meta.messages = { ...prev.messages, catalogs: built.meta.messages.catalogs, from: `build ${prev.n} (this build is partial)` };
   }
   let snap;
-  try { snap = record(mapDir(runDir), built, { unit }); } catch (e) { throw recover(run, e); }
+  try { snap = record(mapDir(runDir), built, { unit, ...(resetStage ? { reset: replaces } : {}) }); } catch (e) { throw recover(run, e); }
   writeAtomic(join(mapDir(runDir), 'map.md'), summary(snap, run));
   writeAtomic(mapHtml(runDir), mapPage(snap, ctx, run));
+  if (resetStage) pitStop(runDir, defaultDest(runDir)); // staged at once: the reset is meant to be pushed
   return snap;
 }
 
@@ -93,6 +120,18 @@ export function pitStop(runDir, dest) {
   if (!mine.startsWith(theirs)) throw new Error(`pit stop refused: ${join(out, 'events.jsonl')} has events this run's log lacks (written from another machine?); merge it first or pick another --dest`);
   for (const name of PIT_STOP) writeAtomic(join(out, name), readFileSync(join(src, name)));
   return { dest: out, files: PIT_STOP };
+}
+
+// The header nav on a run's map page (live): that run's dashboard, its run maps and its
+// project map, then the coordinator's page. On /run/<other>/map it names <other>, not the served run.
+export function mapNav(ctx, id) {
+  const base = ctx.base ?? '';
+  return [
+    { path: base || '/', label: id, href: ctx.home },
+    { path: `${base}/maps`, label: 'Maps', href: ctx.maps },
+    { path: `${base}/map`, label: 'Project map', href: ctx.mapHref },
+    ...(ctx.pages ?? []).filter((p) => p.path === '/coordinator'),
+  ];
 }
 
 // The map page, live or static. A broken log renders a page that says what broke and how to recover.

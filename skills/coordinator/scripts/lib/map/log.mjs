@@ -29,7 +29,8 @@ const digest = (snap) => sha(COLLECTIONS.map((c) => snap[c].map(canon).join('\n'
 
 // The schema of each kind, checked on write and on read.
 const TYPES = { v: 'number', seq: 'number', at: 'string', kind: 'string', build: 'number' };
-const KINDS = { 'map.build': { meta: 'object' }, 'map.delta': { coll: 'string', set: 'array', del: 'array' }, 'map.done': { stats: 'object', digest: 'string' } };
+// map.reset (seq 1 only) opens a new history that replaces another: `replaces` is the SHA-256 of the staged log it replaces ('' when none).
+const KINDS = { 'map.reset': { replaces: 'string' }, 'map.build': { meta: 'object' }, 'map.delta': { coll: 'string', set: 'array', del: 'array' }, 'map.done': { stats: 'object', digest: 'string' } };
 const typeOf = (x) => (Array.isArray(x) ? 'array' : x === null ? 'null' : typeof x);
 export function validate(e, where = 'event') {
   const fail = (why) => { throw new Error(`map: invalid ${where}: ${why}`); };
@@ -53,6 +54,7 @@ function readEvents(file) {
     let e; try { e = JSON.parse(l); } catch { throw new Error(`map: ${file} line ${i + 1} is not JSON`); }
     validate(e, `event on line ${i + 1}`);
     if (e.seq !== i + 1) throw new Error(`map: ${file} line ${i + 1} has seq ${e.seq}: a gap or a reorder`);
+    if (e.kind === 'map.reset' && e.seq !== 1) throw new Error(`map: ${file} line ${i + 1}: a reset can only open a log`);
     return e;
   });
   return { events, lines };
@@ -66,6 +68,7 @@ function replay(snap, events) {
   const colls = Object.fromEntries(COLLECTIONS.map((c) => [c, new Map(snap[c].map((r) => [r.id, r]))]));
   let build = snap.build; let pending = null;
   for (const e of events) {
+    if (e.kind === 'map.reset') continue; // marks where the history starts; holds no records
     if (e.kind === 'map.build') pending = { n: e.build, at: e.at, ...(e.unit ? { unit: e.unit } : {}), ...e.meta };
     else if (e.kind === 'map.delta') { const m = colls[e.coll]; for (const id of e.del) m.delete(id); for (const r of e.set) m.set(r.id, r); } else {
       const out = { ...Object.fromEntries(COLLECTIONS.map((c) => [c, [...colls[c].values()].sort((a, b) => (a.id < b.id ? -1 : 1))])) };
@@ -106,7 +109,8 @@ export function load(dir, { write = true } = {}) {
 // (push masks again; for map data that is then a no-op, and a pulled log replays cleanly).
 const masked = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(masked) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, masked(x)])) : v);
 
-export function record(dir, raw, { unit = null, at = new Date().toISOString() } = {}) {
+// `reset` (a SHA-256, or '') opens an empty log with a map.reset line first.
+export function record(dir, raw, { unit = null, at = new Date().toISOString(), reset = null } = {}) {
   const built = masked(raw);
   const f = files(dir);
   return withLock(f.events, () => {
@@ -115,6 +119,10 @@ export function record(dir, raw, { unit = null, at = new Date().toISOString() } 
     let seq = prev.upTo.seq;
     const out = [];
     const push = (e) => { out.push(validate({ v: V, seq: ++seq, at, kind: e.kind, ...(unit ? { unit } : {}), build: n, ...e })); };
+    if (reset !== null) {
+      if (seq !== 0) throw new Error('map: a reset needs an empty log');
+      push({ kind: 'map.reset', build: 0, replaces: reset });
+    }
     push({ kind: 'map.build', meta: built.meta });
     const stats = {};
     for (const c of COLLECTIONS) {

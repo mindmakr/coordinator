@@ -49,9 +49,10 @@
 //   run.mjs hud <run>      rewrites hud.html, maps.html and units/<unit>.html beside state.json now and prints its path
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
-//   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--fresh] [--force] [--pit-stop [--dest dir]]
+//   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--fresh | --reset-stage] [--force] [--pit-stop [--dest dir]]
 //                  the project map (modules, helpers, settings, surfaces, reuse) into the run's map/ and map.html;
-//                  --fresh starts a new log (the old map/ is kept aside); --force records a build cut short by the cap;
+//                  --fresh starts a new log (the old map/ is kept aside); --reset-stage also replaces the staged and pushed
+//                  map history (a map.reset event push and pull accept); --force records a build cut short by the cap;
 //                  --pit-stop stages the log and summary in the run's pit-stop/map (push carries them), or copies them to --dest
 //   run.mjs touches <run> <path> [--json]   what that file touches, from the map, for a builder's brief
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
@@ -86,7 +87,7 @@ import { selfPage } from './lib/selfpage.mjs';
 import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
-import { build as buildMap, defaultDest, hasMap, mapAttach, mapHtml, mapRestore, mapView, pitStop, touchesOf } from './lib/map/index.mjs';
+import { build as buildMap, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, touchesOf } from './lib/map/index.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget'],
@@ -95,7 +96,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force'], touches: ['json'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -401,7 +402,7 @@ const commands = {
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
-        if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), ctx) : null;
+        if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx, id) }) : null;
         if (rest === '/maps') return mapsPage(v, Date.now(), ctx);
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
       },
@@ -486,11 +487,12 @@ const commands = {
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
     if (o.unit !== undefined) unitOf(s, o.unit);
     if (o.dest !== undefined && o['pit-stop'] !== true) throw new Error('--dest goes with --pit-stop');
-    const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)), fresh: o.fresh === true, force: o.force === true });
+    const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)), fresh: o.fresh === true, force: o.force === true, resetStage: o['reset-stage'] === true });
     commands.hud([run]); // the dashboard links to the map
     const b = snap.build;
     return {
       build: b.n, files: b.scanned, seconds: Math.round(b.ms.total / 100) / 10, partial: b.partial, stats: b.stats, page: mapHtml(runDir(run)),
+      ...(o['reset-stage'] === true ? { reset: 'a new map history, staged: the next push replaces the copy, and pull on other machines takes it' } : {}),
       ...(o['pit-stop'] === true ? { pitStop: pitStop(runDir(run), typeof o.dest === 'string' ? o.dest : defaultDest(runDir(run))) } : {}),
     };
   },

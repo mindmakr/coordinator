@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -72,12 +73,37 @@ test('the map log only moves forward: a pit stop from another machine is refused
   const tip = git(origin, 'rev-parse', 'coordinator-state').trim();
   const refused = cli(A, 'push', 'r1');
   assert.equal(refused.code, 1);
-  assert.match(refused.err, /project map has events this pit stop lacks.*pull r1 first; nothing pushed/);
+  assert.match(refused.err, /project map has events this pit stop lacks.*pull r1 first.*nothing pushed/);
   assert.equal(git(origin, 'rev-parse', 'coordinator-state').trim(), tip, 'nothing pushed');
   const pulled = cli(A, 'pull', 'r1');
   assert.equal(pulled.code, 0, pulled.err);
-  assert.match(pulled.out.map, /kept the local map.*--fresh/, 'a different local map is kept, and named');
+  assert.match(pulled.out.map, /kept the local map.*--reset-stage/, 'a different local map is kept, and named');
   assert.ok(existsSync(join(stateDir(A), 'runs', 'r1', 'map', 'map.json')));
+});
+
+test('--reset-stage starts a new map history that push and pull accept, recorded as map.reset', () => {
+  const copyBefore = show('runs/r1/map/events.jsonl');
+  const r = cli(A, 'map', 'r1', '--root', code, '--reset-stage');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out.build, 1); assert.match(r.out.reset, /new map history/);
+  const first = JSON.parse(readFileSync(join(stateDir(A), 'runs', 'r1', 'map', 'events.jsonl'), 'utf8').split('\n')[0]);
+  assert.equal(first.kind, 'map.reset');
+  assert.equal(first.replaces, createHash('sha256').update(copyBefore).digest('hex'), 'it names the copy it replaces');
+  assert.ok(readdirSync(join(stateDir(A), 'runs', 'r1')).some((n) => n.startsWith('map.old-')), 'the old map is kept aside');
+  const p = cli(A, 'push', 'r1');
+  assert.equal(p.code, 0, p.err);
+  assert.equal(JSON.parse(show('runs/r1/map/events.jsonl').split('\n')[0]).kind, 'map.reset', 'the branch holds the new history');
+  const b = cli(B, 'pull', 'r1');
+  assert.equal(b.code, 0, b.err);
+  assert.equal(b.out.map, 'reset', 'b held the replaced history, so it takes the new one');
+  assert.equal(cli(B, 'touches', 'r1', 'src/extra.ts').code, 0, 'and reads it');
+  assert.ok(readdirSync(join(stateDir(B), 'runs', 'r1')).some((n) => n.startsWith('map.old-')));
+  // A reset that names some other history is still refused.
+  writeFileSync(join(code, 'src', 'extra2.ts'), 'export const y = 2;\n');
+  assert.equal(cli(B, 'map', 'r1', '--root', code, '--pit-stop').code, 0);
+  assert.equal(cli(B, 'push', 'r1').code, 0);
+  assert.equal(cli(A, 'map', 'r1', '--root', code, '--reset-stage').code, 0); // a's stage is the old copy, not b's newer one
+  assert.equal(cli(A, 'push', 'r1').code, 1, 'b pushed after a staged its reset: refused');
 });
 
 test('the map has its own files and lock, apart from the run\'s event log', () => {

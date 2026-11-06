@@ -60,6 +60,8 @@ test('surfaces: prefixed Fastify routes with their services, app-router pages an
   assert.ok(patch, 'register(…, { prefix }) applies to the plugin file');
   assert.deepEqual(patch.services, ['src/services/employer.service.ts'], 'what the handler names, not every import of the file');
   assert.deepEqual(byId(map.surfaces, 'route:POST /v1/employer/disburse src/routes/employer.ts').services, ['src/services/ewa.service.ts'], 'through a local function, one call deep');
+  assert.deepEqual(byId(map.surfaces, 'route:GET /v1/employer/totals src/routes/employer.ts').services, ['src/services/ewa.service.ts']);
+  assert.deepEqual(byId(map.surfaces, 'route:GET /v1/employer/me src/routes/employer.ts').services, ['src/services/employer.service.ts'], 'two handlers with a `data` each: neither borrows the other\'s');
   assert.ok(byId(map.surfaces, 'route:GET /api/health app/api/health/route.ts'));
   const screen = byId(map.surfaces, 'screen:/employer app/(dashboard)/employer/page.tsx');
   assert.deepEqual(screen.calls, ['route:GET /v1/employer/settings src/routes/employer.ts'], 'the screen reaches the route through its client call');
@@ -159,6 +161,9 @@ test('a stale, missing or tampered snapshot is rebuilt from the events; a broken
   assert.throws(() => load(d), /invalid event/);
   writeFileSync(join(d, 'events.jsonl'), events);
   assert.throws(() => validate({ v: 1, seq: 1, at: 'x', kind: 'map.delta', build: 1, coll: 'nope', set: [], del: [] }), /unknown collection/);
+  writeFileSync(join(d, 'events.jsonl'), `${events}${JSON.stringify({ v: 1, seq: lines.length + 1, at: 'x', kind: 'map.reset', build: 0, replaces: '' })}\n`);
+  assert.throws(() => load(d), /a reset can only open a log/);
+  writeFileSync(join(d, 'events.jsonl'), events);
 });
 
 test('touches: what a file imports, who reaches it, helpers, settings, surfaces and reuse', () => {
@@ -250,6 +255,8 @@ test('a build cut short by the time cap is refused over a full map unless --forc
   const snap = buildRun('m1', runDir, { ...opts, force: true });
   assert.equal(snap.build.partial, true);
   assert.equal(snap.modules.length, map.modules.length, 'a forced partial build removes nothing');
+  assert.equal(snap.build.messages.unused, map.meta.messages.unused, 'message figures stay those of the complete build');
+  assert.match(snap.build.messages.from, /^build \d+ \(this build is partial\)$/);
 });
 
 test('a corrupt log is named, with --fresh as the way out; the page says so too', () => {
@@ -289,5 +296,18 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
     assert.equal(other.status, 200, 'another run\'s map at /run/<id>/map');
     assert.match(await other.text(), /href="\/run\/m2\?t=[^"]+">← m2 dashboard[\s\S]*Project map · project/, 'its back link goes to that run');
     assert.equal((await fetch(`${u.origin}/run/m3/map${u.search}`)).status, 404, 'a run with no map has no map page');
+    // A broken log on another run: the page names the cause, and its nav is that run's.
+    const log = join(state, 'runs', 'm2', 'map', 'events.jsonl');
+    const good = readFileSync(log, 'utf8');
+    writeFileSync(log, `${good}not json\n`);
+    try {
+      const broken = await (await fetch(`${u.origin}/run/m2/map${u.search}`)).text();
+      assert.match(broken, /Project map · not readable/); assert.match(broken, /is not JSON[\s\S]*--fresh/);
+      const nav = /<nav class="pages"[\s\S]*?<\/nav>/.exec(broken)[0];
+      assert.match(nav, /href="\/run\/m2\?t=[^"]+">m2<\/a>/, 'the nav names m2, the run whose map this is');
+      assert.match(nav, /href="\/run\/m2\/maps\?t=[^"]+">Maps<\/a>/);
+      assert.match(nav, /href="\/run\/m2\/map\?t=[^"]+" aria-current="page">Project map<\/a>/);
+      assert.ok(!/>m1</.test(nav), 'not the served run');
+    } finally { writeFileSync(log, good); }
   } finally { child.kill(); }
 });

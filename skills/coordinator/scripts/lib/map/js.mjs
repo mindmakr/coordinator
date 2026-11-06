@@ -57,16 +57,61 @@ export function shape(body) {
 // The names a stretch of code refers to (not property names after a dot).
 export const idsIn = (text) => new Set(text.match(/(?<![\w$.])[A-Za-z_$][\w$]*/g) ?? []);
 
-// Function bodies: hashed for reuse (when big enough), and every named body's
-// identifiers (`uses`), so a route handler can be traced one call deep.
-function functions(code, bare, lineOf) {
-  const out = []; const seen = new Set(); const uses = new Map();
-  const add = (name, open) => {
+// The innermost `{` enclosing an offset (-1: module level), from one pass over `bare`.
+function blocks(bare) {
+  const marks = [0]; const opens = [-1]; const stack = [];
+  for (let i = 0; i < bare.length; i++) {
+    const c = bare[i];
+    if (c === '{') { stack.push(i); marks.push(i + 1); opens.push(i); } else if (c === '}') { stack.pop(); marks.push(i + 1); opens.push(stack.at(-1) ?? -1); }
+  }
+  return (off) => {
+    let lo = 0; let hi = marks.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (marks[mid] <= off) lo = mid; else hi = mid - 1; }
+    return opens[lo];
+  };
+}
+
+// Declarations by name, each with the identifiers it refers to and the block it lives in,
+// so a name resolves the way scope does: to the innermost declaration whose block holds the use.
+function scope(bare) {
+  const blockAt = blocks(bare);
+  const decls = new Map(); const ends = new Map(); // block start → its end, matched once
+  const declare = (name, at, ids) => {
+    const b = blockAt(at);
+    if (!decls.has(name)) decls.set(name, []);
+    if (b >= 0 && !ends.has(b)) ends.set(b, match(bare, b));
+    decls.get(name).push({ ids, at, block: b, end: b < 0 ? Infinity : ends.get(b) });
+  };
+  // The identifiers of the declaration of `name` visible at offset `at`, or none.
+  // (A const arrow is declared twice, by its body and its initialiser: same block, ids merged.)
+  const see = (name, at) => {
+    const seen = (decls.get(name) ?? []).filter((d) => d.block < 0 || (d.block < at && at < d.end));
+    const inner = Math.max(-1, ...seen.map((d) => d.block));
+    return seen.filter((d) => d.block === inner).flatMap((d) => [...d.ids]);
+  };
+  // Names the stretch [from, to) declares itself: they shadow any outer declaration.
+  let byAt = null; // every declaration as [offset, name], sorted once, searched per handler
+  const own = (from, to) => {
+    byAt ??= [...decls].flatMap(([n, ds]) => ds.map((d) => [d.at, n])).sort((a, b) => a[0] - b[0]);
+    let lo = 0; let hi = byAt.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (byAt[mid][0] < from) lo = mid + 1; else hi = mid; }
+    const names = new Set();
+    for (let i = lo; i < byAt.length && byAt[i][0] < to; i++) names.add(byAt[i][1]);
+    return names;
+  };
+  return { declare, see, own };
+}
+
+// Function bodies: hashed for reuse (when big enough), and declared in `sc` with
+// their identifiers, so a route handler can be traced one call deep.
+function functions(code, bare, lineOf, sc) {
+  const out = []; const seen = new Set();
+  const add = (name, open, at) => {
     if (open < 0 || seen.has(open) || bare[open] !== '{') return;
     const end = match(bare, open);
     if (end < 0) return;
     seen.add(open);
-    if (name !== 'anonymous' && !uses.has(name)) uses.set(name, idsIn(bare.slice(open, end)));
+    if (name !== 'anonymous') sc.declare(name, at, idsIn(bare.slice(open, end)));
     const body = code.slice(open + 1, end - 1);
     const first = lineOf(open); const last = lineOf(end - 1);
     if (last - first + 1 < MIN_BODY.lines) return;
@@ -81,13 +126,13 @@ function functions(code, bare, lineOf) {
     const m = /^\s*(?::\s*[^{=;]*?)?\s*(=>\s*)?\{/.exec(bare.slice(close, close + 300));
     return m ? close + m[0].length - 1 : -1;
   };
-  for (const m of bare.matchAll(/\bfunction\b\s*\*?\s*([\w$]+)?\s*(?:<[^>{}()]*>)?\s*\(/g)) add(m[1] ?? 'anonymous', bodyAfter(m.index + m[0].length - 1));
-  for (const m of bare.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:<[^>{}()]*>\s*)?\(/g)) add(m[1], bodyAfter(m.index + m[0].length - 1));
+  for (const m of bare.matchAll(/\bfunction\b\s*\*?\s*([\w$]+)?\s*(?:<[^>{}()]*>)?\s*\(/g)) add(m[1] ?? 'anonymous', bodyAfter(m.index + m[0].length - 1), m.index);
+  for (const m of bare.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]+)?=\s*(?:async\s+)?(?:<[^>{}()]*>\s*)?\(/g)) add(m[1], bodyAfter(m.index + m[0].length - 1), m.index);
   for (const m of bare.matchAll(/^[ \t]*(?:(?:public|private|protected|static|async|override|readonly)\s+)*([\w$]+)\s*(?:<[^>{}()]*>)?\s*\(/gm)) {
-    if (!KEYWORDS.has(m[1])) add(m[1], bodyAfter(m.index + m[0].length - 1));
+    if (!KEYWORDS.has(m[1])) add(m[1], bodyAfter(m.index + m[0].length - 1), m.index);
   }
   out.sort((a, b) => a.line - b.line);
-  return { fns: out, uses };
+  return out;
 }
 
 // The top-level keys of the object literal opening at `open`.
@@ -123,15 +168,20 @@ export function analyse(src, file = '') {
     imports.push({ spec: m[5], names: star ? ['*'] : pairs.map((p) => p[0]), line: at(m.index), reexport: star && !m[3] ? '*' : pairs, type: !!m[1] });
     if (m[3]) exports.push({ name: m[3], kind: 'const', line: at(m.index) });
   }
-  for (const m of code.matchAll(/(?:\b(?:const|let|var)\s+(\{[^}]*\}|[\w$]+)\s*=\s*)?\brequire\s*\(\s*(['"])([^'"\n]+)\2\s*\)/g)) {
-    const names = m[1]?.startsWith('{') ? m[1].slice(1, -1).split(',').map((p) => /^\s*([\w$]+)/.exec(p)?.[1]).filter(Boolean) : ['*'];
-    imports.push({ spec: m[3], names, locals: m[1] && !m[1].startsWith('{') ? { [m[1]]: '*' } : {}, line: at(m.index) });
-    if (m[1] && !m[1].startsWith('{')) nsNames.set(m[1], imports.at(-1));
+  // The binding a require/import() call is assigned to, read backwards from the call
+  // (`const x =`, `const { a, b: c } = await`): anchored on the call, not on every position.
+  const bindingBefore = (i) => /\b(?:const|let|var)\s*(\{[^}]*\}|[\w$]+)\s*=\s*(?:await\s+)?$/.exec(code.slice(Math.max(0, i - 400), i))?.[1];
+  for (const m of code.matchAll(/\brequire\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g)) {
+    const bind = bindingBefore(m.index);
+    const names = bind?.startsWith('{') ? bind.slice(1, -1).split(',').map((p) => /^\s*([\w$]+)/.exec(p)?.[1]).filter(Boolean) : ['*'];
+    imports.push({ spec: m[2], names, locals: bind && !bind.startsWith('{') ? { [bind]: '*' } : {}, line: at(m.index) });
+    if (bind && !bind.startsWith('{')) nsNames.set(bind, imports.at(-1));
   }
   // import('x'), and `const { a, b } = await import('x')`, which names what it takes.
-  for (const m of code.matchAll(/(?:\b(?:const|let|var)\s*(\{[^}]*\}|[\w$]+)\s*=\s*(?:await\s+)?)?\bimport\s*\(\s*(['"])([^'"\n]+)\2\s*\)/g)) {
-    const named = m[1]?.startsWith('{') ? m[1].slice(1, -1).split(',').map((p) => /^\s*([\w$]+)(?:\s*:\s*([\w$]+))?/.exec(p)).filter(Boolean) : null;
-    imports.push({ spec: m[3], names: named ? named.map((x) => x[1]) : ['*'], locals: named ? Object.fromEntries(named.map((x) => [x[2] ?? x[1], x[1]])) : m[1] ? { [m[1]]: '*' } : {}, line: at(m.index), dynamic: true });
+  for (const m of code.matchAll(/\bimport\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g)) {
+    const bind = bindingBefore(m.index);
+    const named = bind?.startsWith('{') ? bind.slice(1, -1).split(',').map((p) => /^\s*([\w$]+)(?:\s*:\s*([\w$]+))?/.exec(p)).filter(Boolean) : null;
+    imports.push({ spec: m[2], names: named ? named.map((x) => x[1]) : ['*'], locals: named ? Object.fromEntries(named.map((x) => [x[2] ?? x[1], x[1]])) : bind ? { [bind]: '*' } : {}, line: at(m.index), dynamic: true });
   }
   // `ns.name` after `import * as ns` or `const ns = require(…)` counts as taking `name`.
   for (const [ns, imp] of nsNames) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${ns.replace(/\$/g, '\\$')}\\.([A-Za-z_$][\\w$]*)`, 'g'))) if (!imp.names.includes(m[1])) imp.names.push(m[1]);
@@ -150,9 +200,11 @@ export function analyse(src, file = '') {
   for (const m of bare.matchAll(/\b(?:module\.)?exports\.([\w$]+)\s*=/g)) exports.push({ name: m[1], kind: 'const', line: at(m.index) });
   for (const m of bare.matchAll(/\bmodule\.exports\s*=\s*\{/g)) for (const k of objectKeys(bare, m.index + m[0].length - 1)) exports.push({ name: k, kind: 'const', line: at(m.index) });
 
-  const { fns, uses } = functions(code, bare, lineOf);
+  const sc = scope(bare);
+  const fns = functions(code, bare, lineOf, sc);
   // A variable stands for what its initialiser names (`const costSvc = new CostTypeService()`), so a handler reaches the import through it.
-  for (const m of bare.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]+)?=(?!>)\s*([^;\n]{1,200})/g)) if (!uses.has(m[1])) uses.set(m[1], idsIn(m[2]));
+  // Scoped: a handler's `data` resolves to the `data` its own block can see, not another function's.
+  for (const m of bare.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=\n]+)?=(?!>)\s*([^;\n]{1,200})/g)) sc.declare(m[1], m.index, idsIn(m[2]));
   // A named export of a local function is a function export.
   const fnNames = new Set(fns.map((f) => f.name));
   for (const e of exports) if (e.kind === 'const' && fnNames.has(typeof e.local === 'string' ? e.local : e.name)) e.kind = 'function';
@@ -220,8 +272,9 @@ export function analyse(src, file = '') {
     else if (!client && path.startsWith('/') && (SERVER.test(recv) || /(^|\/)(routes?|server|api|controllers?|handlers?)(\/|\.|$)/.test(file))) {
       // What the handler refers to: the call's own arguments, so services come from the handler, not the whole file.
       const open = i + arg[0].indexOf('(');
-      const close = match(bare, open);
-      routes.push({ method, path, line: at(m.index), ids: [...idsIn(bare.slice(open, close < 0 ? open + 2000 : close))] });
+      const close = match(bare, open) < 0 ? open + 2000 : match(bare, open);
+      const own = sc.own(open, close);
+      routes.push({ method, path, line: at(m.index), at: m.index, ids: [...idsIn(bare.slice(open, close))], outer: [...idsIn(bare.slice(open, close))].filter((id) => !own.has(id)) });
     }
   }
   for (const m of isTest ? [] : bare.matchAll(/\.\s*route\s*\(\s*\{/g)) {
@@ -229,7 +282,7 @@ export function analyse(src, file = '') {
     const obj = code.slice(m.index, end < 0 ? m.index + 400 : end);
     const url = /\b(?:url|path)\s*:\s*(['"`])([^'"`\n]+)\1/.exec(obj);
     const meth = /\bmethod\s*:\s*(\[[^\]]*\]|(['"])\w+\2)/.exec(obj);
-    if (url) for (const x of (meth ? meth[1].match(/\w+/g) : ['ALL'])) routes.push({ method: x.toUpperCase(), path: url[2], line: at(m.index), ids: [...idsIn(bare.slice(m.index, end < 0 ? m.index + 400 : end))] });
+    if (url) for (const x of (meth ? meth[1].match(/\w+/g) : ['ALL'])) routes.push({ method: x.toUpperCase(), path: url[2], line: at(m.index), at: m.index, ids: [...idsIn(bare.slice(m.index, end < 0 ? m.index + 400 : end))] });
   }
   for (const m of isTest ? [] : code.matchAll(/\bfetch\s*\(\s*(['"`])([^'"`\n]+)\1(?:\s*,\s*\{[^}]*?method\s*:\s*(['"])(\w+)\3)?/g)) calls.push({ method: (m[4] ?? 'GET').toUpperCase(), path: m[2], line: at(m.index) });
   // register(plugin, { prefix }) (Fastify) and use('/prefix', router) (Express).
@@ -251,5 +304,5 @@ export function analyse(src, file = '') {
   }
   for (const m of code.matchAll(/\b(?:formatMessage\s*\(\s*\{\s*id\s*:\s*|i18nKey\s*=\s*\{?\s*)(['"`])([\w.:-]+)\1/g)) msgs.push({ key: m[2].replace(':', '.'), ns: null, line: at(m.index) });
 
-  return { imports, exports, fns, uses, env, settings, routes, calls, mounts, msgs, ns: [...ns], lines: lineOf(src.length) };
+  return { imports, exports, fns, see: sc.see, env, settings, routes, calls, mounts, msgs, ns: [...ns], lines: lineOf(src.length) };
 }

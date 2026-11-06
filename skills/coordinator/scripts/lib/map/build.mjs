@@ -147,10 +147,10 @@ export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
   // A handler's services: the imported files whose bindings it names, directly
   // or through a function of the same file it calls (one step). File-wide
   // imports only when the handler names none (an inline plugin, say).
-  const handled = (f, ids) => {
+  const handled = (f, ids, at, outer = null) => {
     const a = info.get(f);
     const names = new Set(ids);
-    for (const id of ids) for (const x of a.uses?.get(id) ?? []) names.add(x);
+    for (const id of outer ?? ids) for (const x of a.see(id, at)) names.add(x); // the declaration scope gives the handler; its own shadow outer ones
     const hit = sorted((edges.get(f) ?? []).filter(({ imp }) => !imp.type && Object.keys(imp.locals ?? {}).some((l) => names.has(l))).map((e) => e.to));
     return hit.length ? hit.slice(0, 20) : behind(f);
   };
@@ -160,12 +160,12 @@ export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
     for (const r of a.routes) {
       for (const pre of [...new Set(prefixes(f))]) {
         const path = `${pre}${r.path}`.replace(/\/+/g, '/').replace(/(.)\/$/, '$1') || '/';
-        surfaces.push({ id: `route:${r.method} ${path} ${f}`, kind: 'route', method: r.method, path, file: f, line: r.line, services: handled(f, r.ids ?? []) });
+        surfaces.push({ id: `route:${r.method} ${path} ${f}`, kind: 'route', method: r.method, path, file: f, line: r.line, services: handled(f, r.ids ?? [], r.at ?? 0, r.outer) });
       }
     }
   }
   for (const s of fileSurfaces(files.filter((f) => info.has(f)), exportsOf)) {
-    surfaces.push({ id: `${s.kind}:${s.method ? `${s.method} ` : ''}${s.path} ${s.file}`, kind: s.kind, ...(s.method ? { method: s.method } : {}), path: s.path, file: s.file, line: 1, services: s.method && info.get(s.file).uses?.has(s.method) ? handled(s.file, [s.method]) : behind(s.file) });
+    surfaces.push({ id: `${s.kind}:${s.method ? `${s.method} ` : ''}${s.path} ${s.file}`, kind: s.kind, ...(s.method ? { method: s.method } : {}), path: s.path, file: s.file, line: 1, services: s.method && info.get(s.file).see(s.method, 0).length ? handled(s.file, [s.method], 0) : behind(s.file) });
   }
   // Screens reach routes through their client calls, up to two import steps deep.
   const byLast = new Map(); // routes by their last path segment

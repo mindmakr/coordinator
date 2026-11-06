@@ -21,7 +21,7 @@ export function summary(snap, run) {
     `- **Modules:** ${snap.modules.length} (${Object.entries(b.langs ?? {}).map(([k, v]) => `${k} ${v}`).join(', ')}), ${b.unresolved ?? 0} unresolved imports.`,
     `- **Shared helpers:** ${snap.helpers.length} exported functions or classes used by two or more files.`,
     `- **Settings:** ${snap.settings.filter((s) => s.kind === 'env').length} env vars and ${snap.settings.filter((s) => s.kind === 'key').length} settings or config keys; ${written} are written somewhere.`,
-    `- **Surfaces:** ${Object.entries(kinds).map(([k, v]) => `${v} ${k}s`).join(', ') || 'none'}${b.messages ? `; ${b.messages.keys} message keys in all, ${b.messages.unused} not found in code, ${b.messages.unknownLookups} lookups that match no key` : ''}.`,
+    `- **Surfaces:** ${Object.entries(kinds).map(([k, v]) => `${v} ${k}s`).join(', ') || 'none'}${b.messages ? `; ${b.messages.keys} message keys in all, ${b.messages.unused} not found in code, ${b.messages.unknownLookups} lookups that match no key${b.messages.from ? ` (counted in ${b.messages.from})` : ''}` : ''}.`,
     `- **Reuse candidates:** ${snap.reuse.length} groups of functions with the same shape.`,
     `- **Scan:** ${b.scanned ?? 0} of ${b.files ?? 0} files in ${((b.ms?.total ?? 0) / 1000).toFixed(1)} s${b.partial ? ' — **partial: stopped at the time cap**' : ''}.`,
     '',
