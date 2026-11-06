@@ -21,7 +21,7 @@ Write the staffing into the run: `run.mjs note --kind decision --text "critic: s
 - **Parallel only when it's independent.** Units that share files go to one builder. Many agents on one file just collide.
 - **Briefs carry everything.** An agent sees only its brief: the goal, the bar, the fence, the references, the lessons and its exact reply format (`briefs.md`).
 - **Cheapest member that clears the bar.** Use a fast model or agent for mechanical units, and a strong one for judgment, critique and integration. Record which choice worked in the retro.
-- **Reuse, don't duplicate.** If the project has a skill for a step (reviewing a PR, testing screens, writing release notes), the agent runs that skill instead of improvising.
+- **Reuse, don't duplicate.** If the project has a skill for a step (reviewing a PR, testing screens, writing release notes), the agent runs that skill instead of improvising. Where it has none, the built-in playbook covers the step (`sub-skills.md`).
 - **Every member reports in the same shape**, so the lead can compare rounds and the retro can learn from them.
 
 ## Learning who to call

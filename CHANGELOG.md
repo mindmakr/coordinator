@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Built-in sub-skills** (#13): investigate, plan, fix, review (with a security pass and a project-rule pass), verify, visual, translations, release notes and board, each a short playbook in `references/sub-skills/` (when, inputs, how it plugs into the loop, steps, output). `references/sub-skills.md` maps loop steps to playbooks; the builder, critic and integrator briefs and `run.md` name the right one per step. The project's own skill still wins.
+- **Review depth is fixed:** a strong model, the whole diff and its callers, the red test against base, full checks, and the correctness, security and project-rule passes every round. A budget can cut rounds or time, never a pass.
+- **Lessons from real runs folded in:** each parallel builder gets its own database; audit and lookup work on auth failure paths must stay inside the equal-time envelope, and timing tests call the route; copy under the project's approval is not failed on wording; a bar that needs open-ended language detected is bounded before freeze; CAUSE names the root cause and is reused word for word; a defect found after a pass is recorded as an escape.
+- **Plugin:** each sub-skill is listed as `/coordinator:<name>` (thin `skills/<name>/SKILL.md` entries).
+- **Codex CLI note** (`references/codex.md`): install path and differences; discovery of all ten skills checked on codex-cli 0.160.0, a full run not yet.
+
 ## 0.5.0 (2026-11-06)
 
 A live dashboard, and a bar made of behaviours with evidence attached. From the owner's feedback on the 0.4 HUD.

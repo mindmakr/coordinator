@@ -5,7 +5,7 @@
 1. **Red, then green.** Write a test that reproduces the issue with the issue's own figures. The critic sees it fail on the base branch and pass on the fix.
 2. **The full checks:** typecheck, lint, the test suite, and whatever the project names. The critic runs them itself or reads the logged output for the exact commit.
 3. **The acceptance list** from the issue, plus every decision the owner recorded on it.
-4. **A blind review of the diff.** If the project has a review skill, the critic runs it. Otherwise it reads the diff for correctness, security and missed callers of the changed code.
+4. **A blind review of the diff.** If the project has a review skill, the critic runs it at its thorough level. Otherwise it follows `sub-skills/review.md`: correctness, a security pass and the project's rules, at full depth every round.
 5. **Visible changes:** screenshots of the changed screens in each language and at phone width.
 
 ## Split

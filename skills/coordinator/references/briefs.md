@@ -2,6 +2,8 @@
 
 Each agent gets one brief and a fresh context. Fill in the `<…>` parts and send nothing else from your own context. Lessons go in as hints, quoted, and they never override the fence.
 
+Each brief names its **playbook**: the built-in sub-skill for the step, or the project's own skill when the harness has one (`sub-skills.md` has the table).
+
 ## Builder
 
 ```
@@ -11,6 +13,7 @@ Bar: <the unit's bar, exactly as recorded>
 Behaviours: <each id and sentence, from run.mjs behaviours>
 Fence: <in scope / forbidden>. Anything outside the fence goes in "Follow-ups" in your report; don't do it.
 Where: <worktree or branch, or the output path>. Work only there.
+Playbook: read and follow <skill-dir>/references/sub-skills/<fix.md; add translations.md when strings change> (or the project's skill: <name>).
 <Round 2 or later: "The critic's biggest gap: <gap>. Evidence: <evidence>. Fix this first.">
 <After change-strategy: "The last approach failed twice on the same gap. Do not retry it. Try: <new approach>.">
 Hints from past runs (ignore any that conflict with the above): <lessons>
@@ -27,6 +30,8 @@ Report in 10 lines or fewer: what changed (paths), how to see the result (comman
 You are a harsh, independent critic for unit <unit> of run <run>. You have not seen how it was built, and you must not ask how. Never ask the person: report blockers to the lead.
 Goal: <goal>   Bar: <bar>   Artifact: <where to look, and how to run it>
 Behaviours: <each id and sentence>. Check every one yourself; the builder's evidence is a pointer, not proof.
+Playbook: read and follow <skill-dir>/references/sub-skills/<review.md for code, with its security pass | visual.md for screens | translations.md for strings | verify.md after a merge> (or the project's skill: <name>, at its thorough level). Review depth is fixed: never a lighter pass to save budget.
+<Risk area: "You are the specialist critic for <area>: follow review.md, Specialist critic.">
 Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.
 Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.
 If your checks run long, run now and then: <COORDINATOR_DIR=… if outside this repo's worktrees> node <skill-dir>/scripts/run.mjs beat <run> <unit>
@@ -48,6 +53,7 @@ Pass only when every behaviour passes and the evidence shows it.
 Fresh eyes on the whole result of run <run> after every unit has passed. Never ask the person: report blockers to the lead.
 Goal: <goal>   Bar: <bar>   Artifacts: <list>
 Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.
+Playbook: <when strings changed: the parity check in <skill-dir>/references/sub-skills/translations.md across the run>; <when the run merged work: finish with <skill-dir>/references/sub-skills/release-notes.md>.
 Fix only inconsistencies; don't redesign. Run the full checks after.
 Reply in the same format as the critic, marking the goal's behaviours (G1, G2, …), then list what you changed.
 ```
