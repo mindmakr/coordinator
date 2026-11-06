@@ -139,6 +139,8 @@ function files(o, red, read) {
     [`runs/${runId}/${STATE}`]: snapshotText(state, log.events.length, buf),
     [`runs/${runId}/README.md`]: red(o.render(state)),
   };
+  // More files of the run (the project map), each source masking and checking its own: { path: content }.
+  for (const add of o.attach ?? []) Object.assign(out, add({ run: runId, red, read }));
   const lessons = join(o.base, 'lessons.json');
   if (existsSync(lessons)) out['lessons/lessons.json'] = `${JSON.stringify(red(JSON.parse(readFileSync(lessons, 'utf8'))), null, 2)}\n`;
   if (state.closed) {
@@ -149,7 +151,7 @@ function files(o, red, read) {
   return { out, seq: log.events.length };
 }
 
-// push({ run, dir, base, project, to, message, render }) → what was written where.
+// push({ run, dir, base, project, to, message, render, attach? }) → what was written where. attach: [({ run, red, read }) → { path: content }].
 export function push(o) {
   const cfg = config(o.base);
   const d = destination(o.project, cfg, where(o.to, cfg));
@@ -177,7 +179,7 @@ export function push(o) {
   }
 }
 
-// pull({ run, dir, base, project, from, after }) → restored, fast-forwarded, or already up to date.
+// pull({ run, dir, base, project, from, after, restore? }) → restored, fast-forwarded, or already up to date. restore: { name: ({ run, read }) → status }.
 // A local log that has events the copy lacks is never overwritten.
 export function pull(o) {
   const runId = safeId(o.run, 'run');
@@ -211,7 +213,9 @@ export function pull(o) {
   const restored = got && !existsSync(lessons);
   if (restored) writeAtomic(lessons, got);
   const { state, ...rest } = result;
-  return { run: runId, from: d.folder ?? d.branch, ...rest, lessons: restored ? 'restored' : 'kept' };
+  // What else the copy holds for this run (the project map), each restorer reporting its own status.
+  const extra = Object.fromEntries(Object.entries(o.restore ?? {}).map(([name, fn]) => [name, fn({ run: runId, read })]));
+  return { run: runId, from: d.folder ?? d.branch, ...rest, lessons: restored ? 'restored' : 'kept', ...extra };
 }
 
 const RECOVER = (run) => `To recover: move the local run folder aside, run.mjs pull ${run}, then redo the local changes on top.`;
