@@ -29,4 +29,4 @@ When `lessons.mjs list` shows a lesson that has been seen 3 or more times, propo
 
 ## Tuning budgets
 
-`S/run.mjs stats [--tag <domain>]` prints, from the closed runs, the median and 80th-percentile rounds-to-pass per unit, and the share of units stopped. Set `--max-rounds` to the 80th percentile plus 1, and never higher than 8. If more than 20% of units stop, the bars or the splits are the problem, not the budget: write that down as a lesson.
+`S/run.mjs stats [--tag <domain>]` prints, from the closed runs, the median and 80th-percentile rounds-to-pass per unit, the share of units stopped, and escapes: defects found after a unit passed (`note --kind escape`), per run and overall, with the escape rate (escapes per passed unit). A rising escape rate means the critics need more depth or a specialist, never fewer passes (`sub-skills/review.md`). Set `--max-rounds` to the 80th percentile plus 1, and never higher than 8. If more than 20% of units stop, the bars or the splits are the problem, not the budget: write that down as a lesson.

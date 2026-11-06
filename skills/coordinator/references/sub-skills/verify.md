@@ -21,7 +21,7 @@
 
 ## Escapes
 
-A defect found here in a unit that already passed is an **escape**: the review that passed it missed it. Record it so the evidence for review depth builds up: `run.mjs note <run> --kind info --unit <unit> --text "escape: <defect>; passed in round <n>; found by verify"`. A defect the change did not cause is a follow-up, not an escape.
+A defect found here in a unit that already passed is an **escape**: the review that passed it missed it. Record it so the evidence for review depth builds up: `S/run.mjs note <run> --kind escape --unit <unit> --text "<defect>; found by verify"` (it works on a closed run too, and records the round that passed it). `stats` counts escapes per run and overall, and `show` and the dashboard show them. A defect the change did not cause is a follow-up, not an escape.
 
 ## Output
 

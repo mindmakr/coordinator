@@ -1,5 +1,7 @@
 # Built-in sub-skills
 
+(The 1.0 design calls this folder `references/skills/`; it is `references/sub-skills/` so it is not confused with the plugin's top-level `skills/` folder.)
+
 The loop needs no other skill installed. Each step has a short playbook here, inspired by the cleverways skills but not depending on them. The lead names the playbook in the brief; the agent reads it and follows it.
 
 **The project's own skill wins.** If the harness lists a project or plugin skill for a step (a review skill, a visual-test skill), the brief names that one instead, and the playbook here is only the floor it must still meet (`team.md`).
@@ -41,7 +43,7 @@ These came from runs of this skill and are now part of the playbooks. Each lives
 | Copy under an approval process is not failed on wording | `translations.md` |
 | A bar that needs open-ended language detected gets bounded first | `investigate.md` |
 | CAUSE names the root cause, reused word for word | `review.md` |
-| Cheaper review rounds missed real bugs: review depth is fixed | `review.md` |
+| Cheaper review rounds missed real bugs: review depth is fixed, escapes are counted | `review.md`, `verify.md` |
 
 ## Other harnesses
 

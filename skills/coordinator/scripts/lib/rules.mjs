@@ -92,6 +92,14 @@ export function allows(cmd, d) {
 }
 
 // Per-unit rounds-to-pass and stop share across closed runs, for budget tuning.
+// Escapes: defects found after a unit passed (`note --kind escape`). The rate is
+// escapes per passed unit, the evidence for how deep review has to go.
+export function escapes(run) {
+  const passed = run.units.filter((u) => u.status === 'pass').length;
+  const count = (run.notes ?? []).filter((n) => n.kind === 'escape').length;
+  return { escapes: count, passed, rate: passed ? Math.round((count / passed) * 100) / 100 : null };
+}
+
 export function stats(runs) {
   const passRounds = [];
   let total = 0; let stopped = 0;
@@ -108,8 +116,16 @@ export function stats(runs) {
     medianRoundsToPass: pct(0.5), p80RoundsToPass: p80,
     stoppedShare: total ? Math.round((stopped / total) * 100) / 100 : null,
     suggestedMaxRounds: p80 === null ? null : Math.min(8, p80 + 1),
+    ...escapeTotals(runs),
   };
 }
 
 // Behaviours that keep a unit (or the goal) from passing: failing or not yet checked.
 export const unmet = (behaviours) => (behaviours ?? []).filter((b) => b.status !== 'pass');
+
+function escapeTotals(runs) {
+  const byRun = runs.map((r) => ({ run: r.id, ...escapes(r) }));
+  const count = byRun.reduce((n, r) => n + r.escapes, 0);
+  const passed = byRun.reduce((n, r) => n + r.passed, 0);
+  return { escapes: count, passedUnits: passed, escapeRate: passed ? Math.round((count / passed) * 100) / 100 : null, escapesByRun: byRun.filter((r) => r.escapes) };
+}
