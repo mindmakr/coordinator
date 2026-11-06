@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 (2026-11-06)
+
+The HUD explains the run in plain words (#7).
+
+- **Situation, Needs you, Time left** at the top of `hud.html` and `run.mjs show`: the lead's latest `note --kind situation` (or a count of tasks in progress, done and waiting), a highlighted box of open questions with the lead's recommendation (`note --kind question --recommend R`, closed by `note --kind decision --answers qN`), and a rough time left from the median try so far and the time budget.
+- **One plain sentence per unit**, before the scores: what it is for, how it went, what happens next. `add` takes `--title` and an http(s) `--link`. Raw gap and evidence move behind a toggle.
+- **Needs attention** badge on a unit that failed two tries in a row or whose agent went quiet.
+- The lead writes a situation note after each verdict and each merge (`references/commands/run.md`).
+- All new fields are optional: older state files load and render as before.
+
 ## 0.2.0 (2026-11-06)
 
 From the first real run and its owner's feedback.

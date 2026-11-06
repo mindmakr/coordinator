@@ -69,7 +69,7 @@ Example:
 
 You can also describe the goal ("coordinate this…") and the agent picks the command itself.
 
-**Watching a run.** Each run keeps a `hud.html` beside its state: the unit board, scores per round, budget bars, a timeline, and the decisions, questions and follow-ups. It is rewritten on every change and reloads itself, with no scripts and no network, so you can open it straight from disk. In Claude Code the lead can publish it as a private Artifact. `run.mjs show <run>` prints the same at a glance in text.
+**Watching a run.** Each run keeps a `hud.html` beside its state. It opens with the situation in plain words, a **Needs you** box with the lead's recommendation (or "Nothing needs you"), and a rough time left; each unit says in one sentence what it is for, how it went and what happens next. Then the unit board, scores per round, budget bars, a timeline, and the decisions, questions and follow-ups. It is rewritten on every change and reloads itself, with no scripts and no network, so you can open it straight from disk. In Claude Code the lead can publish it as a private Artifact. `run.mjs show <run>` prints the same at a glance in text.
 
 ## What's inside
 
@@ -92,7 +92,7 @@ skills/coordinator/
     ├── run.mjs                 run state and the loop's decisions
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
-    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, hud
+    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, plain, hud
     └── test/                   node:test suites
 ```
 

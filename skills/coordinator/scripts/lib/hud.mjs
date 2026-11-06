@@ -1,7 +1,8 @@
 // Fills the fixed hud.template.html from a view (lib/view.mjs), so every run's
 // HUD looks the same. Everything from the state is escaped: gaps, notes and
 // evidence are untrusted text. The page has no scripts and no network (its CSP
-// forbids both), so it works opened from file:// and published as a page.
+// forbids both), so it works opened from file:// and published as a page. A
+// unit's --link is a plain anchor, and only when it is an http(s) URL.
 import { readFileSync } from 'node:fs';
 import { trend } from './view.mjs';
 
@@ -31,14 +32,25 @@ function sparkline(scores) {
   return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="scores ${esc(trend(scores))}"><line x1="0" x2="${W}" y1="${y(10)}" y2="${y(10)}"/>${line}${dots}</svg>`;
 }
 
+// Only plain web links become anchors; anything else is shown as text.
+const href = (url) => (/^https?:\/\/[^\s"'<>]+$/i.test(url ?? '') ? esc(url) : null);
+
 function unitCard(u) {
-  const gap = u.gap ? `<p class="gap">${esc(u.gap)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</p>` : '';
-  return `<section class="card"><h3>${esc(u.id)} <span class="chip s-${cls(u.status)}">${esc(u.status)}</span></h3>`
+  const link = u.link ? (href(u.link) ? ` <a href="${href(u.link)}" rel="noreferrer">link</a>` : ` <span class="cause">${esc(u.link)}</span>`) : '';
+  const flag = u.attention ? `<span class="chip flag" title="${esc(u.attention)}">needs attention</span> ` : '';
+  const raw = [u.gap && `<dt>Last gap</dt><dd>${esc(u.gap)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${esc(u.evidence)}</dd>`].filter(Boolean).join('');
+  return `<section class="card"><h3><span>${esc(u.title ? `${u.id} · ${u.title}` : u.id)}${link}</span><span>${flag}<span class="chip s-${cls(u.status)}">${esc(u.status)}</span></span></h3>`
+    + `<p class="say">${esc(u.sentence)}</p>`
     + `<div class="row"><span>round ${u.rounds}/${u.maxRounds}${u.after ? ` · after ${esc(u.after)}` : ''}</span><span>${esc(trend(u.scores) || 'no score yet')}</span></div>`
     + bar(u.rounds, u.maxRounds)
     + (u.scores.length ? `<div class="row">${sparkline(u.scores)}</div>` : '')
-    + gap
+    + (raw ? `<details class="raw"><summary>Gap and evidence</summary><dl>${raw}</dl></details>` : '')
     + `<div class="unit-next"><b>Next:</b> ${esc(u.next)}</div></section>`;
+}
+
+function needsYou(items) {
+  if (!items.length) return '<div class="needs calm">Nothing needs you.</div>';
+  return `<div class="needs"><b>Needs you</b><ul>${items.map((q) => `<li><b>${esc(q.id)}</b> ${esc(q.text)}${q.recommend ? `<br><span class="rec">Recommended: ${esc(q.recommend)}</span>` : ''}</li>`).join('')}</ul></div>`;
 }
 
 function list(title, items) {
@@ -59,6 +71,8 @@ export function hud(v, nowMs = Date.now()) {
     refresh: v.open ? `<meta http-equiv="refresh" content="${REFRESH_SECONDS}">` : '',
     id: esc(v.id), tag: esc(v.tag), phase: esc(v.phase), phaseClass: cls(v.phase.replace(/^closed: /, '')),
     started: esc(when(v.started)), updated: esc(when(new Date(nowMs).toISOString())), next: esc(v.next),
+    situation: esc(v.situation.text), situationMeta: v.situation.computed ? 'counted from the state' : esc(`the lead, ${when(v.situation.at)}`),
+    needs: needsYou(v.needsYou), timeLeft: esc(v.timeLeft),
     goal: esc(v.goal), bar: esc(v.bar), fence: esc(v.fence),
     budget: v.budget.map((b) => `<div class="card"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max)}</div>`).join(''),
     units: v.units.length ? v.units.map(unitCard).join('') : '<p class="empty">No units yet.</p>',

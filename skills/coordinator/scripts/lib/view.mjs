@@ -1,5 +1,7 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
+import { attention, clip, questions, sentence, situation, timeLeft } from './plain.mjs';
+
 const MINUTE = 60_000;
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale'];
 
@@ -26,6 +28,7 @@ export function view(run, plan, nowMs = Date.now()) {
   const integ = run.integration?.rounds ?? [];
   const notes = run.notes ?? [];
   const pick = (kind) => notes.filter((n) => n.kind === kind).map((n) => n.text);
+  const qs = questions(run);
   const timeline = [
     ...run.units.flatMap((u) => u.rounds.map((r) => ({ at: r.at, kind: r.verdict, who: `${u.id} r${r.n}`, score: r.score, text: r.verdict === 'pass' ? (r.evidence ?? '') : r.gap, cause: r.cause ?? null }))),
     ...integ.map((r, i) => ({ at: r.at, kind: r.verdict, who: `integration r${i + 1}`, score: null, text: r.verdict === 'pass' ? (r.evidence ?? '') : r.gap, cause: r.cause ?? null })),
@@ -35,6 +38,9 @@ export function view(run, plan, nowMs = Date.now()) {
     id: run.id, tag: run.tag, goal: run.goal, bar: run.bar, fence: run.fence,
     phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
     open: !run.closed, started: run.createdAt,
+    situation: situation(run),
+    needsYou: run.closed ? [] : qs.filter((q) => q.open),
+    timeLeft: timeLeft(run, plan, nowMs),
     budget: [
       { name: 'time', used: Math.max(0, Math.round((end - Date.parse(run.createdAt)) / MINUTE)), max: run.budget.maxMinutes, unit: 'min' },
       { name: 'units', used: run.units.length, max: run.budget.maxUnits, unit: '' },
@@ -43,38 +49,51 @@ export function view(run, plan, nowMs = Date.now()) {
     ],
     units: run.units.map((u) => {
       const last = u.rounds.at(-1);
+      const d = next.get(u.id);
       return {
-        id: u.id, status: u.status, after: u.after ?? null, rounds: u.rounds.length, maxRounds: run.budget.maxRounds,
+        id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, after: u.after ?? null,
+        sentence: sentence(u, d), attention: attention(u, d),
+        rounds: u.rounds.length, maxRounds: run.budget.maxRounds,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
-        next: label(next.get(u.id)),
+        evidence: last?.evidence ?? null,
+        next: label(d),
       };
     }),
     integration: integ.map((r) => r.verdict),
     next: nextStep(run, plan),
-    decisions: pick('decision'), questions: pick('question'), followUps: pick('follow-up'),
+    decisions: pick('decision'),
+    questions: qs.map((q) => `${q.id}${q.open ? '' : ' (answered)'}: ${q.text}${q.recommend ? ` · recommended: ${q.recommend}` : ''}`),
+    followUps: pick('follow-up'),
     timeline,
   };
 }
 
-const clip = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 export const trend = (scores) => scores.map((s) => (s.score === null ? '–' : String(s.score))).join(' → ');
 
-// The compact text HUD: a dozen lines, readable in any terminal or chat.
+// The compact text HUD: the situation first, then a dozen lines of detail.
 export function text(v) {
   const w = Math.max(4, ...v.units.map((u) => u.id.length)) + 2;
   const budget = v.budget.map((b) => `${b.name} ${b.used}/${b.max}${b.unit ? ` ${b.unit}` : ''}`).join(' · ');
+  const needs = v.needsYou.length
+    ? v.needsYou.map((q, i) => `${i ? ' '.repeat(11) : 'needs you  '}${q.id}: ${clip(q.text, 120)}${q.recommend ? ` → recommended: ${clip(q.recommend, 80)}` : ''}`)
+    : ['needs you  nothing'];
   const lines = [
     `${v.id} [${v.tag}] · ${v.phase} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
+    `situation  ${clip(v.situation.text, 240)}`,
+    ...needs,
+    `time left  ${v.timeLeft}`,
+    '',
     `budget  ${budget}`,
     '',
     `${'unit'.padEnd(w)}${'status'.padEnd(10)}${'round'.padEnd(7)}${'scores'.padEnd(18)}next`,
   ];
   for (const u of v.units) {
     lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}`);
+    lines.push(`${' '.repeat(w)}${u.attention ? '! ' : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);
-  lines.push('', `next    ${v.next}`, `open    ${v.questions.length} questions · ${v.followUps.length} follow-ups · ${v.decisions.length} decisions`);
+  lines.push('', `next    ${v.next}`, `open    ${v.needsYou.length} questions · ${v.followUps.length} follow-ups · ${v.decisions.length} decisions`);
   return `${lines.join('\n')}\n`;
 }
