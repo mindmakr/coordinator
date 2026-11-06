@@ -134,11 +134,19 @@ aside.rail li { margin-bottom: .35rem; }
 .asks > div { border-top: 1px solid var(--rule); padding-top: .5rem; }
 .button { display: inline-block; background: var(--ink); color: var(--paper); text-decoration: none; padding: .5rem .9rem; font-weight: 600; margin-top: .3rem; }
 .button:hover { background: var(--accent); color: var(--accent-ink); }
+.button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); padding: calc(.5rem - 1px) calc(.9rem - 1px); }
+.button.ghost:hover { background: var(--ink); color: var(--paper); }
+.cta { background: var(--paper-2); border: 1px solid var(--rule); padding: .8rem .9rem 1rem; }
+.cta .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 .7rem; }
+.cta .actions .button { margin-top: 0; }
+.cta p:last-child { margin-bottom: 0; }
+.beta-strip { display: none; margin: 0; padding: .5rem 0; border-bottom: 1px solid var(--rule); font-size: .92rem; text-align: center; }
 
 footer.colophon { border-top: 3px double var(--rule); margin-top: 2.5rem; padding-top: .8rem; font-size: .88rem; color: var(--ink-2); display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1.5rem; }
 footer.colophon p { margin: 0; }
 
 @media (max-width: 960px) {
+  .beta-strip { display: block; }
   .front { grid-template-columns: minmax(0, 1fr); }
   .front > .lead { border-right: 0; padding-right: 0; }
   .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -179,6 +187,7 @@ footer.colophon p { margin: 0; }
   <nav class="sections" aria-label="Sections">
     <ul>
       <li><a href="#lead">Front page</a></li>
+      <li><a href="#hosted">Hosted beta</a></li>
       <li><a href="#works-with">Works with</a></li>
       <li><a href="#team">One person to a team</a></li>
       <li><a href="#inspired">Inspired by</a></li>
@@ -187,6 +196,7 @@ footer.colophon p { margin: 0; }
       <li><a href="#install">Install</a></li>
     </ul>
   </nav>
+  <p class="beta-strip"><span class="tag next">Hosted beta</span> Follow your runs from a phone: <a href="#hosted">install the GitHub App or sign in</a></p>
 </header>
 
 <main>
@@ -218,6 +228,18 @@ footer.colophon p { margin: 0; }
   </article>
 
   <aside class="rail" aria-label="At a glance">
+    <section aria-labelledby="hosted-h" id="hosted">
+      <div class="cta">
+        <p class="kicker"><span class="tag next">Hosted beta</span> Free while in beta</p>
+        <h2 id="hosted-h">Follow your runs from a phone</h2>
+        <p>Install the Coordinator GitHub App on a repo, and every run pushed to it shows on the web to the people who can read that repo. Builders and critics still run on your machine.</p>
+        <div class="actions">
+          <a class="button" href="https://app.coordinator.mindmakr.com">Install the GitHub App</a>
+          <a class="button ghost" href="https://app.coordinator.mindmakr.com/login">Sign in</a>
+        </div>
+        <p class="note">A beta: expect changes. What the App can do: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/permissions.md">permissions</a>. What it keeps: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">privacy</a>. Or <a href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">host it yourself</a>.</p>
+      </div>
+    </section>
     <section aria-labelledby="steps-h">
       <h2 id="steps-h">A run, in five steps</h2>
       <ol>
@@ -247,7 +269,8 @@ footer.colophon p { margin: 0; }
       <p>Then, in a project:</p>
 <pre><code>/coordinator:init
 /coordinator:run Fix issue #142</code></pre>
-      <p class="note">Needs Node 18+ and git. No other dependencies, no network calls. Add <code>.coordinator/</code> to your <code>.gitignore</code>. Full instructions in the <a href="https://github.com/mindmakr/coordinator#install">README</a>.</p>
+      <p>In OpenAI Codex CLI: copy the skill folders into <code>.agents/skills/</code> and ask for the coordinator skill by name.</p>
+      <p class="note">Needs Node 18+ and git. No other dependencies. Add <code>.coordinator/</code> to your <code>.gitignore</code>. Full instructions in the <a href="https://github.com/mindmakr/coordinator/blob/main/docs/install.md">install guide</a>.</p>
     </section>
     <section aria-labelledby="facts-h">
       <h2 id="facts-h">The small print</h2>
@@ -276,8 +299,8 @@ footer.colophon p { margin: 0; }
       <p>The skill is plain Markdown and Node scripts. It asks for three things from a harness: agents it can delegate to, a way to run a script, and a way to ask you a question. Where there is no question tool it falls back to a numbered list; where there are no Artifacts it gives you the file path. So far it is packaged and released for Claude Code only.</p>
     </article>
     <article>
-      <h3><span class="tag planned">Planned for 1.0</span> A second harness</h3>
-      <p>The <a href="https://github.com/mindmakr/coordinator/issues/15">1.0 plan</a> adds a second harness with its own install path and an end-to-end run. The draft design recommends OpenAI Codex CLI, with others as community adapters. The choice is still open, and none of these projects is affiliated with Coordinator.</p>
+      <h3><span class="tag next">1.0</span> OpenAI Codex CLI</h3>
+      <p>The second harness in 1.0. Copy the skill folders into <code>.agents/skills/</code>, add a short block to <code>AGENTS.md</code>, and ask for the coordinator skill by name. With no question tool, questions go to the dashboard (<a href="https://github.com/mindmakr/coordinator/blob/main/skills/coordinator/references/codex.md">what differs</a>). Other harnesses are welcome as community adapters. None of these projects is affiliated with Coordinator.</p>
     </article>
   </div>
 </section>
@@ -307,7 +330,7 @@ footer.colophon p { margin: 0; }
     </article>
     <article>
       <h3><span class="tag planned">Planned for 1.0</span> Answer from anywhere</h3>
-      <p>Today you answer on your own machine. The 1.0 plan moves the dashboard to the web so you can follow a run and answer the lead from a phone, with alerts when something needs you (<a href="https://github.com/mindmakr/coordinator/issues/11">#11</a>, <a href="https://github.com/mindmakr/coordinator/issues/12">#12</a>, <a href="https://github.com/mindmakr/coordinator/issues/18">#18</a>). Builders and critics keep running on your machine.</p>
+      <p>Today you answer on your own machine. The <a href="#hosted">hosted beta</a> puts the dashboard on the web, read-only (<a href="https://github.com/mindmakr/coordinator/issues/11">#11</a>); answering the lead from a phone, with alerts when something needs you, comes next (<a href="https://github.com/mindmakr/coordinator/issues/12">#12</a>, <a href="https://github.com/mindmakr/coordinator/issues/18">#18</a>). Builders and critics keep running on your machine.</p>
     </article>
     <article>
       <h3><span class="tag now">Today</span> Memory and lessons</h3>
@@ -424,6 +447,7 @@ footer.colophon p { margin: 0; }
 <footer class="colophon">
   <p>Coordinator by mindmakr · Version 0.5.0 · <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT licence</a></p>
   <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a> · <a href="https://github.com/mindmakr/coordinator">github.com/mindmakr/coordinator</a></p>
+  <p>Docs: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/install.md">Install</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/connect.md">Connect</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Self-host</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/permissions.md">Permissions</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">Privacy</a> · The hosted service: <a href="https://github.com/mindmakr/coordinator/blob/main/service/LICENSE">AGPL-3.0</a></p>
 </footer>
 
 </div>

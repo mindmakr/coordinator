@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Draft notes for 1.0 (#14). Follow and steer runs from anywhere, while the code still runs only on your machine.
+
+- **Hosted beta:** the Coordinator GitHub App at [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com), free during the beta. Install it on a repo and every run the lead pushes to `coordinator-state` shows on the web, to the people who can read that repo, with one tracker comment per unit on its issues and PRs. The homepage gains an "Install the GitHub App" / "Sign in" call to action.
+- **Self-host:** the same service from one container and Postgres, with your own GitHub App registered from `service/app-manifest.json` ([docs/self-host.md](docs/self-host.md), Docker and Dokploy).
+- **Docs:** [install](docs/install.md) (Claude Code and Codex CLI), [connect](docs/connect.md) (the App, the state branch, `coordinator.json`), [self-host](docs/self-host.md), [permissions](docs/permissions.md) (each App permission and why) and [privacy](docs/privacy.md) (what the hosted service keeps, for how long, and what never leaves your machine). Linked from the README.
+- **OpenAI Codex CLI** is the second supported harness: install path, an `AGENTS.md` block and an adapter note on what differs ([references/codex.md](skills/coordinator/references/codex.md)). `tools/codex-e2e.mjs` runs a small task end to end in `codex exec` and checks the run's own log. A first run on codex-cli 0.160.0 used sub-agents and fixed the bug but stopped at the account's usage limit before a verdict; a run that closes `done` is still to come.
+- **Migration from 0.x tested:** `migration.test.mjs` loads run folders written by the 0.1 to 0.5 releases' own scripts (`test/fixtures/old-runs`, made by `tools/make-old-runs.mjs`), and any real state folders named in `COORDINATOR_MIGRATION_SOURCES` (copied first; the test fails if a source changes). Each run lists, shows, renders its dashboard and unit pages, takes a write that imports it into the event log, and goes through `push` and `pull`. Checked on 10 real runs from three projects.
+- **Licences:** the skill, scripts and shared code stay MIT; the service in `service/` is AGPL-3.0.
+
 ## 0.6.0 (2026-11-06)
 
 The coordinator's own page (#19), dashboard maps (#20), the project map (#21), the event log and repo-backed state (#9, #10) and built-in sub-skills (#13).

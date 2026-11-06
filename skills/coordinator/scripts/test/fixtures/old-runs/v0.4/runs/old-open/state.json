@@ -1,0 +1,97 @@
+{
+  "id": "old-open",
+  "tag": "fixture",
+  "goal": "Totals on the dashboard match the ledger",
+  "bar": "The totals test passes",
+  "fence": "src/dashboard only",
+  "paths": [],
+  "budget": {
+    "maxRounds": 4,
+    "maxMinutes": 240,
+    "maxUnits": 6,
+    "maxAdded": 2,
+    "staleMinutes": 45
+  },
+  "createdAt": "2026-11-06T21:24:22.642Z",
+  "frozen": true,
+  "addedAfterFreeze": 0,
+  "units": [
+    {
+      "id": "u1",
+      "bar": "Server returns the ledger total",
+      "title": "Server total",
+      "link": null,
+      "after": null,
+      "status": "pass",
+      "rounds": [
+        {
+          "n": 1,
+          "verdict": "fail",
+          "score": 5,
+          "gap": "rounding drops a cent",
+          "cause": "rounding",
+          "evidence": "test failed: 99 != 100",
+          "at": "2026-11-06T21:24:23.340Z"
+        },
+        {
+          "n": 2,
+          "verdict": "pass",
+          "score": 9,
+          "gap": null,
+          "cause": null,
+          "evidence": "test passed",
+          "at": "2026-11-06T21:24:23.672Z"
+        }
+      ],
+      "strategyChanges": 0,
+      "strategyAt": -1,
+      "heartbeatAt": "2026-11-06T21:24:23.597Z",
+      "stopReason": null
+    },
+    {
+      "id": "u2",
+      "bar": "Card shows the server total",
+      "title": null,
+      "link": null,
+      "after": "u1",
+      "status": "open",
+      "rounds": [],
+      "strategyChanges": 0,
+      "strategyAt": -1,
+      "heartbeatAt": null,
+      "stopReason": null
+    }
+  ],
+  "notes": [
+    {
+      "kind": "question",
+      "text": "Round to the cent or to the riyal?",
+      "header": "Rounding",
+      "options": [
+        {
+          "label": "Cent",
+          "description": "Matches the ledger"
+        },
+        {
+          "label": "Riyal",
+          "description": "Matches the card design"
+        }
+      ],
+      "multi": false,
+      "unit": null,
+      "recommend": "Cent",
+      "at": "2026-11-06T21:24:23.764Z",
+      "history": [],
+      "usedAt": null
+    },
+    {
+      "kind": "decision",
+      "text": "Use the server total",
+      "at": "2026-11-06T21:24:23.902Z"
+    }
+  ],
+  "integration": {
+    "rounds": []
+  },
+  "closed": null
+}

@@ -56,9 +56,9 @@ A single agent pass grades its own homework. It decides the work is "fine", stop
 
 Coordinator brings no team of its own: it staffs builders, critics and researchers from the agents, skills and tools your harness already has. It is designed for any harness that can delegate to sub-agents, run a script and ask you a question.
 
-- **Claude Code:** supported today, as a plugin or a copied skill folder.
-- **Other skills-capable harnesses:** copy `skills/coordinator` into the harness's skills folder. Fallbacks are built in (a numbered list where there is no question tool, a file path where there are no Artifacts), but so far it is packaged and released for Claude Code only.
-- **Planned for 1.0:** a second harness with its own install path and an end-to-end run. The draft design ([#15](https://github.com/mindmakr/coordinator/issues/15)) recommends OpenAI Codex CLI; the choice is still open.
+- **Claude Code:** as a plugin or a copied skill folder.
+- **OpenAI Codex CLI:** the skill folders in `.agents/skills/` and a short block in `AGENTS.md`. Codex has no question tool, so questions go to the dashboard ([what differs](skills/coordinator/references/codex.md)).
+- **Other skills-capable harnesses:** copy the skill folders into the harness's skills folder. Fallbacks are built in (a numbered list where there is no question tool, a file path where there are no Artifacts). Adapters are welcome.
 
 ## Install
 
@@ -69,11 +69,25 @@ Coordinator brings no team of its own: it staffs builders, critics and researche
 /plugin install coordinator@coordinator
 ```
 
-**Any skills-capable harness:** copy `skills/coordinator` into your skills folder (for Claude Code, `~/.claude/skills/`). Installed this way, the commands are `/coordinator init`, `/coordinator run <task>` and so on.
+**OpenAI Codex CLI:** copy every folder under `skills/` into the project's `.agents/skills/`, add the [AGENTS.md block](skills/coordinator/references/codex.md#agentsmd-block), and ask for the coordinator skill by name.
+
+**Any skills-capable harness:** copy every folder under `skills/` into your skills folder (for Claude Code, `~/.claude/skills/`). Installed this way, the commands are `/coordinator init`, `/coordinator run <task>` and so on.
 
 **Needs:** Node 18+ and git. No other dependencies.
 
-Then add `.coordinator/` to your project's `.gitignore`.
+Then add `.coordinator/` to your project's `.gitignore`. The full guide is [docs/install.md](docs/install.md).
+
+## Follow runs from anywhere (hosted beta)
+
+Install the Coordinator GitHub App from [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com) and every run the lead pushes to your repo's `coordinator-state` branch shows on the web, to the people who can read that repo. Each issue and PR a run works on gets one tracker comment, kept current. Builders and critics still run on your machine. Free during the beta.
+
+| Doc | What |
+|---|---|
+| [Install](docs/install.md) | Claude Code and Codex CLI |
+| [Connect](docs/connect.md) | The App, the state branch, `coordinator.json` |
+| [Self-host](docs/self-host.md) | One container and your own GitHub App (Docker, Dokploy) |
+| [Permissions](docs/permissions.md) | Each App permission and why |
+| [Privacy](docs/privacy.md) | What the hosted service keeps, for how long, and what never leaves your machine |
 
 ## Use
 
@@ -129,7 +143,7 @@ skills/coordinator/
 │   ├── team.md                 staffing roles from your harness's agents
 │   ├── sub-skills.md           which built-in playbook runs at which step
 │   ├── sub-skills/             investigate · plan · fix · review · verify · visual · translations · release-notes · board
-│   ├── codex.md                using the skill in OpenAI Codex CLI (discovery checked; full run not yet)
+│   ├── codex.md                the OpenAI Codex CLI adapter: install, what differs, what has been checked
 │   ├── guardrails.md           budgets, fence, stop rules, gated actions
 │   ├── durability.md           the event log and snapshot, pit-stop push/pull, heartbeats, resume
 │   ├── hud.md                  the text view, the live dashboard and the snapshot
@@ -145,7 +159,9 @@ skills/coordinator/
     │                           workbench, view, plain, questions, hud, unitpage, parts, links, theme, timeline,
     │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study
     │   └── map/                the project map: scan, resolve, build, event log, page, touches
-    └── test/                   node:test suites
+    └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
+docs/                           the homepage, and install · connect · self-host · permissions · privacy
+tools/                          codex-e2e.mjs (a headless run in Codex CLI) and make-old-runs.mjs (the migration fixtures)
 ```
 
 ## Design principles
@@ -199,4 +215,4 @@ More on the [homepage](https://mindmakr.github.io/coordinator/).
 
 ## License
 
-[MIT](LICENSE)
+The skill, its scripts and the shared code are [MIT](LICENSE). The hosted service in `service/` is [AGPL-3.0](service/LICENSE): you may run and change it, and if you offer a changed version to others over a network, you share your changes.
