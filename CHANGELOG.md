@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Map labels and stats panels:** every unit box on the maps carries a status mark (✓ ✗ ■ ○ ▶ ◆, never colour alone), its id and a clipped title; hovering, focusing or tapping a box shows its status, round, scores, time spent, last gap, linked issues and PRs and files touched, and lights what it connects to while the rest dims. Escape or a tap elsewhere closes it. The project map does the same for modules (files and helpers). CSS-driven, so the snapshot works with no script; the view model gains `files` (from the last gaming check). The project map's graph is a group, not an image, so its links reach assistive technology.
+
 ## 0.6.0 (2026-11-06)
 
 The coordinator's own page (#19), dashboard maps (#20), the project map (#21), the event log and repo-backed state (#9, #10) and built-in sub-skills (#13).
