@@ -131,7 +131,7 @@ function files(o, red, read) {
   const theirs = read(`runs/${runId}/${EVENTS}`);
   if (theirs && !buf.subarray(0, theirs.length).equals(theirs)) {
     if (theirs.subarray(0, buf.length).equals(buf)) throw new Error(`refused: the copy of ${runId} has events this machine lacks; run.mjs pull ${runId} first; nothing pushed`);
-    throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(buf, theirs)}; nothing pushed`);
+    throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(buf, theirs)}; nothing pushed. ${RECOVER(runId)}`);
   }
   const out = {
     [MARKER]: 'v1\n', 'README.md': README,
@@ -197,7 +197,7 @@ export function pull(o) {
     else {
       const mine = redactLog(cur.log, red);
       if (mine.subarray(0, remote.buf.length).equals(remote.buf)) return { status: mine.length === remote.buf.length ? 'up-to-date' : 'local-ahead', seq: cur.seq, state: null };
-      if (!remote.buf.subarray(0, mine.length).equals(mine)) throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(mine, remote.buf)}; nothing changed`);
+      if (!remote.buf.subarray(0, mine.length).equals(mine)) throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(mine, remote.buf)}; nothing changed. ${RECOVER(runId)}`);
       buf = Buffer.concat([cur.log.buf, remote.buf.subarray(mine.length)]); status = 'fast-forward';
     }
     const log = parseLog(buf, EVENTS);
@@ -214,4 +214,5 @@ export function pull(o) {
   return { run: runId, from: d.folder ?? d.branch, ...rest, lessons: restored ? 'restored' : 'kept' };
 }
 
+const RECOVER = (run) => `To recover: move the local run folder aside, run.mjs pull ${run}, then redo the local changes on top.`;
 const firstDiff = (a, b) => { let i = 0; while (i < a.length && a[i] === b[i]) i++; return a.subarray(0, i).toString('utf8').split('\n').length - 1; };

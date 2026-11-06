@@ -82,12 +82,12 @@ test('pull never overwrites local events the copy lacks', () => {
   cli(B, 'note', 'r1', '--kind', 'info', '--text', 'only on b'); cli(B, 'push', 'r1');
   const before = readFileSync(join(runDir(A, 'r1'), 'events.jsonl'), 'utf8');
   const r = cli(A, 'pull', 'r1');
-  assert.equal(r.code, 1); assert.match(r.err, /different histories after event 4/);
+  assert.equal(r.code, 1); assert.match(r.err, /different histories after event 4/); assert.match(r.err, /nothing changed. To recover: move the local run folder aside/);
   assert.equal(readFileSync(join(runDir(A, 'r1'), 'events.jsonl'), 'utf8'), before);
   // Nor does push drop the other machine's events.
   const tip = git(origin, 'rev-parse', 'coordinator-state').trim();
   const p = cli(A, 'push', 'r1');
-  assert.equal(p.code, 1); assert.match(p.err, /different histories after event 4; nothing pushed/);
+  assert.equal(p.code, 1); assert.match(p.err, /different histories after event 4; nothing pushed/); assert.match(p.err, /move the local run folder aside, run.mjs pull r1/);
   assert.equal(git(origin, 'rev-parse', 'coordinator-state').trim(), tip);
   assert.match(show('coordinator-state', 'runs/r1/events.jsonl'), /only on b/);
   // A machine that is merely behind is told to pull first.
