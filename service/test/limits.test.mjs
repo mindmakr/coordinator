@@ -101,6 +101,60 @@ test('a deferred comment survives a restart and lands once', async () => {
   } finally { CAPS.commentWritesPerInstallation = keep; }
 });
 
+// Round 4: a refresh started by a merge or check webhook flags what it could not write, too.
+const signed = (t) => (event, payload, delivery) => {
+  const body = JSON.stringify(payload);
+  return fetch(`${t.base}/webhook`, { method: 'POST', body, headers: { 'X-GitHub-Event': event, 'X-GitHub-Delivery': delivery, 'X-Hub-Signature-256': `sha256=${createHmac('sha256', t.cfg.github.webhookSecret).update(body).digest('hex')}` } });
+};
+const merged = (full, id, n, at) => ({ action: 'closed', installation: { id: 7 }, repository: { id, full_name: full, private: true }, pull_request: { number: n, merged: true, merged_at: at } });
+const body = (t, k) => (t.gh.comments.get(k) ?? []).map((c) => c.body).join('\n');
+
+test('a merge webhook whose comment is over the write budget is flagged and lands at a later resync, once', async () => {
+  const keep = CAPS.commentWritesPerInstallation;
+  CAPS.commentWritesPerInstallation = 1;
+  try {
+    const t = await world();
+    const hook = signed(t);
+    try {
+      await t.app.resyncAll(); t.tick(CAPS.windowMs + 1); await t.app.resyncAll();
+      assert.deepEqual(commentCounts(t), [1, 1]);
+      assert.equal(await owed(t), false);
+      t.tick(CAPS.windowMs + 1);
+      await hook('pull_request', merged('acme/mobile', 71, 5, '2026-11-06T11:00:00Z'), 'm1'); await t.app.idle();
+      await hook('pull_request', merged('acme/web', 70, 12, '2026-11-06T11:01:00Z'), 'w1'); await t.app.idle();
+      assert.match(body(t, 'acme/mobile#5'), /merged/, 'the first merge used the one write');
+      assert.doesNotMatch(body(t, 'acme/web#12'), /merged/, 'the second is held back');
+      assert.equal(await owed(t), true, 'and the run is flagged for it');
+      t.tick(CAPS.windowMs + 1);
+      const r = await t.app.resyncAll(); // no force, the branch tip has not moved
+      assert.equal(r[0].repos.find((x) => x.repo === 'acme/web').unchanged, true);
+      assert.match(body(t, 'acme/web#12'), /merged/, 'it lands without a new push');
+      assert.equal(await owed(t), false);
+      assert.deepEqual(commentCounts(t), [1, 1], 'edited in place, never a second comment');
+    } finally { await t.close(); }
+  } finally { CAPS.commentWritesPerInstallation = keep; }
+});
+
+test('a check webhook whose refresh fails partway is flagged and retried at the next resync, once', async () => {
+  const t = await world();
+  const hook = signed(t);
+  try {
+    await t.app.resyncAll();
+    assert.deepEqual(commentCounts(t), [1, 1]);
+    const update = t.gh.updateComment;
+    t.gh.updateComment = async () => { throw new Error('GitHub 502'); };
+    await hook('check_suite', { action: 'completed', installation: { id: 7 }, repository: { id: 70, full_name: 'acme/web', private: true }, check_suite: { id: 55, conclusion: 'failure', head_sha: 'abc', updated_at: '2026-11-06T10:30:00Z', pull_requests: [{ number: 12 }] } }, 'c1');
+    await t.app.idle();
+    assert.doesNotMatch(body(t, 'acme/web#12'), /failure/);
+    assert.equal(await owed(t), true, 'the failed refresh is flagged');
+    t.gh.updateComment = update;
+    await t.app.resyncAll();
+    assert.match(body(t, 'acme/web#12'), /failure/, 'the checks result lands at the next resync');
+    assert.equal(await owed(t), false);
+    assert.deepEqual(commentCounts(t), [1, 1], 'edited in place, never a second comment');
+  } finally { await t.close(); }
+});
+
 test('links per unit are capped at ingest, and a page view checks access only for linked repos with events', async () => {
   let buf = makeRun('r1');
   const links = Array.from({ length: 2000 }, (_, i) => ({ kind: 'issue', url: `https://github.com/evil${i}/x/issues/1` }));

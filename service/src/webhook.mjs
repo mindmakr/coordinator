@@ -2,6 +2,7 @@
 // parsed; a delivery id seen before is acknowledged and skipped. Pushes to the
 // state branch resync that repo; installation events add and remove repos.
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { trailOwed } from './ingest.mjs';
 
 export function verifySignature(secret, raw, header) {
   if (typeof header !== 'string' || !header.startsWith('sha256=')) return false;
@@ -60,7 +61,9 @@ export function webhooks({ db, ingest, trail = null, branch = 'coordinator-state
       if (!trail) return;
       for (const r of await db.runsReferencing(inst, key)) {
         const repo = (await db.repos(inst)).find((x) => x.id === r.repoId);
-        if (repo) await trail.refreshRun(inst, repo, r.runId);
+        if (!repo) continue;
+        // A held-back or failed write is flagged, so the next periodic resync lands it (and edits, never re-posts).
+        await db.setTrailPending(inst, repo.id, r.runId, trailOwed(await trail.refreshRun(inst, repo, r.runId)));
       }
     };
   }

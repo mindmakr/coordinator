@@ -46,6 +46,9 @@ export function readMap(buf) {
 // the same cap the trail writes under (trail.mjs CAPS.refsPerUnit), so one log cannot fan out into
 // thousands of rows or of access checks on a page view.
 export const MAX_REFS_PER_UNIT = 10;
+// A trail refresh still owes GitHub a write when a comment was held back by the write budget,
+// or when the refresh failed partway (out.error, e.g. a GitHub 5xx).
+export const trailOwed = (r) => Boolean(r?.error) || (r?.comments ?? []).some((c) => c[2] === 'deferred');
 export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).slice(0, MAX_REFS_PER_UNIT).map((x) => ({ unit: u.id, key: x.key })));
 
 // trail (optional): { refreshRun(installationId, repo, runId) }, run for every run whose state changed,
@@ -132,7 +135,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     const retried = owed.filter((id) => !changed.includes(id));
     for (const runId of [...changed, ...retried]) {
       const r = await trail.refreshRun(installationId, repo, runId);
-      const pending = (r?.comments ?? []).some((c) => c[2] === 'deferred');
+      const pending = trailOwed(r);
       if (pending || owed.includes(runId)) await db.setTrailPending(installationId, repo.id, runId, pending);
     }
     return retried;
