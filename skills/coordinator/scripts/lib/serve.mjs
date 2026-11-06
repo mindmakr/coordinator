@@ -3,8 +3,9 @@
 // POST also needs this page's own origin. Writes are callbacks (run.mjs passes
 // its locked state code), so the page changes nothing the CLI could not.
 // GET /                 the dashboard          GET /unit/<id>     a unit's page
+// GET /maps             the run's maps (mind map, flow, heatmaps, goal relevance)
 // GET /coordinator      the coordinator's own page, across every run in the state folder
-// GET /run/<run>[/unit/<id>]  another run's dashboard or unit page, read-only
+// GET /run/<run>[/unit/<id>|/maps]  another run's dashboard or unit page, read-only
 // GET /events?p=<path>  live updates (SSE)     GET [/run/<run>]/artifacts/<unit>/<file>  a stored screenshot or log
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -16,7 +17,7 @@ import { csp } from './parts.mjs';
 export const HOST = '127.0.0.1';
 const MAX_BODY = 64 * 1024;
 const ID = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
-const PAGE = new RegExp(`^/(?:coordinator|run/${ID}(?:/unit/${ID})?|unit/${ID})?$`);
+const PAGE = new RegExp(`^/(?:coordinator|maps|run/${ID}(?:/unit/${ID}|/maps)?|unit/${ID})?$`);
 const ART = new RegExp(`^(?:/run/(${ID}))?/artifacts/([A-Za-z0-9_][A-Za-z0-9._-]{0,63})/([^/]+)$`);
 
 const sameToken = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
