@@ -28,6 +28,11 @@ try {
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
 } catch (e) {
-  log.error('could not start', { error: e });
+  // An AggregateError (a refused Postgres connection tried on IPv4 and IPv6) has an empty
+  // message; its parts carry the cause.
+  const inner = Array.isArray(e?.errors) ? e.errors : [];
+  const parts = inner.length && !e?.message ? inner : [e, ...inner];
+  const cause = [...new Set(parts.map((x) => x?.message || x?.code || String(x)))].join('; ') || String(e);
+  log.error('could not start', { error: cause });
   process.exit(1);
 }

@@ -239,7 +239,7 @@ export function pull(o) {
 // The copy's answers and person notes the local log lacks, appended in the copy's order
 // as new local events (seq renumbered), each through updateRun like run.mjs answer and note.
 // All are tried on a copy of the state first, so a refusal (an option the question lacks) changes nothing.
-// An answer to a question already used is kept as an "answer changed after use" note, so it never wedges the run.
+// An answer to a question already used, or closed by a decision, is kept as a flagged note, so it never wedges the run.
 // Ones already here (an earlier pull) are skipped: a second pull adds nothing.
 function replayExtras(o, extra) {
   const trial = structuredClone(readRun(o.dir).state);
