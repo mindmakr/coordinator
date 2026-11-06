@@ -82,13 +82,18 @@ const BUDGET_HELP = {
   'integration rounds': 'Integration checks used, against the cap.',
 };
 
-const hidden = (live, fields) => [['t', live.token], ...(live.back ? [['back', live.back]] : []), ...fields].map(([k, val]) => `<input type="hidden" name="${k}" value="${esc(val)}">`).join('');
+// A form object: the live page's { token } (field `t`, posts to /answer and /note), or a hosted
+// copy's { token, tokenName, post: path prefix, disabled: why this viewer cannot write }.
+const hidden = (live, fields) => [[live.tokenName ?? 't', live.token], ...(live.back ? [['back', live.back]] : []), ...fields].map(([k, val]) => `<input type="hidden" name="${k}" value="${esc(val)}">`).join('');
 const recommended = ' <span class="chip s-pass">Recommended</span>';
+const action = (live, path) => esc(`${live.post ?? ''}${path}`);
+const off = (live) => (live.disabled ? ' disabled' : '');
+const why = (live) => (live.disabled ? `<p class="hint">${esc(live.disabled)}</p>` : '');
 
 export function noteForm(live, unit) {
-  return `<form class="note" method="post" action="/note">${hidden(live, unit ? [['unit', unit]] : [])}`
-    + `<label>${esc(unit ? `Note to the lead about ${unit}` : 'Note to the lead')}<textarea name="text" rows="2" maxlength="1000" required></textarea></label>`
-    + '<button type="submit">Send note</button></form>';
+  return `<form class="note" method="post" action="${action(live, '/note')}">${hidden(live, unit ? [['unit', unit]] : [])}`
+    + `<label>${esc(unit ? `Note to the lead about ${unit}` : 'Note to the lead')}<textarea name="text" rows="2" maxlength="1000" required${off(live)}></textarea></label>`
+    + `<button type="submit"${off(live)}>Send note</button>${why(live)}</form>`;
 }
 
 function answerForm(q, live) {
@@ -99,9 +104,9 @@ function answerForm(q, live) {
   const other = !q.options.length ? `<label class="opt"><span><b>Your answer</b>${box}</span></label>`
     : q.multi ? `<label class="opt"><span><b>Other</b><small>optional, as well as any options above</small>${box}</span></label>`
       : `<label class="opt"><input type="radio" name="choice" value="${OTHER}"${a?.other ? ' checked' : ''}><span><b>Other</b>${box}</span></label>`;
-  return `<form class="ask" method="post" action="/answer">${hidden(live, [['q', q.id]])}`
-    + `<fieldset><legend>${q.options.length ? (q.multi ? 'Pick any' : 'Pick one') : 'Write your answer'}</legend>${opts}${other}</fieldset>`
-    + `<button type="submit">${a ? 'Change answer' : 'Submit'}</button></form>`;
+  return `<form class="ask" method="post" action="${action(live, '/answer')}">${hidden(live, [['q', q.id]])}`
+    + `<fieldset${off(live)}><legend>${q.options.length ? (q.multi ? 'Pick any' : 'Pick one') : 'Write your answer'}</legend>${opts}${other}</fieldset>`
+    + `<button type="submit"${off(live)}>${a ? 'Change answer' : 'Submit'}</button>${why(live)}</form>`;
 }
 
 function optionList(q) {
@@ -196,7 +201,8 @@ export function timelineList(events, repo, finished = new Set()) {
 export function hud(v, nowMs = Date.now(), ctx = null) {
   ctx ??= staticCtx('', 0);
   if (ctx.token) ctx = liveCtx(ctx, v.id); // older callers pass { token, nonce }
-  const form = ctx.live && v.open && !ctx.readOnly ? ctx.live : null; // a closed run, or another run's page, takes no answers
+  const live = ctx.form ?? ctx.live; // ctx.form: a hosted copy's forms (no live script)
+  const form = live && v.open && !ctx.readOnly ? live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
     blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}</header>`),

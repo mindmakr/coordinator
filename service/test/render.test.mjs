@@ -31,7 +31,8 @@ test('every page escapes run text, carries no script, and sends a strict CSP and
     const run = await (await t.get('/r/acme/web/run/r1')).text();
     assert.match(run, /Totals match &lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/, 'the goal, escaped');
     assert.match(run, /Which total\?/, 'the open question shows');
-    assert.equal(run.includes('name="choice"'), false, 'no answer form: read-only');
+    assert.match(run, /<fieldset disabled>/, 'a reader sees the answer form disabled');
+    assert.match(run, /Only people who can push to acme\/web can answer or add notes/, 'with the reason');
     assert.match(run, /href="\/r\/acme\/web\/run\/r1\/unit\/u1"/, 'units link to their pages here');
     const unit = await (await t.get('/r/acme/web/run/r1/unit/u1')).text();
     assert.match(unit, /stale cache/);

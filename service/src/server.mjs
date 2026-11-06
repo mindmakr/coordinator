@@ -12,9 +12,14 @@ import { refsOf } from './ingest.mjs';
 import { limiter } from './ratelimit.mjs';
 import { parseCookies, sessions as makeSessions } from './session.mjs';
 import { verifySignature, webhooks as makeWebhooks } from './webhook.mjs';
+import { WriteError, writer as makeWriter } from './writes.mjs';
+import { commands as makeCommands } from './commands.mjs';
 
 const MAX_WEBHOOK = 5 * 1024 * 1024;
 const MAX_FORM = 4 * 1024;
+const MAX_WRITE_FORM = 16 * 1024; // c12: an answer or note of 1000 characters, percent-encoded
+const WRITE_ROUTES = new Set(['answer', 'note']); // c12: POST /r/<owner>/<repo>/run/<run>/answer|note
+const BACK = /^\/unit\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const MAX_REPOS_PER_VIEW = 20; // distinct linked repos whose access is checked for one page view
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\/unit\/([^/]+)|\/(maps)|\/([a-z][a-z-]{0,30}))?)?\/?$/;
@@ -33,9 +38,12 @@ function readBody(req, max) {
 export function createApp({ config, db, gh, log, now = Date.now }) {
   const github = trail({ db, gh, config, log, now });
   const ingest = ingester({ db, gh, branch: config.stateBranch, log, trail: github });
-  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log });
-  const auth = makeSessions({ db, gh, config, log, now });
   const acl = makeAccess({ gh, db, ttlMs: config.accessTtlMs, now });
+  // c12: answers and notes, from the HUD and from comment commands.
+  const writes = makeWriter({ db, gh, config, ingest, acl, log, now });
+  const commands = makeCommands({ db, gh, writes, log, now });
+  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log, commands });
+  const auth = makeSessions({ db, gh, config, log, now });
   const limits = {
     webhookFailures: limiter({ max: 30, windowMs: 60_000, now }),
     auth: limiter({ max: 30, windowMs: 10 * 60_000, now }),
@@ -66,11 +74,11 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
     return true;
   };
   // A browser POST: this site's origin, same-site fetch, a form body, and the session's CSRF token.
-  async function form(req, user) {
+  async function form(req, user, max = MAX_FORM) {
     if (req.headers.origin !== config.baseUrl) throw new HttpError(403, 'cross-origin request refused');
     if (req.headers['sec-fetch-site'] && req.headers['sec-fetch-site'] !== 'same-origin') throw new HttpError(403, 'cross-site request refused');
     if (!String(req.headers['content-type'] ?? '').startsWith('application/x-www-form-urlencoded')) throw new HttpError(415, 'form posts only');
-    const f = new URLSearchParams((await readBody(req, MAX_FORM)).toString('utf8'));
+    const f = new URLSearchParams((await readBody(req, max)).toString('utf8'));
     if (!auth.validCsrf(user, f.get('csrf'))) throw new HttpError(403, 'missing or wrong form token; reload the page');
     return f;
   }
@@ -102,7 +110,7 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
   async function repoRoute(req, res, url, m, user) {
     const [, owner, name, kind, runRaw, unitRaw, maps, runKind] = m;
     if (kind && kind !== 'sync' && REPO_PAGES[kind]?.scope !== 'repo') return notFound(res, user);
-    if (runKind && (!Object.hasOwn(REPO_PAGES, runKind) || REPO_PAGES[runKind].scope !== 'run')) return notFound(res, user);
+    if (runKind && !WRITE_ROUTES.has(runKind) && (!Object.hasOwn(REPO_PAGES, runKind) || REPO_PAGES[runKind].scope !== 'run')) return notFound(res, user);
     const fullName = `${decodeURIComponent(owner)}/${decodeURIComponent(name)}`;
     const run = runRaw === undefined ? null : decodeURIComponent(runRaw);
     const unit = unitRaw === undefined ? null : decodeURIComponent(unitRaw);
@@ -123,6 +131,7 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
       await ingest.syncRepo(repo.installationId, repo);
       return redirect(res, 303, repoBase(repo.fullName));
     }
+    if (run !== null && WRITE_ROUTES.has(runKind)) return writeRoute(req, res, user, repo, run, runKind);
     if (req.method !== 'GET') return notFound(res, user);
     const n = now();
     if (kind) return html(res, 200, REPO_PAGES[kind].render(user, repo, await db.runs(repo.installationId, repo.id), n));
@@ -131,8 +140,26 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
     if (!row?.state) return notFound(res, user);
     if (runKind) return REPO_PAGES[runKind].has(row) ? html(res, 200, REPO_PAGES[runKind].render(user, repo, row, n)) : notFound(res, user);
     const gh = await githubEvents(user, repo, row.state);
-    const out = maps ? mapsView(user, repo, row, n, gh) : unit === null ? runPage(user, repo, row, n, gh) : unitView(user, repo, row, unit, n, gh);
+    // c12: the run and unit pages carry the answer and note forms, disabled with the reason for readers.
+    const viewer = !maps && !row.state.closed ? { ...user, write: await writes.canWrite(user, repo) } : user;
+    const out = maps ? mapsView(user, repo, row, n, gh) : unit === null ? runPage(viewer, repo, row, n, gh) : unitView(viewer, repo, row, unit, n, gh);
     return out === null ? notFound(res, user) : html(res, 200, out);
+  }
+
+  // c12: an answer or a note from the HUD, committed to the state branch with the person's own token.
+  async function writeRoute(req, res, user, repo, run, kind) {
+    if (req.method !== 'POST') return notFound(res, user);
+    const f = await form(req, user, MAX_WRITE_FORM);
+    const runBase = `${repoBase(repo.fullName)}/run/${encodeURIComponent(run)}`;
+    const back = BACK.test(f.get('back') ?? '') ? `${runBase}${f.get('back')}` : runBase;
+    try {
+      await writes.fromHud(user, repo, run, kind, f);
+    } catch (e) {
+      if (!(e instanceof WriteError)) throw e;
+      return html(res, e.status, messagePage(kind === 'answer' ? 'Answer not saved' : 'Note not saved', e.message, user, back), e.status === 429 ? { 'Retry-After': '60' } : {});
+    }
+    const q = f.get('q');
+    return redirect(res, 303, kind === 'answer' && back === runBase && /^q\d{1,4}$/.test(q ?? '') ? `${back}#${q}` : back);
   }
 
   // GitHub's events for the issues and PRs the run's units link, from this installation only,

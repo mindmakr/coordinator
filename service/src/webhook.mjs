@@ -17,7 +17,7 @@ const refKey = (full, n) => `${String(full).toLowerCase()}#${Number(n)}`;
 // Pull request and check results become events on the read model (shown in the
 // timelines and the tracker comments) and refresh the trail of every run in the
 // same installation whose units link that PR, through the ingester's per-repo queue (ingest.refreshRuns).
-export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
+export function webhooks({ db, ingest, branch = 'coordinator-state', log, commands = null }) {
   async function installationEvent(p) {
     const id = Number(p.installation?.id);
     if (p.action === 'deleted') {
@@ -94,6 +94,8 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
           : event === 'installation_repositories' ? await reposEvent(payload)
             : event === 'pull_request' && payload.repository ? await pullRequestEvent(payload)
               : event === 'check_suite' && payload.repository ? await checkSuiteEvent(payload)
+                // c12: comment commands (commands.mjs)
+                : event === 'issue_comment' && payload.repository && commands ? await commands.handle(payload)
                 : { status: 202, body: `ignored: ${event}` };
       const done = async () => { if (delivery) await db.recordDelivery(delivery); };
       if (!r.work) { await done(); return r; }

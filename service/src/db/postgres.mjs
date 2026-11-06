@@ -130,6 +130,14 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
       [installationId, n.refKey, n.runId, n.unitId, n.commentId, n.bodySha, n.boardSha]);
     },
 
+    // c12 writes: true when this call claimed the comment (it was not handled before).
+    async claimCommand(installationId, commentId) {
+      await q("DELETE FROM comment_commands WHERE at < now() - interval '30 days'");
+      return (await q('INSERT INTO comment_commands (installation_id, comment_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [installationId, commentId])).rowCount === 1;
+    },
+    async finishCommand(installationId, commentId, status) { await q('UPDATE comment_commands SET status = $3 WHERE installation_id = $1 AND comment_id = $2', [installationId, commentId, status]); },
+    async releaseCommand(installationId, commentId) { await q('DELETE FROM comment_commands WHERE installation_id = $1 AND comment_id = $2', [installationId, commentId]); },
+
     async putSession(s) {
       await q(`INSERT INTO sessions (id_hash, user_id, login, token_enc, refresh_enc, token_expires_at, refresh_expires_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [s.idHash, s.userId, s.login, s.tokenEnc, s.refreshEnc, ts(s.tokenExpiresAt), ts(s.refreshExpiresAt), ts(s.expiresAt)]);

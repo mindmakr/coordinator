@@ -2,7 +2,7 @@
   "name": "coordinator-service",
   "version": "0.1.0",
   "private": true,
-  "description": "GitHub App and read-only web dashboard for Coordinator runs",
+  "description": "GitHub App and web dashboard for Coordinator runs: read runs, answer and add notes",
   "license": "AGPL-3.0-only",
   "type": "module",
   "engines": { "node": ">=20" },

@@ -10,6 +10,9 @@
 const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'run', 'putRun', 'dropRunsExcept', 'deleteInstallation',
   'putRunMap', 'markTrailPending', 'clearTrailPending', 'repoByName', 'setUnitRefs', 'runsReferencing', 'addGhEvent', 'ghEvents', 'tracker', 'putTracker'];
 
+// c12 writes: comment commands, claimed once each.
+SCOPED.push('claimCommand', 'finishCommand', 'releaseCommand');
+
 export function guard(db) {
   const out = { ...db };
   for (const name of SCOPED) {

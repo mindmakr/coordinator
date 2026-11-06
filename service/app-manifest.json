@@ -1,6 +1,6 @@
 {
   "name": "Coordinator",
-  "description": "Follow coordinator runs from anywhere: reads the coordinator-state branch, shows each run to the people who can read the repo, and keeps one tracker comment and board card per unit current.",
+  "description": "Follow coordinator runs from anywhere: reads the coordinator-state branch, shows each run to the people who can read the repo, and takes answers and notes from the web and from comment commands, and keeps one tracker comment and board card per unit current.",
   "url": "https://coordinator.example.com",
   "hook_attributes": {
     "url": "https://coordinator.example.com/webhook",
@@ -15,7 +15,7 @@
   "setup_on_update": false,
   "default_permissions": {
     "metadata": "read",
-    "contents": "read",
+    "contents": "write",
     "issues": "write",
     "pull_requests": "write",
     "checks": "read",
@@ -24,6 +24,7 @@
   "default_events": [
     "push",
     "pull_request",
-    "check_suite"
+    "check_suite",
+    "issue_comment"
   ]
 }

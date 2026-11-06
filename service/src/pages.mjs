@@ -1,6 +1,8 @@
 // Server-side pages from the read model, drawn by the skill's own renderers
 // (hud, unitPage, selfPage, page) so a run looks the same here as on the
-// local dashboard. Read-only: no answer forms (that is c12), no scripts. Every
+// local dashboard. No scripts. The run and unit pages carry the answer and
+// note forms (c12), posting to /run/<run>/answer|note; disabled, with the
+// reason, for people who cannot push to the repo. Every
 // string from a run is escaped by those renderers; the few bits drawn here use
 // the same esc().
 import { blk, chip, decide, esc, hud, mapsPage, page, projectMapPage, runView, selfModel, selfPage, stamp, unitPage } from './core.mjs';
@@ -15,13 +17,17 @@ export const REPO_PAGES = {
   map: { scope: 'run', label: 'Project map', has: (row) => !!(row.map || row.mapError), render: (user, repo, row) => projectMapView(user, repo, row) },
 };
 
-export const READ_ONLY_HINT = 'This page is read-only for now: answer in the chat with the lead. Answering from here comes in the next release.';
+export const READ_ONLY_HINT = 'Answer on the run’s page, or in the chat with the lead.';
 
-function ctxFor(fullName, run = null, row = null) {
+// c12: the forms for a viewer whose push access was checked (user.write: { ok, reason }).
+const formFor = (user, runBase) => (user?.write && runBase ? { token: user.csrf, tokenName: 'csrf', post: runBase, disabled: user.write.ok ? null : user.write.reason } : null);
+
+function ctxFor(fullName, run = null, row = null, user = null) {
   const base = repoBase(fullName);
   const runBase = run ? `${base}/run/${enc(run)}` : null;
+  const form = formFor(user, runBase);
   return {
-    live: null, theme: null, run, store: run, base: runBase ?? base, home: runBase ?? base, embed: null, readOnly: true,
+    live: null, form, theme: null, run, store: run, base: runBase ?? base, home: runBase ?? base, embed: null, readOnly: !form,
     readOnlyHint: READ_ONLY_HINT,
     maps: runBase ? `${runBase}/maps` : null,
     mapHref: runBase && row && REPO_PAGES.map.has(row) ? `${runBase}/map` : null,
@@ -67,7 +73,7 @@ const plainCtx = () => ({ live: null, theme: null, embed: null, pages: [{ path: 
 function bar(user, repo = null) {
   if (!user) return '<p class="meta"><a href="/login">Sign in with GitHub</a></p>';
   const sync = repo ? `<form method="post" action="${esc(repoBase(repo))}/sync" style="display:inline"><input type="hidden" name="csrf" value="${esc(user.csrf)}"><button type="submit">Sync now</button></form> ` : '';
-  return `<div class="row" style="margin:0 0 12px"><span>Signed in as <b>${esc(user.login)}</b> · read-only</span><span>${sync}`
+  return `<div class="row" style="margin:0 0 12px"><span>Signed in as <b>${esc(user.login)}</b>${user.write ? (user.write.ok ? ' · can answer' : ' · read-only') : ''}</span><span>${sync}`
     + `<form method="post" action="/logout" style="display:inline"><input type="hidden" name="csrf" value="${esc(user.csrf)}"><button type="submit">Sign out</button></form></span></div>`;
 }
 const withBar = (html, user, repo) => html.replace('<main id="app">', () => `<main id="app">${bar(user, repo)}`);
@@ -119,11 +125,11 @@ export function runsPage(user, repo, rows, nowMs = Date.now()) {
 const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName }), gh); };
 
 export function runPage(user, repo, row, nowMs = Date.now(), gh = []) {
-  return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row)), user, repo.fullName);
+  return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row, user)), user, repo.fullName);
 }
 
 export function unitView(user, repo, row, unitId, nowMs = Date.now(), gh = []) {
-  const html = unitPage(viewOf(repo, row, nowMs, gh), unitId, nowMs, ctxFor(repo.fullName, row.runId, row));
+  const html = unitPage(viewOf(repo, row, nowMs, gh), unitId, nowMs, ctxFor(repo.fullName, row.runId, row, user));
   return html === null ? null : withBar(html, user, repo.fullName);
 }
 
@@ -151,7 +157,7 @@ export function coordinatorPage(user, repo, rows, nowMs = Date.now()) {
   return withBar(selfPage(m, nowMs, ctxFor(repo.fullName)), user, repo.fullName);
 }
 
-export function messagePage(title, text, user = null) {
-  const body = blk('head', `<header class="run"><h1>${esc(title)}</h1></header>`) + `<section class="card"><p>${esc(text)}</p><p><a href="/">Back to your projects</a></p></section>`;
+export function messagePage(title, text, user = null, back = null) {
+  const body = blk('head', `<header class="run"><h1>${esc(title)}</h1></header>`) + `<section class="card"><p>${esc(text)}</p><p>${back ? `<a href="${esc(back)}">Back to the run</a> · ` : ''}<a href="/">Back to your projects</a></p></section>`;
   return withBar(page({ title, body, ctx: plainCtx(), path: '' }), user);
 }
