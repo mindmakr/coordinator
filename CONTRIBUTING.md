@@ -31,6 +31,14 @@ Agents using this skill may open these issues and PRs themselves, but only with 
 
 5. Write in plain, specific language. The writing gets the same craft bar the skill enforces (`references/craft.md`).
 
+## Evangelists
+
+Telling people about the coordinator helps as much as code. Write up a run you did with it, show it at a meetup or in a stream, or point a team at it. Say what went wrong as well as what worked; honest write-ups bring the bug reports that make it better. If you publish something, open an issue with the link and we may list it.
+
+## Sponsors and partners
+
+If you build a model, a coding tool or an open-source agent, or your team depends on the coordinator, you can help with credits for test runs, an adapter for your harness built together, or sponsorship. Use the [sponsor or partner form](https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml). It opens a public issue, so leave out private contact and payment details; we will agree a private channel there if one is needed. Support is listed openly, and no name is used as an endorsement without its owner's written agreement.
+
 ## Reporting a security issue
 
 Don't open a public issue. Use GitHub's private vulnerability reporting on this repository.

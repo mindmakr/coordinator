@@ -2,13 +2,26 @@
 
 **Give your coding agent a lead.** Coordinator is an agent skill that runs a task the way a good engineering lead would. It agrees everything with you up front, staffs the work from your harness's own agents, and keeps sending the work back to independent critics until it meets a bar you can check. Then it reports, and remembers what it learned for next time.
 
+Author: Asif Raja, by [mindmakr](https://github.com/mindmakr) · Homepage: [mindmakr.github.io/coordinator](https://mindmakr.github.io/coordinator/)
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen)
 ![No dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 
+## What it is, and why
+
+One person can run a team of agents, if something keeps that team honest. Coordinator does that job:
+
+- **Questions first.** Every open question is asked once, before the work starts, with a recommendation. Then the run goes on without you.
+- **Nobody marks their own work.** Builders build; a separate critic, blind to the builder's reasoning, checks the real result against a bar written in advance. A pass needs evidence.
+- **Hard stops.** Budgets, no-progress and same-cause detection, and a scope cap are enforced in code, not left to the agent's judgement.
+- **Durable state.** Every run is a locked JSON file. A crash or a context reset resumes from it.
+- **Lessons.** Each run ends with a retro that carries lessons and tuned budgets into the next one.
+- **A dashboard in your browser.** Each run writes its own page, and can serve it locally with answer forms. No separate GUI app to install.
+
 ---
 
-## Why
+## With and without it
 
 A single agent pass grades its own homework. It decides the work is "fine", stops early, drifts into side quests, and asks you questions halfway through, while you're away. Coordinator separates the roles and makes the loop strict:
 
@@ -36,6 +49,14 @@ A single agent pass grades its own homework. It decides the work is "fine", stop
 2. **Loop.** Builders work in parallel where the units are independent, each in its own worktree. Critics judge the real artifact. `run.mjs next` decides what happens to each unit, and refuses any step taken out of order.
 3. **Finish.** An integrator checks that the parts fit together. You get a short report: the outcome, the evidence, what stopped and why, and the decisions it made for you.
 4. **Retro.** Repeated gaps become lessons, past runs tune the budgets, and gaps in the skill itself become issues or PRs here, with your approval.
+
+## Works with
+
+Coordinator brings no team of its own: it staffs builders, critics and researchers from the agents, skills and tools your harness already has. It is designed for any harness that can delegate to sub-agents, run a script and ask you a question.
+
+- **Claude Code:** supported today, as a plugin or a copied skill folder.
+- **Other skills-capable harnesses:** copy `skills/coordinator` into the harness's skills folder. Fallbacks are built in (a numbered list where there is no question tool, a file path where there are no Artifacts), but so far it is packaged and released for Claude Code only.
+- **Planned for 1.0:** a second harness with its own install path and an end-to-end run. The draft design ([#15](https://github.com/mindmakr/coordinator/issues/15)) recommends OpenAI Codex CLI; the choice is still open.
 
 ## Install
 
@@ -108,6 +129,20 @@ skills/coordinator/
   - Merging, deploying, deleting, spending or posting needs your approval, given up front.
 - **Extensible.** New playbooks are commands or domain files that reuse the core. They never fork it.
 
+## Coming soon
+
+Planned, not built yet. The road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14).
+
+| Add-on | Status |
+|---|---|
+| Behaviours and evidence on the bar, a live dashboard with a page per unit | In development (0.5) |
+| Follow and answer a run from a phone, with alerts | On the 1.0 plan ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12), [#18](https://github.com/mindmakr/coordinator/issues/18)) |
+| Security pass as a second critic on every code change | On the 1.0 plan ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
+| Run maps: mind, flow, heat and goal relevance | On the 1.0 plan ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
+| Project map: code, settings, surfaces and reuse | On the 1.0 plan ([#21](https://github.com/mindmakr/coordinator/issues/21)) |
+| The coordinator's own page: lessons, stats, history, proposals | On the 1.0 plan ([#19](https://github.com/mindmakr/coordinator/issues/19)) |
+| Compliance and audit trails, API flows, caller and callee graphs, function and external dependency maps | Proposed; [tell us what you need](https://github.com/mindmakr/coordinator/issues/new/choose) |
+
 ## Contributing
 
 Every run is a test of this skill. If a run went wrong, a rule was unclear or a guard didn't fire, open an issue. A fix is welcome as a PR. See [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -117,9 +152,23 @@ npm test
 claude plugin validate .
 ```
 
-## Credits
+## Inspired by
 
-The build, blind-critic and repeat loop comes from Matt Shumer's write-up of the method. The command structure, the context file and the deterministic detector come from Paul Bakaus's Impeccable. Details are in [CREDITS.md](CREDITS.md).
+- **The Gauntlet Loop** by Matt Shumer ([write-up](https://somethingbig.ai/gauntlet-loop), [example repository](https://github.com/mshumer/Claude-of-Duty)): the build, blind-critic and repeat loop.
+- **[Impeccable](https://github.com/pbakaus/impeccable)** by Paul Bakaus: the command structure, the context file and the deterministic detector.
+- Wider work on long-term agent memory and graph-shaped workflows shaped the lessons store and the planned maps.
+
+Details are in [CREDITS.md](CREDITS.md).
+
+## Support the project
+
+Coordinator is maintained by one author. It needs contributors, evangelists, sponsors and partners, especially people who build models, coding tools and open-source agents.
+
+- **Contribute:** report runs that went wrong, send fixes, or build an adapter for your harness ([CONTRIBUTING.md](CONTRIBUTING.md)).
+- **Spread the word:** write up a run, present it, or point a team at it.
+- **Sponsor or partner:** credits for test runs, an adapter built together, or sponsorship, through the [sponsor or partner form](https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml). It is a public issue, so leave out private contact and payment details.
+
+More on the [homepage](https://mindmakr.github.io/coordinator/).
 
 ## License
 
