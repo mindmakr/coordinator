@@ -1,0 +1,56 @@
+name: Sponsor or partner
+description: Offer sponsorship, credits for test runs, or a partnership such as an adapter for your harness
+title: "Sponsor or partner: <your organisation or project>"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for offering to support Coordinator.
+
+        **This issue is public.** Do not include private email addresses, phone numbers, payment details or anything confidential. We will reply here and, if needed, agree a private channel with you.
+
+        Support is listed openly. Nobody's name is used as an endorsement without their written agreement.
+  - type: input
+    id: who
+    attributes:
+      label: Who you are
+      description: Your organisation, project or name, and a public link (website or GitHub).
+      placeholder: Example Labs, https://example.com
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What you build
+      options:
+        - A model (LLM provider)
+        - A coding tool or IDE
+        - An open-source coding agent or harness
+        - A team or company using Coordinator
+        - An individual
+        - Something else
+    validations:
+      required: true
+  - type: checkboxes
+    id: offer
+    attributes:
+      label: How you would like to help
+      options:
+        - label: Sponsor the project
+        - label: Credits or access for test runs across models and harnesses
+        - label: Build or maintain an adapter for our harness together
+        - label: Write about it, present it, or feature it
+        - label: Something else (describe below)
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: What you have in mind, and what you would like in return, if anything.
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: Public contact
+      description: A GitHub handle we can mention to reply. No private email addresses here.
+      placeholder: "@your-handle"

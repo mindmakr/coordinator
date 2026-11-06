@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Coordinator · Coordinator by mindmakr</title>
+<meta name="description" content="Coordinator is an open-source agent skill: it asks every question up front, then runs builders and blind critics unattended until a bar you can check is met. Author: Asif Raja, by mindmakr.">
+<meta name="author" content="Asif Raja, by mindmakr">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231b1915'/%3E%3Ctext x='16' y='24' font-family='Georgia,serif' font-size='22' font-weight='700' fill='%23f7f2e8' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #f7f2e8;
+  --paper-2: #efe8d9;
+  --ink: #1b1915;
+  --ink-2: #4a453c;
+  --rule: #2a2620;
+  --rule-soft: #cfc6b4;
+  --accent: #8a1c1c;
+  --accent-ink: #ffffff;
+  --planned: #6b4f00;
+  --planned-bg: #f3e6bf;
+  --link: #7a1a1a;
+  --code-bg: #ebe3d2;
+  --display: "Playfair Display", "Times New Roman", Georgia, serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #15130f;
+    --paper-2: #1e1b16;
+    --ink: #ece6d8;
+    --ink-2: #bdb4a2;
+    --rule: #d9d1c0;
+    --rule-soft: #4a443a;
+    --accent: #e0806f;
+    --accent-ink: #15130f;
+    --planned: #f1cf72;
+    --planned-bg: #3a3017;
+    --link: #f0a090;
+    --code-bg: #26221b;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+a { color: var(--link); text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+code, pre { font-family: var(--mono); font-size: .88em; }
+code { background: var(--code-bg); padding: .05em .3em; border-radius: 3px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); padding: .7rem .8rem; overflow-x: auto; margin: .6rem 0 1rem; border-left: 3px solid var(--rule); }
+pre code { background: none; padding: 0; }
+.skip { position: absolute; left: -999px; top: 0; background: var(--ink); color: var(--paper); padding: .5rem 1rem; }
+.skip:focus { left: 1rem; }
+
+.page { max-width: 1200px; margin: 0 auto; padding: 0 16px 3rem; }
+
+/* Masthead */
+.masthead { text-align: center; padding-top: 1.25rem; }
+.ears { display: flex; justify-content: space-between; gap: 1rem; font-size: .8rem; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }
+.ears p { margin: 0; max-width: 24rem; }
+.ears p:last-child { text-align: right; }
+.title {
+  font-weight: 900; font-family: var(--display); font-weight: 900; letter-spacing: -.01em;
+  font-size: clamp(2.6rem, 9vw, 6.2rem); line-height: 1; margin: .35rem 0 .3rem;
+}
+.motto { font-style: italic; color: var(--ink-2); margin: 0 0 .6rem; }
+.dateline {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem 1rem;
+  border-top: 3px double var(--rule); border-bottom: 1px solid var(--rule);
+  padding: .4rem 0; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em;
+}
+.dateline span { white-space: nowrap; }
+nav.sections ul { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: .2rem 1.2rem; padding: .5rem 0; margin: 0; border-bottom: 1px solid var(--rule); font-size: .9rem; }
+nav.sections a { color: var(--ink); text-decoration: none; }
+nav.sections a:hover { text-decoration: underline; }
+
+/* Front page grid */
+.front { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 0 2rem; padding-top: 1.25rem; }
+.front > .lead { border-right: 1px solid var(--rule-soft); padding-right: 2rem; }
+.kicker { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 0 0 .3rem; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.1; margin: 0 0 .5rem; }
+h2.headline { font-size: clamp(2rem, 4.6vw, 3.4rem); font-weight: 900; }
+h2 { font-size: clamp(1.6rem, 3.2vw, 2.3rem); font-weight: 900; }
+h3 { font-size: 1.3rem; font-weight: 700; }
+.standfirst { font-size: 1.22rem; line-height: 1.45; color: var(--ink-2); margin: .2rem 0 .8rem; }
+.byline { font-size: .9rem; text-transform: uppercase; letter-spacing: .05em; border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft); padding: .35rem 0; margin: 0 0 1rem; }
+.cols { column-count: 2; column-gap: 1.8rem; column-rule: 1px solid var(--rule-soft); }
+.cols p { margin: 0 0 .85rem; }
+.cols h3 { break-after: avoid; margin-top: .4rem; }
+.cols > *:first-child { margin-top: 0; }
+.dropcap::first-letter { font-family: var(--display); font-weight: 900; float: left; font-size: 3.6em; line-height: .82; padding: .06em .08em 0 0; color: var(--accent); }
+p { margin: 0 0 .85rem; }
+figure { margin: 1.2rem 0; }
+figure img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); }
+figcaption { font-size: .85rem; color: var(--ink-2); padding-top: .4rem; border-bottom: 1px solid var(--rule-soft); padding-bottom: .5rem; }
+
+aside.rail > section { border-top: 3px solid var(--rule); padding: .6rem 0 1rem; }
+aside.rail > section + section { margin-top: .5rem; }
+aside.rail h2 { font-size: 1.35rem; }
+aside.rail ol, aside.rail ul { padding-left: 1.2rem; margin: .3rem 0 .6rem; }
+aside.rail li { margin-bottom: .35rem; }
+.box { background: var(--paper-2); padding: .8rem .9rem; border: 1px solid var(--rule-soft); }
+
+/* Inside pages */
+.band { border-top: 3px double var(--rule); margin-top: 2rem; padding-top: 1.2rem; }
+.band > header { max-width: 52rem; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 1.8rem; margin-top: 1rem; }
+.grid3 > article { border-top: 1px solid var(--rule); padding-top: .6rem; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2rem; margin-top: 1rem; }
+.grid2 > * { border-top: 1px solid var(--rule); padding-top: .6rem; }
+.tag { display: inline-block; font-family: var(--body); font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: .08rem .4rem; border-radius: 2px; vertical-align: .15em; margin-right: .3rem; }
+.tag.now { background: var(--ink); color: var(--paper); }
+.tag.next { background: var(--accent); color: var(--accent-ink); }
+.tag.planned { background: var(--planned-bg); color: var(--planned); border: 1px solid currentColor; }
+.note { font-size: .9rem; color: var(--ink-2); }
+
+.letter { background: var(--paper-2); border: 1px solid var(--rule); padding: 1.2rem 1.4rem; margin-top: 1rem; }
+.letter .salute { font-family: var(--display); font-style: italic; font-size: 1.3rem; margin-bottom: .6rem; }
+.letter .cols { column-count: 2; }
+.asks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem 1.8rem; margin-top: 1rem; }
+.asks > div { border-top: 1px solid var(--rule); padding-top: .5rem; }
+.button { display: inline-block; background: var(--ink); color: var(--paper); text-decoration: none; padding: .5rem .9rem; font-weight: 600; margin-top: .3rem; }
+.button:hover { background: var(--accent); color: var(--accent-ink); }
+
+footer.colophon { border-top: 3px double var(--rule); margin-top: 2.5rem; padding-top: .8rem; font-size: .88rem; color: var(--ink-2); display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1.5rem; }
+footer.colophon p { margin: 0; }
+
+@media (max-width: 960px) {
+  .front { grid-template-columns: minmax(0, 1fr); }
+  .front > .lead { border-right: 0; padding-right: 0; }
+  .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asks { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  body { font-size: 1rem; }
+  .cols, .letter .cols { column-count: 1; }
+  .grid3, .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .ears { justify-content: center; }
+  .ears p:last-child { display: none; }
+  .ears p { text-align: center; }
+  .dateline { justify-content: center; }
+  .letter { padding: 1rem; }
+}
+@media print {
+  nav.sections, .skip { display: none; }
+  body { background: #fff; color: #000; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#lead">Skip to the lead story</a>
+<div class="page">
+
+<header class="masthead">
+  <div class="ears">
+    <p>An open-source agent skill. MIT licence.</p>
+    <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a></p>
+  </div>
+  <h1 class="title">The Coordinator</h1>
+  <p class="motto">What your agents did, what they are doing next, and the evidence for it.</p>
+  <div class="dateline">
+    <span><time datetime="2026-11-06">Friday, 6 November 2026</time></span>
+    <span>Version 0.4 edition</span>
+    <span>Free to install</span>
+  </div>
+  <nav class="sections" aria-label="Sections">
+    <ul>
+      <li><a href="#lead">Front page</a></li>
+      <li><a href="#works-with">Works with</a></li>
+      <li><a href="#team">One person to a team</a></li>
+      <li><a href="#inspired">Inspired by</a></li>
+      <li><a href="#coming">Coming soon</a></li>
+      <li><a href="#wanted">Wanted</a></li>
+      <li><a href="#install">Install</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+<div class="front">
+  <article class="lead" id="lead" aria-labelledby="lead-h">
+    <p class="kicker">Lead story</p>
+    <h2 class="headline" id="lead-h">One person, a team of agents, and nobody marking their own homework</h2>
+    <p class="standfirst">Coordinator asks every question before the work starts. Then it runs builders and blind critics, unattended, until the work meets a bar you can check. It stops when its rules say stop, writes everything down, and carries what it learned into the next run.</p>
+    <p class="byline">Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a></p>
+
+    <div class="cols">
+      <p class="dropcap">A single coding agent grades its own work. It decides the job is "fine", stops early, drifts into side quests, and asks you a question halfway through, usually while you are away. Coordinator gives that agent a lead to answer to.</p>
+      <p>The lead does not build and does not grade. At the start of a run it reads the project and the task, researches references, picks agents for each role from the ones your harness already has, and asks you every open question in one batch, with its recommendation first. Your answers, including standing permissions such as "merge into dev when the review says ready", go on the record.</p>
+      <h3>Then you can leave</h3>
+      <p>Builders work in parallel where the pieces are independent, each in its own git worktree. A fresh critic, who never sees the builder's reasoning, checks the real result against a bar written before anyone started: a failing test that must pass, a reference to match, an acceptance list. A pass without evidence counts as a fail.</p>
+      <p>A small script, <code>run.mjs next</code>, decides what happens to each piece: build again, change strategy, or stop. It refuses steps taken out of order. A second script, <code>detect.mjs</code>, reads the diff for the usual ways to fake a green run: skipped or deleted tests, removed assertions, rewritten snapshots, suppressed checks.</p>
+      <h3>Hard stops, in code</h3>
+      <p>Rounds and time have budgets. A run also stops when it makes no progress, when the same root cause comes back after a change of strategy, when a stacked piece is blocked, or when new scope passes its cap. A stopped piece is reported as stopped, with its last gap. Merging, deploying, deleting, spending or posting needs your approval, given up front.</p>
+      <h3>Nothing lives only in memory</h3>
+      <p>Every run is a JSON file, written atomically behind a lock, with a readable <code>workbench.md</code> beside it. A crash or a context reset resumes from the file. When the run ends, a retro turns repeated gaps into lessons, tunes the budgets from past runs, and, with your approval, sends gaps in the skill itself back to this project as issues.</p>
+      <h3>The dashboard is a web page</h3>
+      <p>You don't need a purpose-built GUI app to watch a team of agents. Each run writes its own dashboard, <code>hud.html</code>, that opens in any browser: the situation in plain words, a <em>Needs you</em> box with the lead's recommendation, a rough time left, then every piece of work, its scores, budgets and a timeline. <code>run.mjs serve</code> serves the same page on your own machine with answer forms, so you can reply to the lead from the browser while it works.</p>
+    </div>
+
+    <figure>
+      <img src="dashboard.png" width="1280" height="900" loading="lazy" alt="The Coordinator dashboard for a demo run. At the top: the situation, 'Totals endpoint: one gap left on partial refunds; the second try is building'. Below it the goal with its one behaviour, unchecked. A highlighted Needs you box asks whether to count partial refunds as negative lines or net them per order, with 'Net per order' marked Recommended, an Other box and a Submit button. Then a note box for the lead and a rough time left.">
+      <figcaption>The dashboard from the next version, 0.5, in development, showing a made-up demo run. The lead has parked one question, with its recommendation first; everything else carries on without you.</figcaption>
+    </figure>
+  </article>
+
+  <aside class="rail" aria-label="At a glance">
+    <section aria-labelledby="steps-h">
+      <h2 id="steps-h">A run, in five steps</h2>
+      <ol>
+        <li><strong>Intake.</strong> Read the project, research, staff the team, ask everything once.</li>
+        <li><strong>Split.</strong> Into pieces a critic can judge on their own.</li>
+        <li><strong>Build.</strong> One fresh builder per piece, in its own worktree.</li>
+        <li><strong>Judge.</strong> One blind critic per round, on the real artifact.</li>
+        <li><strong>Next.</strong> Build again, change strategy, or stop. Then integrate, report and learn.</li>
+      </ol>
+    </section>
+    <section aria-labelledby="stops-h">
+      <h2 id="stops-h">Stop rules, enforced in code</h2>
+      <ul>
+        <li>Round and time budgets</li>
+        <li>No progress between rounds</li>
+        <li>The same root cause after a change of strategy</li>
+        <li>A blocked stacked piece</li>
+        <li>A cap on scope added after the split</li>
+        <li>Steps out of order are refused</li>
+      </ul>
+    </section>
+    <section aria-labelledby="install-h" id="install">
+      <h2 id="install-h">Install</h2>
+      <p>As a Claude Code plugin:</p>
+<pre><code>/plugin marketplace add mindmakr/coordinator
+/plugin install coordinator@coordinator</code></pre>
+      <p>Then, in a project:</p>
+<pre><code>/coordinator:init
+/coordinator:run Fix issue #142</code></pre>
+      <p class="note">Needs Node 18+ and git. No other dependencies, no network calls. Add <code>.coordinator/</code> to your <code>.gitignore</code>. Full instructions in the <a href="https://github.com/mindmakr/coordinator#install">README</a>.</p>
+    </section>
+    <section aria-labelledby="facts-h">
+      <h2 id="facts-h">The small print</h2>
+      <div class="box">
+        <p>Scripts: Node 18+, zero dependencies, tested with <code>node:test</code>.</p>
+        <p>Secrets are refused in lessons and masked in run state.</p>
+        <p style="margin:0">The answer page binds to 127.0.0.1 only, behind a token made at each start.</p>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<section class="band" id="works-with" aria-labelledby="works-h">
+  <header>
+    <p class="kicker">Compatibility</p>
+    <h2 id="works-h">Works with any agent that can coordinate</h2>
+    <p class="standfirst">The coordinator brings no team of its own. It staffs builders, critics and researchers from whatever your harness offers.</p>
+  </header>
+  <div class="grid3">
+    <article>
+      <h3><span class="tag now">Today</span> Claude Code</h3>
+      <p>Coordinator is built and run on Claude Code, as a plugin or as a copied skill folder. It uses Claude Code's sub-agents, background tasks and question tool, and can publish the dashboard as a private Artifact.</p>
+    </article>
+    <article>
+      <h3><span class="tag now">By design</span> Any harness with sub-agents</h3>
+      <p>The skill is plain Markdown and Node scripts. It asks for three things from a harness: agents it can delegate to, a way to run a script, and a way to ask you a question. Where there is no question tool it falls back to a numbered list; where there are no Artifacts it gives you the file path. So far it is packaged and released for Claude Code only.</p>
+    </article>
+    <article>
+      <h3><span class="tag planned">Planned for 1.0</span> A second harness</h3>
+      <p>The <a href="https://github.com/mindmakr/coordinator/issues/15">1.0 plan</a> adds a second harness with its own install path and an end-to-end run. The draft design recommends OpenAI Codex CLI, with others as community adapters. The choice is still open, and none of these projects is affiliated with Coordinator.</p>
+    </article>
+  </div>
+</section>
+
+<section class="band" id="team" aria-labelledby="team-h">
+  <header>
+    <p class="kicker">Features</p>
+    <h2 id="team-h">From one person to a team</h2>
+    <p class="standfirst">The parts that let one person hand off a day's work and come back to evidence instead of a status update.</p>
+  </header>
+  <div class="grid3">
+    <article>
+      <h3><span class="tag now">Today</span> The loop</h3>
+      <p>Build, judge, decide, repeat. Builders and critics are always different agents. An integrator checks that the parts fit once every piece has passed.</p>
+    </article>
+    <article>
+      <h3><span class="tag now">Today</span> The bar</h3>
+      <p>Written before building, in terms a critic can check: a red test that must go green, a screen to match, an acceptance list. A craft bar covers the writing and the UI as well: no filler copy, UI started from references, never from a blank page.</p>
+    </article>
+    <article>
+      <h3><span class="tag next">Next, 0.5</span> Behaviours and evidence</h3>
+      <p>In development for 0.5: the bar becomes a list of behaviours ("given … when … then …"), the critic marks each one with evidence attached (test output, screenshots, logs, links), and a pass is refused while any behaviour is failing or unchecked.</p>
+    </article>
+    <article>
+      <h3><span class="tag now">Today</span> The dashboard</h3>
+      <p>A page in your browser, rewritten on every change, with a text twin in the terminal (<code>run.mjs show</code>). Version 0.5, in development, makes it live over Server-Sent Events, with a page per piece of work and a searchable timeline.</p>
+    </article>
+    <article>
+      <h3><span class="tag planned">Planned for 1.0</span> Answer from anywhere</h3>
+      <p>Today you answer on your own machine. The 1.0 plan moves the dashboard to the web so you can follow a run and answer the lead from a phone, with alerts when something needs you (<a href="https://github.com/mindmakr/coordinator/issues/11">#11</a>, <a href="https://github.com/mindmakr/coordinator/issues/12">#12</a>, <a href="https://github.com/mindmakr/coordinator/issues/18">#18</a>). Builders and critics keep running on your machine.</p>
+    </article>
+    <article>
+      <h3><span class="tag now">Today</span> Memory and lessons</h3>
+      <p>Lessons are stored per person or per project, merged, ranked by use and pruned, and quoted into the next run's briefs. Past runs set the budgets. A lesson seen three times is proposed as a change to the skill, for a person to review.</p>
+    </article>
+    <article>
+      <h3><span class="tag planned">Planned</span> Maps</h3>
+      <p>Mind, flow and heat maps of a run (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>), a map of the project's code and settings (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>), and a page about the coordinator itself: its lessons, stats and history (<a href="https://github.com/mindmakr/coordinator/issues/19">#19</a>).</p>
+    </article>
+    <article>
+      <h3><span class="tag now">Today</span> Durable state</h3>
+      <p>Locked, atomic JSON shared across git worktrees, with heartbeats for every builder and critic. <code>/coordinator:status</code> picks a run up after a break or a crash.</p>
+    </article>
+    <article>
+      <h3><span class="tag now">Today</span> Safe by default</h3>
+      <p>No network calls, no shell strings, ids checked against path traversal. Text from issues, web pages and other agents is treated as data, never as instructions.</p>
+    </article>
+  </div>
+</section>
+
+<section class="band" id="inspired" aria-labelledby="inspired-h">
+  <header>
+    <p class="kicker">Credits</p>
+    <h2 id="inspired-h">Inspired by</h2>
+    <p class="standfirst">Coordinator is an independent adaptation of other people's ideas. Credit where it is due.</p>
+  </header>
+  <div class="grid3">
+    <article>
+      <h3>The Gauntlet Loop</h3>
+      <p>The build, blind-critic and repeat loop at the centre comes from Matt Shumer's <a href="https://somethingbig.ai/gauntlet-loop">write-up of the Gauntlet Loop</a> and his example repository, <a href="https://github.com/mshumer/Claude-of-Duty">Claude-of-Duty</a>: a bar the agent cannot argue its way around, the goal rather than the implementation, and a builder that never grades itself.</p>
+    </article>
+    <article>
+      <h3>Impeccable</h3>
+      <p>From Paul Bakaus's <a href="https://github.com/pbakaus/impeccable">Impeccable</a>: one skill made of narrow commands, an <code>init</code> that asks only what it cannot infer and writes a shared context file, and a deterministic detector that needs no model.</p>
+    </article>
+    <article>
+      <h3>Memory and graph flows</h3>
+      <p>The wider work on giving agents long-term memory, and on running work as a graph of steps with explicit hand-offs, shaped the lessons store and the planned maps. These are shared ideas in the field; Coordinator claims none of them.</p>
+    </article>
+  </div>
+  <p class="note">What Coordinator adds: the intake that asks everything up front, stop rules in code, durable run state, a bar-gaming detector for diffs, and learning across runs. Details in <a href="https://github.com/mindmakr/coordinator/blob/main/CREDITS.md">CREDITS.md</a>.</p>
+</section>
+
+<section class="band" id="coming" aria-labelledby="coming-h">
+  <header>
+    <p class="kicker">Coming soon</p>
+    <h2 id="coming-h">On the drawing board: add-ons for the questions a lead gets asked</h2>
+    <p class="standfirst">None of these exist yet. Each is marked with where it stands: on the 1.0 plan with an issue, or proposed and open for discussion.</p>
+  </header>
+  <div class="grid2">
+    <div>
+      <h3><span class="tag planned">On the 1.0 plan</span> Security review in every run</h3>
+      <p>A security pass as a second critic on every code change: secret, dependency and static scans on what the change adds, and authorisation checks read from the diff. Risk areas named in a project's <code>COORDINATOR.md</code> add a specialist critic that must also pass (<a href="https://github.com/mindmakr/coordinator/issues/13">#13</a>).</p>
+    </div>
+    <div>
+      <h3><span class="tag planned">Proposed</span> Compliance and auditing</h3>
+      <p>An audit trail a reviewer can follow from a requirement to the behaviour that tests it and the evidence that it passed, and compliance checklists as bars. The 1.0 service design keeps an audit log of its own; compliance packs have no issue yet. <a href="#wanted">Tell us what you need.</a></p>
+    </div>
+    <div>
+      <h3><span class="tag planned">On the 1.0 plan</span> Code and implementation maps</h3>
+      <p>A map of the code the coordinator works on: modules and imports, shared helpers and who reuses them, near-duplicates worth merging, so builders and critics see what a change touches before they touch it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>). Run maps: mind, flow and heat (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>).</p>
+    </div>
+    <div>
+      <h3><span class="tag planned">On the 1.0 plan</span> Settings and surfaces</h3>
+      <p>Each settings key mapped to where it is read and written, and each route, screen and message tied to the services behind it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>).</p>
+    </div>
+    <div>
+      <h3><span class="tag planned">Proposed</span> API flows and call graphs</h3>
+      <p>Request flows through an API, caller and callee graphs, and dependencies between functions, built on the project map. No issue yet beyond <a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>.</p>
+    </div>
+    <div>
+      <h3><span class="tag planned">Proposed</span> External dependency maps</h3>
+      <p>Third-party packages and services a project calls, where it calls them, and which run touched them. No issue yet.</p>
+    </div>
+  </div>
+  <p class="note" style="margin-top:1rem">The road to 1.0, in order. <strong>Today (0.4):</strong> a local dashboard with answer forms and <code>watch</code>. <strong>Next (0.5, in development):</strong> the live dashboard with behaviours and evidence. <strong>Planned:</strong> <a href="https://github.com/mindmakr/coordinator/issues/9">an event log behind the local dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/10">run state kept in your own repository</a> · <a href="https://github.com/mindmakr/coordinator/issues/11">a GitHub App and a read-only web dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/12">answers, notes and alerts from anywhere</a> · <a href="https://github.com/mindmakr/coordinator/issues/13">built-in sub-skills</a> · <a href="https://github.com/mindmakr/coordinator/issues/14">the 1.0 release</a>. The design is a draft under review (<a href="https://github.com/mindmakr/coordinator/issues/15">#15</a>).</p>
+</section>
+
+<section class="band" id="wanted" aria-labelledby="wanted-h">
+  <header>
+    <p class="kicker">Notices</p>
+    <h2 id="wanted-h">Wanted: contributors, evangelists, sponsors</h2>
+  </header>
+  <div class="letter">
+    <p class="salute">An open letter to the people who build models, coding tools and open-source agents</p>
+    <div class="cols">
+      <p>If you build a model, a coding tool or an open-source agent, your users are already running teams of agents. What they lack is a lead: someone to ask the questions up front, keep the builder and the critic apart, and stop the run when it stops making sense.</p>
+      <p>Coordinator is that lead, written as an open skill under the MIT licence. It runs on Claude Code today and is designed for any harness that can delegate to sub-agents. Each harness that supports it widens what it can do for your users and theirs.</p>
+      <p>It is maintained by one author. Support would go to the work that one person cannot do alone: testing runs across models and harnesses, building and maintaining adapters for more harnesses, and the hosted dashboard planned for 1.0.</p>
+      <p>We are not asking for endorsement. We are asking for help, and we will say plainly, on this page and in the repository, who is helping and how.</p>
+      <p><em>Asif Raja, by mindmakr</em></p>
+    </div>
+  </div>
+  <div class="asks">
+    <div>
+      <h3>Contribute</h3>
+      <p>Every run is a test of the skill. Report a run that went wrong, a lesson that keeps recurring, or send a fix. An adapter for your harness is especially welcome.</p>
+      <a class="button" href="https://github.com/mindmakr/coordinator/blob/main/CONTRIBUTING.md">Read CONTRIBUTING.md</a>
+    </div>
+    <div>
+      <h3>Spread the word</h3>
+      <p>Write up a run, show it at a meetup, star the repository, or point a team that is drowning in agent output at it. Say what went wrong as well as what worked.</p>
+      <a class="button" href="https://github.com/mindmakr/coordinator">Visit the repository</a>
+    </div>
+    <div>
+      <h3>Sponsor or partner</h3>
+      <p>Credits for test runs, an adapter built together, sponsorship of the work. Open the form; it is a public issue, so leave out private email addresses and payment details, and we will agree a private channel there.</p>
+      <a class="button" href="https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml">Sponsor or partner</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="colophon">
+  <p>Coordinator by mindmakr · Version 0.4.0 · <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT licence</a></p>
+  <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a> · <a href="https://github.com/mindmakr/coordinator">github.com/mindmakr/coordinator</a></p>
+</footer>
+
+</div>
+</body>
+</html>
