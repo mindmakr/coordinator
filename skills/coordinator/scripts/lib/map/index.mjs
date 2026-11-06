@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { esc } from '../links.mjs';
 import { page } from '../parts.mjs';
-import { writeAtomic } from '../store.mjs';
+import { withLock, writeAtomic } from '../store.mjs';
 import { buildMap } from './build.mjs';
 import { files, load, record } from './log.mjs';
 import { mapPage } from './page.mjs';
@@ -21,14 +21,42 @@ export const PIT_STOP = ['events.jsonl', 'map.md'];
 // Without --dest a pit stop stages them in the run's own state folder; nothing is written to the project's tree.
 export const defaultDest = (runDir) => join(runDir, 'pit-stop', 'map');
 
-// For the state branch (c10's `run.mjs push`, lib/statesync.mjs): the files to add
-// under the run, as { 'runs/<run>/map/<name>': content }.
-// TODO(c10): once statesync.mjs is merged, spread pitStopFiles(o.dir, runId) into
-// the map its files() returns, masked with the same redactor, so `push` carries the map.
-export function pitStopFiles(runDir, run) {
-  if (!hasMap(runDir)) return {};
-  return Object.fromEntries(PIT_STOP.map((n) => [`runs/${run}/map/${n}`, readFileSync(join(mapDir(runDir), n))]));
-}
+// The state branch (`run.mjs push`/`pull`, lib/statesync.mjs) carries the staged pit stop
+// as runs/<run>/map/events.jsonl and map.md. The map keeps its own files and its own lock
+// (map/events.jsonl.lock), apart from the run's events.jsonl and state.json.
+const copyPath = (run, name) => `runs/${run}/map/${name}`;
+
+// push's attach hook: the staged files, masked line by line with push's redactor; refused,
+// like the run's own log, when the copy has map events the staged log lacks.
+export const mapAttach = (runDir) => ({ run, red, read }) => {
+  const stage = defaultDest(runDir);
+  if (!existsSync(join(stage, 'events.jsonl'))) return {}; // no pit stop yet
+  const log = readFileSync(join(stage, 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => `${JSON.stringify(red(JSON.parse(l)))}\n`).join('');
+  const theirs = read(copyPath(run, 'events.jsonl'));
+  if (theirs && !log.startsWith(theirs.toString('utf8'))) throw new Error(`refused: the copy of ${run}'s project map has events this pit stop lacks (written from another machine); run.mjs pull ${run} first; nothing pushed`);
+  const out = { [copyPath(run, 'events.jsonl')]: log };
+  if (existsSync(join(stage, 'map.md'))) out[copyPath(run, 'map.md')] = red(readFileSync(join(stage, 'map.md'), 'utf8'));
+  return out;
+};
+
+// pull's restore hook: the copy's map log becomes the local one when there is none, or
+// fast-forwards it; a local log ahead of the copy is kept; one that differs is kept and named.
+export const mapRestore = (runDir) => ({ run, read }) => {
+  const theirs = read(copyPath(run, 'events.jsonl'));
+  if (!theirs) return 'none';
+  const copy = theirs.toString('utf8');
+  const local = files(mapDir(runDir)).events;
+  return withLock(local, () => {
+    const mine = existsSync(local) ? readFileSync(local, 'utf8') : '';
+    if (mine.startsWith(copy)) return mine.length === copy.length ? 'up-to-date' : 'local-ahead';
+    if (!copy.startsWith(mine)) return `kept the local map: it and the copy differ (run.mjs map ${run} --fresh starts over)`;
+    writeAtomic(local, copy); // map.json catches up on the next read
+    const md = read(copyPath(run, 'map.md'));
+    if (md) writeAtomic(join(mapDir(runDir), 'map.md'), md);
+    for (const [name, content] of [['events.jsonl', copy], ['map.md', md]]) if (content) writeAtomic(join(defaultDest(runDir), name), content);
+    return mine ? 'fast-forward' : 'restored';
+  });
+};
 
 // A broken log is named, with the way out.
 const recover = (run, e) => new Error(`${e.message}. To start the map over: run.mjs map ${run} --fresh (the old map/ folder is kept beside it)`);

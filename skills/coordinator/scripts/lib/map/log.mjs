@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withLock, writeAtomic } from '../store.mjs';
+import { maskSecrets } from '../secrets.mjs';
 import { COLLECTIONS } from './build.mjs';
 
 export const V = 1;
@@ -101,7 +102,12 @@ export function load(dir, { write = true } = {}) {
 }
 
 // Records one build: appends its events and rewrites the snapshot, under one lock.
-export function record(dir, built, { unit = null, at = new Date().toISOString() } = {}) {
+// Every string is masked before it is recorded, so the digest covers what any copy holds
+// (push masks again; for map data that is then a no-op, and a pulled log replays cleanly).
+const masked = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(masked) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, masked(x)])) : v);
+
+export function record(dir, raw, { unit = null, at = new Date().toISOString() } = {}) {
+  const built = masked(raw);
   const f = files(dir);
   return withLock(f.events, () => {
     const prev = load(dir, { write: false });

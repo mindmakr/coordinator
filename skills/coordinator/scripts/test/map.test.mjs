@@ -13,7 +13,7 @@ import { mapPage } from '../lib/map/page.mjs';
 import { exportTarget, jsonc } from '../lib/map/resolve.mjs';
 import { callMatches } from '../lib/map/surfaces.mjs';
 import { text, touches } from '../lib/map/touches.mjs';
-import { build as buildRun, mapView, pitStopFiles } from '../lib/map/index.mjs';
+import { build as buildRun, mapView, mapAttach } from '../lib/map/index.mjs';
 import { staticCtx } from '../lib/hud.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -235,7 +235,7 @@ test('--pit-stop stages the log and summary in the run\'s folder, never the proj
   writeFileSync(join(dest, 'events.jsonl'), `${readFileSync(join(dest, 'events.jsonl'), 'utf8')}{"v":1,"seq":999}\n`);
   const refused = cli('map', 'm1', '--root', copy, '--pit-stop', '--dest', dest);
   assert.equal(refused.code, 1); assert.match(refused.err, /pit stop refused/);
-  const files = pitStopFiles(join(state, 'runs', 'm1'), 'm1');
+  const files = mapAttach(join(state, 'runs', 'm1'))({ run: 'm1', red: (x) => x, read: () => null });
   assert.deepEqual(Object.keys(files), ['runs/m1/map/events.jsonl', 'runs/m1/map/map.md'], 'what push will carry to the state branch');
 });
 
