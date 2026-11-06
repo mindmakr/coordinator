@@ -15,7 +15,7 @@ async function fresh(kind) {
   const pg = (await import('pg')).default;
   const c = new pg.Client({ connectionString: PG });
   await c.connect();
-  await c.query('DROP TABLE IF EXISTS audit, sessions, deliveries, runs, repos, installations, schema_migrations CASCADE');
+  await c.query('DROP TABLE IF EXISTS trackers, gh_events, unit_refs, audit, sessions, deliveries, runs, repos, installations, schema_migrations CASCADE');
   await c.end();
   const { postgresDb } = await import('../src/db/postgres.mjs');
   return guard(await postgresDb(PG, { max: 2 }));
@@ -50,10 +50,30 @@ for (const kind of ['memory', 'postgres']) {
       const s = { idHash: 'h1', userId: 1, login: 'reader', tokenEnc: 'enc', refreshEnc: null, tokenExpiresAt: Date.now() + 1000, refreshExpiresAt: null, expiresAt: Date.now() + 60_000 };
       await db.putSession(s);
       assert.equal((await db.session('h1')).login, 'reader');
-      await db.putSession({ ...s, idHash: 'old', expiresAt: Date.now() - 1 });
+      await db.putSession({ ...s, idHash: 'old', expiresAt: Date.now() - 3_600_000 });
       assert.equal(await db.session('old'), null, 'an expired session is gone');
       await db.dropSession('h1');
       assert.equal(await db.session('h1'), null);
+
+      // The trail's tables.
+      await db.upsertRepo({ installationId: 7, id: 70, fullName: 'acme/web', private: true });
+      await db.upsertRepo({ installationId: 7, id: 70, fullName: 'acme/web' });
+      assert.equal((await db.repoByName('acme/web')).private, true, 'an unknown visibility keeps the known one');
+      await db.setRepoSync(7, 70, { headSha: 'h', config: { trackers: false } });
+      assert.deepEqual((await db.repoByName('acme/web')).config, { trackers: false });
+      await db.setUnitRefs(7, 70, 'r1', [{ unit: 'u1', key: 'acme/web#12' }, { unit: 'u2', key: 'acme/web#12' }]);
+      assert.deepEqual(await db.runsReferencing(7, 'acme/web#12'), [{ repoId: 70, runId: 'r1' }]);
+      assert.deepEqual(await db.runsReferencing(8, 'acme/web#12'), [], 'scoped');
+      await db.addGhEvent(7, { id: 'merged:acme/web#12', refKey: 'acme/web#12', kind: 'merged', at: '2026-11-06T11:00:00.000Z', detail: { label: 'PR' } });
+      await db.addGhEvent(7, { id: 'merged:acme/web#12', refKey: 'acme/web#12', kind: 'merged', at: '2026-11-06T11:00:00.000Z', detail: { label: 'PR' } });
+      assert.deepEqual(await db.ghEvents(7, ['acme/web#12']), [{ id: 'merged:acme/web#12', refKey: 'acme/web#12', kind: 'merged', at: '2026-11-06T11:00:00.000Z', detail: { label: 'PR' } }]);
+      assert.deepEqual(await db.ghEvents(8, ['acme/web#12']), []);
+      await db.putTracker(7, { refKey: 'acme/web#12', runId: 'r1', unitId: 'u1', commentId: 5, bodySha: 'b' });
+      await db.putTracker(7, { refKey: 'acme/web#12', runId: 'r1', unitId: 'u1', boardSha: 'c' });
+      assert.deepEqual(await db.tracker(7, 'acme/web#12', 'r1', 'u1'), { refKey: 'acme/web#12', runId: 'r1', unitId: 'u1', commentId: 5, bodySha: 'b', boardSha: 'c' });
+      assert.equal(await db.tracker(8, 'acme/web#12', 'r1', 'u1'), null);
+      await db.dropRunsExcept(7, 70, []);
+      assert.deepEqual(await db.runsReferencing(7, 'acme/web#12'), [], 'refs go with their run');
 
       await db.audit('test', { installationId: 7, login: 'reader' });
       await db.deleteInstallation(7);

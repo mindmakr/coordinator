@@ -29,7 +29,7 @@ export async function migrate(pool) {
   }
 }
 
-const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons } : null);
+const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons, config: r.config ?? null, private: r.private ?? null } : null);
 const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at) } : null);
 
 export async function postgresDb(url, { max = 10 } = {}) {
@@ -53,17 +53,20 @@ export async function postgresDb(url, { max = 10 } = {}) {
     async installationIds() { return (await q('SELECT id FROM installations')).rows.map((r) => Number(r.id)); },
     async deleteInstallation(id) { await q('DELETE FROM installations WHERE id = $1', [id]); },
 
-    async upsertRepo({ installationId, id, fullName }) {
-      await q('INSERT INTO repos (installation_id, id, full_name) VALUES ($1, $2, $3) ON CONFLICT (installation_id, id) DO UPDATE SET full_name = $3', [installationId, id, fullName]);
+    async upsertRepo({ installationId, id, fullName, private: priv }) {
+      await q(`INSERT INTO repos (installation_id, id, full_name, private) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (installation_id, id) DO UPDATE SET full_name = $3, private = COALESCE($4, repos.private)`, [installationId, id, fullName, priv ?? null]);
     },
     async removeRepo(installationId, id) { await q('DELETE FROM repos WHERE installation_id = $1 AND id = $2', [installationId, id]); },
     async repos(installationId) { return (await q('SELECT * FROM repos WHERE installation_id = $1 ORDER BY full_name', [installationId])).rows.map(repoRow); },
     async repoByName(fullName) {
       return repoRow((await q('SELECT * FROM repos WHERE lower(full_name) = lower($1) ORDER BY synced_at DESC NULLS LAST LIMIT 1', [fullName])).rows[0]);
     },
-    async setRepoSync(installationId, id, { headSha, error = null, lessons }) {
-      if (lessons === undefined) await q('UPDATE repos SET head_sha = $3, sync_error = $4, synced_at = now() WHERE installation_id = $1 AND id = $2', [installationId, id, headSha, error]);
-      else await q('UPDATE repos SET head_sha = $3, sync_error = $4, lessons = $5, synced_at = now() WHERE installation_id = $1 AND id = $2', [installationId, id, headSha, error, JSON.stringify(lessons)]);
+    async setRepoSync(installationId, id, { headSha, error = null, lessons, config }) {
+      const set = ['head_sha = $3', 'sync_error = $4', 'synced_at = now()']; const v = [installationId, id, headSha, error];
+      if (lessons !== undefined) { v.push(JSON.stringify(lessons)); set.push(`lessons = $${v.length}`); }
+      if (config !== undefined) { v.push(JSON.stringify(config)); set.push(`config = $${v.length}`); }
+      await q(`UPDATE repos SET ${set.join(', ')} WHERE installation_id = $1 AND id = $2`, v);
     },
 
     async runs(installationId, repoId) { return (await q('SELECT * FROM runs WHERE installation_id = $1 AND repo_id = $2 ORDER BY run_id', [installationId, repoId])).rows.map(runRow); },
@@ -75,6 +78,37 @@ export async function postgresDb(url, { max = 10 } = {}) {
     },
     async dropRunsExcept(installationId, repoId, keep) {
       await q('DELETE FROM runs WHERE installation_id = $1 AND repo_id = $2 AND NOT (run_id = ANY($3::text[]))', [installationId, repoId, keep]);
+      await q('DELETE FROM unit_refs WHERE installation_id = $1 AND repo_id = $2 AND NOT (run_id = ANY($3::text[]))', [installationId, repoId, keep]);
+    },
+
+    async setUnitRefs(installationId, repoId, runId, list) {
+      await q('DELETE FROM unit_refs WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3', [installationId, repoId, runId]);
+      for (const { unit, key } of list) {
+        await q('INSERT INTO unit_refs (installation_id, repo_id, run_id, unit_id, ref_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING', [installationId, repoId, runId, unit, key]);
+      }
+    },
+    async runsReferencing(installationId, refKey) {
+      return (await q('SELECT DISTINCT repo_id, run_id FROM unit_refs WHERE installation_id = $1 AND ref_key = $2', [installationId, refKey])).rows.map((r) => ({ repoId: Number(r.repo_id), runId: r.run_id }));
+    },
+    async addGhEvent(installationId, e) {
+      await q(`INSERT INTO gh_events (installation_id, id, ref_key, kind, at, detail) VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (installation_id, id) DO UPDATE SET kind = $4, at = $5, detail = $6`, [installationId, e.id, e.refKey, e.kind, e.at, JSON.stringify(e.detail ?? {})]);
+      await q("DELETE FROM gh_events WHERE at < now() - interval '180 days'");
+    },
+    async ghEvents(installationId, refKeys) {
+      return (await q('SELECT * FROM gh_events WHERE installation_id = $1 AND ref_key = ANY($2::text[]) ORDER BY at', [installationId, refKeys])).rows
+        .map((r) => ({ id: r.id, refKey: r.ref_key, kind: r.kind, at: iso(r.at), detail: r.detail }));
+    },
+    async tracker(installationId, refKey, runId, unitId) {
+      const r = (await q('SELECT * FROM trackers WHERE installation_id = $1 AND ref_key = $2 AND run_id = $3 AND unit_id = $4', [installationId, refKey, runId, unitId])).rows[0];
+      return r ? { refKey: r.ref_key, runId: r.run_id, unitId: r.unit_id, commentId: r.comment_id === null ? null : Number(r.comment_id), bodySha: r.body_sha, boardSha: r.board_sha } : null;
+    },
+    async putTracker(installationId, t) {
+      const cur = (await q('SELECT comment_id, body_sha, board_sha FROM trackers WHERE installation_id = $1 AND ref_key = $2 AND run_id = $3 AND unit_id = $4', [installationId, t.refKey, t.runId, t.unitId])).rows[0];
+      const n = { commentId: cur?.comment_id ?? null, bodySha: cur?.body_sha ?? null, boardSha: cur?.board_sha ?? null, ...t };
+      await q(`INSERT INTO trackers (installation_id, ref_key, run_id, unit_id, comment_id, body_sha, board_sha) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (installation_id, ref_key, run_id, unit_id) DO UPDATE SET comment_id = $5, body_sha = $6, board_sha = $7`,
+      [installationId, n.refKey, n.runId, n.unitId, n.commentId, n.bodySha, n.boardSha]);
     },
 
     async putSession(s) {

@@ -7,7 +7,8 @@
 // the state branch (masked again on the way in), repo names, installation ids.
 // Sessions hold encrypted tokens and a hash of the cookie, never the cookie.
 
-const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'run', 'putRun', 'dropRunsExcept', 'deleteInstallation'];
+const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'run', 'putRun', 'dropRunsExcept', 'deleteInstallation',
+  'setUnitRefs', 'runsReferencing', 'addGhEvent', 'ghEvents', 'tracker', 'putTracker'];
 
 export function guard(db) {
   const out = { ...db };

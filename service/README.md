@@ -1,8 +1,8 @@
 # Coordinator service
 
-A GitHub App and a read-only web dashboard for [Coordinator](../README.md) runs. The lead pushes a run's state to the `coordinator-state` branch at pit stops (`run.mjs push`, see [durability.md](../skills/coordinator/references/durability.md)); this service reads that branch when GitHub says it changed and shows each run to the people who can read the repo, from any browser or phone.
+A GitHub App and a read-only web dashboard for [Coordinator](../README.md) runs, plus the GitHub trail: one tracker comment and one board card per unit, kept current. The lead pushes a run's state to the `coordinator-state` branch at pit stops (`run.mjs push`, see [durability.md](../skills/coordinator/references/durability.md)); this service reads that branch when GitHub says it changed and shows each run to the people who can read the repo, from any browser or phone.
 
-Design: [docs/design/v1.md](../docs/design/v1.md), sections 7 (web HUD), 10 (hosting) and 11 (security). This is the read-only part (0.6); answers, notes and alerts come next.
+Design: [docs/design/v1.md](../docs/design/v1.md), sections 6 (GitHub as the visible trail), 7 (web HUD), 10 (hosting) and 11 (security). This is milestone 0.6 (#11); answers, notes and alerts come next (#12).
 
 Licence: [AGPL-3.0](LICENSE). The skill and its shared code stay MIT.
 
@@ -13,10 +13,25 @@ Licence: [AGPL-3.0](LICENSE). The skill and its shared code stay MIT.
 | Ingest | `POST /webhook` takes `push` events for `coordinator-state` and installation events. The signature (`X-Hub-Signature-256`) is checked on the raw body before parsing. It reads the branch with an installation token (read-only, minted per sync, never stored), validates every `runs/<run>/events.jsonl` with the skill's own event schema, replays it, masks secrets again, and stores the state. A repeated delivery id is skipped; an unchanged branch tip or log blob is not read again. A log that fails validation keeps the last good copy and shows why. |
 | Sign-in | GitHub App user authorisation (user-to-server tokens, which expire and refresh). A random `state` in a short-lived HttpOnly cookie guards the round trip. |
 | Access | Every repo page asks GitHub, with the viewer's own token, whether they can read the repo; the answer is reused for that person only, for 60 s. No access, no repo, and a repo re-created under the same name all give the same 404. |
-| Pages | Projects (repos you can read), runs of a repo, run dashboard, unit pages with their timelines, and the coordinator page, drawn by the skill's own renderers, so they look like the local dashboard. No scripts and no forms except sign-out and "Sync now". |
+| Pages | Projects (repos you can read), runs of a repo, run dashboard, unit pages with their timelines, the run's maps, and the coordinator page, drawn by the skill's own renderers, so they look like the local dashboard. No scripts and no forms except sign-out and "Sync now". Questions show without answer forms ("answer in the chat for now"); evidence files stay on the person's machine and show as "file kept locally". |
+| Merges and checks | `pull_request` (closed, merged, reopened) and `check_suite` (completed) events are stored against the PR and shown in the run's and unit's timelines (badged "(GitHub)"), to viewers who can read the PR's repo too. They also refresh the tracker comments and board cards of every run that links the PR. |
+| Tracker comments | One comment per unit on each issue or PR it links, marked `<!-- coordinator:tracker run=… unit=… -->` and edited in place (template: the skill's `lib/tracker.mjs`, so the lead writes the same text). State, tries and scores, open questions, merge and check results, and a link to the unit's page. The last gap, cause and question headers appear only when the comment is in the run's own repo and that repo is private; elsewhere it is status only. Unchanged text is never re-sent; a deleted comment is re-made; mentions never ping. Only repos of the same installation are written. |
+| Board | When `coordinator.json` on the state branch names an organisation board, each unit's card gets **Run** (text) and **Unit state** (building, judging, passed, stopped, needs you); the two fields are created on first use. With a `status` map, the board's own Status follows too. Cards not on the board are left alone; nothing else is created or renamed. |
 | Manual sync | "Sync now" on a repo page (rate limited), or `npm run sync -- <installation-id>` (`--all`, `--force`). |
 
-Shared code: [src/core.mjs](src/core.mjs) imports the skill's `scripts/lib` (event schema, replay, rules, view, renderers, secret masking). Nothing is copied; the container image carries that folder beside the service.
+Shared code: [src/core.mjs](src/core.mjs) imports the skill's `scripts/lib` (event schema, replay, rules, view, renderers, maps, tracker template, secret masking). Nothing is copied; the container image carries that folder beside the service. A page beside a repo's runs (c21's project map, for one) adds itself to `REPO_PAGES` in [src/pages.mjs](src/pages.mjs).
+
+### coordinator.json (optional, on the state branch)
+
+```json
+{
+  "trackers": true,
+  "board": { "owner": "acme", "number": 3,
+             "status": { "building": "In progress", "judging": "In review", "passed": "Done", "stopped": "Blocked", "needs you": "Blocked" } }
+}
+```
+
+`"trackers": false` turns the comments off for that repo. Without `board`, no board is touched. Boards owned by a personal account are not reachable by an App; use an organisation board. `TRACKERS=off` or `BOARD=off` in the environment turns either off everywhere.
 
 ## Run it locally
 
@@ -57,19 +72,22 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `GITHUB_APP_SLUG` | no | Shows an "install the App" link |
 | `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` (last entry) for rate limits |
 | `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 300), `SESSION_DAYS` | no | Defaults 3000, `coordinator-state`, 60, 7 |
+| `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off for every repo |
 
 ## Register the GitHub App
 
-[app-manifest.json](app-manifest.json) asks for the least the read-only service needs:
+[app-manifest.json](app-manifest.json) asks for the least each part needs. Every installation token is also narrowed when it is minted to the one job it is for (`SCOPES` in [src/github.mjs](src/github.mjs)), so the ingest token can only read, and the comment token cannot touch the board or the code.
 
-| Permission | Level | Why |
-|---|---|---|
-| Metadata | read | Required by GitHub |
-| Contents | read | Read the `coordinator-state` branch (GitHub grants contents per repo, not per branch; the service only ever reads that branch) |
-| Issues | read | Issue titles and state for unit links (used by the next release; asked now so installs need no re-approval) |
-| Pull requests | read | The same for PRs |
+| Permission | Level | Used by | Why |
+|---|---|---|---|
+| Metadata | read | everything | Required by GitHub |
+| Contents | read | ingest | Read the `coordinator-state` branch (GitHub grants contents per repo, not per branch; the service only ever reads that branch) |
+| Issues | write | tracker comments | Create and edit the one tracker comment per unit (issue comments) |
+| Pull requests | write | tracker comments, merge events | Comments on PRs; `pull_request` events |
+| Checks | read | check events | `check_suite` events |
+| Organization projects | write | board | Set the Run, Unit state and Status fields; create the two coordinator fields once. Leave it out to run without a board |
 
-Events: `push` only (installation events always arrive). Answers and notes from the web (the next release) will need Contents: write.
+Events: `push`, `pull_request`, `check_suite` (installation events always arrive). Contents stays read until answers and notes from the web (the next release) need to write to the state branch.
 
 1. Replace `https://coordinator.example.com` in the manifest with your `BASE_URL`.
 2. Save this as a local HTML file, paste the manifest into the `value`, and open it (for an organisation, use `https://github.com/organizations/<org>/settings/apps/new`):

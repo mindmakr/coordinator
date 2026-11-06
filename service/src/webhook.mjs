@@ -10,10 +10,14 @@ export function verifySignature(secret, raw, header) {
   return got.length === want.length && timingSafeEqual(got, want);
 }
 
-const repoOf = (r) => ({ id: Number(r.id), fullName: String(r.full_name) });
+const repoOf = (r) => ({ id: Number(r.id), fullName: String(r.full_name), ...(typeof r.private === 'boolean' ? { private: r.private } : {}) });
+const refKey = (full, n) => `${String(full).toLowerCase()}#${Number(n)}`;
 
 // handle(event, payload) → { status, body, work? }. `work` is the sync to run after replying.
-export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
+// Pull request and check results become events on the read model (shown in the
+// timelines and the tracker comments) and refresh the trail of every run in the
+// same installation whose units link that PR.
+export function webhooks({ db, ingest, trail = null, branch = 'coordinator-state', log }) {
   async function installationEvent(p) {
     const id = Number(p.installation?.id);
     if (p.action === 'deleted') {
@@ -43,7 +47,44 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
     if (!(await db.installation(id))) await db.upsertInstallation({ id, account: String(p.repository?.owner?.login ?? '') });
     const repo = repoOf(p.repository);
     await db.upsertRepo({ installationId: id, ...repo });
-    return { status: 202, body: 'syncing', work: () => ingest.syncRepo(id, repo) };
+    return { status: 202, body: 'syncing', work: () => ingest.syncRepo(id, { id: repo.id, fullName: repo.fullName }) };
+  }
+
+  // Records what happened to PR `n` of the payload's repo; returns the work that refreshes affected runs.
+  async function record(p, n, kind, at, detail, id) {
+    const inst = Number(p.installation.id);
+    if (!(await db.installation(inst))) return null; // not installed here (yet): nothing to show it on
+    const key = refKey(p.repository.full_name, n);
+    await db.addGhEvent(inst, { id, refKey: key, kind, at, detail: { label: `PR ${p.repository.full_name}#${Number(n)}`, ...detail } });
+    return async () => {
+      if (!trail) return;
+      for (const r of await db.runsReferencing(inst, key)) {
+        const repo = (await db.repos(inst)).find((x) => x.id === r.repoId);
+        if (repo) await trail.refreshRun(inst, repo, r.runId);
+      }
+    };
+  }
+
+  async function pullRequestEvent(p) {
+    const pr = p.pull_request ?? {};
+    const kind = p.action === 'closed' ? (pr.merged ? 'merged' : 'closed') : p.action === 'reopened' ? 'reopened' : null;
+    if (!kind || !Number.isSafeInteger(Number(pr.number))) return { status: 202, body: `ignored: pull_request ${p.action}` };
+    const at = String((kind === 'merged' ? pr.merged_at : kind === 'closed' ? pr.closed_at : pr.updated_at) ?? new Date().toISOString());
+    const work = await record(p, pr.number, kind, at, {}, `${kind}:${refKey(p.repository.full_name, pr.number)}:${at}`);
+    return work ? { status: 202, body: kind, work } : { status: 202, body: 'ignored: unknown installation' };
+  }
+
+  async function checkSuiteEvent(p) {
+    const cs = p.check_suite ?? {};
+    if (p.action !== 'completed' || !Array.isArray(cs.pull_requests) || !cs.pull_requests.length) return { status: 202, body: 'ignored: check_suite' };
+    const conclusion = String(cs.conclusion ?? 'finished').slice(0, 30);
+    const works = [];
+    for (const pr of cs.pull_requests.slice(0, 20)) {
+      if (!Number.isSafeInteger(Number(pr.number))) continue;
+      const w = await record(p, pr.number, 'checks', String(cs.updated_at ?? new Date().toISOString()), { conclusion, sha: String(cs.head_sha ?? '').slice(0, 40) }, `checks:${refKey(p.repository.full_name, pr.number)}:${Number(cs.id)}`);
+      if (w) works.push(w);
+    }
+    return works.length ? { status: 202, body: `checks ${conclusion}`, work: async () => { for (const w of works) await w(); } } : { status: 202, body: 'ignored: unknown installation' };
   }
 
   return {
@@ -54,7 +95,9 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
       const r = event === 'push' ? await pushEvent(payload)
         : event === 'installation' ? await installationEvent(payload)
           : event === 'installation_repositories' ? await reposEvent(payload)
-            : { status: 202, body: `ignored: ${event}` };
+            : event === 'pull_request' && payload.repository ? await pullRequestEvent(payload)
+              : event === 'check_suite' && payload.repository ? await checkSuiteEvent(payload)
+                : { status: 202, body: `ignored: ${event}` };
       const done = async () => { if (delivery) await db.recordDelivery(delivery); };
       if (!r.work) { await done(); return r; }
       // Recorded only once the sync succeeds, so GitHub's redelivery of a failed one is not skipped.

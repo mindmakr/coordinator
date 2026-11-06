@@ -10,6 +10,12 @@ export class GitHubError extends Error {
   constructor(status, what) { super(`GitHub ${what}: HTTP ${status}`); this.status = status; }
 }
 
+export const SCOPES = {
+  read: { contents: 'read', metadata: 'read' },                     // ingest
+  comments: { issues: 'write', pull_requests: 'write', metadata: 'read' }, // tracker comments
+  board: { organization_projects: 'write', issues: 'read', pull_requests: 'read', metadata: 'read' }, // board fields
+};
+
 export function github({ appId, privateKey, clientId, clientSecret, api, web, fetch: f = globalThis.fetch }) {
   // The App's own JWT: RS256, issued a minute back for clock drift, valid 9 minutes.
   function appJwt(nowS = Math.floor(Date.now() / 1000)) {
@@ -35,10 +41,9 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
   }
   const ok = (r) => { if (r.status >= 200 && r.status < 300) return r.json; throw new GitHubError(r.status, r.what); };
 
-  // Read-only scope on every token minted here: the read model needs nothing more.
-  const READ = { contents: 'read', metadata: 'read' };
-  async function installationToken(installationId) {
-    const r = await call(appJwt(), 'POST', `/app/installations/${Number(installationId)}/access_tokens`, { permissions: READ }, 'installation token');
+  // Each token is narrowed to the one job it is minted for (SCOPES), whatever the App holds.
+  async function installationToken(installationId, permissions = SCOPES.read) {
+    const r = await call(appJwt(), 'POST', `/app/installations/${Number(installationId)}/access_tokens`, { permissions }, 'installation token');
     return ok(r).token;
   }
 
@@ -88,6 +93,22 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
       const j = ok(await call(token, 'GET', `/repos/${enc(full)}/git/blobs/${encodeURIComponent(sha)}`));
       if (j.encoding !== 'base64') throw new Error(`blob ${sha}: unexpected encoding`);
       return Buffer.from(j.content, 'base64');
+    },
+
+    // Tracker comments (an issue's or a PR's conversation).
+    issueComments: (token, full, n) => pages(token, `/repos/${enc(full)}/issues/${Number(n)}/comments`),
+    createComment: async (token, full, n, body) => ok(await call(token, 'POST', `/repos/${enc(full)}/issues/${Number(n)}/comments`, { body }, 'create comment')).id,
+    // false when the comment is gone (deleted by someone), so a new one is made.
+    async updateComment(token, full, id, body) {
+      const r = await call(token, 'PATCH', `/repos/${enc(full)}/issues/comments/${Number(id)}`, { body }, 'update comment');
+      if (r.status === 404) return false;
+      ok(r);
+      return true;
+    },
+    async graphql(token, query, variables = {}) {
+      const r = ok(await call(token, 'POST', '/graphql', { query, variables }, 'graphql'));
+      if (r?.errors?.length) throw Object.assign(new Error(`GitHub graphql: ${String(r.errors[0].message).slice(0, 200)}`), { errors: r.errors });
+      return r.data;
     },
 
     // As the person.

@@ -151,9 +151,11 @@ function unitCard(u, ctx, form, repo) {
   return blk(`unit-${u.id}`, html, 'section', ` class="card${u.finished ? ' fin' : ''}" id="unit-${esc(u.id)}"`);
 }
 
-function needsYou(v, form) {
+// ctx.readOnlyHint (plain text): where a read-only copy tells people to answer instead.
+function needsYou(v, form, ctx = {}) {
   const hint = form || !(v.needsYou.length + v.answered.length) ? ''
-    : `<p class="hint">This copy is read-only. Answer in the chat, or ask the lead for the answer page (<code>run.mjs serve ${esc(v.id)}</code>).</p>`;
+    : ctx.readOnlyHint ? `<p class="hint">${esc(ctx.readOnlyHint)}</p>`
+      : `<p class="hint">This copy is read-only. Answer in the chat, or ask the lead for the answer page (<code>run.mjs serve ${esc(v.id)}</code>).</p>`;
   const open = v.needsYou.length ? `<div class="needs"><b>Needs you</b><ul>${v.needsYou.map((q) => questionItem(q, form, v.repo)).join('')}</ul>${hint}</div>`
     : `<div class="needs calm">Nothing needs you.${hint}</div>`;
   const answered = v.answered.length
@@ -199,7 +201,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}</header>`),
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     blk('goal', goalBlock(v, ctx)),
-    blk('needs', needsYou(v, form)),
+    blk('needs', needsYou(v, form, ctx)),
     form ? blk('note', noteForm(form)) : '',
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),

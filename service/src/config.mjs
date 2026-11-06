@@ -33,6 +33,9 @@ export function loadConfig(env = process.env) {
     accessTtlMs: int(env.ACCESS_TTL_SECONDS, 60, 0, 300) * 1000,
     sessionDays: int(env.SESSION_DAYS, 7, 1, 30),
     sessionSecret,
+    // The GitHub trail: tracker comments and board fields. "off" turns one off for every repo;
+    // a repo turns its own off in coordinator.json ("trackers": false, or no "board").
+    trail: { trackers: env.TRACKERS !== 'off', board: env.BOARD !== 'off' },
     github: {
       appId: need(env, 'GITHUB_APP_ID'),
       appSlug: env.GITHUB_APP_SLUG || null,

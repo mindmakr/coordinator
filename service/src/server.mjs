@@ -6,7 +6,9 @@ import { createServer } from 'node:http';
 import { REPO, isSafeId, questions } from './core.mjs';
 import { access as makeAccess } from './access.mjs';
 import { ingester } from './ingest.mjs';
-import { coordinatorPage, landing, messagePage, projectsPage, repoBase, runPage, runsPage, unitView } from './pages.mjs';
+import { trail } from './trail.mjs';
+import { REPO_PAGES, landing, mapsView, messagePage, projectsPage, repoBase, runPage, runsPage, unitView } from './pages.mjs';
+import { refsOf } from './ingest.mjs';
 import { limiter } from './ratelimit.mjs';
 import { parseCookies, sessions as makeSessions } from './session.mjs';
 import { verifySignature, webhooks as makeWebhooks } from './webhook.mjs';
@@ -14,7 +16,7 @@ import { verifySignature, webhooks as makeWebhooks } from './webhook.mjs';
 const MAX_WEBHOOK = 5 * 1024 * 1024;
 const MAX_FORM = 4 * 1024;
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
-const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/(coordinator|sync)|\/run\/([^/]+)(?:\/unit\/([^/]+))?)?\/?$/;
+const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\/unit\/([^/]+)|\/(maps))?)?\/?$/;
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
@@ -28,8 +30,9 @@ function readBody(req, max) {
 }
 
 export function createApp({ config, db, gh, log, now = Date.now }) {
-  const ingest = ingester({ db, gh, branch: config.stateBranch, log });
-  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log });
+  const github = trail({ db, gh, config, log });
+  const ingest = ingester({ db, gh, branch: config.stateBranch, log, trail: github });
+  const hooks = makeWebhooks({ db, ingest, trail: github, branch: config.stateBranch, log });
   const auth = makeSessions({ db, gh, config, log, now });
   const acl = makeAccess({ gh, db, ttlMs: config.accessTtlMs, now });
   const limits = {
@@ -90,7 +93,8 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
 
   // A repo page: the person must be signed in and able to read the repo on GitHub; otherwise 404.
   async function repoRoute(req, res, url, m, user) {
-    const [, owner, name, kind, runRaw, unitRaw] = m;
+    const [, owner, name, kind, runRaw, unitRaw, maps] = m;
+    if (kind && kind !== 'sync' && !Object.hasOwn(REPO_PAGES, kind)) return notFound(res, user);
     const fullName = `${decodeURIComponent(owner)}/${decodeURIComponent(name)}`;
     const run = runRaw === undefined ? null : decodeURIComponent(runRaw);
     const unit = unitRaw === undefined ? null : decodeURIComponent(unitRaw);
@@ -113,12 +117,30 @@ export function createApp({ config, db, gh, log, now = Date.now }) {
     }
     if (req.method !== 'GET') return notFound(res, user);
     const n = now();
-    if (kind === 'coordinator') return html(res, 200, coordinatorPage(user, repo, await db.runs(repo.installationId, repo.id), n));
+    if (kind) return html(res, 200, REPO_PAGES[kind].render(user, repo, await db.runs(repo.installationId, repo.id), n));
     if (run === null) return html(res, 200, runsPage(user, repo, await db.runs(repo.installationId, repo.id), n));
     const row = await db.run(repo.installationId, repo.id, run);
     if (!row?.state) return notFound(res, user);
-    const out = unit === null ? runPage(user, repo, row, n) : unitView(user, repo, row, unit, n);
+    const gh = await githubEvents(user, repo, row.state);
+    const out = maps ? mapsView(user, repo, row, n, gh) : unit === null ? runPage(user, repo, row, n, gh) : unitView(user, repo, row, unit, n, gh);
     return out === null ? notFound(res, user) : html(res, 200, out);
+  }
+
+  // GitHub's events for the issues and PRs the run's units link, from this installation only,
+  // and only for repos this viewer can read too (a linked repo may be more private than the run's).
+  async function githubEvents(user, repo, state) {
+    const refs = refsOf(state);
+    if (!refs.length) return [];
+    const events = await db.ghEvents(repo.installationId, [...new Set(refs.map((r) => r.key))]);
+    const allowed = new Map();
+    const out = [];
+    for (const { unit, key } of refs) {
+      const name = key.split('#')[0];
+      if (!allowed.has(name)) allowed.set(name, name === repo.fullName.toLowerCase() || !!(await acl.readable(user, name)));
+      const list = allowed.get(name) ? events.filter((e) => e.refKey === key) : [];
+      if (list.length) out.push({ unit, events: list });
+    }
+    return out;
   }
 
   const notFound = (res, user) => html(res, 404, messagePage('Not found', 'There is nothing here, or you cannot read it on GitHub.', user));

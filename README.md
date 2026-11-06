@@ -140,7 +140,8 @@ skills/coordinator/
     ├── detect.mjs              the bar-gaming detector
     ├── lib/                    pure modules: rules, store, events, eventschema, schema, statesync, gaming, secrets, args,
     │                           workbench, view, plain, questions, hud, unitpage, parts, links, theme, timeline,
-    │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study
+    │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study,
+    │                           maps, heat, mapsvg, mapspage, tracker
     └── test/                   node:test suites
 service/                        the GitHub App and web dashboard (AGPL-3.0, its own dependencies; imports scripts/lib)
 ```

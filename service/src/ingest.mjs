@@ -4,11 +4,11 @@
 // Idempotent: the branch tip and each log's blob sha are compared first, so a
 // redelivered webhook or a repeated sync changes nothing. A log that fails
 // validation keeps the last good state and records why; other runs go on.
-import { isSafeId, maskSecrets, parseLog, replay, validRun } from './core.mjs';
+import { isSafeId, maskSecrets, parseLog, replay, unitRefs, validRun } from './core.mjs';
 
 const RUN_LOG = /^runs\/([^/]+)\/events\.jsonl$/;
 const MARKER = '.coordinator-state';
-export const LIMITS = { logBytes: 8 * 1024 * 1024, runs: 500, lessonsBytes: 1024 * 1024 };
+export const LIMITS = { logBytes: 8 * 1024 * 1024, runs: 500, lessonsBytes: 1024 * 1024, configBytes: 64 * 1024 };
 
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const maskDeep = (v) => (typeof v === 'string' ? maskSecrets(v) : Array.isArray(v) ? v.map(maskDeep) : isObj(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, maskDeep(x)])) : v);
@@ -26,7 +26,11 @@ export function readLog(runId, buf) {
   } catch (e) { return { error: maskSecrets(String(e.message)).slice(0, 500) }; }
 }
 
-export function ingester({ db, gh, branch = 'coordinator-state', log }) {
+// The issues and PRs each unit links, as rows for db.setUnitRefs.
+export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).map((x) => ({ unit: u.id, key: x.key })));
+
+// trail (optional): { refreshRun(installationId, repo, runId) }, run for every run whose state changed.
+export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null }) {
   const chains = new Map(); // one sync per repo at a time; a second waits for the first
   const serial = (k, fn) => {
     const next = (chains.get(k) ?? Promise.resolve()).catch(() => {}).then(fn);
@@ -67,36 +71,43 @@ export function ingester({ db, gh, branch = 'coordinator-state', log }) {
           log?.warn('run log rejected', { repo: repo.fullName, run: e.runId, reason: r.error });
         } else {
           await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: r.seq, state: r.state, error: null });
+          await db.setUnitRefs(installationId, repo.id, e.runId, refsOf(r.state));
           out.updated.push(e.runId);
         }
       }
       await db.dropRunsExcept(installationId, repo.id, logs.map((e) => e.runId));
       const lessons = await readLessons(token, repo, entries);
-      await db.setRepoSync(installationId, repo.id, { headSha: head, error: tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons });
+      const config = await readJson(token, repo, entries, 'coordinator.json', LIMITS.configBytes);
+      await db.setRepoSync(installationId, repo.id, { headSha: head, error: tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons, config: isObj(config) ? config : null });
+      if (trail && out.updated.length) {
+        const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
+        for (const runId of out.updated) await trail.refreshRun(installationId, fresh, runId);
+      }
       return out;
     });
   }
 
+  async function readJson(token, repo, entries, path, max) {
+    const e = entries.find((x) => x.path === path && x.type === 'blob');
+    if (!e || e.size > max) return null;
+    try { return JSON.parse((await gh.blob(token, repo.fullName, e.sha)).toString('utf8')); } catch { return null; }
+  }
   async function readLessons(token, repo, entries) {
-    const e = entries.find((x) => x.path === 'lessons/lessons.json' && x.type === 'blob');
-    if (!e || e.size > LIMITS.lessonsBytes) return null;
-    try {
-      const j = JSON.parse((await gh.blob(token, repo.fullName, e.sha)).toString('utf8'));
-      return Array.isArray(j) ? maskDeep(j.filter(isObj)) : null;
-    } catch { return null; }
+    const j = await readJson(token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes);
+    return Array.isArray(j) ? maskDeep(j.filter(isObj)) : null;
   }
 
   // Every repo the installation can reach now: new ones added, gone ones removed, each synced.
   async function syncInstallation(installationId, { force = false } = {}) {
     const token = await gh.installationToken(installationId);
     const seen = [];
-    for await (const r of gh.installationRepos(token)) seen.push({ id: r.id, fullName: r.full_name });
+    for await (const r of gh.installationRepos(token)) seen.push({ id: r.id, fullName: r.full_name, private: typeof r.private === 'boolean' ? r.private : undefined });
     const known = await db.repos(installationId);
     for (const r of known) if (!seen.some((s) => s.id === r.id)) await db.removeRepo(installationId, r.id);
     const results = [];
+    for (const r of seen) await db.upsertRepo({ installationId, ...r }); // all first, so links between them resolve
     for (const r of seen) {
-      await db.upsertRepo({ installationId, ...r });
-      try { results.push(await syncRepo(installationId, r, { force, token })); } catch (e) { results.push({ repo: r.fullName, error: e.message }); }
+      try { results.push(await syncRepo(installationId, { id: r.id, fullName: r.fullName }, { force, token })); } catch (e) { results.push({ repo: r.fullName, error: e.message }); }
     }
     return results;
   }

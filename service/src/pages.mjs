@@ -3,26 +3,58 @@
 // local dashboard. Read-only: no answer forms (that is c12), no scripts. Every
 // string from a run is escaped by those renderers; the few bits drawn here use
 // the same esc().
-import { blk, chip, decide, esc, hud, page, runView, selfModel, selfPage, stamp, unitPage } from './core.mjs';
+import { blk, chip, decide, esc, hud, mapsPage, page, runView, selfModel, selfPage, stamp, unitPage } from './core.mjs';
 
 const enc = encodeURIComponent;
 export const repoBase = (fullName) => `/r/${fullName.split('/').map(enc).join('/')}`;
+
+// Pages of a repo beside its runs, by path segment: /r/<owner>/<repo>/<id>.
+// render(user, repo, rows, nowMs) → HTML. c21's project map adds itself here.
+export const REPO_PAGES = {
+  coordinator: { label: 'Coordinator', render: (user, repo, rows, nowMs) => coordinatorPage(user, repo, rows, nowMs) },
+};
+
+export const READ_ONLY_HINT = 'This page is read-only for now: answer in the chat with the lead. Answering from here comes in the next release.';
 
 function ctxFor(fullName, run = null) {
   const base = repoBase(fullName);
   const runBase = run ? `${base}/run/${enc(run)}` : null;
   return {
     live: null, theme: null, run, store: run, base: runBase ?? base, home: runBase ?? base, embed: null, readOnly: true,
+    readOnlyHint: READ_ONLY_HINT,
+    maps: runBase ? `${runBase}/maps` : null,
     runHref: (id) => `${base}/run/${enc(id)}`,
     unitHref: (id) => `${runBase}/unit/${enc(id)}`,
-    // Evidence files never leave the person's machine (durability.md), so there is nothing to open here.
-    artHref: () => '#evidence-is-local',
+    // Evidence files never leave the person's machine (durability.md): shown as "file kept locally".
+    artHref: () => null,
     pages: [
       { path: '/', label: 'Projects', href: '/' },
       { path: base, label: fullName, href: base },
-      ...(run ? [{ path: runBase, label: run, href: runBase }] : []),
-      { path: '/coordinator', label: 'Coordinator', href: `${base}/coordinator` },
+      ...(run ? [{ path: runBase, label: run, href: runBase }, { path: `${runBase}/maps`, label: 'Maps', href: `${runBase}/maps` }] : []),
+      ...Object.entries(REPO_PAGES).map(([id, p]) => ({ path: id === 'coordinator' ? '/coordinator' : `${base}/${id}`, label: p.label, href: `${base}/${id}` })),
     ],
+  };
+}
+
+// GitHub's own events for the units' issues and PRs (merged, closed, checks), as timeline rows.
+// gh: [{ unit, events: [{ kind, at, detail }] }], already limited to what the viewer may read.
+const BADGE = { merged: 'merge', closed: 'info', reopened: 'info' };
+export function withGitHub(v, gh = []) {
+  if (!gh.length) return v;
+  const rows = gh.flatMap(({ unit, events }) => events.map((e) => {
+    const failed = e.kind === 'checks' && e.detail?.conclusion !== 'success';
+    return {
+      at: e.at, unit, who: unit, score: null, cause: null,
+      badge: e.kind === 'checks' ? (failed ? 'fail' : 'pass') : BADGE[e.kind] ?? 'info',
+      label: e.kind === 'checks' ? (failed ? 'checks red' : 'checks green') : e.kind,
+      text: `${e.detail?.label ?? 'PR'} ${e.kind === 'checks' ? `checks ${e.detail?.conclusion ?? 'finished'}` : e.kind} (GitHub)`,
+    };
+  }));
+  const byTime = (a, b) => String(a.at).localeCompare(String(b.at));
+  return {
+    ...v,
+    timeline: [...v.timeline, ...rows].sort((a, b) => byTime(b, a)),
+    units: v.units.map((u) => ({ ...u, timeline: [...u.timeline, ...rows.filter((r) => r.unit === u.id)].sort(byTime) })),
   };
 }
 
@@ -81,17 +113,19 @@ export function runsPage(user, repo, rows, nowMs = Date.now()) {
   return withBar(page({ title: repo.fullName, body, ctx, path: ctx.base }), user, repo.fullName);
 }
 
-export function runPage(user, repo, row, nowMs = Date.now()) {
-  const s = runState(row);
-  const v = runView(s, decide(s), nowMs, { repo: repo.fullName });
-  return withBar(hud(v, nowMs, ctxFor(repo.fullName, row.runId)), user, repo.fullName);
+const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName }), gh); };
+
+export function runPage(user, repo, row, nowMs = Date.now(), gh = []) {
+  return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId)), user, repo.fullName);
 }
 
-export function unitView(user, repo, row, unitId, nowMs = Date.now()) {
-  const s = runState(row);
-  const v = runView(s, decide(s), nowMs, { repo: repo.fullName });
-  const html = unitPage(v, unitId, nowMs, ctxFor(repo.fullName, row.runId));
+export function unitView(user, repo, row, unitId, nowMs = Date.now(), gh = []) {
+  const html = unitPage(viewOf(repo, row, nowMs, gh), unitId, nowMs, ctxFor(repo.fullName, row.runId));
   return html === null ? null : withBar(html, user, repo.fullName);
+}
+
+export function mapsView(user, repo, row, nowMs = Date.now(), gh = []) {
+  return withBar(mapsPage(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId)), user, repo.fullName);
 }
 
 export function coordinatorPage(user, repo, rows, nowMs = Date.now()) {
