@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0 (2026-11-06)
+
+A live dashboard, and a bar made of behaviours with evidence attached. From the owner's feedback on the 0.4 HUD.
+
+- **Live dashboard:** `run.mjs serve` pushes changes over Server-Sent Events (same token, 127.0.0.1 only, 15 s heartbeat, reconnect with backoff) and the page swaps only the blocks that changed, never one being typed in. A **Live** dot shows connected or reconnecting. No more full-page reloads.
+- **Kept state:** open sections, scroll position, theme and timeline filters are remembered per browser, across live updates and reloads.
+- **Theme toggle:** System, Light or Dark.
+- **Behaviours make up the bar:** `add --behaviour "Given … when … then …"` (repeatable) or `behave <run> <unit> [--id B1] --text …` / `--id B1 --remove`; `behaviours <run>` lists them. The critic marks each with `verdict … --behaviour B1=pass:"evidence"`; `verdict pass` is refused while any behaviour is failing or unchecked, and `start` sets them back to unchecked.
+- **Evidence per unit and behaviour:** `evidence <run> <unit> [--behaviour B1] (--text | --file | --url) --kind test|screenshot|log|link [--label]`. Text is masked and capped; images and small logs are checked and copied into `artifacts/<unit>/`; URLs must be http(s). Test output shows in a monospace block, collapsed when long; screenshots as thumbnails that open full size.
+- **Goal evidence:** `behave <run> --goal …`, `evidence <run> --goal …`; the dashboard opens with **Goal: met / not yet**, and `integrate pass` needs every goal behaviour passing.
+- **A page per unit** (`/unit/<id>`, live; `units/<id>.html` in the snapshot): behaviours, evidence, every round with the builder's report (`built --report`), the critic's verdict, score, cause and behaviour marks, notes and questions, links, and **the unit's own timeline** (start, beats with `beat --text`, built, verdicts, strategy, evidence, questions, answers, notes, links, merge, stop).
+- **Timelines:** colour-coded badges with text labels, search, kind and unit filters, time ranges (30 min to 8+ days) and sort, all kept per browser.
+- **Links everywhere:** URLs, `owner/repo#n`, and against the run's repo (`init --repo`, else the project's GitHub remote) `#n`, commit shas and branch names, each opening in a new tab with no referrer. `add`/`link --issue … --pr …` (repeatable, for linked repos) and `link --merge …` put chips on the card and the unit page.
+- **Looks like the project:** `init --theme file.css` or `Theme:` in `COORDINATOR.md` maps the design system's custom properties (shadcn, Tailwind 4 `@theme`, daisyUI) onto the dashboard; unsafe values are dropped and nothing is loaded.
+- **Brand:** "Coordinator by mindmakr" mark, favicon, page titles and footer with the version.
+- **Snapshot:** `hud.html` is now a static read-only snapshot (no meta refresh, so open sections stay open); one page per unit beside it; small screenshots embedded.
+- Older state files load: every new field is optional.
+
 ## 0.4.0 (2026-11-06)
 
 The person answers the lead's questions and adds notes from the HUD, and the lead hears about it at once.

@@ -53,11 +53,12 @@ test('hud.html escapes every piece of state text and loads nothing', () => {
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /cause: cycle &quot;dates&quot;/);
   assert.match(html, /g \{\{units\}\} &amp; &quot;q&quot;/, 'placeholders inside state text are not expanded');
-  assert.doesNotMatch(html, /\b(src|href)=["']?(https?:)?\/\//i, 'no network');
+  assert.doesNotMatch(html, /\bsrc=["']?(https?:)?\/\//i, 'no network');
+  assert.doesNotMatch(html, /<link rel="stylesheet"|@import/i, 'no stylesheets from anywhere');
   assert.match(html, /default-src 'none'/);
-  assert.match(html, /http-equiv="refresh" content="15"/);
+  assert.doesNotMatch(html, /http-equiv="refresh"/, 'a snapshot: no reload that would close what the reader opened');
   assert.match(html, /<svg class="spark"[^>]*>.*<polyline points="/s);
-  assert.deepEqual(html.match(/\{\{\w+\}\}/g), ['{{units}}'], 'every placeholder filled; only the goal\'s text remains');
+  assert.deepEqual([...new Set(html.match(/\{\{\w+\}\}/g))], ['{{units}}'], 'every placeholder filled; only the goal\'s text remains');
 });
 
 test('an old state without causes or notes still renders', () => {

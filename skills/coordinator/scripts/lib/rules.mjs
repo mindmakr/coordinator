@@ -110,3 +110,6 @@ export function stats(runs) {
     suggestedMaxRounds: p80 === null ? null : Math.min(8, p80 + 1),
   };
 }
+
+// Behaviours that keep a unit (or the goal) from passing: failing or not yet checked.
+export const unmet = (behaviours) => (behaviours ?? []).filter((b) => b.status !== 'pass');

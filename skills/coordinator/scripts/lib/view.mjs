@@ -2,6 +2,8 @@
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
 import { attention, clip, sentence, situation, timeLeft } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
+import { unmet } from './rules.mjs';
+import { runTimeline, unitTimeline } from './timeline.mjs';
 
 const MINUTE = 60_000;
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale'];
@@ -23,7 +25,7 @@ function nextStep(run, plan) {
   }
 }
 
-export function view(run, plan, nowMs = Date.now()) {
+export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
   const end = run.closed ? Date.parse(run.closed.at) : nowMs;
   const next = new Map(plan.units.map((u) => [u.id, u]));
   const integ = run.integration?.rounds ?? [];
@@ -31,14 +33,14 @@ export function view(run, plan, nowMs = Date.now()) {
   const pick = (kind) => notes.filter((n) => n.kind === kind).map((n) => n.text);
   const qs = questions(run);
   const personNotes = notes.filter((n) => n.kind === 'person').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at }));
-  const timeline = [
-    ...run.units.flatMap((u) => u.rounds.map((r) => ({ at: r.at, kind: r.verdict, who: `${u.id} r${r.n}`, score: r.score, text: r.verdict === 'pass' ? (r.evidence ?? '') : r.gap, cause: r.cause ?? null }))),
-    ...integ.map((r, i) => ({ at: r.at, kind: r.verdict, who: `integration r${i + 1}`, score: null, text: r.verdict === 'pass' ? (r.evidence ?? '') : r.gap, cause: r.cause ?? null })),
-    ...notes.map((n) => ({ at: n.at, kind: n.kind, who: n.unit ?? '', score: null, text: n.text, cause: null })),
-    ...qs.flatMap((q) => q.history.map((a) => ({ at: a.at, kind: 'answer', who: `${q.id} · ${a.by}`, score: null, text: answerText(a), cause: null }))),
-  ].filter((e) => e.at).sort((a, b) => b.at.localeCompare(a.at));
+  const timeline = runTimeline(run).reverse();
+  const goalBehaviours = run.goalBehaviours ?? [];
   return {
-    id: run.id, tag: run.tag, goal: run.goal, bar: run.bar, fence: run.fence,
+    id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo,
+    goalCheck: {
+      behaviours: goalBehaviours, evidence: run.goalEvidence ?? [],
+      met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
+    }, bar: run.bar, fence: run.fence,
     phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
     open: !run.closed, started: run.createdAt,
     situation: situation(run),
@@ -64,6 +66,9 @@ export function view(run, plan, nowMs = Date.now()) {
         evidence: last?.evidence ?? null,
         next: label(d),
         personNotes: personNotes.filter((n) => n.unit === u.id),
+        bar: u.bar, behaviours: u.behaviours ?? [], evidenceItems: u.evidence ?? [], links: u.links ?? [],
+        roundList: u.rounds, stopReason: u.stopReason ?? null,
+        asks: qs.filter((q) => q.unit === u.id), timeline: unitTimeline(run, u.id),
       };
     }),
     integration: integ.map((r) => r.verdict),
@@ -97,11 +102,14 @@ export function text(v) {
     `${'unit'.padEnd(w)}${'status'.padEnd(10)}${'round'.padEnd(7)}${'scores'.padEnd(18)}next`,
   ];
   for (const u of v.units) {
-    lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}`);
+    const bs = u.behaviours.length ? ` · behaviours ${u.behaviours.filter((b) => b.status === 'pass').length}/${u.behaviours.length}` : '';
+    lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? '! ' : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);
+  const gb = v.goalCheck.behaviours;
+  lines.push(`goal    ${v.goalCheck.met ? 'met' : 'not yet'}${gb.length ? ` (${gb.filter((b) => b.status === 'pass').length}/${gb.length} behaviours pass)` : ''}`);
   lines.push('', `next    ${v.next}`, `open    ${v.needsYou.length} questions · ${v.followUps.length} follow-ups · ${v.decisions.length} decisions`);
   return `${lines.join('\n')}\n`;
 }

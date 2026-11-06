@@ -1,13 +1,20 @@
-// The local answer page: the HUD plus forms, served on 127.0.0.1 only.
-// Every request needs the token made at start; a POST also needs this page's
-// own origin. The writes are callbacks (run.mjs passes its locked state code),
-// so the page changes nothing the CLI could not.
+// The live dashboard and answer page, on 127.0.0.1 only. Every request needs
+// the token made at start (GET in the URL; POST in the form or a header); a
+// POST also needs this page's own origin. Writes are callbacks (run.mjs passes
+// its locked state code), so the page changes nothing the CLI could not.
+// GET /                 the dashboard          GET /unit/<id>     a unit's page
+// GET /events?p=<path>  live updates (SSE)     GET /artifacts/<unit>/<file>  a stored screenshot or log
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { esc } from './hud.mjs';
+import { esc } from './links.mjs';
+import { hub } from './live.mjs';
+import { csp } from './parts.mjs';
 
 export const HOST = '127.0.0.1';
 const MAX_BODY = 64 * 1024;
+const PAGE = /^\/(?:unit\/([A-Za-z0-9][A-Za-z0-9._-]{0,63}))?$/;
+const ART = /^\/artifacts\/([A-Za-z0-9_][A-Za-z0-9._-]{0,63})\/([^/]+)$/;
 
 const sameToken = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -33,10 +40,14 @@ function readBody(req) {
 const errorPage = (msg, back) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Not saved</title>`
   + `<p>Not saved: ${esc(msg)}</p><p><a href="${esc(back)}">Back to the run</a></p>`;
 
-// page({ token, nonce }) returns the HTML; post[path](form) writes and returns
-// the anchor to show next. Resolves with the server and its URL once listening.
-export function serve({ port = 0, page, post }) {
+const pathOf = (p) => { const m = PAGE.exec(p ?? ''); return m ? p : null; };
+
+// page(path, { token, nonce }) returns the HTML or null; post[path](form) writes
+// and returns the anchor to show next; file(target, name) returns { file, type }
+// for an artifact the state names, or null; version() changes when the state does.
+export function serve({ port = 0, page, post, file = () => null, version = () => '' }) {
   const token = randomBytes(24).toString('base64url');
+  const live = hub({ version, render: (p) => page(p, { token, nonce: 'patch' }) });
   const server = createServer(async (req, res) => {
     const { port: p } = server.address();
     const hosts = [`${HOST}:${p}`, `localhost:${p}`];
@@ -44,13 +55,25 @@ export function serve({ port = 0, page, post }) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const home = `/?t=${token}`;
     try {
-      if (req.method === 'GET' && url.pathname === '/') {
+      if (req.method === 'GET' && url.pathname === '/favicon.ico') return send(res, 204, '');
+      if (req.method === 'GET') {
         if (!sameToken(url.searchParams.get('t'), token)) return send(res, 403, 'missing or wrong token: open the link serve printed');
+        if (url.pathname === '/events') {
+          const at = pathOf(url.searchParams.get('p'));
+          if (!at) return send(res, 400, 'bad page');
+          return live.add(req, res, at);
+        }
+        const art = ART.exec(url.pathname);
+        if (art) {
+          const f = file(decodeURIComponent(art[1]), decodeURIComponent(art[2]));
+          if (!f) return send(res, 404, 'not found');
+          return send(res, 200, readFileSync(f.file), { 'Content-Type': f.type, 'Content-Security-Policy': "default-src 'none'; img-src 'self'; sandbox", 'Cache-Control': 'private, max-age=60' });
+        }
+        if (!pathOf(url.pathname)) return send(res, 404, 'not found');
         const nonce = randomBytes(16).toString('base64');
-        return send(res, 200, page({ token, nonce }), {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
-        });
+        const html = page(url.pathname, { token, nonce });
+        if (html === null) return send(res, 404, 'not found');
+        return send(res, 200, html, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': `${csp({ nonce })}; frame-ancestors 'none'` });
       }
       if (req.method !== 'POST' || !post[url.pathname]) return send(res, 404, 'not found');
       // Same origin only: a browser always sends Origin on a POST; anything else is refused.
@@ -63,13 +86,17 @@ export function serve({ port = 0, page, post }) {
       try { anchor = post[url.pathname](form); } catch (e) {
         return send(res, 400, errorPage(e.message, home), { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'" });
       }
-      return send(res, 303, '', { Location: `${home}#${encodeURIComponent(anchor ?? '')}` });
+      const back = form.get('back');
+      return send(res, 303, '', { Location: `${pathOf(back) && back !== '/' ? `${back}?t=${token}` : home}#${encodeURIComponent(anchor ?? '')}` });
     } catch (e) {
+      if (res.headersSent) return res.end();
       return send(res, e.message === 'too large' ? 413 : 500, e.message === 'too large' ? 'too large' : 'server error');
     }
   });
+  const close = server.close.bind(server);
+  server.close = (cb) => { live.close(); return close(cb); }; // open event streams would hold it open
   return new Promise((ok, fail) => {
     server.once('error', fail);
-    server.listen(port, HOST, () => ok({ server, token, url: `http://${HOST}:${server.address().port}/?t=${token}` }));
+    server.listen(port, HOST, () => ok({ server, token, live, url: `http://${HOST}:${server.address().port}/?t=${token}` }));
   });
 }

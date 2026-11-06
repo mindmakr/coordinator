@@ -33,6 +33,9 @@ function mainCheckout() {
   return projectRoot;
 }
 
+// The project's folder (the main checkout), where COORDINATOR.md and the git remote live.
+export const projectDir = () => mainCheckout();
+
 export function baseDir(scope = 'project') {
   if (process.env.COORDINATOR_DIR) return resolve(process.env.COORDINATOR_DIR);
   return scope === 'global' ? join(homedir(), '.coordinator') : join(mainCheckout(), '.coordinator');

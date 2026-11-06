@@ -71,8 +71,8 @@ test('each unit says what it is for, how it went and what happens next', () => {
   assert.equal(say.u3, 'u3 works. Building, try 1; next a critic checks it when the builder finishes.');
   assert.equal(say.u4, 'u4 works. Waiting for u3; starts when it passes.');
   assert.ok(html.indexOf('<p class="say">u2 works.') < html.indexOf('round 2/4'), 'the sentence comes before the scores');
-  assert.match(html, /<details class="raw"><summary>Gap and evidence<\/summary><dl><dt>Last gap<\/dt><dd>still off by one/);
-  assert.match(html, /<a href="https:\/\/github.com\/o\/r\/issues\/1" rel="noreferrer">link<\/a>/);
+  assert.match(html, /<details class="raw" data-d="u-u2-raw"><summary>Gap and evidence<\/summary><dl><dt>Last gap<\/dt><dd>still off by one/);
+  assert.match(html, /<a href="https:\/\/github.com\/o\/r\/issues\/1" target="_blank" rel="noopener noreferrer">o\/r#1<\/a>/, 'a short label for a GitHub link');
   assert.match(html, /u1 · #1 Security gaps/);
 });
 
@@ -94,7 +94,7 @@ test('lead and agent text is escaped everywhere, and a non-web link is not a lin
   assert.doesNotMatch(html, /<img|<script|<svg onload|<i>t|href="javascript/i);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(html, /Recommended: &quot;&gt;&lt;script&gt;/);
-  assert.match(html, /<span class="cause">javascript:alert\(1\)<\/span>/);
+  assert.match(html, /<span class="badge k-link">link<\/span> javascript:alert\(1\)<\/span>/, 'shown as text, not a link');
 });
 
 test('an old state (no titles, links, situation, answers or notes) still loads', () => {

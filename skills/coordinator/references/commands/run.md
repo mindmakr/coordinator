@@ -26,12 +26,12 @@ From here the run is **unattended**. Do not ask the person anything until the re
 
 ## 2. Set up
 
-`S/run.mjs init <run> --tag <domain> --goal … --bar … --fence "<scope in words>" --paths <dir,dir>`, then `add` each unit (`--after` for stacked work; `--title "#1206 Security gaps"` and `--link <issue or PR URL>` so the HUD names it plainly), then `freeze`. Then record the intake answers (step 1.8) on the run. `--paths` is the fence as path prefixes; the detector reads it. Every change also rewrites the run's HUD, `hud.html`: tell the person where it is, once (`references/hud.md`).
+`S/run.mjs init <run> --tag <domain> --goal … --bar … --fence "<scope in words>" --paths <dir,dir> [--repo owner/name] [--theme <design-system.css>]`, then `add` each unit (`--after` for stacked work; `--title "#1206 Security gaps"`, `--issue owner/repo#1206` and later `--pr`, repeatable for linked repos, so the dashboard names and links it; one `--behaviour "Given … when … then …"` per behaviour of its bar, `references/bar.md`), then `freeze`. Give the goal its own behaviours with `behave <run> --goal --text …`. Then record the intake answers (step 1.8) on the run. `--paths` is the fence as path prefixes; the detector reads it. Every change also rewrites the run's snapshot, `hud.html` (`references/hud.md`).
 
 **Hear the person at once.** Start two background commands and keep them running until the finish:
 
 - `S/run.mjs watch <run>`: one line per new or changed answer and per note from the person. Run it where its lines wake you (a Monitor in Claude Code; elsewhere a background command whose output you check after each agent report). On a line: read it with `S/run.mjs questions <run>` or `show`, act on it, then `S/run.mjs use-answer <run> qN`. A note from the person is their word on the run: follow it inside the fence and the approvals, log scope changes as usual.
-- `S/run.mjs serve <run>`: the answer page on 127.0.0.1. Give the person the URL it prints, once. It holds a token: don't paste it anywhere else (`references/guardrails.md`).
+- `S/run.mjs serve <run>`: the live dashboard on 127.0.0.1, with answer forms and a page per unit. Give the person the URL it prints, once. It holds a token: don't paste it anywhere else (`references/guardrails.md`).
 
 ## 3. Loop
 
@@ -39,8 +39,8 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 
 | Action | Do |
 |---|---|
-| `build` | `start`, then send a builder (`references/briefs.md`) in the background. On its report: `built`. |
-| `judge` | Code: run `S/detect.mjs --run <run> --unit <unit> --base <base> --head <the builder's commit>` first (it records which commits it checked, and refuses an empty diff). A hit is a FAIL with that gap, unless the change is legitimate (e.g. an intended snapshot update): then rerun with `--allow <rule>:<path>` and record why with `note --kind decision`. On a run with `--paths`, a PASS is refused without a clean result for this round. Then send a critic. Record with `verdict`, copying the critic's `SCORE`, `GAP` and `CAUSE` into `--score`, `--gap` and `--cause` (score and gap are required on a fail). |
+| `build` | `start`, then send a builder (`references/briefs.md`) in the background. On its report: `built --report "<its summary>"`; once its PR is open, `link <run> <unit> --pr …`. |
+| `judge` | Code: run `S/detect.mjs --run <run> --unit <unit> --base <base> --head <the builder's commit>` first (it records which commits it checked, and refuses an empty diff). A hit is a FAIL with that gap, unless the change is legitimate (e.g. an intended snapshot update): then rerun with `--allow <rule>:<path>` and record why with `note --kind decision`. On a run with `--paths`, a PASS is refused without a clean result for this round. Then send a critic. Record with `verdict`, copying the critic's `SCORE`, `GAP` and `CAUSE` into `--score`, `--gap` and `--cause` (score and gap are required on a fail) and each BEHAVIOURS line into `--behaviour B1=pass:"…"`; a pass is refused while a behaviour is failing or unchecked. |
 | `change-strategy` | Pick a different approach, `strategy --text`, then build. |
 | `check-stale` | Ask the agent. No answer and `phase: building`: `start` again and send a fresh builder. `phase: judging`: `beat` and send a fresh critic (the build is kept). |
 | `wait` | Nothing. A notification will come; never poll. |
@@ -68,7 +68,7 @@ The run-level `decision` from `next`:
 
 ## 4. Finish
 
-Do the actions approved at intake (for example, merge when the review is READY) and record each one. Act on any answer still waiting (`questions`), then stop `watch` and `serve`. Then:
+Do the actions approved at intake (for example, merge when the review is READY) and record each one (a merge also with `link <run> <unit> --merge <PR URL>`). Act on any answer still waiting (`questions`), then stop `watch` and `serve`. Then:
 
 - **Report**, as short as the content allows and at most 12 lines (replies follow `references/craft.md`): the outcome, the links, the bar and its evidence, the units stopped and why, the questions you decided on the person's behalf, the follow-ups, and the actions you took.
 - **Retro:** `references/learning.md`, then `S/run.mjs close <run> --outcome …`.
