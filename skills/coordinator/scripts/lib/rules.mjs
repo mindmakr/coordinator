@@ -100,6 +100,21 @@ export function escapes(run) {
   return { escapes: count, passed, rate: passed ? Math.round((count / passed) * 100) / 100 : null };
 }
 
+// Escapes and passed units grouped by the critic setup of the verdict that passed
+// each unit (`verdict --critic`), so the depth that lets defects through shows up.
+export function bySetup(runs) {
+  const groups = new Map();
+  for (const run of runs) for (const u of run.units) {
+    if (u.status !== 'pass') continue;
+    const setup = u.rounds.findLast((r) => r.verdict === 'pass')?.critic ?? '(not recorded)';
+    const g = groups.get(setup) ?? { setup, passed: 0, escapes: 0 };
+    g.passed++;
+    g.escapes += (run.notes ?? []).filter((n) => n.kind === 'escape' && n.unit === u.id).length;
+    groups.set(setup, g);
+  }
+  return [...groups.values()].map((g) => ({ ...g, rate: Math.round((g.escapes / g.passed) * 100) / 100 })).sort((a, b) => a.setup.localeCompare(b.setup));
+}
+
 export function stats(runs) {
   const passRounds = [];
   let total = 0; let stopped = 0;
@@ -127,5 +142,5 @@ function escapeTotals(runs) {
   const byRun = runs.map((r) => ({ run: r.id, ...escapes(r) }));
   const count = byRun.reduce((n, r) => n + r.escapes, 0);
   const passed = byRun.reduce((n, r) => n + r.passed, 0);
-  return { escapes: count, passedUnits: passed, escapeRate: passed ? Math.round((count / passed) * 100) / 100 : null, escapesByRun: byRun.filter((r) => r.escapes) };
+  return { escapes: count, passedUnits: passed, escapeRate: passed ? Math.round((count / passed) * 100) / 100 : null, escapesByRun: byRun.filter((r) => r.escapes), escapesBySetup: bySetup(runs) };
 }

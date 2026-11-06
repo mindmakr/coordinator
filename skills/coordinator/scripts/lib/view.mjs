@@ -2,7 +2,7 @@
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
 import { attention, attentionLabel, clip, dotState, sentence, situation, timeLeft } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
-import { escapes, unmet } from './rules.mjs';
+import { bySetup, escapes, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 
 const MINUTE = 60_000;
@@ -54,7 +54,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       { name: 'added after freeze', used: run.addedAfterFreeze ?? 0, max: run.budget.maxAdded, unit: '' },
       { name: 'integration rounds', used: integ.length, max: run.budget.maxRounds, unit: '' },
     ],
-    escapes: { ...escapes(run), list: notes.filter((n) => n.kind === 'escape').map((n) => ({ unit: n.unit, round: n.round ?? null, text: n.text, at: n.at })) },
+    escapes: { ...escapes(run), bySetup: bySetup([run]), list: notes.filter((n) => n.kind === 'escape').map((n) => ({ unit: n.unit, round: n.round ?? null, text: n.text, at: n.at })) },
     units: run.units.map((u) => {
       const last = u.rounds.at(-1);
       const d = next.get(u.id);
@@ -119,6 +119,8 @@ export function text(v) {
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);
   if (v.escapes?.escapes) lines.push(`escapes  ${escapeLine(v.escapes)}`);
+  const setups = (v.escapes?.bySetup ?? []).filter((g) => g.setup !== '(not recorded)' || g.escapes);
+  if (setups.length) lines.push(`critics  ${setups.map((g) => `${clip(g.setup, 50)}: ${g.escapes} escape${g.escapes === 1 ? '' : 's'} in ${g.passed} passed (rate ${g.rate})`).join(' · ')}`);
   const gb = v.goalCheck.behaviours;
   lines.push(`goal    ${v.goalCheck.met ? 'met' : 'not yet'}${gb.length ? ` (${gb.filter((b) => b.status === 'pass').length}/${gb.length} behaviours pass)` : ''}`);
   lines.push('', `next    ${v.next}`, `open    ${v.needsYou.length} questions · ${v.followUps.length} follow-ups · ${v.decisions.length} decisions`);

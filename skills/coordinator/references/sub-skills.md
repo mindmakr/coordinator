@@ -1,6 +1,6 @@
 # Built-in sub-skills
 
-(The 1.0 design calls this folder `references/skills/`; it is `references/sub-skills/` so it is not confused with the plugin's top-level `skills/` folder.)
+(The folder is `references/sub-skills/`, not `references/skills/`, so it is not confused with the plugin's top-level `skills/` folder.)
 
 The loop needs no other skill installed. Each step has a short playbook here, inspired by the cleverways skills but not depending on them. The lead names the playbook in the brief; the agent reads it and follows it.
 

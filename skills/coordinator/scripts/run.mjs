@@ -5,7 +5,7 @@
 //   run.mjs init <run> --goal G --bar B --fence F [--paths a,b] [--tag T] [--max-rounds 4]
 //                      [--max-minutes 240] [--max-units 6] [--max-added 2] [--stale-minutes 45]
 //                      [--repo owner/name] (resolves #123 and shas; else the project's git remote) [--theme file.css]
-//   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL]
+//   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
@@ -20,6 +20,9 @@
 //                  score and gap required on fail; cause is the critic's root-cause tag (drives same-gap);
 //                  on a run with --paths, pass needs a clean detect.mjs --unit result;
 //                  [--behaviour B1=pass:"evidence" | B1=fail:"gap" …]: a pass needs every behaviour passing
+//                  [--critic SETUP] who judged (e.g. "review skill high + security"): stats groups escapes by it
+//                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
+//                  the unit stays judging, and its pass is refused until every required specialist passed
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …]
 //                  only when next says integrate; a pass needs every goal behaviour passing
@@ -61,7 +64,7 @@ import { render } from './lib/workbench.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour'], strategy: ['text'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
@@ -179,7 +182,8 @@ const commands = {
       const link = optText(o.link, 300);
       if (link && !/^https?:\/\/\S+$/i.test(link)) throw new Error('--link must be an http(s) URL');
       const links = [...refLinks(s, 'issue', o.issue), ...refLinks(s, 'pr', o.pr)];
-      const u = { id: unit, bar: text(o.bar, 'bar'), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
+      const specialists = list(o.specialist).map((n) => safeId(n, 'specialist'));
+      const u = { id: unit, bar: text(o.bar, 'bar'), ...(specialists.length ? { specialists } : {}), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
       s.units.push(u);
       for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
     });
@@ -196,6 +200,7 @@ const commands = {
     return change(run, (s) => {
       const u = unitOf(s, unit); if (u.status !== 'building') throw new Error(`unit ${unit} is ${u.status}, not building`); expect(s, u, 'built');
       u.status = 'judging'; u.heartbeatAt = now(); u.report = optText(o.report, 2000); log(u, 'built', u.report ?? '');
+      delete u.specialistMarks; // a new build is judged again by every specialist
     });
   },
   behave([run, unit], o) {
@@ -252,13 +257,22 @@ const commands = {
       if (v === 'fail' && !optText(o.gap)) throw new Error('--gap is required on a fail (it drives the same-gap stop)');
       const evidence = optText(o.evidence);
       const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
+      const critic = optText(o.critic, 120);
+      if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
+        const name = String(o.specialist);
+        if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
+        (u.specialistMarks ??= {})[name] = { verdict, score: score(o.score), gap, cause, evidence, ...(critic ? { critic } : {}), at: now() };
+        return;
+      }
+      const missing = (u.specialists ?? []).filter((n) => u.specialistMarks?.[n]?.verdict !== 'pass');
+      if (verdict === 'pass' && missing.length) throw new Error(`pass refused: specialist ${missing.join(', ')} has not passed this build`);
       const round = u.rounds.length + 1;
       if (verdict === 'pass' && s.paths?.length && !(u.detect?.round === round && u.detect.clean)) {
         throw new Error(`pass refused: no clean detect result for round ${round}; run detect.mjs --run ${s.id} --unit ${u.id} --base … first`);
       }
       const marks = mark(u.behaviours ?? [], o.behaviour, verdict);
-      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}) });
-      u.report = null;
+      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
+      u.report = null; delete u.specialistMarks;
       u.status = verdict === 'pass' ? 'pass' : 'open';
     });
   },

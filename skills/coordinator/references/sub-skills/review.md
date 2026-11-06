@@ -41,7 +41,7 @@ Wording that goes through the project's own approval is not failed on nuance (`t
 
 ## Specialist critic (risk areas)
 
-For money, auth, migrations, time zones, a simulated clock, or any area `COORDINATOR.md` marks, the lead sends a second critic with this playbook plus the area: a specialist agent where the harness has one (security, database, accessibility). It runs steps 1, 2 and 7 itself and goes deep on the area. Both critics must pass.
+For money, auth, migrations, time zones, a simulated clock, or any area `COORDINATOR.md` marks, the lead sends a second critic with this playbook plus the area: a specialist agent where the harness has one (security, database, accessibility). It runs steps 1, 2 and 7 itself and goes deep on the area. Both critics must pass, and the state enforces it: the unit is added with `add --specialist security` (comma-separated for several), the specialist's reply is recorded with `verdict … --specialist security` on the same build, and the general `verdict pass` is refused until every required specialist has passed. Record who judged with `--critic "<setup>"` on every verdict, so `stats` can give an escape rate per critic setup.
 
 ## Output
 
