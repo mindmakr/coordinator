@@ -73,7 +73,7 @@ pre code { background: none; padding: 0; }
 .ears p { margin: 0; max-width: 24rem; }
 .ears p:last-child { text-align: right; }
 .title {
-  font-family: var(--display); font-weight: 900; letter-spacing: -.01em;
+  font-weight: 900; font-family: var(--display); font-weight: 900; letter-spacing: -.01em;
   font-size: clamp(2.6rem, 9vw, 6.2rem); line-height: 1; margin: .35rem 0 .3rem;
 }
 .motto { font-style: italic; color: var(--ink-2); margin: 0 0 .6rem; }
@@ -92,7 +92,7 @@ nav.sections a:hover { text-decoration: underline; }
 .front > .lead { border-right: 1px solid var(--rule-soft); padding-right: 2rem; }
 .kicker { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 0 0 .3rem; }
 h1, h2, h3 { font-family: var(--display); line-height: 1.1; margin: 0 0 .5rem; }
-h1.headline { font-size: clamp(2rem, 4.6vw, 3.4rem); font-weight: 900; }
+h2.headline { font-size: clamp(2rem, 4.6vw, 3.4rem); font-weight: 900; }
 h2 { font-size: clamp(1.6rem, 3.2vw, 2.3rem); font-weight: 900; }
 h3 { font-size: 1.3rem; font-weight: 700; }
 .standfirst { font-size: 1.22rem; line-height: 1.45; color: var(--ink-2); margin: .2rem 0 .8rem; }
@@ -169,7 +169,7 @@ footer.colophon p { margin: 0; }
     <p>An open-source agent skill. MIT licence.</p>
     <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a></p>
   </div>
-  <p class="title" role="heading" aria-level="1">The Coordinator</p>
+  <h1 class="title">The Coordinator</h1>
   <p class="motto">What your agents did, what they are doing next, and the evidence for it.</p>
   <div class="dateline">
     <span><time datetime="2026-11-06">Friday, 6 November 2026</time></span>
@@ -193,7 +193,7 @@ footer.colophon p { margin: 0; }
 <div class="front">
   <article class="lead" id="lead" aria-labelledby="lead-h">
     <p class="kicker">Lead story</p>
-    <h1 class="headline" id="lead-h">One person, a team of agents, and nobody marking their own homework</h1>
+    <h2 class="headline" id="lead-h">One person, a team of agents, and nobody marking their own homework</h2>
     <p class="standfirst">Coordinator asks every question before the work starts. Then it runs builders and blind critics, unattended, until the work meets a bar you can check. It stops when its rules say stop, writes everything down, and carries what it learned into the next run.</p>
     <p class="byline">Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a></p>
 
@@ -268,15 +268,15 @@ footer.colophon p { margin: 0; }
   </header>
   <div class="grid3">
     <article>
-      <h3><span class="tag now">Today</span>Claude Code</h3>
+      <h3><span class="tag now">Today</span> Claude Code</h3>
       <p>Coordinator is built and run on Claude Code, as a plugin or as a copied skill folder. It uses Claude Code's sub-agents, background tasks and question tool, and can publish the dashboard as a private Artifact.</p>
     </article>
     <article>
-      <h3><span class="tag now">By design</span>Any harness with sub-agents</h3>
+      <h3><span class="tag now">By design</span> Any harness with sub-agents</h3>
       <p>The skill is plain Markdown and Node scripts. It asks for three things from a harness: agents it can delegate to, a way to run a script, and a way to ask you a question. Where there is no question tool it falls back to a numbered list; where there are no Artifacts it gives you the file path. So far it is packaged and released for Claude Code only.</p>
     </article>
     <article>
-      <h3><span class="tag planned">Planned for 1.0</span>A second harness</h3>
+      <h3><span class="tag planned">Planned for 1.0</span> A second harness</h3>
       <p>The <a href="https://github.com/mindmakr/coordinator/issues/15">1.0 plan</a> adds a second harness with its own install path and an end-to-end run. The draft design recommends OpenAI Codex CLI, with others as community adapters. The choice is still open, and none of these projects is affiliated with Coordinator.</p>
     </article>
   </div>
@@ -290,39 +290,39 @@ footer.colophon p { margin: 0; }
   </header>
   <div class="grid3">
     <article>
-      <h3><span class="tag now">Today</span>The loop</h3>
+      <h3><span class="tag now">Today</span> The loop</h3>
       <p>Build, judge, decide, repeat. Builders and critics are always different agents. An integrator checks that the parts fit once every piece has passed.</p>
     </article>
     <article>
-      <h3><span class="tag now">Today</span>The bar</h3>
+      <h3><span class="tag now">Today</span> The bar</h3>
       <p>Written before building, in terms a critic can check: a red test that must go green, a screen to match, an acceptance list. A craft bar covers the writing and the UI as well: no filler copy, UI started from references, never from a blank page.</p>
     </article>
     <article>
-      <h3><span class="tag next">Next, 0.5</span>Behaviours and evidence</h3>
-      <p>In development: the bar becomes a list of behaviours ("given … when … then …"), the critic marks each one with evidence attached (test output, screenshots, logs, links), and a pass is refused while any behaviour is failing or unchecked.</p>
+      <h3><span class="tag next">Next, 0.5</span> Behaviours and evidence</h3>
+      <p>In development for 0.5: the bar becomes a list of behaviours ("given … when … then …"), the critic marks each one with evidence attached (test output, screenshots, logs, links), and a pass is refused while any behaviour is failing or unchecked.</p>
     </article>
     <article>
-      <h3><span class="tag now">Today</span>The dashboard</h3>
+      <h3><span class="tag now">Today</span> The dashboard</h3>
       <p>A page in your browser, rewritten on every change, with a text twin in the terminal (<code>run.mjs show</code>). Version 0.5, in development, makes it live over Server-Sent Events, with a page per piece of work and a searchable timeline.</p>
     </article>
     <article>
-      <h3><span class="tag planned">Planned, 0.7</span>Answer from anywhere</h3>
+      <h3><span class="tag planned">Planned for 1.0</span> Answer from anywhere</h3>
       <p>Today you answer on your own machine. The 1.0 plan moves the dashboard to the web so you can follow a run and answer the lead from a phone, with alerts when something needs you (<a href="https://github.com/mindmakr/coordinator/issues/11">#11</a>, <a href="https://github.com/mindmakr/coordinator/issues/12">#12</a>, <a href="https://github.com/mindmakr/coordinator/issues/18">#18</a>). Builders and critics keep running on your machine.</p>
     </article>
     <article>
-      <h3><span class="tag now">Today</span>Memory and lessons</h3>
+      <h3><span class="tag now">Today</span> Memory and lessons</h3>
       <p>Lessons are stored per person or per project, merged, ranked by use and pruned, and quoted into the next run's briefs. Past runs set the budgets. A lesson seen three times is proposed as a change to the skill, for a person to review.</p>
     </article>
     <article>
-      <h3><span class="tag planned">Planned</span>Maps</h3>
+      <h3><span class="tag planned">Planned</span> Maps</h3>
       <p>Mind, flow and heat maps of a run (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>), a map of the project's code and settings (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>), and a page about the coordinator itself: its lessons, stats and history (<a href="https://github.com/mindmakr/coordinator/issues/19">#19</a>).</p>
     </article>
     <article>
-      <h3><span class="tag now">Today</span>Durable state</h3>
+      <h3><span class="tag now">Today</span> Durable state</h3>
       <p>Locked, atomic JSON shared across git worktrees, with heartbeats for every builder and critic. <code>/coordinator:status</code> picks a run up after a break or a crash.</p>
     </article>
     <article>
-      <h3><span class="tag now">Today</span>Safe by default</h3>
+      <h3><span class="tag now">Today</span> Safe by default</h3>
       <p>No network calls, no shell strings, ids checked against path traversal. Text from issues, web pages and other agents is treated as data, never as instructions.</p>
     </article>
   </div>
@@ -359,31 +359,31 @@ footer.colophon p { margin: 0; }
   </header>
   <div class="grid2">
     <div>
-      <h3><span class="tag planned">On the 1.0 plan</span>Security review in every run</h3>
+      <h3><span class="tag planned">On the 1.0 plan</span> Security review in every run</h3>
       <p>A security pass as a second critic on every code change: secret, dependency and static scans on what the change adds, and authorisation checks read from the diff. Risk areas named in a project's <code>COORDINATOR.md</code> add a specialist critic that must also pass (<a href="https://github.com/mindmakr/coordinator/issues/13">#13</a>).</p>
     </div>
     <div>
-      <h3><span class="tag planned">Proposed</span>Compliance and auditing</h3>
+      <h3><span class="tag planned">Proposed</span> Compliance and auditing</h3>
       <p>An audit trail a reviewer can follow from a requirement to the behaviour that tests it and the evidence that it passed, and compliance checklists as bars. The 1.0 service design keeps an audit log of its own; compliance packs have no issue yet. <a href="#wanted">Tell us what you need.</a></p>
     </div>
     <div>
-      <h3><span class="tag planned">On the 1.0 plan</span>Code and implementation maps</h3>
+      <h3><span class="tag planned">On the 1.0 plan</span> Code and implementation maps</h3>
       <p>A map of the code the coordinator works on: modules and imports, shared helpers and who reuses them, near-duplicates worth merging, so builders and critics see what a change touches before they touch it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>). Run maps: mind, flow and heat (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>).</p>
     </div>
     <div>
-      <h3><span class="tag planned">On the 1.0 plan</span>Settings and surfaces</h3>
+      <h3><span class="tag planned">On the 1.0 plan</span> Settings and surfaces</h3>
       <p>Each settings key mapped to where it is read and written, and each route, screen and message tied to the services behind it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>).</p>
     </div>
     <div>
-      <h3><span class="tag planned">Proposed</span>API flows and call graphs</h3>
+      <h3><span class="tag planned">Proposed</span> API flows and call graphs</h3>
       <p>Request flows through an API, caller and callee graphs, and dependencies between functions, built on the project map. No issue yet beyond <a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>.</p>
     </div>
     <div>
-      <h3><span class="tag planned">Proposed</span>External dependency maps</h3>
+      <h3><span class="tag planned">Proposed</span> External dependency maps</h3>
       <p>Third-party packages and services a project calls, where it calls them, and which run touched them. No issue yet.</p>
     </div>
   </div>
-  <p class="note" style="margin-top:1rem">The 1.0 road, in order: <a href="https://github.com/mindmakr/coordinator/issues/9">0.4 local interactive dashboard and event log</a> · <a href="https://github.com/mindmakr/coordinator/issues/10">0.5 repo-backed state</a> · <a href="https://github.com/mindmakr/coordinator/issues/11">0.6 GitHub App and read-only web dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/12">0.7 remote answers, notes and alerts</a> · <a href="https://github.com/mindmakr/coordinator/issues/13">0.8 built-in sub-skills</a> · <a href="https://github.com/mindmakr/coordinator/issues/14">1.0 release</a>. The design is a draft under review (<a href="https://github.com/mindmakr/coordinator/issues/15">#15</a>).</p>
+  <p class="note" style="margin-top:1rem">The road to 1.0, in order. <strong>Today (0.4):</strong> a local dashboard with answer forms and <code>watch</code>. <strong>Next (0.5, in development):</strong> the live dashboard with behaviours and evidence. <strong>Planned:</strong> <a href="https://github.com/mindmakr/coordinator/issues/9">an event log behind the local dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/10">run state kept in your own repository</a> · <a href="https://github.com/mindmakr/coordinator/issues/11">a GitHub App and a read-only web dashboard</a> · <a href="https://github.com/mindmakr/coordinator/issues/12">answers, notes and alerts from anywhere</a> · <a href="https://github.com/mindmakr/coordinator/issues/13">built-in sub-skills</a> · <a href="https://github.com/mindmakr/coordinator/issues/14">the 1.0 release</a>. The design is a draft under review (<a href="https://github.com/mindmakr/coordinator/issues/15">#15</a>).</p>
 </section>
 
 <section class="band" id="wanted" aria-labelledby="wanted-h">

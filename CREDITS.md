@@ -9,6 +9,8 @@ These ideas came from [Impeccable](https://github.com/pbakaus/impeccable) by Pau
 - an `init` that asks only what it cannot infer and writes a shared context file;
 - a deterministic detector that needs no model.
 
+The lessons store and the planned maps also draw on the wider, shared work on giving agents long-term memory and on running work as a graph of steps with explicit hand-offs. No single project is the source, and this project claims none of those ideas.
+
 This project is an independent adaptation. It adds:
 - the intake that asks everything up front, so the run can go unattended;
 - stop rules enforced in code;
