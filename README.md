@@ -104,6 +104,7 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 - **A page per unit:** behaviours, evidence, every round (builder's report, critic's verdict, score, cause), notes and questions, issue and PR links, and its own timeline.
 - **Timelines** with colour-coded, labelled badges, search, kind and unit filters, time ranges and sort.
 - **Links:** URLs, `owner/repo#12`, `#12`, commit shas and branch names open on GitHub in a new tab.
+- **The coordinator's own page** (`/coordinator`, linked from the header; `run.mjs self` in text): across every run in the project, its age, lessons with their sources, memory (`COORDINATOR.md` and your past answers), pass rate, rounds to pass and time per unit with the trend, history, what each open run waits on, its proposals, and the side studies it ran while waiting (`init --study-budget`). Other runs open read-only at `/run/<run>`.
 - **Looks like your project:** `init --theme app/globals.css` (or `Theme:` in `COORDINATOR.md`) maps your design system's colours, fonts and radius onto it. Light, dark or system.
 
 Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once.
@@ -130,7 +131,8 @@ skills/coordinator/
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
     ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, plain, questions,
-    │                           hud, unitpage, parts, links, theme, timeline, behaviours, evidence, serve, live
+    │                           hud, unitpage, parts, links, theme, timeline, behaviours, evidence, serve, live,
+    │                           self, selfpage, selfdata, study
     └── test/                   node:test suites
 ```
 
@@ -154,7 +156,6 @@ Out in 0.5: behaviours and evidence on the bar, and the live dashboard with a pa
 | Security pass as a second critic on every code change | On the 1.0 plan ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
 | Run maps: mind, flow, heat and goal relevance | On the 1.0 plan ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
 | Project map: code, settings, surfaces and reuse | On the 1.0 plan ([#21](https://github.com/mindmakr/coordinator/issues/21)) |
-| The coordinator's own page: lessons, stats, history, proposals | On the 1.0 plan ([#19](https://github.com/mindmakr/coordinator/issues/19)) |
 | Compliance and audit trails, API flows, caller and callee graphs, function and external dependency maps | Proposed; [tell us what you need](https://github.com/mindmakr/coordinator/issues/new/choose) |
 
 ## Contributing
