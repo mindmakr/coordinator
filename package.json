@@ -4,6 +4,6 @@
   "type": "module",
   "engines": { "node": ">=18" },
   "scripts": {
-    "test": "node --test skills/coordinator/scripts/test/rules.test.mjs skills/coordinator/scripts/test/gaming.test.mjs skills/coordinator/scripts/test/secrets.test.mjs skills/coordinator/scripts/test/hud.test.mjs skills/coordinator/scripts/test/plain.test.mjs skills/coordinator/scripts/test/cli.test.mjs skills/coordinator/scripts/test/answers.test.mjs skills/coordinator/scripts/test/dashboard.test.mjs skills/coordinator/scripts/test/morph.test.mjs skills/coordinator/scripts/test/subskills.test.mjs skills/coordinator/scripts/test/briefs.test.mjs skills/coordinator/scripts/test/fixture.test.mjs skills/coordinator/scripts/test/critics.test.mjs skills/coordinator/scripts/test/self.test.mjs"
+    "test": "node --test skills/coordinator/scripts/test/rules.test.mjs skills/coordinator/scripts/test/gaming.test.mjs skills/coordinator/scripts/test/secrets.test.mjs skills/coordinator/scripts/test/hud.test.mjs skills/coordinator/scripts/test/plain.test.mjs skills/coordinator/scripts/test/cli.test.mjs skills/coordinator/scripts/test/answers.test.mjs skills/coordinator/scripts/test/dashboard.test.mjs skills/coordinator/scripts/test/morph.test.mjs skills/coordinator/scripts/test/subskills.test.mjs skills/coordinator/scripts/test/briefs.test.mjs skills/coordinator/scripts/test/fixture.test.mjs skills/coordinator/scripts/test/critics.test.mjs skills/coordinator/scripts/test/self.test.mjs skills/coordinator/scripts/test/events.test.mjs skills/coordinator/scripts/test/statesync.test.mjs"
   }
 }

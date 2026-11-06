@@ -28,7 +28,7 @@ Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare skill),
 - **The bar decides.** Behaviours make up the bar, written before building. A fresh critic, never the builder, marks each against the real artifact, with evidence (`references/bar.md`).
 - **No slop.** Everything people read meets the craft bar; UI starts from references (`references/craft.md`).
 - **The harness is the team.** Staff roles from its agents, skills and tools (`references/team.md`); built-in sub-skills cover gaps (`references/sub-skills.md`).
-- **The state decides.** `.coordinator/runs/<run>/state.json`, written only by `run.mjs`, says what happens next; memory only caches it (`references/durability.md`).
+- **The log decides.** `.coordinator/runs/<run>/events.jsonl`, written only by `run.mjs`, says what happens next; memory only caches it (`references/durability.md`).
 - **The fence holds.** Out-of-scope work is logged as a follow-up, never built.
 - **Evidence or it didn't happen.** A PASS without evidence is a FAIL. Record evidence per behaviour (`run.mjs evidence`). `detect.mjs` flags bar-gaming.
 - **It gets better.** A retro ends every run: lessons, budgets (`references/learning.md`) and upstream fixes (`references/upstream.md`).
