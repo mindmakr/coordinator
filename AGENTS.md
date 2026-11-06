@@ -8,3 +8,4 @@
 - Every write goes through `lib/store.mjs` (atomic, locked, ids validated). No shell strings: use `execFileSync` with argument arrays.
 - Nothing stores secrets or personal data, and nothing calls the network, except `run.mjs push` and `pull`, which run git against the project's own remotes when the lead asks, at pit stops; `push` also calls `gh repo view` to learn whether the repo is public when `.coordinator/coordinator.json` does not say.
 - Before pushing, run `npm test` and `claude plugin validate .`
+- The hosted service is `service/` (AGPL-3.0, its own `package.json` and dependencies, tests with `cd service && npm test`). It imports the skill's `scripts/lib` through `service/src/core.mjs`; the skill never imports the service, and stays dependency-free.

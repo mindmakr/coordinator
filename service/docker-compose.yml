@@ -1,0 +1,38 @@
+name: coordinator-service
+
+# Local development: Postgres, and the service built from this checkout.
+#   docker compose -f service/docker-compose.yml up -d db       Postgres only (for npm test / npm start)
+#   docker compose -f service/docker-compose.yml up --build     both; needs service/.env (copy .env.example)
+# Ports bind to 127.0.0.1 only.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: coordinator
+      POSTGRES_PASSWORD: coordinator-dev
+      POSTGRES_DB: coordinator
+    ports:
+      - "127.0.0.1:5452:5432"
+    volumes:
+      - coordinator-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coordinator"]
+      interval: 2s
+      retries: 30
+
+  service:
+    build:
+      context: ..
+      dockerfile: service/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://coordinator:coordinator-dev@db:5432/coordinator
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  coordinator-db:

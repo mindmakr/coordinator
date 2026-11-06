@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { buildMap } from '../lib/map/build.mjs';
 import { lex } from '../lib/map/lex.mjs';
 import { analyse } from '../lib/map/js.mjs';
-import { load, record, validate } from '../lib/map/log.mjs';
+import { fromText, load, record, serialise, validate } from '../lib/map/log.mjs';
 import { mapPage } from '../lib/map/page.mjs';
 import { exportTarget, jsonc } from '../lib/map/resolve.mjs';
 import { callMatches } from '../lib/map/surfaces.mjs';
@@ -151,6 +151,9 @@ test('a stale, missing or tampered snapshot is rebuilt from the events; a broken
 
   const events = readFileSync(join(d, 'events.jsonl'), 'utf8');
   const lines = events.trim().split('\n');
+  // A copy read with no files (the hosted service) is the same map, checked the same way.
+  assert.equal(serialise(fromText(events)), serialise(load(d, { write: false })), 'fromText replays to the same snapshot');
+  assert.throws(() => fromText(`${[lines[0], ...lines.slice(2)].join('\n')}\n`), /seq .*gap/);
   writeFileSync(join(d, 'events.jsonl'), `${[lines[0], ...lines.slice(2)].join('\n')}\n`);
   assert.throws(() => load(d), /seq .*gap/, 'a missing line is a gap');
   const tampered = lines.map((l) => (l.includes('"coll":"helpers"') ? l.replace('src/routes/employer.ts', 'src/elsewhere.ts') : l));

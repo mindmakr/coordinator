@@ -49,7 +49,7 @@ export function mindSvg(v, ctx) {
         nodes.push(link(unitHref, `${n.unit} ${n.label}: ${said(n.status)} — ${clip(n.text, 160)}`, `<circle class="nd ${st(n.status)}" cx="${r1(x)}" cy="${r1(y)}" r="9"/>`
           + (labels ? txt(cx + (R2 + 16) * Math.cos(a), cy + (R2 + 16) * Math.sin(a) + 4, n.label, 'sm', Math.cos(a) < -0.2 ? 'end' : Math.cos(a) > 0.2 ? 'start' : 'middle') : '')));
       } else {
-        const href = n.url ? n.url : n.file ? ctx.artHref(n.file) : unitHref;
+        const href = n.url ? n.url : (n.file && ctx.artHref(n.file)) || unitHref; // a file kept locally opens its unit
         const shape = n.kind === 'more' ? `<circle class="nd ev" cx="${r1(x)}" cy="${r1(y)}" r="9"/>${txt(x, y + 3, n.label, 'xs', 'middle')}` : `<circle class="nd ev" cx="${r1(x)}" cy="${r1(y)}" r="4.5"/>`;
         nodes.push(link(href, `${n.unit} evidence (${n.label}): ${clip(n.text, 160)}`, shape, !!n.url));
       }

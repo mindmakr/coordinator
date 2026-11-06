@@ -68,3 +68,23 @@ test('an old state without causes or notes still renders', () => {
   assert.equal(v.units[0].cause, null);
   assert.match(hud(v), /No units yet|api/);
 });
+
+test('a hosted read-only copy can name its own answer hint and mark evidence files as kept locally', async () => {
+  const { staticCtx } = await import('../lib/hud.mjs');
+  const { unitPage } = await import('../lib/unitpage.mjs');
+  const s = state();
+  s.units[0].evidence = [{ id: 'e1', kind: 'log', label: 'test log', file: 'api/run <1>.log', at: at(11) }];
+  const { ask } = await import('../lib/questions.mjs');
+  ask(s, { question: 'which?', header: 'Which', option: ['a|first', 'b|second'] }); // an open question shows the hint
+  const v = view(s, decide(s, T0), T0);
+  const ctx = { ...staticCtx('', 0), readOnlyHint: 'Answer in the chat for now <b>', artHref: () => null };
+  const page = hud(v, T0, ctx);
+  assert.match(page, /Answer in the chat for now &lt;b&gt;/);
+  assert.equal(page.includes('run.mjs serve'), false);
+  const unit = unitPage(v, 'api', T0, ctx);
+  assert.match(unit, /run &lt;1&gt;\.log: file kept locally/);
+  assert.equal(/href="null"|href=""/.test(unit), false, 'no broken link');
+  // The local snapshot still links its files and keeps its own hint.
+  assert.match(unitPage(v, 'api', T0, staticCtx('', 1)), /href="\.\.\/artifacts\/api\/run%20%3C1%3E\.log"/);
+  assert.match(hud(v, T0, staticCtx('', 0)), /run\.mjs serve r1/);
+});

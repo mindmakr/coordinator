@@ -48,7 +48,10 @@ export function validate(e, where = 'event') {
 
 function readEvents(file) {
   if (!existsSync(file)) return { events: [], lines: [] };
-  const lines = readFileSync(file, 'utf8').split('\n');
+  return parseEvents(readFileSync(file, 'utf8'), file);
+}
+function parseEvents(text, file) {
+  const lines = text.split('\n');
   if (lines.at(-1) === '') lines.pop();
   const events = lines.map((l, i) => {
     let e; try { e = JSON.parse(l); } catch { throw new Error(`map: ${file} line ${i + 1} is not JSON`); }
@@ -83,6 +86,15 @@ export function serialise(s) {
   const body = [`"v":${s.v}`, `"upTo":${canon(s.upTo)}`, `"build":${canon(s.build)}`,
     ...COLLECTIONS.map((c) => `"${c}":[${s[c].length ? `\n${s[c].map(canon).join(',\n')}\n` : ''}]`)];
   return `{${body.join(',\n')}}\n`;
+}
+
+// The map a copy of events.jsonl describes (the state branch's runs/<run>/map/events.jsonl),
+// checked and replayed exactly as load() does, with no files. Throws on a bad log.
+export function fromText(text, name = 'events.jsonl') {
+  const { events, lines } = parseEvents(String(text), name);
+  const out = replay(empty(), events);
+  out.upTo = { seq: events.length, sha256: prefixHash(lines, events.length) };
+  return out;
 }
 
 // The current snapshot: trusted when it matches the events, else replayed (and rewritten).
