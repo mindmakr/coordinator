@@ -7,3 +7,7 @@ CREATE TABLE comment_commands (
   at              timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (installation_id, comment_id)
 );
+
+-- c11 follow-up: trail_seq values come from one sequence, so a run dropped and re-created
+-- (dropRunsExcept, then putRun) never gets back a value a refresh read before (no ABA).
+CREATE SEQUENCE trail_seq_global;

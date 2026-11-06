@@ -1,10 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Answers and notes from anywhere** (#12, first half): the web dashboard takes answers and notes, committed to the run's event log on the `coordinator-state` branch with the person's own token, only from people with push access (readers see the forms disabled, with the reason); `/coordinator answer qN <option>` / `"text"` and `/coordinator note <text>` work in issue and PR comments. Both write the same `answer` / `note` event `run.mjs` does, so the lead's `pull` fast-forwards onto it. The dashboard's forms take a `ctx.form` (token field name, path prefix, disabled reason) so a hosted copy can carry them without the live script. Details in `service/CHANGELOG.md`.
+- **Plugin icon:** `.claude-plugin/icon.png` (512 px, the dashboard's mark), so `claude plugin validate` no longer warns ICON_MISSING.
+- **Service follow-ups from the c11 review:** owed trail writes survive a crash, trail sequence values never repeat, and a stale same-named repo row cannot hide a page. Details in `service/CHANGELOG.md`.
+
 ## 0.6.0 (2026-11-06)
 
 The coordinator's own page (#19), dashboard maps (#20), the project map (#21), the event log and repo-backed state (#9, #10) and built-in sub-skills (#13).
-
-- **Answers and notes from anywhere** (#12, first half): the web dashboard takes answers and notes, committed to the run's event log on the `coordinator-state` branch with the person's own token, only from people with push access (readers see the forms disabled, with the reason); `/coordinator answer qN <option>` / `"text"` and `/coordinator note <text>` work in issue and PR comments. Both write the same `answer` / `note` event `run.mjs` does, so the lead's `pull` fast-forwards onto it. The dashboard's forms take a `ctx.form` (token field name, path prefix, disabled reason) so a hosted copy can carry them without the live script. Details in `service/CHANGELOG.md`.
 
 - **Service fix (#11, review round 5):** merge and check results that a webhook could not write (over the comment budget, or a GitHub error) are retried at the next resync instead of waiting for the state branch to move. Details in `service/CHANGELOG.md`.
 - **Service hardening (#11, review round 4):** linked refs capped at ingest and per page view, deferred tracker comments retried at every sync and across restarts, oversized webhooks refused by header, bounded connections; the tracker template skips null rounds. Details in `service/CHANGELOG.md`.

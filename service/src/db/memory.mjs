@@ -8,6 +8,7 @@ export function memoryDb() {
   const sessions = new Map(); const audit = [];
   const refs = new Map(); const ghEvents = new Map(); const trackers = new Map();
   const commands = new Map(); // c12 writes
+  let trailCounter = 0; // trail_seq values, like Postgres's trail_seq_global
   const repoKey = (i, r) => key(i, r);
   return {
     kind: 'memory',
@@ -39,8 +40,9 @@ export function memoryDb() {
     async repoByName(installationId, fullName) {
       return clone([...repos.values()].find((r) => r.installationId === installationId && r.fullName.toLowerCase() === String(fullName).toLowerCase())) ?? null;
     },
-    async repoForPage(fullName) {
-      const hit = [...repos.values()].filter((r) => r.fullName.toLowerCase() === String(fullName).toLowerCase())
+    // id: GitHub's id for the repo; only a row with that id is returned (the newest synced, if several).
+    async repoForPage(fullName, id) {
+      const hit = [...repos.values()].filter((r) => r.fullName.toLowerCase() === String(fullName).toLowerCase() && r.id === Number(id))
         .sort((a, b) => String(b.syncedAt ?? '').localeCompare(String(a.syncedAt ?? '')))[0];
       return clone(hit) ?? null;
     },
@@ -64,7 +66,9 @@ export function memoryDb() {
     },
     async markTrailPending(installationId, repoId, runId) {
       const r = runs.get(key(installationId, repoId, runId));
-      if (r) Object.assign(r, { trailPending: true, trailSeq: r.trailSeq + 1 });
+      if (!r) return null;
+      Object.assign(r, { trailPending: true, trailSeq: ++trailCounter }); // one counter for every run: a re-created run never reuses a value
+      return r.trailSeq;
     },
     async clearTrailPending(installationId, repoId, runId, seq) {
       const r = runs.get(key(installationId, repoId, runId));

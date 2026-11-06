@@ -56,10 +56,11 @@ export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).slice(0,
 // even when the branch tip has not moved.
 //
 // Every trail refresh of a repo's runs, from a sync or from a webhook (refreshRuns), is a retrail in
-// that repo's serial queue, so two never overlap. The flag is set by a refresh that owed a write
-// (markTrailPending bumps the run's trailSeq) and cleared only by a retrail that rebuilt the whole run
-// cleanly, and then only if trailSeq still holds what it read first: a deferral recorded meanwhile
-// (by another process sharing the database) is never overwritten by a clean finish.
+// that repo's serial queue, so two never overlap. The flag is set before each refresh
+// (markTrailPending gives the run a new trailSeq from one global counter) and cleared only by a
+// refresh that finished cleanly, and then only if trailSeq still holds the value it set: a deferral
+// recorded meanwhile (by another process sharing the database) is never overwritten, a crash
+// mid-refresh leaves the run owed, and a run dropped and re-created never gets an old value back.
 export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null }) {
   const chains = new Map(); // one sync or trail refresh per repo at a time; a second waits for the first
   const serial = (k, fn) => {
@@ -136,16 +137,18 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
   // ones still are. The flag lives in the read model, so a restart keeps it; the tracker rows keep
   // the comment ids, so a retry edits or adopts the comment and never posts a second one.
   // Called inside the repo's queue only. Refreshes `changed` (plus, with `owedToo`, every other run still
-  // owed) as whole runs. A refresh that owed a write marks the run; one that finished cleanly clears a
-  // flag it saw at the start, and only if no deferral was recorded since (trailSeq unchanged).
+  // owed) as whole runs. Each run is marked owed first (a new trailSeq) and cleared by a clean finish,
+  // and then only if no deferral was recorded since (trailSeq still the one this refresh set).
   async function retrail(installationId, repo, changed, { owedToo = true } = {}) {
     if (!trail || !repo) return [];
-    const owed = new Map((await db.runs(installationId, repo.id)).filter((r) => r.trailPending).map((r) => [r.runId, r.trailSeq]));
-    const retried = owedToo ? [...owed.keys()].filter((id) => !changed.includes(id)) : [];
+    const owed = (await db.runs(installationId, repo.id)).filter((r) => r.trailPending).map((r) => r.runId);
+    const retried = owedToo ? owed.filter((id) => !changed.includes(id)) : [];
     for (const runId of [...changed, ...retried]) {
+      // Marked before the refresh, cleared after a clean one: a crash between a deferred write and
+      // its mark cannot lose the write. The clear holds only if nobody marked the run meanwhile.
+      const seq = await db.markTrailPending(installationId, repo.id, runId);
       const r = await trail.refreshRun(installationId, repo, runId);
-      if (trailOwed(r)) await db.markTrailPending(installationId, repo.id, runId);
-      else if (owed.has(runId)) await db.clearTrailPending(installationId, repo.id, runId, owed.get(runId));
+      if (!trailOwed(r) && seq !== null) await db.clearTrailPending(installationId, repo.id, runId, seq);
     }
     return retried;
   }

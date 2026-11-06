@@ -120,11 +120,12 @@ test('a clean retrail clears the flag only if no deferral was recorded since it 
     assert.equal(await t.db.clearTrailPending(7, 70, 'r1', seen), false, 'a stale clear is refused');
     assert.equal(await t.pending(), true);
     const now = (await t.db.runs(7, 70))[0].trailSeq;
-    assert.equal(now, seen + 1);
+    assert.ok(now > seen, 'every mark takes a new, higher value');
     assert.equal(await t.db.clearTrailPending(7, 70, 'r1', now), true);
     assert.equal(await t.pending(), false);
-    await t.app.ingest.syncRepo(7, { id: 70, fullName: 'acme/web' }, { force: true }); // putRun keeps the counter
-    assert.equal((await t.db.runs(7, 70))[0].trailSeq, now);
+    await t.app.ingest.syncRepo(7, { id: 70, fullName: 'acme/web' }, { force: true }); // a refresh marks first, then clears its own mark
+    assert.ok((await t.db.runs(7, 70))[0].trailSeq > now);
+    assert.equal(await t.pending(), false);
   } finally { await t.close(); }
 });
 
@@ -143,5 +144,59 @@ test('a link resolves to this installation\'s repo row, never a same-named one i
     assert.throws(() => t.db.repoByName(undefined, 'acme/mobile'), /installation id is required/);
     await t.app.ingest.syncRepo(7, { id: 70, fullName: 'acme/web' });
     assert.equal(t.gh.comments.get('acme/mobile#5')?.length, 1, 'the fence saw installation 7\'s row and let the comment through');
+  } finally { await t.close(); }
+});
+
+// c11 final critic follow-ups.
+test('a refresh marks the run owed before it starts: a crash mid-refresh leaves the write owed', async () => {
+  const t = await world();
+  try {
+    await t.app.resyncAll();
+    assert.equal(await t.pending(), false);
+    let seenDuring = null;
+    const orig = t.gh.updateComment;
+    t.gh.updateComment = async (...a) => { seenDuring ??= await t.pending(); throw new Error('the process dies here'); };
+    await t.send('pull_request', mergedWeb, 'crash1'); await t.app.idle();
+    t.gh.updateComment = orig;
+    assert.equal(seenDuring, true, 'owed while the refresh runs');
+    assert.equal(await t.pending(), true, 'still owed after the crash');
+    t.tick(60_000); await t.app.resyncAll();
+    assert.equal(await t.pending(), false, 'a clean retry clears it');
+    assert.match(t.body('acme/web#12'), /merged/i);
+  } finally { await t.close(); }
+});
+
+test('trail_seq is global: a run dropped and re-created never gets back a value a refresh read (no ABA)', async () => {
+  const t = await world();
+  try {
+    await t.app.resyncAll();
+    const before = await t.db.markTrailPending(7, 70, 'r1');
+    const row = (await t.db.runs(7, 70))[0];
+    await t.db.dropRunsExcept(7, 70, []);
+    await t.db.putRun(7, 70, { runId: 'r1', eventsSha: row.eventsSha, seq: row.seq, state: row.state, error: null });
+    const after = await t.db.markTrailPending(7, 70, 'r1');
+    assert.notEqual(after, before);
+    assert.equal(await t.db.clearTrailPending(7, 70, 'r1', before), false, 'the stale value matches nothing');
+    assert.equal(await t.pending(), true);
+    assert.equal(await t.db.markTrailPending(7, 70, 'nope'), null, 'no such run');
+  } finally { await t.close(); }
+});
+
+test('a page resolves to the row whose id GitHub gives, not a stale same-named row in another installation', async () => {
+  const t = await world();
+  try {
+    await t.app.resyncAll();
+    t.gh.addUser('tok-r', { id: 4, login: 'r', read: ['acme/web'] });
+    // A stale row of the same name (a repo since deleted and re-made, or moved) synced more recently elsewhere.
+    await t.db.upsertInstallation({ id: 8, account: 'acme-old' });
+    await t.db.upsertRepo({ installationId: 8, id: 99, fullName: 'acme/web' });
+    await t.db.setRepoSync(8, 99, { headSha: 'h' });
+    const { signIn } = await import('./helpers.mjs');
+    const cookie = await signIn(t, 'r');
+    for (let i = 0; i < 2; i++) { // the second read comes from the cache
+      const r = await fetch(`${t.base}/r/acme/web/run/r1`, { headers: { Cookie: cookie } });
+      assert.equal(r.status, 200, `read ${i + 1}`);
+    }
+    assert.equal(t.gh.calls.filter((c) => c[0] === 'repoAccess').length, 1);
   } finally { await t.close(); }
 });

@@ -68,8 +68,9 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     async repoByName(installationId, fullName) {
       return repoRow((await q('SELECT * FROM repos WHERE installation_id = $1 AND lower(full_name) = lower($2) ORDER BY synced_at DESC NULLS LAST LIMIT 1', [installationId, fullName])).rows[0]);
     },
-    async repoForPage(fullName) {
-      return repoRow((await q('SELECT * FROM repos WHERE lower(full_name) = lower($1) ORDER BY synced_at DESC NULLS LAST LIMIT 1', [fullName])).rows[0]);
+    // id: GitHub's id for the repo; only a row with that id is returned (the newest synced, if several).
+    async repoForPage(fullName, id) {
+      return repoRow((await q('SELECT * FROM repos WHERE lower(full_name) = lower($1) AND id = $2 ORDER BY synced_at DESC NULLS LAST LIMIT 1', [fullName, Number(id)])).rows[0]);
     },
     async setRepoSync(installationId, id, { headSha, error = null, lessons, config }) {
       const set = ['head_sha = $3', 'sync_error = $4', 'synced_at = now()']; const v = [installationId, id, headSha, error];
@@ -90,7 +91,8 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
         [installationId, repoId, runId, mapSha ?? null, map === null || map === undefined ? null : JSON.stringify(map), mapError ?? null]);
     },
     async markTrailPending(installationId, repoId, runId) {
-      await q('UPDATE runs SET trail_pending = true, trail_seq = trail_seq + 1 WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3', [installationId, repoId, runId]);
+      // The new trail_seq, from one global sequence (never reused, even for a re-created run); null when there is no such run.
+      return (await q("UPDATE runs SET trail_pending = true, trail_seq = nextval('trail_seq_global') WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3 RETURNING trail_seq", [installationId, repoId, runId])).rows.map((r) => Number(r.trail_seq))[0] ?? null;
     },
     async clearTrailPending(installationId, repoId, runId, seq) {
       return (await q('UPDATE runs SET trail_pending = false WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3 AND trail_seq = $4', [installationId, repoId, runId, seq])).rowCount > 0;
