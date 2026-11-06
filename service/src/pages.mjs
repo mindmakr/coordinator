@@ -37,6 +37,7 @@ function ctxFor(fullName, run = null, row = null, user = null) {
     artHref: () => null,
     pages: [
       { path: '/', label: 'Projects', href: '/' },
+      ALERTS,
       { path: base, label: fullName, href: base },
       ...(run ? [{ path: runBase, label: run, href: runBase }, { path: `${runBase}/maps`, label: 'Maps', href: `${runBase}/maps` }] : []),
       ...(run && row ? Object.entries(REPO_PAGES).filter(([, p]) => p.scope === 'run' && p.has(row)).map(([id, p]) => ({ path: `${runBase}/${id}`, label: p.label, href: `${runBase}/${id}` })) : []),
@@ -67,7 +68,9 @@ export function withGitHub(v, gh = []) {
   };
 }
 
-const plainCtx = () => ({ live: null, theme: null, embed: null, pages: [{ path: '/', label: 'Projects', href: '/' }] });
+// c12: Alerts (the person's own settings, /alerts) beside Projects for anyone signed in.
+const ALERTS = { path: '/alerts', label: 'Alerts', href: '/alerts' };
+const plainCtx = (user = null) => ({ live: null, theme: null, embed: null, pages: [{ path: '/', label: 'Projects', href: '/' }, ...(user ? [ALERTS] : [])] });
 
 // Who is signed in, and the only two forms: sign out and (on a repo) sync now.
 function bar(user, repo = null) {
@@ -97,7 +100,7 @@ export function projectsPage(user, repos, { counts = new Map(), installUrl = nul
   const none = `<p class="empty">No projects yet. A project appears here once the Coordinator App is installed on its repo and a run has been pushed to its coordinator-state branch${installUrl ? ` (<a href="${esc(installUrl)}">install the App</a>)` : ''}.</p>`;
   const body = blk('head', '<header class="run"><h1>Projects</h1><span class="meta">repos you can read on GitHub</span></header>')
     + blk('projects', cards || none, 'div', ' class="grid"');
-  return withBar(page({ title: 'Projects', body, ctx: plainCtx(), path: '/' }), user);
+  return withBar(page({ title: 'Projects', body, ctx: plainCtx(user), path: '/' }), user);
 }
 
 export function runsPage(user, repo, rows, nowMs = Date.now()) {
@@ -159,5 +162,5 @@ export function coordinatorPage(user, repo, rows, nowMs = Date.now()) {
 
 export function messagePage(title, text, user = null, back = null) {
   const body = blk('head', `<header class="run"><h1>${esc(title)}</h1></header>`) + `<section class="card"><p>${esc(text)}</p><p>${back ? `<a href="${esc(back)}">Back to the run</a> · ` : ''}<a href="/">Back to your projects</a></p></section>`;
-  return withBar(page({ title, body, ctx: plainCtx(), path: '' }), user);
+  return withBar(page({ title, body, ctx: plainCtx(user), path: '' }), user);
 }

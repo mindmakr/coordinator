@@ -44,6 +44,8 @@ test('a question parked by a running lead is answered on the HUD, then by a comm
     cli('start', 'r1', 'u1');
     assert.equal(json('ask', 'r1', '--question', 'Which total?', '--header', 'Total', '--option', 'server|use the server total', '--option', 'client|sum on the client', '--unit', 'u1').asked, 'q1');
     cli('push', 'r1', '--to', folder);
+    // The lead carries on after its pit stop: its log is now ahead of the branch.
+    cli('beat', 'r1', 'u1');
 
     // GitHub has the branch; the service reads it.
     gh.addRepo('acme/web', { id: 70, installationId: 7, files: {} });
@@ -57,13 +59,16 @@ test('a question parked by a running lead is answered on the HUD, then by a comm
     const cookie = await signIn(t, 'ana');
     const page = await (await fetch(`${t.base}/r/acme/web/run/r1`, { headers: { Cookie: cookie, 'User-Agent': 'Mobile' } })).text();
     assert.match(page, /Which total\?/);
+    assert.match(page, /href="\/alerts"/, 'the HUD links to the alert settings');
     const csrf = /name="csrf" value="([^"]+)"/.exec(page)[1];
     const r = await fetch(`${t.base}/r/acme/web/run/r1/answer`, { method: 'POST', redirect: 'manual', body: new URLSearchParams({ csrf, q: 'q1', choice: 'server' }), headers: { Cookie: cookie, Origin: t.cfg.baseUrl, 'Content-Type': 'application/x-www-form-urlencoded' } });
     assert.equal(r.status, 303);
 
-    // One loop step of the lead: pull, see the answer, use it, next.
+    // One loop step of the lead: pull, see the answer, use it, next. The branch's answer is
+    // replayed on top of the lead's beat (the two logs differ after the push).
     toFolder(gh, folder);
-    assert.equal(json('pull', 'r1', '--from', folder).status, 'fast-forward');
+    const pulled = json('pull', 'r1', '--from', folder);
+    assert.deepEqual([pulled.status, pulled.replayed], ['replayed', 1]);
     let q = json('questions', 'r1').find((x) => x.id === 'q1');
     assert.equal(q.status, 'answered');
     assert.deepEqual(q.answer.choices, ['server']);
@@ -72,9 +77,11 @@ test('a question parked by a running lead is answered on the HUD, then by a comm
     assert.ok(json('next', 'r1').decision);
     assert.equal(json('questions', 'r1').find((x) => x.id === 'q1').status, 'used');
 
-    // Again, from a comment on the unit's issue.
+    // Again, from a comment on the unit's issue. The pit stop replaces the branch's log with the lead's,
+    // which holds the HUD's answer (replayed), so nothing from the web is lost.
     json('ask', 'r1', '--question', 'Round the total?', '--header', 'Rounding', '--option', 'yes|to cents', '--option', 'no|keep it exact');
     cli('push', 'r1', '--to', folder);
+    assert.match(readFileSync(join(folder, 'runs/r1/events.jsonl'), 'utf8'), /"kind":"answer"/);
     toGitHub(gh, folder);
     await t.app.ingest.syncRepo(7, { id: 70, fullName: 'acme/web' });
     const payload = JSON.stringify({ action: 'created', installation: { id: 7 }, repository: { id: 70, full_name: 'acme/web' }, issue: { number: 12 }, comment: { id: 900, body: '/coordinator answer q2 no', html_url: 'https://github.example/acme/web/issues/12#issuecomment-900', user: { login: 'ana', id: 5, type: 'User' } }, sender: { login: 'ana', type: 'User' } });

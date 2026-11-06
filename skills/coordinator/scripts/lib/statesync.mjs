@@ -9,6 +9,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { EVENTS, STATE, parseLog, readRun, replay, snapshotText, updateRun } from './events.mjs';
+import { extras, holds, replayAct, shared } from './incoming.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { safeId, withLock, writeAtomic } from './store.mjs';
 
@@ -129,7 +130,7 @@ function files(o, red, read) {
   const state = replay(parseLog(buf, `masked ${EVENTS}`).events);
   // Only ever extend the copy: a push never drops events another machine pushed.
   const theirs = read(`runs/${runId}/${EVENTS}`);
-  if (theirs && !buf.subarray(0, theirs.length).equals(theirs)) {
+  if (theirs && !buf.subarray(0, theirs.length).equals(theirs) && !replayedHere(parseLog(buf, `masked ${EVENTS}`), theirs, state)) {
     if (theirs.subarray(0, buf.length).equals(buf)) throw new Error(`refused: the copy of ${runId} has events this machine lacks; run.mjs pull ${runId} first; nothing pushed`);
     throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(buf, theirs)}; nothing pushed. ${RECOVER(runId)}`);
   }
@@ -149,6 +150,18 @@ function files(o, red, read) {
     out['stats/runs.jsonl'] = lines.sort((a, b) => a.run.localeCompare(b.run)).map((l) => `${JSON.stringify(l)}\n`).join('');
   }
   return { out, seq: log.events.length };
+}
+
+// The copy differs from the local log only by answers and person notes that pull has
+// already replayed here (renumbered, after the lead's own later events): the push may
+// replace the copy's log, since every one of its events is kept, in effect, in ours.
+function replayedHere(mine, theirs, state) {
+  let copy;
+  try { copy = parseLog(theirs, 'copy'); } catch { return false; }
+  const extra = extras(copy, shared(mine, copy));
+  if (!extra?.length) return false;
+  if (!extra.every((e) => e.acts.every((a) => holds(state, a)))) throw new Error(`refused: the copy of ${state.id} has answers or notes this machine lacks; run.mjs pull ${state.id} first; nothing pushed`);
+  return true;
 }
 
 // push({ run, dir, base, project, to, message, render, attach? }) → what was written where. attach: [({ run, red, read }) → { path: content }].
@@ -199,7 +212,11 @@ export function pull(o) {
     else {
       const mine = redactLog(cur.log, red);
       if (mine.subarray(0, remote.buf.length).equals(remote.buf)) return { status: mine.length === remote.buf.length ? 'up-to-date' : 'local-ahead', seq: cur.seq, state: null };
-      if (!remote.buf.subarray(0, mine.length).equals(mine)) throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(mine, remote.buf)}; nothing changed. ${RECOVER(runId)}`);
+      if (!remote.buf.subarray(0, mine.length).equals(mine)) {
+        const extra = extras(remote, shared(parseLog(mine, `masked ${EVENTS}`), remote));
+        if (extra) return { status: 'replay', extra, seq: cur.seq, state: null };
+        throw new Error(`refused: the local ${runId} and the copy have different histories after event ${firstDiff(mine, remote.buf)}; nothing changed. ${RECOVER(runId)}`);
+      }
       buf = Buffer.concat([cur.log.buf, remote.buf.subarray(mine.length)]); status = 'fast-forward';
     }
     const log = parseLog(buf, EVENTS);
@@ -209,6 +226,7 @@ export function pull(o) {
     o.after?.(state);
     return { status, seq: log.events.length, added: log.events.length - (cur?.seq ?? 0), state };
   });
+  if (result.status === 'replay') { Object.assign(result, replayExtras(o, result.extra)); delete result.extra; }
   const lessons = join(o.base, 'lessons.json'); const got = read('lessons/lessons.json');
   const restored = got && !existsSync(lessons);
   if (restored) writeAtomic(lessons, got);
@@ -216,6 +234,26 @@ export function pull(o) {
   // What else the copy holds for this run (the project map), each restorer reporting its own status.
   const extra = Object.fromEntries(Object.entries(o.restore ?? {}).map(([name, fn]) => [name, fn({ run: runId, read })]));
   return { run: runId, from: d.folder ?? d.branch, ...rest, lessons: restored ? 'restored' : 'kept', ...extra };
+}
+
+// The copy's answers and person notes the local log lacks, appended in the copy's order
+// as new local events (seq renumbered), each through updateRun like run.mjs answer and note.
+// All are tried on a copy of the state first, so a refusal (a used answer, a closed run) changes nothing.
+// Ones already here (an earlier pull) are skipped: a second pull adds nothing.
+function replayExtras(o, extra) {
+  const check = (s) => { if (s.closed) throw new Error(`refused: run ${s.id} is closed; the copy's answers and notes were not replayed`); };
+  const trial = structuredClone(readRun(o.dir).state);
+  check(trial);
+  for (const e of extra) for (const a of e.acts) replayAct(trial, a);
+  let state = null; let n = 0;
+  for (const e of extra) {
+    const before = readRun(o.dir).seq;
+    state = updateRun(o.dir, { kind: e.kind, unit: e.unit }, (s) => { check(s); for (const a of e.acts) replayAct(s, a); });
+    n += readRun(o.dir).seq - before;
+  }
+  if (n && state) o.after?.(state);
+  const now = readRun(o.dir).seq;
+  return { status: n ? 'replayed' : 'local-ahead', seq: now, added: n, replayed: n, state };
 }
 
 const RECOVER = (run) => `To recover: move the local run folder aside, run.mjs pull ${run}, then redo the local changes on top.`;

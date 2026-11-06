@@ -156,3 +156,55 @@ test('a folder works as the target and the source', () => {
   assert.equal(readFileSync(join(runDir(B, 'r1'), 'events.jsonl'), 'utf8'), readFileSync(join(folder, 'runs', 'r1', 'events.jsonl'), 'utf8'));
   assert.match(cli(B, 'pull', 'nope').err, /no run nope/);
 });
+
+test('answers and person notes made away are replayed after the lead\'s own later events, once, and nothing else is', () => {
+  const folder = join(root, 'away', 'state');
+  const ok = (r) => { assert.equal(r.code, 0, r.err); return r.out; };
+  const kinds = (m) => readFileSync(join(runDir(m, 'r3'), 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).map((e) => `${e.seq}:${e.kind}`);
+  ok(cli(A, 'init', 'r3', '--goal', 'g', '--bar', 'b', '--fence', 'f')); ok(cli(A, 'add', 'r3', 'u1', '--bar', 'b'));
+  ok(cli(A, 'freeze', 'r3')); ok(cli(A, 'start', 'r3', 'u1'));
+  ok(cli(A, 'ask', 'r3', '--question', 'Which?', '--header', 'Pick', '--option', 'x|the x', '--option', 'y|the y', '--unit', 'u1'));
+  ok(cli(A, 'push', 'r3', '--to', folder));
+  // The lead carries on locally after its pit stop.
+  ok(cli(A, 'beat', 'r3', 'u1'));
+  const seqBefore = kinds(A).length;
+  // Away (machine B stands in for the web HUD): an answer, then a note.
+  ok(cli(B, 'pull', 'r3', '--from', folder));
+  ok(cli(B, 'answer', 'r3', 'q1', '--choice', 'y'));
+  ok(cli(B, 'note', 'r3', '--kind', 'person', '--text', 'ship it', '--unit', 'u1'));
+  ok(cli(B, 'push', 'r3', '--to', folder));
+  const away = cli(B, 'questions', 'r3').out[0].answer;
+
+  const p = ok(cli(A, 'pull', 'r3', '--from', folder));
+  assert.deepEqual([p.status, p.replayed, p.seq], ['replayed', 2, seqBefore + 2]);
+  assert.deepEqual(kinds(A).slice(-3), [`${seqBefore}:unit.beat`, `${seqBefore + 1}:answer`, `${seqBefore + 2}:note`], 'in the copy\'s order, renumbered after the beat');
+  assert.deepEqual(cli(A, 'questions', 'r3').out[0].answer, away, 'the answer as it was given, with its time');
+  assert.equal(readRun(runDir(A, 'r3')).rebuilt, undefined);
+  // Idempotent: a second pull adds nothing.
+  const again = ok(cli(A, 'pull', 'r3', '--from', folder));
+  assert.deepEqual([again.status, again.replayed, kinds(A).length], ['local-ahead', 0, seqBefore + 2]);
+  // The lead uses the answer, and its next pit stop replaces the copy's log with its own.
+  ok(cli(A, 'use-answer', 'r3', 'q1'));
+  ok(cli(A, 'push', 'r3', '--to', folder));
+  assert.equal(readFileSync(join(folder, 'runs', 'r3', 'events.jsonl'), 'utf8'), readFileSync(join(runDir(A, 'r3'), 'events.jsonl'), 'utf8'));
+
+  // A push never drops a note this machine has not replayed yet: pull first.
+  rmSync(runDir(B, 'r3'), { recursive: true }); ok(cli(B, 'pull', 'r3', '--from', folder));
+  ok(cli(B, 'note', 'r3', '--kind', 'person', '--text', 'one more'));
+  ok(cli(B, 'push', 'r3', '--to', folder));
+  ok(cli(A, 'beat', 'r3', 'u1'));
+  assert.match(cli(A, 'push', 'r3', '--to', folder).err, /has answers or notes this machine lacks; run.mjs pull r3 first; nothing pushed/);
+  assert.equal(ok(cli(A, 'pull', 'r3', '--from', folder)).replayed, 1);
+  ok(cli(A, 'push', 'r3', '--to', folder));
+
+  // Anything other than an answer or a person's note is refused, and nothing changes.
+  rmSync(runDir(B, 'r3'), { recursive: true }); ok(cli(B, 'pull', 'r3', '--from', folder));
+  ok(cli(B, 'note', 'r3', '--kind', 'person', '--text', 'fine'));
+  ok(cli(B, 'note', 'r3', '--kind', 'info', '--text', 'lead-only kind'));
+  ok(cli(B, 'push', 'r3', '--to', folder));
+  ok(cli(A, 'beat', 'r3', 'u1'));
+  const log = readFileSync(join(runDir(A, 'r3'), 'events.jsonl'), 'utf8');
+  const r = cli(A, 'pull', 'r3', '--from', folder);
+  assert.equal(r.code, 1); assert.match(r.err, /different histories/);
+  assert.equal(readFileSync(join(runDir(A, 'r3'), 'events.jsonl'), 'utf8'), log);
+});

@@ -63,7 +63,8 @@
 //                  stats, masked, to the coordinator-state branch (never main; a public repo needs a
 //                  private companion repo, references/durability.md)
 //   run.mjs pull <run> [--from branch|./folder]   restores the run on another machine, or appends the
-//                  copy's newer events; never overwrites local events the copy lacks
+//                  copy's newer events; never overwrites local events the copy lacks. After the lead's own
+//                  later events, it replays the copy's extra answers and person notes (nothing else) on top
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';

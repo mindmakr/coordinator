@@ -150,6 +150,10 @@ One container plus Postgres:
 
 Logs go to stdout as JSON lines. Deleting the database loses nothing but sessions and the audit log: a sync rebuilds every run from the repos.
 
+## Known limits
+
+- **"A lead went quiet" is a guess from the state branch.** The service sees only what the lead pushes, and the lead pushes at pit stops (a unit merged, a decision, the run closing), not at every heartbeat. The alert fires when a run has units mid-work and the newest time in the pushed state (a heartbeat, round, note or start) is older than twice the run's stale budget (`staleMinutes`, 45 by default, so 90 minutes) ([src/alerts/triggers.mjs](src/alerts/triggers.mjs), `quietSince`). So a lead that is working well but has not reached a pit stop for that long is reported quiet, and a lead that stopped right after a push is not reported until the same time has passed. It is sent once per quiet spell, at normal urgency, and only by push; treat it as "worth a look", not as proof the lead is down. The lead's own machine (`run.mjs watch`, the local dashboard) knows better.
+
 ## Security notes
 
 - Webhooks: the HMAC SHA-256 is always checked first, in constant time, with a 5 MB body cap. A delivery that verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses, so someone else's misconfigured hook must not block ours. Only refused deliveries are counted (30 a minute per address, then 429 for refused ones only).
