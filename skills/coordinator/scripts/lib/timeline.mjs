@@ -14,9 +14,9 @@ export function log(unit, kind, text = '', extra = {}) {
 }
 
 // The colour family behind each badge; the badge always shows its label too.
-export const BADGES = ['decision', 'question', 'answer', 'note', 'pass', 'fail', 'stop', 'merge', 'evidence', 'strategy', 'build', 'link', 'info'];
+export const BADGES = ['decision', 'question', 'answer', 'note', 'pass', 'fail', 'stop', 'merge', 'evidence', 'strategy', 'behaviour', 'build', 'link', 'info'];
 const NOTE_BADGE = { decision: 'decision', question: 'question', person: 'note', strategy: 'strategy' };
-const LOG_BADGE = { start: 'build', beat: 'build', built: 'build', reset: 'build', strategy: 'strategy', evidence: 'evidence', stop: 'stop', behaviour: 'info' };
+const LOG_BADGE = { start: 'build', beat: 'build', built: 'build', reset: 'build', strategy: 'strategy', evidence: 'evidence', stop: 'stop', behaviour: 'behaviour' };
 
 const ev = (at, badge, label, unit, rest = {}) => ({ at, badge, label, unit: unit ?? null, who: '', score: null, cause: null, text: '', ...rest });
 const roundEv = (r, unit, who) => ev(r.at, r.verdict, `verdict ${r.verdict}`, unit, { who, score: r.score ?? null, cause: r.cause ?? null, text: r.verdict === 'pass' ? (r.evidence ?? '') : (r.gap ?? '') });

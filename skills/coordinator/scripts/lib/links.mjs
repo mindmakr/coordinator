@@ -75,6 +75,14 @@ export function repoFromRemote(url) {
   return m && REPO.test(m[1]) ? m[1] : null;
 }
 
+// The repo most GitHub issue and PR links in a text point at (an old run's state), or null.
+export function repoFromText(text) {
+  const counts = new Map();
+  for (const m of String(text ?? '').matchAll(/https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100})\/(?:issues|pull)\/\d+/g)) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+  const best = [...counts].sort((a, b) => b[1] - a[1])[0];
+  return best && REPO.test(best[0]) ? best[0] : null;
+}
+
 // Reads the project's own git config (no network). Cached per folder.
 const cache = new Map();
 export function inferRepo(cwd) {

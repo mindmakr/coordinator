@@ -163,19 +163,19 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     form ? blk('note', noteForm(form)) : '',
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),
-    '<h2>Budget</h2>',
+    '<h2 data-a="h-Budget">Budget</h2>',
     blk('budget', v.budget.map((b) => `<div class="card"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max)}</div>`).join(''), 'div', ' class="budget"'),
-    '<h2>Units</h2>',
+    '<h2 data-a="h-Units">Units</h2>',
     '<p class="legend"><b>Needs you</b> = waiting on you; <b>Retrying</b> = the lead is on it; <b>Quiet</b> = the lead is checking on a silent agent.</p>',
     blk('units', v.units.length ? v.units.map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
     blk('integration', v.integration.length ? `<h2>Integration</h2><p>${v.integration.map((x) => chip(x, x)).join(' → ')}</p>` : ''),
-    '<h2>Decisions, questions and follow-ups</h2>',
+    '<h2 data-a="h-Decisions">Decisions, questions and follow-ups</h2>',
     blk('lists', [list('Decisions', v.decisions, r), list('Questions', v.questions, r), list('Follow-ups', v.followUps, r),
       list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
-    '<h2 id="timeline">Timeline</h2>',
+    '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
     blk('timeline', timelineList(v.timeline, r), 'ol', ' class="timeline" data-tl-list'),
   ].join('\n');
-  return page({ title: `${v.id} · Coordinator`, body, ctx, path: '/' });
+  return page({ title: v.id, body, ctx, path: '/' });
 }
 

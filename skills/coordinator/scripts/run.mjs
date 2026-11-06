@@ -46,7 +46,7 @@ import { addEvidence, artifact } from './lib/evidence.mjs';
 import { allows, decide, decideUnit, stats } from './lib/rules.mjs';
 import { baseDir, isSafeId, projectDir, readJson, safeId, update, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
-import { githubRef, inferRepo, REPO, webUrl } from './lib/links.mjs';
+import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
 import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
@@ -59,7 +59,7 @@ const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
-  behave: ['goal', 'id', 'text', 'remove'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
+  behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
   ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
 };
@@ -84,7 +84,8 @@ const now = () => new Date().toISOString();
 const hudFile = (run) => join(runsDir(), safeId(run, 'run'), 'hud.html');
 
 const runDir = (run) => join(runsDir(), safeId(run, 'run'));
-const repoFor = (s) => s.repo ?? inferRepo(projectDir());
+// The run's repo: --repo, else the project's GitHub remote, else the GitHub links already in the state.
+const repoFor = (s) => s.repo ?? inferRepo(projectDir()) ?? repoFromText(JSON.stringify(s));
 const themeFor = (s) => loadTheme(themeFile(s, projectDir()));
 
 // The files people read: rewritten inside the state's lock after every change.
@@ -101,7 +102,7 @@ function derived(s) {
 // --issue and --pr values (owner/repo#n, #n or a URL) as unit links.
 function refLinks(s, kind, values = []) {
   return values.map((raw) => {
-    const url = githubRef(String(raw), s.repo ?? inferRepo(projectDir()), kind);
+    const url = githubRef(String(raw), repoFor(s), kind);
     if (!url) throw new Error(`--${kind} must be owner/repo#n, #n (with a known repo) or an http(s) URL, got: ${raw}`);
     return { kind, url, label: null, at: now() };
   });
@@ -175,7 +176,7 @@ const commands = {
       const links = [...refLinks(s, 'issue', o.issue), ...refLinks(s, 'pr', o.pr)];
       const u = { id: unit, bar: text(o.bar, 'bar'), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
       s.units.push(u);
-      for (const b of o.behaviour ?? []) behave(s, u, { text: b });
+      for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
     });
   },
   freeze([run]) { return change(run, (s) => { if (!s.units.length) throw new Error('add units first'); s.frozen = true; }); },
@@ -198,8 +199,15 @@ const commands = {
       if ((o.goal === true) === (unit !== undefined)) throw new Error('name a unit or --goal, not both');
       if (o.remove !== undefined && o.remove !== true) throw new Error('--remove takes no value');
       const u = unit === undefined ? null : unitOf(st, unit);
+      // Dropping or rewording a behaviour changes the bar: never mid-judgement, and after freeze only with a reason.
+      if (u?.status === 'judging') throw new Error(`behave refused: ${u.id} is being judged; wait for the verdict`);
+      const list = u ? (u.behaviours ?? []) : (st.goalBehaviours ?? []);
+      const changes = o.remove === true || (o.id !== undefined && list.some((b) => b.id === String(o.id).toUpperCase()));
+      const reason = changes && st.frozen ? text(o.reason, 'reason (removing or rewording a behaviour after freeze changes the bar)', 300) : null;
       id = behave(st, u, { id: o.id, text: o.text, remove: o.remove === true });
-      if (u) log(u, 'behaviour', o.remove ? `removed ${id}` : `${id}: ${optText(o.text, 300)}`);
+      const what = o.remove ? `removed ${id}` : `${id}: ${optText(o.text, 300)}`;
+      if (u) log(u, 'behaviour', reason ? `${what} (${reason})` : what);
+      if (reason) st.notes.push({ kind: 'bar', text: `${u ? u.id : 'goal'} ${what}: ${reason}`, at: now() });
     });
     return { ...s, behaviour: id };
   },

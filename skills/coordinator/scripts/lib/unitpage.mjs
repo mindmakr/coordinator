@@ -8,7 +8,7 @@ import { trend } from './view.mjs';
 
 function round(r, repo) {
   const marks = (r.behaviours ?? []).map((m) => `<li>${chip(m.status, m.status)} <b>${esc(m.id)}</b>${m.evidence ? ` ${linkify(m.evidence, repo)}` : ''}</li>`).join('');
-  return `<div class="round"><h4>Round ${r.n} ${chip(r.verdict, r.verdict)}${r.score !== null && r.score !== undefined ? ` <span class="cause">score ${esc(r.score)}</span>` : ''}`
+  return `<div class="round" data-a="round-${r.n}"><h4>Round ${r.n} ${chip(r.verdict, r.verdict)}${r.score !== null && r.score !== undefined ? ` <span class="cause">score ${esc(r.score)}</span>` : ''}`
     + `${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''} ${stamp(r.at, 'cause')}</h4>`
     + `<dl>${r.report ? `<dt>Builder's report</dt><dd>${linkify(r.report, repo)}</dd>` : ''}`
     + `${r.gap ? `<dt>Gap</dt><dd>${linkify(r.gap, repo)}</dd>` : ''}${r.evidence ? `<dt>Critic's evidence</dt><dd>${linkify(r.evidence, repo)}</dd>` : ''}</dl>`
@@ -29,19 +29,19 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     blk('head', `<header class="run"><h1>${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${chip(u.status, u.status)}`
       + `<span class="meta">round ${u.rounds}/${u.maxRounds} · scores ${esc(trend(u.scores) || 'none yet')} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`
       + unitLinks(u, r) + `<p class="say">${esc(u.sentence)}</p><div class="next"><b>Next</b>${esc(u.next)}</div>`),
-    '<h2>Bar and behaviours</h2>',
+    '<h2 data-a="h-Bar">Bar and behaviours</h2>',
     blk('behaviours', `<section class="card"><p>${linkify(u.bar, r)}</p>${behaviourList(u.behaviours, r, u.evidenceItems, ctx, `p-${u.id}`)}</section>`),
-    '<h2>Evidence and artifacts</h2>',
+    '<h2 data-a="h-Evidence">Evidence and artifacts</h2>',
     blk('evidence', `<section class="card">${loose.length ? evidenceList(loose, r, ctx, `p-${u.id}-ev`) : '<p class="empty">No evidence outside the behaviours.</p>'}</section>`),
-    '<h2>Rounds</h2>',
+    '<h2 data-a="h-Rounds">Rounds</h2>',
     blk('rounds', `<section class="card">${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
-    '<h2>Notes and questions</h2>',
+    '<h2 data-a="h-Notes">Notes and questions</h2>',
     blk('notes', `<section class="card">${u.asks.length ? `<ul class="needs-list">${u.asks.map((q) => questionItem(q, form, r)).join('')}</ul>` : ''}`
       + (notes ? `<ul>${notes}</ul>` : (u.asks.length ? '' : '<p class="empty">None.</p>'))
       + (form ? noteForm(form, u.id) : '') + '</section>'),
-    `<h2 id="timeline">Timeline of ${esc(u.id)}</h2>`,
+    `<h2 id="timeline" data-a="h-timeline">Timeline of ${esc(u.id)}</h2>`,
     ctx.live ? timelineTools() : '',
     blk('timeline', timelineList([...u.timeline].reverse(), r), 'ol', ' class="timeline" data-tl-list'),
   ].join('\n');
-  return page({ title: `${u.id} · ${v.id} · Coordinator`, body, ctx, path: `/unit/${u.id}` });
+  return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `/unit/${u.id}` });
 }

@@ -21,7 +21,7 @@ Write each unit's bar as **behaviours**: what a person or a system sees, not how
 - Given an HR admin without the permission, when they open /hr/payroll, then they get a 403 and no data.
 - It should show totals in SAR with two decimals, in English and Arabic.
 
-Record them with `S/run.mjs add <run> <unit> --behaviour "…"` (repeat the flag) or later with `S/run.mjs behave <run> <unit> --text "…"` (ids B1, B2, …; `--id B2 --text` rewords one, `--id B2 --remove` drops it). The run's goal gets its own with `behave <run> --goal --text "…"` (G1, G2, …).
+Record them with `S/run.mjs add <run> <unit> --behaviour "…"` (repeat the flag) or later with `S/run.mjs behave <run> <unit> --text "…"` (ids B1, B2, …; `--id B2 --text` rewords one, `--id B2 --remove` drops it). After `freeze`, rewording or removing needs `--reason`, which is logged as a bar change, and no behaviour changes while its unit is being judged: a lead cannot drop a failing behaviour to pass a unit quietly. The run's goal gets its own with `behave <run> --goal --text "…"` (G1, G2, …).
 
 - **The critic marks every behaviour** each round: `verdict … --behaviour B1=pass:"what shows it" --behaviour B2=fail:"what is wrong"`. A pass mark needs evidence.
 - **A unit cannot pass while any behaviour is failing or unchecked.** `verdict pass` is refused until each is marked pass. Likewise `integrate pass` until every goal behaviour passes.

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { anchor, esc, linkify } from './links.mjs';
 import { css, DARK, LIGHT } from './theme.mjs';
+import { pickAnchor, scrollDelta } from './anchor.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
 
@@ -49,11 +50,11 @@ export function page({ title, body, ctx, path }) {
   const status = live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span>'
     : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
-    csp: csp(live && { nonce: esc(live.nonce) }), title: esc(title), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }),
+    csp: csp(live && { nonce: esc(live.nonce) }), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }),
     top: `<div class="top">${brand()}<div class="tools">${status}${THEME_TOGGLE}</div></div>`,
     body, footer: footer(),
     attrs: live ? ` data-run="${esc(ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"` : '',
-    script: live ? `<script nonce="${esc(live.nonce)}">const matches = ${matches.toString()};\n${CLIENT}</script>` : '',
+    script: live ? `<script nonce="${esc(live.nonce)}">const matches = ${matches.toString()};\nconst pickAnchor = ${pickAnchor.toString()};\nconst scrollDelta = ${scrollDelta.toString()};\n${CLIENT}</script>` : '',
   };
   return SHELL.replace(/\{\{(\w+)\}\}/g, (_, k) => parts[k] ?? '');
 }
@@ -83,7 +84,7 @@ function evidenceItem(e, repo, ctx, key) {
     body = src ? `<a href="${esc(full)}" target="_blank" rel="noopener noreferrer"><img class="thumb" src="${esc(src)}" alt="${esc(e.label ?? 'screenshot')}" loading="lazy"></a>`
       : `<p><a href="${esc(full)}" target="_blank" rel="noopener noreferrer">Open the screenshot</a></p>`;
   } else if (e.file) body = `<p><a href="${esc(ctx.artHref(e.file))}" target="_blank" rel="noopener noreferrer">Open ${esc(e.file.split('/').pop())}</a></p>`;
-  return `<li class="evidence"><div>${head} ${stamp(e.at, 'cause')}</div>${body}</li>`;
+  return `<li class="evidence" data-a="${esc(`${key}-${e.id}`)}"><div>${head} ${stamp(e.at, 'cause')}</div>${body}</li>`;
 }
 
 export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class="evlist">${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>` : '');
@@ -91,7 +92,7 @@ export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class=
 export function eventRow(e, repo) {
   const score = e.score === null || e.score === undefined ? '' : ` · ${e.score}`;
   const cause = e.cause ? ` <span class="cause">cause: ${esc(e.cause)}</span>` : '';
-  return `<li data-at="${esc(e.at)}" data-badge="${esc(e.badge)}" data-unit="${esc(e.unit ?? '')}">${stamp(e.at)}`
+  return `<li data-a="${esc(`ev|${e.at}|${e.label}|${e.who}`)}" data-at="${esc(e.at)}" data-badge="${esc(e.badge)}" data-unit="${esc(e.unit ?? '')}">${stamp(e.at)}`
     + `<span>${badge(e.badge, e.label)}</span>`
     + `<span>${e.who ? `<b>${esc(e.who)}${esc(score)}</b> ` : ''}${linkify(e.text, repo)}${cause}</span></li>`;
 }

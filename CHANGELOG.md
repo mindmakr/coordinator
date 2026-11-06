@@ -16,7 +16,10 @@ A live dashboard, and a bar made of behaviours with evidence attached. From the 
 - **Looks like the project:** `init --theme file.css` or `Theme:` in `COORDINATOR.md` maps the design system's custom properties (shadcn, Tailwind 4 `@theme`, daisyUI) onto the dashboard; unsafe values are dropped and nothing is loaded.
 - **Retrying / Quiet, not "needs attention":** the unit badge says the lead is handling it (failed twice in a row; agent silent), with the reason on hover and a legend. Only Needs you and question cards address the person.
 - **Local times:** the live pages show times in the viewer's locale and zone (relative within 24 h, full local time on hover); the snapshot keeps ISO with UTC spelled out. Every time is a `<time datetime>`.
-- **Brand:** "Coordinator by mindmakr" mark, favicon, page titles and footer with the version.
+- **Brand:** "Coordinator by mindmakr" mark, favicon, page titles ("<run> · Coordinator by mindmakr") and footer with the version.
+- **Your place is kept:** a live update or a reload keeps the first heading, card or timeline row on screen where it was, found by its key even when the block around it is replaced.
+- **Bar changes are on the record:** after freeze, removing or rewording a behaviour needs `--reason` (logged as a bar note), and none changes while its unit is being judged. Behaviours set at `add` show on the timeline under their own kind.
+- With no `--repo` and no GitHub remote, `#n` resolves against the GitHub links already in the run.
 - **Snapshot:** `hud.html` is now a static read-only snapshot (no meta refresh, so open sections stay open); one page per unit beside it; small screenshots embedded.
 - Older state files load: every new field is optional.
 

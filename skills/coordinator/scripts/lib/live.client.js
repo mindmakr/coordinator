@@ -69,7 +69,16 @@
   const scrollKey = key(`scroll:${path}`);
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   let t = 0;
-  addEventListener('scroll', () => { clearTimeout(t); t = setTimeout(() => save(scrollKey, scrollY), 150); }, { passive: true });
+  // Every keyed element (blocks, headings, cards, rows) with where it sits now.
+  const places = () => [...app.querySelectorAll('[data-k],[data-a]')].map((el) => {
+    const r = el.getBoundingClientRect();
+    return { key: el.dataset.a ? `a:${el.dataset.a}` : `k:${el.dataset.k}`, top: r.top, bottom: r.bottom };
+  });
+  let restoring = true; // until the saved place is back, scrolling does not overwrite it
+  addEventListener('scroll', () => {
+    if (restoring) return;
+    clearTimeout(t); t = setTimeout(() => save(scrollKey, { y: scrollY, anchor: pickAnchor(places()) }), 150);
+  }, { passive: true });
 
   // Times: the viewer's locale and zone. Relative within 24 h, local date-time otherwise;
   // the full local time with its zone on hover. The datetime attribute stays ISO (filters read data-at).
@@ -109,12 +118,12 @@
   let latest = null;
   function patch(html) {
     latest = html; pending = false;
-    const anchor = keyed(app).find((c) => c.getBoundingClientRect().bottom > 0);
-    const top = anchor ? anchor.getBoundingClientRect().top : 0;
+    const anchor = pickAnchor(places()); // by key: the block it sits in may be replaced
     const tpl = document.createElement('template'); tpl.innerHTML = html;
     sync(app, tpl.content);
     localTimes(app);
-    if (anchor && anchor.isConnected) scrollBy(0, anchor.getBoundingClientRect().top - top);
+    const delta = scrollDelta(anchor, places());
+    if (delta) scrollBy(0, delta);
     applyTimeline();
   }
   document.addEventListener('focusout', () => setTimeout(() => { if (pending && latest) patch(latest); }, 0));
@@ -141,7 +150,15 @@
   applyOpen(document);
   localTimes(document);
   applyTimeline();
-  const y = load(scrollKey, 0);
-  if (y) requestAnimationFrame(() => scrollTo(0, y));
+  // Restore once layout has settled (images and fonts), by the saved anchor's key, else the saved offset.
+  const saved = load(scrollKey, null);
+  const settle = () => new Promise((ok) => (document.readyState === 'complete' ? ok() : addEventListener('load', ok, { once: true })))
+    .then(() => (document.fonts ? document.fonts.ready : null)).then(() => new Promise((ok) => requestAnimationFrame(ok)));
+  settle().then(() => {
+    const y = typeof saved === 'number' ? saved : saved && saved.y; // 0.5.0 before this stored a bare number
+    if (y) scrollTo(0, y);
+    const delta = saved && saved.anchor ? scrollDelta(saved.anchor, places()) : 0;
+    if (delta) scrollBy(0, delta);
+  }).finally(() => { restoring = false; });
   connect();
 })();

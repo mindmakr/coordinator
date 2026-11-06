@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { pickAnchor, scrollDelta } from '../lib/anchor.mjs';
 import { artifact } from '../lib/evidence.mjs';
 import { hud } from '../lib/hud.mjs';
 import { linkify } from '../lib/links.mjs';
@@ -201,7 +202,8 @@ test('the drilldown page: behaviours, rounds, notes, links and its own timeline,
   run('note', 'd1', '--kind', 'person', '--text', 'check RTL', '--unit', 'u1');
   const file = readFileSync(join(runDir('d1'), 'units', 'u1.html'), 'utf8');
   assert.match(file, /<a class="back" href="\.\.\/hud\.html">← d1 dashboard<\/a>/);
-  assert.match(file, /<title>u1 · d1 · Coordinator<\/title>/);
+  assert.match(file, /<title>u1 · d1 · Coordinator by mindmakr<\/title>/);
+  assert.match(readFileSync(join(runDir('d1'), 'hud.html'), 'utf8'), /<title>d1 · Coordinator by mindmakr<\/title>/);
   assert.match(file, /Round 1 <span class="chip s-fail">fail<\/span>/);
   assert.match(file, /Builder's report<\/dt><dd>see <a href="https:\/\/github.com\/m\/p\/commit\/7f8ad63"/);
   assert.match(file, /off by <a href="https:\/\/github.com\/m\/p\/issues\/3"/);
@@ -282,6 +284,69 @@ test('every time is a <time> with an ISO datetime; the snapshot spells out UTC; 
   assert.match(live, /new Intl\.DateTimeFormat\(undefined/);
   assert.match(live, /querySelectorAll\('time\[datetime\]'\)/);
   assert.match(live, /data-at="\d{4}-/, 'filters still read the raw timestamp');
+});
+
+test('scroll anchor: found again by key when the block it sits in is replaced', () => {
+  // The reader is inside the timeline: its block starts above the fold, a row is first on screen.
+  const before = [{ key: 'k:units', top: -900, bottom: -300 }, { key: 'k:timeline', top: -200, bottom: 1400 }, { key: 'a:h-timeline', top: -230, bottom: -200 },
+    { key: 'a:ev|t2|decision|', top: 12, bottom: 40 }, { key: 'a:ev|t1|note|', top: 40, bottom: 70 }];
+  const anchor = pickAnchor(before);
+  assert.deepEqual(anchor, { key: 'a:ev|t2|decision|', top: 12 }, 'the first row that starts on screen, not the block');
+  // Three new decisions: the timeline block is replaced (new nodes) and the row moved down 106 px.
+  const after = [{ key: 'k:units', top: -900, bottom: -300 }, { key: 'k:timeline', top: -200, bottom: 1506 }, { key: 'a:ev|t5|decision|', top: 12, bottom: 40 },
+    { key: 'a:ev|t2|decision|', top: 118, bottom: 146 }];
+  assert.equal(scrollDelta(anchor, after), 106, 'scroll down by what the content above it grew');
+  assert.equal(scrollDelta(anchor, [{ key: 'k:units', top: 0, bottom: 10 }]), 0, 'gone: no jump');
+  assert.equal(scrollDelta(null, after), 0);
+  assert.deepEqual(pickAnchor([{ key: 'k:big', top: -50, bottom: 2000 }]), { key: 'k:big', top: -50 }, 'only a tall block on screen');
+  // The keys are stable across renders: a replaced timeline block renders the same row keys.
+  setup('sa1');
+  run('note', 'sa1', '--kind', 'decision', '--text', 'first');
+  const key = (html) => /<li data-a="(ev\|[^"]+\|decision\|)"/.exec(html)[1];
+  const blockHash = (html) => /data-k="timeline" data-h="([^"]+)"/.exec(html)[1];
+  const one = readFileSync(join(runDir('sa1'), 'hud.html'), 'utf8');
+  run('note', 'sa1', '--kind', 'decision', '--text', 'second');
+  const two = readFileSync(join(runDir('sa1'), 'hud.html'), 'utf8');
+  assert.notEqual(blockHash(one), blockHash(two), 'the block is replaced');
+  assert.ok(two.includes(`data-a="${key(one)}"`), 'its first row keeps its key');
+  const s = state('sa1');
+  const live = hud(view(s, decide(s)), Date.now(), { token: 't', nonce: 'n' });
+  assert.match(live, /const pickAnchor = function pickAnchor/);
+  assert.doesNotMatch(live, /isConnected/, 'never by node identity');
+  assert.match(live, /document\.fonts \? document\.fonts\.ready/, 'reload restores after layout settles');
+});
+
+test('after freeze a behaviour is removed or reworded only with a reason, never mid-judgement', () => {
+  setup('br1');
+  run('behave', 'br1', 'u1', '--text', 'It should total'); run('behave', 'br1', 'u1', '--text', 'It should round');
+  run('start', 'br1', 'u1'); run('built', 'br1', 'u1');
+  assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--remove', '--reason', 'x').err, /being judged/);
+  assert.match(run('behave', 'br1', 'u1', '--text', 'new one').err, /being judged/);
+  run('verdict', 'br1', 'u1', 'fail', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down');
+  assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--remove').err, /missing --reason/);
+  assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--text', 'It should round, roughly').err, /missing --reason/);
+  assert.equal(run('behave', 'br1', 'u1', '--text', 'It should log').code, 0, 'adding one tightens the bar: no reason needed');
+  assert.equal(run('behave', 'br1', 'u1', '--id', 'B2', '--remove', '--reason', 'owner dropped rounding from scope').code, 0);
+  const s = state('br1');
+  assert.ok(s.notes.some((n) => n.kind === 'bar' && /u1 removed B2: owner dropped rounding/.test(n.text)), 'the bar change is on the record');
+  assert.deepEqual(s.units[0].behaviours.map((b) => b.id), ['B1', 'B3']);
+});
+
+test('add --behaviour is on the unit timeline, under its own kind', () => {
+  run('init', 'bk1', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  run('add', 'bk1', 'u1', '--bar', 'b', '--behaviour', 'It should total');
+  const [e] = unitTimeline(state('bk1'), 'u1');
+  assert.deepEqual([e.badge, e.label, e.text], ['behaviour', 'behaviour', 'B1: It should total']);
+  assert.match(readFileSync(join(runDir('bk1'), 'units', 'u1.html'), 'utf8'), /<span class="badge k-behaviour">behaviour<\/span>/);
+});
+
+test('with no --repo and no git remote, #n links against the GitHub links already in the state', () => {
+  run('init', 'rp1', '--goal', 'fix #7', '--bar', 'b', '--fence', 'f');
+  run('add', 'rp1', 'u1', '--bar', 'b', '--link', 'https://github.com/acme/shop/issues/7');
+  assert.equal(state('rp1').repo, undefined);
+  assert.match(readFileSync(join(runDir('rp1'), 'hud.html'), 'utf8'), /fix <a href="https:\/\/github.com\/acme\/shop\/issues\/7"/);
+  assert.equal(run('link', 'rp1', 'u1', '--pr', '#9').code, 0, 'a bare #n resolves the same way');
+  assert.equal(state('rp1').units[0].links[0].url, 'https://github.com/acme/shop/pull/9');
 });
 
 test('the footer version matches the plugin', () => {
