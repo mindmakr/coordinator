@@ -48,12 +48,14 @@ const pathOf = (p) => { const m = PAGE.exec(p ?? ''); return m ? p : null; };
 export function serve({ port = 0, page, post, file = () => null, version = () => '' }) {
   const token = randomBytes(24).toString('base64url');
   const live = hub({ version, render: (p) => page(p, { token, nonce: 'patch' }) });
-  const server = createServer(async (req, res) => {
+  // No request can take the server down: every throw ends in a 400 or 500 for that request only.
+  async function handle(req, res) {
     const { port: p } = server.address();
     const hosts = [`${HOST}:${p}`, `localhost:${p}`];
     if (!hosts.includes(req.headers.host)) return send(res, 403, 'wrong host');
-    const url = new URL(req.url, `http://${req.headers.host}`);
     const home = `/?t=${token}`;
+    let url;
+    try { url = new URL(req.url, `http://${HOST}`); } catch { return send(res, 400, 'bad URL'); }
     try {
       if (req.method === 'GET' && url.pathname === '/favicon.ico') return send(res, 204, '');
       if (req.method === 'GET') {
@@ -90,8 +92,15 @@ export function serve({ port = 0, page, post, file = () => null, version = () =>
       return send(res, 303, '', { Location: `${pathOf(back) && back !== '/' ? `${back}?t=${token}` : home}#${encodeURIComponent(anchor ?? '')}` });
     } catch (e) {
       if (res.headersSent) return res.end();
+      if (e instanceof URIError) return send(res, 400, 'bad URL'); // a malformed %-escape
       return send(res, e.message === 'too large' ? 413 : 500, e.message === 'too large' ? 'too large' : 'server error');
     }
+  }
+  const server = createServer((req, res) => {
+    handle(req, res).catch((e) => {
+      console.error(`serve: ${e?.message ?? e}`);
+      try { if (res.headersSent) res.end(); else send(res, 500, 'server error'); } catch { /* the socket is gone */ }
+    });
   });
   const close = server.close.bind(server);
   server.close = (cb) => { live.close(); return close(cb); }; // open event streams would hold it open

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { get as httpGet } from 'node:http';
+import { get as httpGet, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -379,6 +379,22 @@ test('answered questions leave the open count; a legacy decision note is the ans
   const labels = runTimeline(state('aq1')).map((e) => e.text);
   assert.ok(labels.includes('q1 answered: Keep it narrowed to holders of the permission'));
   assert.ok(labels.includes('q2 answered: No'));
+});
+
+test('serve: malformed and over-long URLs get an answer, and the server keeps serving', async () => {
+  const { serve } = await import('../lib/serve.mjs');
+  const { server, url, token } = await serve({ page: (p) => (p === '/' ? '<main id="app">ok</main>' : null), post: {} });
+  const { port } = new URL(url);
+  const raw = (path) => new Promise((ok) => {
+    const req = request({ host: '127.0.0.1', port, path, headers: { Host: `127.0.0.1:${port}` } }, (res) => { res.resume(); res.on('end', () => ok(res.statusCode)); });
+    req.on('error', (e) => ok(`error: ${e.code}`)); req.end();
+  });
+  try {
+    for (const [path, want] of [['//?t=x', 400], ['//', 400], ['/%', 403], [`/%?t=${token}`, 404], ['/..%2F', 403], [`/artifacts/u1/%E0%A4%A?t=${token}`, 400], [`/${'a'.repeat(20_000)}`, 431]]) {
+      assert.equal(await raw(path), want, path.slice(0, 40));
+      assert.equal(await raw(`/?t=${token}`), 200, `still serving after ${path.slice(0, 40)}`);
+    }
+  } finally { server.close(); }
 });
 
 test('the footer version matches the plugin', () => {

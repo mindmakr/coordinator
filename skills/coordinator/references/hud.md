@@ -40,7 +40,7 @@ Stop it with Ctrl+C, or stop the background command, when the run ends.
 
 **Why one script.** The page carries one inline script, allowed by a nonce made per response (`script-src 'nonce-…'`), plus `connect-src 'self'` for the stream and `img-src 'self'` for screenshots. Nothing else can run or load.
 
-**Known issue.** In Chromium, when the top of the screen sits a few pixels below a growing list inside a tall card (for example a unit's open Evidence list), an item appended to that list can shift the view (measured once at 126 px), because the browser anchors to the card that straddles the top of the screen. Content added inside the visible area also moves what is below it, by design. It is a follow-up for the repo, with the critic's reproduction from the 0.5.0 review.
+**Known issue.** In Chromium, when the top of the screen sits a few pixels below a growing list inside a tall card (for example a unit's open Evidence list), an item appended to that list can shift the view (measured once at 126 px), because the browser anchors to the card that straddles the top of the screen. Content added inside the visible area also moves what is below it, by design. Tracked in issue #23. To reproduce: in Chromium, serve a run with 8 units and 45 or more decisions, one unit with 22 or more evidence items and its Evidence list open; put the top of the screen 5–40 px below the end of that list; then add evidence to that unit from the CLI (`run.mjs evidence <run> <unit> --kind log --text …`).
 
 ## The snapshot: `hud.html` and `units/<unit>.html`
 
