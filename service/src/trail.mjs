@@ -78,7 +78,7 @@ export function trail({ db, gh, config, log, now = Date.now }) {
       const token = async () => (readToken ??= await gh.installationToken(installationId, SCOPES.read));
       for (const u of state.units.slice(0, CAPS.units)) {
         for (const ref of unitRefs(u).slice(0, CAPS.refsPerUnit)) {
-          const target = await db.repoByName(ref.repo);
+          const target = await db.repoByName(installationId, ref.repo); // this installation's row only
           if (!(await fence.allows(repo, target, token))) { out.skipped = [...(out.skipped ?? []), ref.key]; continue; } // outside the project: read-only
           const events = await db.ghEvents(installationId, [ref.key]);
           if (trackersOn) {

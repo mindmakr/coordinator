@@ -18,7 +18,7 @@ export function access({ gh, db, ttlMs = 60_000, now = Date.now }) {
   // time to answer cannot tell an unknown repo from a known one the viewer cannot read.
   async function readable(session, fullName) {
     if (!session) return null;
-    const repo = await db.repoByName(fullName);
+    const repo = await db.repoForPage(fullName); // the URL names no installation; GitHub's answer below checks the id
     const k = `${session.userId}\u0000repo\u0000${repo ? `${repo.installationId}:${repo.id}` : `?${String(fullName).toLowerCase()}`}`;
     const hit = cached(k);
     if (hit) return hit.v && repo ? repo : null;

@@ -35,7 +35,10 @@ export function memoryDb() {
       for (const [k, r] of refs) if (r.installationId === installationId && r.repoId === id) refs.delete(k);
     },
     async repos(installationId) { return [...repos.values()].filter((r) => r.installationId === installationId).map(clone); },
-    async repoByName(fullName) {
+    async repoByName(installationId, fullName) {
+      return clone([...repos.values()].find((r) => r.installationId === installationId && r.fullName.toLowerCase() === String(fullName).toLowerCase())) ?? null;
+    },
+    async repoForPage(fullName) {
       const hit = [...repos.values()].filter((r) => r.fullName.toLowerCase() === String(fullName).toLowerCase())
         .sort((a, b) => String(b.syncedAt ?? '').localeCompare(String(a.syncedAt ?? '')))[0];
       return clone(hit) ?? null;
@@ -52,15 +55,21 @@ export function memoryDb() {
     async run(installationId, repoId, runId) { return clone(runs.get(key(installationId, repoId, runId))) ?? null; },
     async putRun(installationId, repoId, row) {
       const prev = runs.get(key(installationId, repoId, row.runId));
-      runs.set(key(installationId, repoId, row.runId), { mapSha: null, map: null, mapError: null, trailPending: false, ...(prev && { mapSha: prev.mapSha, map: prev.map, mapError: prev.mapError, trailPending: prev.trailPending }), ...clone(row), installationId, repoId, updatedAt: new Date().toISOString() });
+      runs.set(key(installationId, repoId, row.runId), { mapSha: null, map: null, mapError: null, trailPending: false, trailSeq: 0, ...(prev && { mapSha: prev.mapSha, map: prev.map, mapError: prev.mapError, trailPending: prev.trailPending, trailSeq: prev.trailSeq }), ...clone(row), installationId, repoId, updatedAt: new Date().toISOString() });
     },
     async putRunMap(installationId, repoId, runId, { mapSha, map, mapError }) {
       const r = runs.get(key(installationId, repoId, runId));
       if (r) Object.assign(r, { mapSha, map: clone(map), mapError });
     },
-    async setTrailPending(installationId, repoId, runId, pending) {
+    async markTrailPending(installationId, repoId, runId) {
       const r = runs.get(key(installationId, repoId, runId));
-      if (r) r.trailPending = !!pending;
+      if (r) Object.assign(r, { trailPending: true, trailSeq: r.trailSeq + 1 });
+    },
+    async clearTrailPending(installationId, repoId, runId, seq) {
+      const r = runs.get(key(installationId, repoId, runId));
+      if (!r || r.trailSeq !== seq) return false;
+      r.trailPending = false;
+      return true;
     },
     async dropRunsExcept(installationId, repoId, keep) {
       const k = new Set(keep);

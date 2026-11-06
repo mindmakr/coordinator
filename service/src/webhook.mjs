@@ -2,7 +2,6 @@
 // parsed; a delivery id seen before is acknowledged and skipped. Pushes to the
 // state branch resync that repo; installation events add and remove repos.
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { trailOwed } from './ingest.mjs';
 
 export function verifySignature(secret, raw, header) {
   if (typeof header !== 'string' || !header.startsWith('sha256=')) return false;
@@ -17,8 +16,8 @@ const refKey = (full, n) => `${String(full).toLowerCase()}#${Number(n)}`;
 // handle(event, payload) → { status, body, work? }. `work` is the sync to run after replying.
 // Pull request and check results become events on the read model (shown in the
 // timelines and the tracker comments) and refresh the trail of every run in the
-// same installation whose units link that PR.
-export function webhooks({ db, ingest, trail = null, branch = 'coordinator-state', log }) {
+// same installation whose units link that PR, through the ingester's per-repo queue (ingest.refreshRuns).
+export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
   async function installationEvent(p) {
     const id = Number(p.installation?.id);
     if (p.action === 'deleted') {
@@ -58,13 +57,8 @@ export function webhooks({ db, ingest, trail = null, branch = 'coordinator-state
     const key = refKey(p.repository.full_name, n);
     await db.addGhEvent(inst, { id, refKey: key, kind, at, detail: { label: `PR ${p.repository.full_name}#${Number(n)}`, ...detail } });
     return async () => {
-      if (!trail) return;
-      for (const r of await db.runsReferencing(inst, key)) {
-        const repo = (await db.repos(inst)).find((x) => x.id === r.repoId);
-        if (!repo) continue;
-        // A held-back or failed write is flagged, so the next periodic resync lands it (and edits, never re-posts).
-        await db.setTrailPending(inst, repo.id, r.runId, trailOwed(await trail.refreshRun(inst, repo, r.runId)));
-      }
+      // A held-back or failed write is flagged, so the next periodic resync lands it (and edits, never re-posts).
+      for (const r of await db.runsReferencing(inst, key)) await ingest.refreshRuns(inst, r.repoId, [r.runId]);
     };
   }
 

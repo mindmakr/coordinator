@@ -30,7 +30,7 @@ export async function migrate(pool) {
 }
 
 const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons, config: r.config ?? null, private: r.private ?? null } : null);
-const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at), mapSha: r.map_sha ?? null, map: r.map ?? null, mapError: r.map_error ?? null, trailPending: r.trail_pending === true } : null);
+const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at), mapSha: r.map_sha ?? null, map: r.map ?? null, mapError: r.map_error ?? null, trailPending: r.trail_pending === true, trailSeq: Number(r.trail_seq ?? 0) } : null);
 
 // schema (tests): a throwaway schema of its own, dropped on close.
 export async function postgresDb(url, { max = 10, schema = null } = {}) {
@@ -65,7 +65,10 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     },
     async removeRepo(installationId, id) { await q('DELETE FROM repos WHERE installation_id = $1 AND id = $2', [installationId, id]); },
     async repos(installationId) { return (await q('SELECT * FROM repos WHERE installation_id = $1 ORDER BY full_name', [installationId])).rows.map(repoRow); },
-    async repoByName(fullName) {
+    async repoByName(installationId, fullName) {
+      return repoRow((await q('SELECT * FROM repos WHERE installation_id = $1 AND lower(full_name) = lower($2) ORDER BY synced_at DESC NULLS LAST LIMIT 1', [installationId, fullName])).rows[0]);
+    },
+    async repoForPage(fullName) {
       return repoRow((await q('SELECT * FROM repos WHERE lower(full_name) = lower($1) ORDER BY synced_at DESC NULLS LAST LIMIT 1', [fullName])).rows[0]);
     },
     async setRepoSync(installationId, id, { headSha, error = null, lessons, config }) {
@@ -86,8 +89,11 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
       await q('UPDATE runs SET map_sha = $4, map = $5, map_error = $6 WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3',
         [installationId, repoId, runId, mapSha ?? null, map === null || map === undefined ? null : JSON.stringify(map), mapError ?? null]);
     },
-    async setTrailPending(installationId, repoId, runId, pending) {
-      await q('UPDATE runs SET trail_pending = $4 WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3', [installationId, repoId, runId, !!pending]);
+    async markTrailPending(installationId, repoId, runId) {
+      await q('UPDATE runs SET trail_pending = true, trail_seq = trail_seq + 1 WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3', [installationId, repoId, runId]);
+    },
+    async clearTrailPending(installationId, repoId, runId, seq) {
+      return (await q('UPDATE runs SET trail_pending = false WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3 AND trail_seq = $4', [installationId, repoId, runId, seq])).rowCount > 0;
     },
     async dropRunsExcept(installationId, repoId, keep) {
       await q('DELETE FROM runs WHERE installation_id = $1 AND repo_id = $2 AND NOT (run_id = ANY($3::text[]))', [installationId, repoId, keep]);

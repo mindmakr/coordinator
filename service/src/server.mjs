@@ -33,7 +33,7 @@ function readBody(req, max) {
 export function createApp({ config, db, gh, log, now = Date.now }) {
   const github = trail({ db, gh, config, log, now });
   const ingest = ingester({ db, gh, branch: config.stateBranch, log, trail: github });
-  const hooks = makeWebhooks({ db, ingest, trail: github, branch: config.stateBranch, log });
+  const hooks = makeWebhooks({ db, ingest, branch: config.stateBranch, log });
   const auth = makeSessions({ db, gh, config, log, now });
   const acl = makeAccess({ gh, db, ttlMs: config.accessTtlMs, now });
   const limits = {

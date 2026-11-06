@@ -54,8 +54,14 @@ export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).slice(0,
 // trail (optional): { refreshRun(installationId, repo, runId) }, run for every run whose state changed,
 // and again at every later sync for a run whose last refresh held a comment back (db trailPending),
 // even when the branch tip has not moved.
+//
+// Every trail refresh of a repo's runs, from a sync or from a webhook (refreshRuns), is a retrail in
+// that repo's serial queue, so two never overlap. The flag is set by a refresh that owed a write
+// (markTrailPending bumps the run's trailSeq) and cleared only by a retrail that rebuilt the whole run
+// cleanly, and then only if trailSeq still holds what it read first: a deferral recorded meanwhile
+// (by another process sharing the database) is never overwritten by a clean finish.
 export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null }) {
-  const chains = new Map(); // one sync per repo at a time; a second waits for the first
+  const chains = new Map(); // one sync or trail refresh per repo at a time; a second waits for the first
   const serial = (k, fn) => {
     const next = (chains.get(k) ?? Promise.resolve()).catch(() => {}).then(fn);
     chains.set(k, next);
@@ -129,16 +135,28 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
   // Refreshes the trail of the changed runs plus every run still owed a comment, and records which
   // ones still are. The flag lives in the read model, so a restart keeps it; the tracker rows keep
   // the comment ids, so a retry edits or adopts the comment and never posts a second one.
-  async function retrail(installationId, repo, changed) {
+  // Called inside the repo's queue only. Refreshes `changed` (plus, with `owedToo`, every other run still
+  // owed) as whole runs. A refresh that owed a write marks the run; one that finished cleanly clears a
+  // flag it saw at the start, and only if no deferral was recorded since (trailSeq unchanged).
+  async function retrail(installationId, repo, changed, { owedToo = true } = {}) {
     if (!trail || !repo) return [];
-    const owed = (await db.runs(installationId, repo.id)).filter((r) => r.trailPending).map((r) => r.runId);
-    const retried = owed.filter((id) => !changed.includes(id));
+    const owed = new Map((await db.runs(installationId, repo.id)).filter((r) => r.trailPending).map((r) => [r.runId, r.trailSeq]));
+    const retried = owedToo ? [...owed.keys()].filter((id) => !changed.includes(id)) : [];
     for (const runId of [...changed, ...retried]) {
       const r = await trail.refreshRun(installationId, repo, runId);
-      const pending = trailOwed(r);
-      if (pending || owed.includes(runId)) await db.setTrailPending(installationId, repo.id, runId, pending);
+      if (trailOwed(r)) await db.markTrailPending(installationId, repo.id, runId);
+      else if (owed.has(runId)) await db.clearTrailPending(installationId, repo.id, runId, owed.get(runId));
     }
     return retried;
+  }
+
+  // A webhook's refresh (a linked PR merged, closed or finished its checks): the same retrail, queued
+  // behind any sync or other refresh of the same repo, for the runs that link the PR.
+  async function refreshRuns(installationId, repoId, runIds) {
+    if (!trail) return;
+    await serial(`${installationId}:${repoId}`, async () => {
+      await retrail(installationId, (await db.repos(installationId)).find((x) => x.id === repoId), runIds, { owedToo: false });
+    });
   }
 
   // { value, error }: never throws, whatever the file holds.
@@ -166,5 +184,5 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     return results;
   }
 
-  return { syncRepo, syncInstallation };
+  return { syncRepo, syncInstallation, refreshRuns };
 }

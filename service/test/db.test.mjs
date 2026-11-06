@@ -29,7 +29,7 @@ for (const kind of ['memory', 'postgres']) {
       await db.upsertInstallation({ id: 8, account: 'other' });
       await db.upsertRepo({ installationId: 7, id: 70, fullName: 'acme/web' });
       await db.upsertRepo({ installationId: 8, id: 80, fullName: 'other/app' });
-      assert.equal((await db.repoByName('ACME/Web')).id, 70, 'names match without case');
+      assert.equal((await db.repoByName(7, 'ACME/Web')).id, 70, 'names match without case');
       assert.deepEqual((await db.installationIds()).sort(), [7, 8]);
 
       // A real sync through the adapter, twice: the second changes nothing.
@@ -58,9 +58,9 @@ for (const kind of ['memory', 'postgres']) {
       // The trail's tables.
       await db.upsertRepo({ installationId: 7, id: 70, fullName: 'acme/web', private: true });
       await db.upsertRepo({ installationId: 7, id: 70, fullName: 'acme/web' });
-      assert.equal((await db.repoByName('acme/web')).private, true, 'an unknown visibility keeps the known one');
+      assert.equal((await db.repoByName(7, 'acme/web')).private, true, 'an unknown visibility keeps the known one');
       await db.setRepoSync(7, 70, { headSha: 'h', config: { trackers: false } });
-      assert.deepEqual((await db.repoByName('acme/web')).config, { trackers: false });
+      assert.deepEqual((await db.repoByName(7, 'acme/web')).config, { trackers: false });
       await db.setUnitRefs(7, 70, 'r1', [{ unit: 'u1', key: 'acme/web#12' }, { unit: 'u2', key: 'acme/web#12' }]);
       assert.deepEqual(await db.runsReferencing(7, 'acme/web#12'), [{ repoId: 70, runId: 'r1' }]);
       assert.deepEqual(await db.runsReferencing(8, 'acme/web#12'), [], 'scoped');
