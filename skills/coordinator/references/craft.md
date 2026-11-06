@@ -12,6 +12,15 @@ Anything a person reads or uses is held to a craft bar as well as the task's bar
 | Prompts and agent briefs | Long role-play preambles, piled-up "IMPORTANT"s, rules that contradict each other, no output contract | Goal, bar, fence, inputs and an exact reply format. Shortest wording that leaves nothing to guess |
 | UI | Default-template look: purple-to-blue gradients, cards nested in cards, everything centred, emoji as icons, grey text on colour, one font weight | A real reference followed with intent: hierarchy, spacing rhythm, contrast that passes WCAG AA, real content in the mock |
 
+## Replies to the person
+
+The person may be juggling several pieces of work, and reads replies between other things.
+
+- Lead with the outcome in one sentence.
+- As short as the content allows. No recap of earlier messages, no closing summary.
+- When more than one piece of work is active, open with a context line naming the run or issue and the unit, such as `cw-efficiency · reviews unit`. Leave it out otherwise.
+- Questions go through the question tool, never as prose (`commands/run.md` step 1.7).
+
 ## UI and UX start from references, never from a blank page
 
 1. **References first.** If the person gave references (Mobbin flows, screenshots, Figma, a site they admire, a design system), they are the bar. Use them before anything else. If a Mobbin or design tool is connected to the harness, search it for the same flow (for example "onboarding", "settings", "checkout") in products the person respects.

@@ -9,12 +9,25 @@ export const tokens = (s) => String(s ?? '').toLowerCase().normalize('NFKC').spl
 const words = (s) => new Set(tokens(s).filter((w) => w.length > 2 || /[^\p{Script=Latin}\p{N}]/u.test(w)));
 
 // Two texts are "the same" when most of their words overlap (Jaccard >= 0.6).
-export function sameGap(a, b) {
+function sameWords(a, b) {
   const A = words(a); const B = words(b);
   if (!A.size || !B.size) return false;
   let both = 0;
   for (const w of A) if (B.has(w)) both++;
   return both / (A.size + B.size - both) >= 0.6;
+}
+
+// A cause tag compares on its words, ignoring case, spacing and punctuation.
+export const causeKey = (c) => tokens(c).join(' ');
+
+// Two rounds (or two gap texts) are the same gap when the critic gave both the
+// same CAUSE tag. Without a cause on both (older runs, a terse critic) the gap
+// wording decides.
+export function sameGap(a, b) {
+  const A = typeof a === 'object' && a ? a : { gap: a };
+  const B = typeof b === 'object' && b ? b : { gap: b };
+  if (causeKey(A.cause) && causeKey(B.cause)) return causeKey(A.cause) === causeKey(B.cause);
+  return sameWords(A.gap, B.gap);
 }
 
 const stop = (reason) => ({ action: 'stop', reason });
@@ -41,7 +54,7 @@ export function decideUnit(unit, run, nowMs) {
   if (rounds.length >= budget.maxRounds) return stop('budget: rounds');
 
   const prev = rounds.at(-2);
-  if (prev && sameGap(prev.gap, last.gap)) {
+  if (prev && sameGap(prev, last)) {
     if ((unit.strategyAt ?? -1) >= rounds.length) return { action: 'build', reason: 'new strategy recorded', gap: last.gap };
     if ((unit.strategyChanges ?? 0) >= MAX_STRATEGY_CHANGES) return stop('stuck: same gap after a change of strategy');
     return { action: 'change-strategy', gap: last.gap };
@@ -63,7 +76,7 @@ export function decide(run, nowMs = Date.now()) {
   if (!units.some((u) => u.action === 'done')) return { decision: 'stopped', units };
   const integ = run.integration?.rounds ?? [];
   if (integ.at(-1)?.verdict === 'pass') return { decision: 'done', units };
-  const repeated = integ.length >= 2 && sameGap(integ.at(-1).gap, integ.at(-2).gap);
+  const repeated = integ.length >= 2 && sameGap(integ.at(-1), integ.at(-2));
   if (integ.length >= run.budget.maxRounds || repeated || minutes(run.createdAt, nowMs) > run.budget.maxMinutes) {
     return { decision: 'done-with-gaps', units };
   }

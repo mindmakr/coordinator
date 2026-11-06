@@ -247,3 +247,23 @@ test('long opposite lessons stay apart', () => {
   l('add', '--tag', 'db', '--text', 'Run the seed script before migrations in every test run on the shared database');
   assert.equal(l('add', '--tag', 'db', '--text', 'Run migrations before the seed script in every test run on the shared database').out.added, true);
 });
+
+test('verdict --cause is stored and drives change-strategy; show and hud.html follow the state', () => {
+  run('init', 'r40', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  run('add', 'r40', 'u', '--bar', 'b'); run('freeze', 'r40');
+  const round = (gap) => { run('start', 'r40', 'u'); run('built', 'r40', 'u'); return run('verdict', 'r40', 'u', 'fail', '--gap', gap, '--cause', 'hand-rolled parser', '--evidence', 'e', '--score', '4'); };
+  assert.equal(round('<script>x</script> plural keys misread').code, 0);
+  round('rich-text tags ignored');
+  const u = JSON.parse(readFileSync(join(dir, 'runs', 'r40', 'state.json'), 'utf8')).units[0];
+  assert.deepEqual(u.rounds.map((r) => r.cause), ['hand-rolled parser', 'hand-rolled parser']);
+  assert.equal(run('next', 'r40').out.units[0].action, 'change-strategy');
+  const html = readFileSync(join(dir, 'runs', 'r40', 'hud.html'), 'utf8');
+  assert.match(html, /&lt;script&gt;x&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script/i);
+  const show = spawnSync(process.execPath, [join(scripts, 'run.mjs'), 'show', 'r40'], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' }).stdout;
+  assert.match(show, /budget {2}time \d+\/240 min · units 1\/6/);
+  assert.match(show, /next {4}change-strategy u/);
+  const h = run('hud', 'r40');
+  assert.equal(h.code, 0);
+  assert.equal(existsSync(h.out.file), true);
+});

@@ -10,26 +10,31 @@
 //   run.mjs beat <run> <unit>       builder or critic still working
 //   run.mjs built <run> <unit>      builder finished: the unit waits for a critic
 //   run.mjs reset <run> <unit> --reason R     in-progress unit with no artifact goes back to build (after a crash)
-//   run.mjs verdict <run> <unit> pass|fail --evidence E [--gap G] --score 0-10   only after built;
-//                  score required on fail; on a run with --paths, pass needs a clean detect.mjs --unit result
+//   run.mjs verdict <run> <unit> pass|fail --evidence E [--gap G] [--cause C] --score 0-10   only after built;
+//                  score and gap required on fail; cause is the critic's root-cause tag (drives same-gap);
+//                  on a run with --paths, pass needs a clean detect.mjs --unit result
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
-//   run.mjs integrate <run> pass|fail --evidence E [--gap G]        only when next says integrate
+//   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C]   only when next says integrate
 //   run.mjs note <run> --kind decision|follow-up|question|bar|info --text T
 //   run.mjs next <run>     prints what to do and records any stops
-//   run.mjs show <run>     prints the workbench
+//   run.mjs show <run>     prints the compact text HUD (units, scores, budget, next step)
+//   run.mjs hud <run>      rewrites hud.html beside state.json now and prints its path
+//                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { allows, decide, decideUnit, stats } from './lib/rules.mjs';
-import { baseDir, isSafeId, readJson, safeId, update, writeAtomic } from './lib/store.mjs';
+import { baseDir, isSafeId, readJson, safeId, update, withLock, writeAtomic } from './lib/store.mjs';
+import { hud } from './lib/hud.mjs';
+import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes'],
-  add: ['bar', 'after', 'reason'], verdict: ['evidence', 'gap', 'score'], strategy: ['text'],
-  integrate: ['evidence', 'gap'], note: ['kind', 'text'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  add: ['bar', 'after', 'reason'], verdict: ['evidence', 'gap', 'cause', 'score'], strategy: ['text'],
+  integrate: ['evidence', 'gap', 'cause'], note: ['kind', 'text'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
 };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
@@ -48,6 +53,14 @@ function applyStops(st) {
 const runsDir = () => join(baseDir('project'), 'runs');
 const stateFile = (run) => join(runsDir(), safeId(run, 'run'), 'state.json');
 const now = () => new Date().toISOString();
+const hudFile = (run) => join(runsDir(), safeId(run, 'run'), 'hud.html');
+
+// The files people read: rewritten inside the state's lock after every change.
+function derived(s) {
+  const plan = decide(s);
+  writeAtomic(join(runsDir(), s.id, 'workbench.md'), render(s, plan));
+  writeAtomic(hudFile(s.id), hud(view(s, plan)));
+}
 const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim().replace(/\\/g, '/')).filter(Boolean) : []);
 
 function load(run) {
@@ -58,8 +71,7 @@ function load(run) {
 // Every change: locked, atomic, refused on a closed run, workbench refreshed in the same lock.
 function change(run, mutate, { closedOk = false } = {}) {
   if (!existsSync(stateFile(run))) throw new Error(`no run: ${run}`);
-  return update(stateFile(run), null, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); },
-    (s) => writeAtomic(join(runsDir(), run, 'workbench.md'), render(s, decide(s))));
+  return update(stateFile(run), null, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); }, derived);
 }
 
 function unitOf(s, id) {
@@ -74,10 +86,10 @@ function expect(s, u, cmd) {
   if (!allows(cmd, d)) throw new Error(`${cmd} refused: next says "${d.action}"${d.reason ? ` (${d.reason})` : ''} for ${u.id}`);
 }
 
-function judged(evidence, v, gapText) {
+function judged(evidence, v, gapText, causeText) {
   const verdict = v === 'pass' && !evidence ? 'fail' : v;
   const gap = verdict === 'fail' ? (gapText ?? (evidence ? 'unspecified' : 'PASS claimed without evidence')) : null;
-  return { verdict, gap };
+  return { verdict, gap, cause: verdict === 'fail' && gapText ? causeText : null };
 }
 
 const commands = {
@@ -93,8 +105,7 @@ const commands = {
       },
       createdAt: now(), frozen: false, addedAfterFreeze: 0, units: [], notes: [], integration: { rounds: [] }, closed: null,
     };
-    return update(stateFile(run), null, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; },
-      (s) => writeAtomic(join(runsDir(), run, 'workbench.md'), render(s, decide(s))));
+    return update(stateFile(run), null, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
   },
   add([run, unit], o) {
     return change(run, (s) => {
@@ -128,12 +139,12 @@ const commands = {
       if (v === 'fail' && o.score === undefined) throw new Error('--score is required on a fail (it drives the no-progress stop)');
       if (v === 'fail' && !optText(o.gap)) throw new Error('--gap is required on a fail (it drives the same-gap stop)');
       const evidence = optText(o.evidence);
-      const { verdict, gap } = judged(evidence, v, optText(o.gap, 500));
+      const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const round = u.rounds.length + 1;
       if (verdict === 'pass' && s.paths?.length && !(u.detect?.round === round && u.detect.clean)) {
         throw new Error(`pass refused: no clean detect result for round ${round}; run detect.mjs --run ${s.id} --unit ${u.id} --base … first`);
       }
-      u.rounds.push({ n: round, verdict, score: score(o.score), gap, evidence, at: now() });
+      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now() });
       u.status = verdict === 'pass' ? 'pass' : 'open';
     });
   },
@@ -159,7 +170,7 @@ const commands = {
       if (d !== 'integrate') throw new Error(`integrate refused: the run is at "${d}"`);
       oneOf(v, ['pass', 'fail'], 'verdict');
       const evidence = optText(o.evidence);
-      s.integration.rounds.push({ ...judged(evidence, v, optText(o.gap, 500)), evidence, at: now() });
+      s.integration.rounds.push({ ...judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80)), evidence, at: now() });
     });
   },
   note([run], o) {
@@ -175,7 +186,13 @@ const commands = {
     const plan = decide(s);
     return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? u) };
   },
-  show([run]) { const s = load(run); process.stdout.write(render(s, decide(s))); return null; },
+  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s)))); return null; },
+  // Reads under the lock so it never renders a half-applied change; also refreshes the elapsed time.
+  hud([run]) {
+    if (!existsSync(stateFile(run))) throw new Error(`no run: ${run}`);
+    withLock(stateFile(run), () => derived(readJson(stateFile(run), null)));
+    return { file: hudFile(run) };
+  },
   close([run], o) {
     const outcome = oneOf(o.outcome, ['done', 'partial', 'stopped'], '--outcome');
     return change(run, (s) => {
@@ -207,9 +224,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|add|freeze|start|beat|built|reset|verdict|strategy|integrate|note|next|show|close|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|add|freeze|start|beat|built|reset|verdict|strategy|integrate|note|next|show|hud|close|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? []);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision }, null, 2));
+  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

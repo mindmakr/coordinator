@@ -17,7 +17,7 @@ A single agent pass grades its own homework. It decides the work is "fine", stop
 | The builder decides it's done | A fresh critic, blind to the builder's reasoning, checks the real result (tests, screens, diffs) against a written bar |
 | "Make it better" | A bar set before building: a failing test that must pass, a reference to match, an acceptance list |
 | Questions mid-task | Every question asked once, up front. Then it runs unattended |
-| Loops forever, or quits early | Stop rules enforced in code: round and time budgets, no-progress and same-gap detection, a cap on scope creep |
+| Loops forever, or quits early | Stop rules enforced in code: round and time budgets, no-progress and same-root-cause detection, a cap on scope creep |
 | Tests quietly skipped to go green | A deterministic detector flags focused, skipped or deleted tests, removed assertions, rewritten snapshots and suppressed checks |
 | Generic, template-looking output | A craft bar: no slop in copy, titles, navigation or prompts, and UI built from researched references (or yours, such as Mobbin) |
 | Forgets everything | Lessons and budgets carried from run to run; general improvements sent back to this repo |
@@ -32,7 +32,7 @@ A single agent pass grades its own homework. It decides the work is "fine", stop
                                                          └─ integrate ─► report ─► retro (learn)
 ```
 
-1. **Intake.** It reads the project and the task, researches references, picks agents for each role, and asks you every open question in one message, with its recommendation first. It records your answers, including any standing permission such as "merge when the review says ready".
+1. **Intake.** It reads the project and the task, researches references, picks agents for each role, and asks you every open question in one batch, through your harness's question tool, with its recommendation first. It records your answers, including any standing permission such as "merge when the review says ready".
 2. **Loop.** Builders work in parallel where the units are independent, each in its own worktree. Critics judge the real artifact. `run.mjs next` decides what happens to each unit, and refuses any step taken out of order.
 3. **Finish.** An integrator checks that the parts fit together. You get a short report: the outcome, the evidence, what stopped and why, and the decisions it made for you.
 4. **Retro.** Repeated gaps become lessons, past runs tune the budgets, and gaps in the skill itself become issues or PRs here, with your approval.
@@ -58,7 +58,7 @@ Then add `.coordinator/` to your project's `.gitignore`.
 |---|---|
 | `/coordinator:init` | Learns the project once: checks, protected branches, risk areas, standing rules. Writes `COORDINATOR.md` |
 | `/coordinator:run <task>` | Intake, then the loop until the bar is met. Takes an issue, a PR, or a plain description |
-| `/coordinator:status [run]` | Where a run stands, or picks it up after a break or a crash |
+| `/coordinator:status [run]` | Where a run stands (a compact text HUD), or picks it up after a break or a crash |
 | `/coordinator:retro <run>` | Lessons, budgets and upstream improvements from a finished run |
 
 Example:
@@ -68,6 +68,8 @@ Example:
 ```
 
 You can also describe the goal ("coordinate this…") and the agent picks the command itself.
+
+**Watching a run.** Each run keeps a `hud.html` beside its state: the unit board, scores per round, budget bars, a timeline, and the decisions, questions and follow-ups. It is rewritten on every change and reloads itself, with no scripts and no network, so you can open it straight from disk. In Claude Code the lead can publish it as a private Artifact. `run.mjs show <run>` prints the same at a glance in text.
 
 ## What's inside
 
@@ -82,6 +84,7 @@ skills/coordinator/
 │   ├── team.md                 staffing roles from your harness's agents
 │   ├── guardrails.md           budgets, fence, stop rules, gated actions
 │   ├── durability.md           background agents, heartbeats, resume
+│   ├── hud.md                  the text and HTML views of a run
 │   ├── learning.md             retro, lessons, budget tuning
 │   ├── upstream.md             contributing improvements back
 │   └── domains/                code · content (writing, design, research, data, prompts)
@@ -89,7 +92,7 @@ skills/coordinator/
     ├── run.mjs                 run state and the loop's decisions
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
-    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench
+    ├── lib/                    pure modules: rules, store, gaming, secrets, args, workbench, view, hud
     └── test/                   node:test suites
 ```
 
