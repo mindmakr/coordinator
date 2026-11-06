@@ -92,6 +92,8 @@ Example:
 
 You can also describe the goal ("coordinate this…") and the agent picks the command itself.
 
+**Built-in sub-skills.** The loop needs no other skill installed. Each step has its own playbook, and the plugin lists each one so you can run a step on its own: `/coordinator:investigate`, `plan`, `fix`, `review` (with a security pass and a project-rule pass, at full depth every round), `verify`, `visual`, `translations`, `release-notes` and `board`. If your project has its own skill for a step, that one is used instead.
+
 ## Dashboard
 
 ![The live dashboard: situation, goal, a question with its recommended answer](docs/dashboard.png)
@@ -112,6 +114,7 @@ Each change also writes `hud.html` and a page per unit beside the state: a stati
 ## What's inside
 
 ```
+skills/<sub-skill>/SKILL.md      thin plugin entries for the nine sub-skills, pointing at the playbooks
 skills/coordinator/
 ├── SKILL.md                    the router and the rules every command shares (<500 words)
 ├── references/
@@ -120,6 +123,9 @@ skills/coordinator/
 │   ├── briefs.md               builder, critic and integrator briefs
 │   ├── craft.md                the no-slop bar; UI from references
 │   ├── team.md                 staffing roles from your harness's agents
+│   ├── sub-skills.md           which built-in playbook runs at which step
+│   ├── sub-skills/             investigate · plan · fix · review · verify · visual · translations · release-notes · board
+│   ├── codex.md                using the skill in OpenAI Codex CLI (discovery checked; full run not yet)
 │   ├── guardrails.md           budgets, fence, stop rules, gated actions
 │   ├── durability.md           background agents, heartbeats, resume
 │   ├── hud.md                  the text view, the live dashboard and the snapshot
