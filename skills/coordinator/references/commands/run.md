@@ -4,9 +4,9 @@
 
 1. Read `COORDINATOR.md`. If it is missing, do `init`'s reading now and put its questions into this run's single batch (step 7); write the file after the answers. Read the task in full: the issue, its comments, linked issues, the PR and its review state.
 2. Load lessons: `S/lessons.mjs list --tag <domain> --top 8` (also `--scope project`).
-3. Draft the **goal**, the **bar** (`references/bar.md`), the **fence**, the **units** and the **budget** (`references/guardrails.md`, defaults from `S/run.mjs stats`).
-4. **Research now, not mid-run.** For anything people will see, collect references: the person's own (Mobbin, screenshots, a design system) first, then web research (`references/craft.md`). For unknowns in the code or the domain, send a researcher. Put what you find into the bar.
-5. **Staff the team** from the harness's agents and skills (`references/team.md`).
+3. Draft the **goal**, the **bar** (`references/bar.md`), the **fence**, the **units** and the **budget** (`references/guardrails.md`, defaults from `S/run.mjs stats`). For work across several repos or issues, follow `references/sub-skills/plan.md`.
+4. **Research now, not mid-run.** For anything people will see, collect references: the person's own (Mobbin, screenshots, a design system) first, then web research (`references/craft.md`). For unknowns in the code or the domain, send a researcher with `references/sub-skills/investigate.md`. Put what you find into the bar.
+5. **Staff the team** from the harness's agents and skills (`references/team.md`), and pick each role's playbook (`references/sub-skills.md`).
 6. List every question whose answer would change what gets built or what you may do:
    - open product decisions, unclear acceptance, scope edges;
    - every "needs a person" action this run will reach (merge, push, migration, message);
@@ -39,15 +39,17 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 
 | Action | Do |
 |---|---|
-| `build` | `start`, then send a builder (`references/briefs.md`) in the background. On its report: `built --report "<its summary>"`; once its PR is open, `link <run> <unit> --pr …`. |
-| `judge` | Code: run `S/detect.mjs --run <run> --unit <unit> --base <base> --head <the builder's commit>` first (it records which commits it checked, and refuses an empty diff). A hit is a FAIL with that gap, unless the change is legitimate (e.g. an intended snapshot update): then rerun with `--allow <rule>:<path>` and record why with `note --kind decision`. On a run with `--paths`, a PASS is refused without a clean result for this round. Then send a critic. Record with `verdict`, copying the critic's `SCORE`, `GAP` and `CAUSE` into `--score`, `--gap` and `--cause` (score and gap are required on a fail) and each BEHAVIOURS line into `--behaviour B1=pass:"…"`; a pass is refused while a behaviour is failing or unchecked. |
+| `build` | `start`, then send a builder (`references/briefs.md`, playbook `sub-skills/fix.md`) in the background. On its report: `built --report "<its summary>"`; once its PR is open, `link <run> <unit> --pr …`. |
+| `judge` | Code: run `S/detect.mjs --run <run> --unit <unit> --base <base> --head <the builder's commit>` first (it records which commits it checked, and refuses an empty diff). A hit is a FAIL with that gap, unless the change is legitimate (e.g. an intended snapshot update): then rerun with `--allow <rule>:<path>` and record why with `note --kind decision`. On a run with `--paths`, a PASS is refused without a clean result for this round. Then send a critic (playbook `sub-skills/review.md`, at full depth; also `visual.md` for screens and a specialist critic for risk areas, all of which must pass). Record with `verdict`, copying the critic's `SCORE`, `GAP` and `CAUSE` into `--score`, `--gap` and `--cause` (score and gap are required on a fail) and each BEHAVIOURS line into `--behaviour B1=pass:"…"`; a pass is refused while a behaviour is failing or unchecked. Add `--critic "<setup>"` (who judged, at what depth) so `stats` can compare escape rates per setup. A specialist critic's reply goes in first with `--specialist <name>`; the pass is refused until every specialist the unit was added with has passed this build. |
 | `change-strategy` | Pick a different approach, `strategy --text`, then build. |
 | `check-stale` | Ask the agent. No answer and `phase: building`: `start` again and send a fresh builder. `phase: judging`: `beat` and send a fresh critic (the build is kept). |
 | `wait` | Nothing. A notification will come; never poll. |
 | `stop` | Recorded by `next` just now. Its gap goes in the report. |
 | `done` / `stopped` | Nothing: the unit passed, or was stopped in an earlier round. |
 
-**After each verdict and each merge**, write the situation in one or two plain sentences: `S/run.mjs note <run> --kind situation --text "Security gaps: failed twice on the same route gate; a new approach is next. Roles: being checked."` It heads the HUD. Say what is happening and what comes next, in the person's words, not unit ids alone.
+**After each verdict and each merge**, move the board if the project has one (`references/sub-skills/board.md`) and write the situation in one or two plain sentences: `S/run.mjs note <run> --kind situation --text "Security gaps: failed twice on the same route gate; a new approach is next. Roles: being checked."` It heads the HUD. Say what is happening and what comes next, in the person's words, not unit ids alone.
+
+**Pit stops.** After a unit merges, a decision is recorded, or the run closes (after `close`), run `S/run.mjs push <run>` so the run is in the repo for another machine (`references/durability.md`). Never after every step.
 
 Briefs for agents outside a git worktree of this repo carry `COORDINATOR_DIR` from `S/run.mjs where`.
 
@@ -57,7 +59,7 @@ The run-level `decision` from `next`:
 |---|---|
 | `split` | Add units, then `freeze`. |
 | `continue` | Act on the units as above. |
-| `integrate` | Send the integrator, then `integrate pass|fail` (with `--gap` and `--cause` on a fail). |
+| `integrate` | Send the integrator (it ends with `sub-skills/release-notes.md` when work merged), then `integrate pass|fail` (with `--gap` and `--cause` on a fail). |
 | `done` | Finish (step 4) with outcome `done`. |
 | `done-with-gaps` | Integration ran out of budget or hit the same gap twice. Finish with outcome `partial`, listing the gaps. |
 | `stopped` | No unit passed. Finish with outcome `stopped`, listing each stop. |
@@ -68,7 +70,7 @@ The run-level `decision` from `next`:
 
 ## 4. Finish
 
-Do the actions approved at intake (for example, merge when the review is READY) and record each one (a merge also with `link <run> <unit> --merge <PR URL>`). Act on any answer still waiting (`questions`), then stop `watch` and `serve`. Then:
+Do the actions approved at intake (for example, merge when the review is READY) and record each one (a merge also with `link <run> <unit> --merge <PR URL>`, then a critic with `references/sub-skills/verify.md` on the merged code). Act on any answer still waiting (`questions`), then stop `watch` and `serve`. Then:
 
 - **Report**, as short as the content allows and at most 12 lines (replies follow `references/craft.md`): the outcome, the links, the bar and its evidence, the units stopped and why, the questions you decided on the person's behalf, the follow-ups, and the actions you took.
 - **Retro:** `references/learning.md`, then `S/run.mjs close <run> --outcome …`.

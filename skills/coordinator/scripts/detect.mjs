@@ -13,7 +13,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from './lib/args.mjs';
 import { allowed, detect, parseDiff } from './lib/gaming.mjs';
-import { baseDir, readJson, safeId, update } from './lib/store.mjs';
+import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
+import { baseDir, safeId } from './lib/store.mjs';
 
 const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 });
@@ -27,9 +28,9 @@ function commit(ref, name) {
 try {
   const { opt } = parse(process.argv.slice(2), ['base', 'head', 'run', 'unit', 'fence', 'allow', 'diff-file']);
   if (opt.unit && !opt.run) throw new Error('--unit needs --run');
-  const file = opt.run ? join(baseDir('project'), 'runs', safeId(opt.run, 'run'), 'state.json') : null;
-  if (file && !existsSync(file)) throw new Error(`no run: ${opt.run}`);
-  const fence = list(opt.fence).concat(file ? readJson(file, null).paths ?? [] : []);
+  const dir = opt.run ? join(baseDir('project'), 'runs', safeId(opt.run, 'run')) : null;
+  if (dir && !existsSync(join(dir, 'state.json')) && !existsSync(join(dir, EVENTS))) throw new Error(`no run: ${opt.run}`);
+  const fence = list(opt.fence).concat(dir ? loadRun(dir).paths ?? [] : []);
   let diff; let base = null; let head = null;
   if (opt['diff-file']) diff = readFileSync(opt['diff-file'], 'utf8');
   else {
@@ -45,7 +46,7 @@ try {
   if (opt.unit) {
     // An empty diff proves nothing: it would let a PASS through unchecked.
     if (!files) throw new Error('empty diff: nothing was checked (is --head the builder\'s commit?)');
-    update(file, null, (s) => {
+    updateRun(dir, { kind: 'unit.detect', unit: safeId(opt.unit, 'unit') }, (s) => {
       if (s.closed) throw new Error(`run ${opt.run} is closed`);
       const u = s.units.find((x) => x.id === safeId(opt.unit, 'unit'));
       if (!u) throw new Error(`no unit ${opt.unit} in run ${opt.run}`);

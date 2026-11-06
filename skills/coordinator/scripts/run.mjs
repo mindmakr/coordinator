@@ -6,7 +6,7 @@
 //                      [--max-minutes 240] [--max-units 6] [--max-added 2] [--stale-minutes 45]
 //                      [--repo owner/name] (resolves #123 and shas; else the project's git remote) [--theme file.css]
 //                      [--study-budget 2] (side studies allowed while waiting, 0-10)
-//   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL]
+//   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
@@ -21,12 +21,18 @@
 //                  score and gap required on fail; cause is the critic's root-cause tag (drives same-gap);
 //                  on a run with --paths, pass needs a clean detect.mjs --unit result;
 //                  [--behaviour B1=pass:"evidence" | B1=fail:"gap" …]: a pass needs every behaviour passing
+//                  [--critic SETUP] who judged (e.g. "review skill high + security"): stats groups escapes by it
+//                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
+//                  the unit stays judging, and its pass is refused until every required specialist passed
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …]
 //                  only when next says integrate; a pass needs every goal behaviour passing
-//   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person --text T
+//   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person|escape --text T
+//                  escape: --unit U, a passed unit where a defect turned up later (a later review, verify, test, a person); counted by stats
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
 //                  [--unit U] (person: a note from the person about one unit)
+//   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P]
+//                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
@@ -44,13 +50,23 @@
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+//   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
+//                  recorded, the run closed): the run's events, snapshot and README, project lessons and
+//                  stats, masked, to the coordinator-state branch (never main; a public repo needs a
+//                  private companion repo, references/durability.md)
+//   run.mjs pull <run> [--from branch|./folder]   restores the run on another machine, or appends the
+//                  copy's newer events; never overwrites local events the copy lacks
+// Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, extname, join, resolve } from 'node:path';
 import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
 import { addEvidence, artifact } from './lib/evidence.mjs';
+import { buildBrief } from './lib/briefs.mjs';
 import { allows, decide, decideUnit, stats } from './lib/rules.mjs';
-import { baseDir, isSafeId, projectDir, readJson, safeId, update, withLock, writeAtomic } from './lib/store.mjs';
+import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
+import { pull, push } from './lib/statesync.mjs';
+import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
 import { load as loadTheme, themeFile } from './lib/theme.mjs';
@@ -69,13 +85,15 @@ import { render } from './lib/workbench.mjs';
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget'],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour'], strategy: ['text'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
   ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  brief: ['role', 'quote', 'source', 'where', 'playbook'],
+  push: ['to', 'message'], pull: ['from'],
 };
-const REPEAT = { study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'] };
+const REPEAT = { study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -122,15 +140,17 @@ function refLinks(s, kind, values = []) {
 }
 const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim().replace(/\\/g, '/')).filter(Boolean) : []);
 
+const exists = (run) => existsSync(stateFile(run)) || existsSync(join(runDir(run), EVENTS));
 function load(run) {
-  if (!existsSync(stateFile(run))) throw new Error(`no run: ${run}`);
-  return readJson(stateFile(run), null);
+  if (!exists(run)) throw new Error(`no run: ${run}`);
+  return loadRun(runDir(run));
 }
 
-// Every change: locked, atomic, refused on a closed run, workbench refreshed in the same lock.
-function change(run, mutate, { closedOk = false } = {}) {
-  if (!existsSync(stateFile(run))) throw new Error(`no run: ${run}`);
-  return update(stateFile(run), null, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); }, derived);
+// Every change: one event of `kind` in the run's log, locked and atomic, refused
+// on a closed run, with the snapshot and workbench refreshed in the same lock.
+function change(run, kind, mutate, { closedOk = false, unit = null } = {}) {
+  if (!exists(run)) throw new Error(`no run: ${run}`);
+  return updateRun(runDir(run), { kind, unit }, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); }, derived);
 }
 
 function unitOf(s, id) {
@@ -170,10 +190,10 @@ const commands = {
       if (!f || extname(f).toLowerCase() !== '.css' || !existsSync(f) || !statSync(f).isFile()) throw new Error('--theme must be an existing .css file');
       fresh.theme = f;
     }
-    return update(stateFile(run), null, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    return updateRun(runDir(run), { kind: 'run.init' }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
   },
   add([run, unit], o) {
-    return change(run, (s) => {
+    return change(run, 'unit.add', (s) => {
       safeId(unit, 'unit');
       if (s.units.some((u) => u.id === unit)) throw new Error(`unit exists: ${unit}`);
       if (s.units.length >= s.budget.maxUnits) throw new Error(`unit cap reached (${s.budget.maxUnits}): log the extra work as a follow-up note`);
@@ -187,28 +207,30 @@ const commands = {
       const link = optText(o.link, 300);
       if (link && !/^https?:\/\/\S+$/i.test(link)) throw new Error('--link must be an http(s) URL');
       const links = [...refLinks(s, 'issue', o.issue), ...refLinks(s, 'pr', o.pr)];
-      const u = { id: unit, bar: text(o.bar, 'bar'), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
+      const specialists = list(o.specialist).map((n) => safeId(n, 'specialist'));
+      const u = { id: unit, bar: text(o.bar, 'bar'), ...(specialists.length ? { specialists } : {}), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
       s.units.push(u);
       for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
-    });
+    }, { unit });
   },
-  freeze([run]) { return change(run, (s) => { if (!s.units.length) throw new Error('add units first'); s.frozen = true; }); },
+  freeze([run]) { return change(run, 'run.freeze', (s) => { if (!s.units.length) throw new Error('add units first'); s.frozen = true; }); },
   // A new build: the critic marks every behaviour again.
   start([run, unit]) {
-    return change(run, (s) => { const u = unitOf(s, unit); expect(s, u, 'start'); u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours); log(u, 'start', `try ${u.rounds.length + 1}`); });
+    return change(run, 'unit.start', (s) => { const u = unitOf(s, unit); expect(s, u, 'start'); u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours); log(u, 'start', `try ${u.rounds.length + 1}`); }, { unit });
   },
   beat([run, unit], o) {
-    return change(run, (s) => { const u = unitOf(s, unit); if (!['building', 'judging'].includes(u.status)) throw new Error(`unit ${unit} is ${u.status}`); expect(s, u, 'beat'); u.heartbeatAt = now(); log(u, 'beat', optText(o.text, 200) ?? ''); });
+    return change(run, 'unit.beat', (s) => { const u = unitOf(s, unit); if (!['building', 'judging'].includes(u.status)) throw new Error(`unit ${unit} is ${u.status}`); expect(s, u, 'beat'); u.heartbeatAt = now(); log(u, 'beat', optText(o.text, 200) ?? ''); }, { unit });
   },
   built([run, unit], o) {
-    return change(run, (s) => {
+    return change(run, 'unit.built', (s) => {
       const u = unitOf(s, unit); if (u.status !== 'building') throw new Error(`unit ${unit} is ${u.status}, not building`); expect(s, u, 'built');
       u.status = 'judging'; u.heartbeatAt = now(); u.report = optText(o.report, 2000); log(u, 'built', u.report ?? '');
-    });
+      delete u.specialistMarks; // a new build is judged again by every specialist
+    }, { unit });
   },
   behave([run, unit], o) {
     let id;
-    const s = change(run, (st) => {
+    const s = change(run, 'behaviour', (st) => {
       if ((o.goal === true) === (unit !== undefined)) throw new Error('name a unit or --goal, not both');
       if (o.remove !== undefined && o.remove !== true) throw new Error('--remove takes no value');
       const u = unit === undefined ? null : unitOf(st, unit);
@@ -221,23 +243,23 @@ const commands = {
       const what = o.remove ? `removed ${id}` : `${id}: ${optText(o.text, 300)}`;
       if (u) log(u, 'behaviour', reason ? `${what} (${reason})` : what);
       if (reason) st.notes.push({ kind: 'bar', text: `${u ? u.id : 'goal'} ${what}: ${reason}`, at: now() });
-    });
+    }, { unit: unit ?? null });
     return { ...s, behaviour: id };
   },
   behaviours([run]) { const s = load(run); return { goal: s.goalBehaviours ?? [], units: Object.fromEntries(s.units.map((u) => [u.id, u.behaviours ?? []])) }; },
   evidence([run, unit], o) {
     let id;
-    const s = change(run, (st) => {
+    const s = change(run, 'evidence', (st) => {
       if ((o.goal === true) === (unit !== undefined)) throw new Error('name a unit or --goal, not both');
       const u = unit === undefined ? null : unitOf(st, unit);
       id = addEvidence(st, u, o, runDir(run));
       if (u) log(u, 'evidence', `${id} ${o.kind}${typeof o.label === 'string' ? `: ${optText(o.label, 120)}` : ''}`);
-    });
+    }, { unit: unit ?? null });
     return { ...s, evidence: id };
   },
   // Allowed on a closed run: a merge often lands after the report.
   link([run, unit], o) {
-    return change(run, (s) => {
+    return change(run, 'unit.link', (s) => {
       const u = unitOf(s, unit);
       const add = [...refLinks(s, 'issue', o.issue), ...refLinks(s, 'pr', o.pr), ...refLinks(s, 'merge', o.merge)];
       if (o.url !== undefined) {
@@ -248,10 +270,10 @@ const commands = {
       if (!add.length) throw new Error('give --issue, --pr, --merge or --url');
       (u.links ??= []).push(...add);
       for (const l of add) log(u, 'link', l.url, { link: l.kind });
-    }, { closedOk: true });
+    }, { closedOk: true, unit });
   },
   verdict([run, unit, v], o) {
-    return change(run, (s) => {
+    return change(run, 'unit.verdict', (s) => {
       const u = unitOf(s, unit);
       if (u.status !== 'judging') throw new Error(`verdict refused: unit ${unit} is ${u.status}; record built first`);
       expect(s, u, 'verdict');
@@ -260,38 +282,47 @@ const commands = {
       if (v === 'fail' && !optText(o.gap)) throw new Error('--gap is required on a fail (it drives the same-gap stop)');
       const evidence = optText(o.evidence);
       const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
+      const critic = optText(o.critic, 120);
+      if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
+        const name = String(o.specialist);
+        if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
+        (u.specialistMarks ??= {})[name] = { verdict, score: score(o.score), gap, cause, evidence, ...(critic ? { critic } : {}), at: now() };
+        return;
+      }
+      const missing = (u.specialists ?? []).filter((n) => u.specialistMarks?.[n]?.verdict !== 'pass');
+      if (verdict === 'pass' && missing.length) throw new Error(`pass refused: specialist ${missing.join(', ')} has not passed this build`);
       const round = u.rounds.length + 1;
       if (verdict === 'pass' && s.paths?.length && !(u.detect?.round === round && u.detect.clean)) {
         throw new Error(`pass refused: no clean detect result for round ${round}; run detect.mjs --run ${s.id} --unit ${u.id} --base … first`);
       }
       const marks = mark(u.behaviours ?? [], o.behaviour, verdict);
-      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}) });
-      u.report = null;
+      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
+      u.report = null; delete u.specialistMarks;
       u.status = verdict === 'pass' ? 'pass' : 'open';
-    });
+    }, { unit });
   },
   reset([run, unit], o) {
-    return change(run, (s) => {
+    return change(run, 'unit.reset', (s) => {
       const u = unitOf(s, unit);
       if (!['building', 'judging'].includes(u.status)) throw new Error(`unit ${unit} is ${u.status}, not in progress`);
       const reason = text(o.reason, 'reason', 300);
       s.notes.push({ kind: 'info', text: `reset ${unit} (${u.status} → open): ${reason}`, at: now() });
       log(u, 'reset', reason);
       u.status = 'open'; u.heartbeatAt = null;
-    });
+    }, { unit });
   },
   strategy([run, unit], o) {
-    return change(run, (s) => {
+    return change(run, 'unit.strategy', (s) => {
       const u = unitOf(s, unit);
       expect(s, u, 'strategy');
       u.strategyChanges++; u.strategyAt = u.rounds.length;
       const t = text(o.text, 'text', 500);
       s.notes.push({ kind: 'strategy', text: `${unit}: ${t}`, at: now() });
       log(u, 'strategy', t);
-    });
+    }, { unit });
   },
   integrate([run, v], o) {
-    return change(run, (s) => {
+    return change(run, 'run.integrate', (s) => {
       const d = decide(s).decision;
       if (d !== 'integrate') throw new Error(`integrate refused: the run is at "${d}"`);
       oneOf(v, ['pass', 'fail'], 'verdict');
@@ -302,12 +333,21 @@ const commands = {
     });
   },
   note([run], o) {
-    const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'retro', 'question', 'bar', 'info', 'person'], '--kind');
-    if (kind === 'person') return change(run, (s) => personNote(s, { text: o.text, unit: o.unit }));
-    if (o.unit !== undefined) throw new Error('--unit goes with --kind person (or ask)');
+    const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'retro', 'question', 'bar', 'info', 'person', 'escape'], '--kind');
+    if (kind === 'person') return change(run, 'note', (s) => personNote(s, { text: o.text, unit: o.unit }), { unit: typeof o.unit === 'string' ? o.unit : null });
+    if (kind === 'escape') {
+      return change(run, 'note', (s) => {
+        if (typeof o.unit !== 'string') throw new Error('--kind escape needs --unit: the unit that passed');
+        const u = unitOf(s, o.unit);
+        const passed = u.rounds.findLastIndex((r) => r.verdict === 'pass');
+        if (passed < 0) throw new Error(`unit ${u.id} has not passed: a defect before a pass is a gap, not an escape`);
+        s.notes.push({ kind: 'escape', unit: u.id, round: passed + 1, text: text(o.text, 'text', 1000), at: now() });
+      }, { closedOk: true, unit: typeof o.unit === 'string' ? o.unit : null });
+    }
+    if (o.unit !== undefined) throw new Error('--unit goes with --kind person or escape (or ask)');
     if (o.recommend !== undefined && kind !== 'question') throw new Error('--recommend goes with --kind question');
     if (o.answers !== undefined && kind !== 'decision') throw new Error('--answers goes with --kind decision');
-    return change(run, (s) => {
+    return change(run, kind === 'question' ? 'question' : 'note', (s) => {
       const note = { kind, text: text(o.text, 'text', kind === 'situation' ? 400 : 1000), at: now() };
       if (o.recommend !== undefined) note.recommend = text(o.recommend, 'recommend', 300);
       if (o.answers !== undefined) {
@@ -319,7 +359,7 @@ const commands = {
       s.notes.push(note);
     }, { closedOk: ['follow-up', 'retro'].includes(kind) });
   },
-  study([run], o) { let id; const s = change(run, (st) => { id = addStudy(st, o); }); return { ...s, study: id }; },
+  study([run], o) { let id; const s = change(run, 'study', (st) => { id = addStudy(st, o); }); return { ...s, study: id }; },
   self(_, o) {
     if (o.json !== undefined && o.html !== undefined) throw new Error('--json or --html, not both');
     const m = selfModel({ ...loadSelf(), current: null });
@@ -333,13 +373,13 @@ const commands = {
     process.stdout.write(selfText(m));
     return null;
   },
-  ask([run], o) { let id; const s = change(run, (st) => { id = ask(st, o); }); return { ...s, asked: id }; },
-  answer([run, id], o) { return change(run, (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person' })); },
-  'use-answer'([run, id]) { return change(run, (s) => useAnswer(s, id)); },
+  ask([run], o) { let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id }; },
+  answer([run, id], o) { return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person' })); },
+  'use-answer'([run, id]) { return change(run, 'answer.used', (s) => useAnswer(s, id)); },
   questions([run]) { return questions(load(run)).map(({ open, ...q }) => q); },
   serve([run], o) {
     load(run);
-    const write = (fn) => (form) => { let anchor; change(run, (s) => { anchor = fn(s, form); }); return anchor; };
+    const write = (kind, fn) => (form) => { let anchor; change(run, kind, (s) => { anchor = fn(s, form); }, { unit: form.get('unit') || null }); return anchor; };
     serve({
       port: num(o.port, 0, 0, 65_535),
       page: (path, live) => {
@@ -349,7 +389,7 @@ const commands = {
         const m = /^\/run\/([^/]+)(\/unit\/.+|\/maps)?$/.exec(path);
         const id = m ? m[1] : run;
         if (m && !isSafeId(id)) return null;
-        if (m && !existsSync(stateFile(id))) return null;
+        if (m && !exists(id)) return null;
         const s = load(id);
         const v = view(s, decide(s), Date.now(), { repo: repoFor(s) });
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
@@ -360,13 +400,13 @@ const commands = {
       version: selfVersion,
       file: (target, name, other) => {
         const id = other ?? run;
-        if (!isSafeId(id) || !existsSync(stateFile(id))) return null;
+        if (!isSafeId(id) || !exists(id)) return null;
         const a = artifact(load(id), target, name);
         return a ? { file: join(runDir(id), 'artifacts', a.rel), type: a.type } : null;
       },
       post: {
-        '/answer': write((s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person' }); return id; }),
-        '/note': write((s, f) => { personNote(s, { text: f.get('text'), unit: f.get('unit') || undefined }); return f.get('unit') ? `unit-${f.get('unit')}` : ''; }),
+        '/answer': write('answer', (s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person' }); return id; }),
+        '/note': write('note', (s, f) => { personNote(s, { text: f.get('text'), unit: f.get('unit') || undefined }); return f.get('unit') ? `unit-${f.get('unit')}` : ''; }),
       },
     }).then(({ url }) => console.log(JSON.stringify({ url, note: 'local only; stop with Ctrl+C' })), (e) => { console.error(`error: ${e.message}`); process.exit(1); });
     return null;
@@ -386,20 +426,31 @@ const commands = {
   // until nothing changes; each stop is reported once, here.
   next([run]) {
     let stopped;
-    const s = change(run, (st) => { stopped = applyStops(st); });
+    const s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
     const plan = decide(s);
     return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? u) };
+  },
+  brief([run, unit], o) {
+    const files = o.quote ?? []; const labels = o.source ?? [];
+    if (labels.length > files.length) throw new Error('one --source per --quote');
+    const quotes = files.map((f, i) => {
+      if (!existsSync(f) || !statSync(f).isFile()) throw new Error(`--quote: no file ${f}`);
+      return { source: labels[i] ?? basename(f), text: readFileSync(f, 'utf8') };
+    });
+    const env = process.env.COORDINATOR_DIR ? commands.where().env : '';
+    process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: optText(o.where, 500), playbook: optText(o.playbook, 300), env })}\n`);
+    return null;
   },
   show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s)))); return null; },
   // Reads under the lock so it never renders a half-applied change; also refreshes the elapsed time.
   hud([run]) {
-    if (!existsSync(stateFile(run))) throw new Error(`no run: ${run}`);
-    withLock(stateFile(run), () => derived(readJson(stateFile(run), null)));
+    if (!exists(run)) throw new Error(`no run: ${run}`);
+    withLock(stateFile(run), () => derived(loadRun(runDir(run))));
     return { file: hudFile(run) };
   },
   close([run], o) {
     const outcome = oneOf(o.outcome, ['done', 'partial', 'stopped'], '--outcome');
-    return change(run, (s) => {
+    return change(run, 'run.close', (s) => {
       applyStops(s); // an expired budget ends in-progress units first
       const busy = s.units.filter((u) => ['building', 'judging'].includes(u.status)).map((u) => u.id);
       if (busy.length) throw new Error(`close refused: ${busy.join(', ')} still in progress`);
@@ -413,24 +464,32 @@ const commands = {
   },
   list() {
     if (!existsSync(runsDir())) return [];
-    return readdirSync(runsDir()).filter((d) => isSafeId(d) && existsSync(stateFile(d))).map((d) => {
+    return readdirSync(runsDir()).filter((d) => isSafeId(d) && exists(d)).map((d) => {
       try {
-        const s = readJson(stateFile(d), null);
+        const s = loadRun(runDir(d));
         return { run: s.id, tag: s.tag, createdAt: s.createdAt, closed: s.closed?.outcome ?? null, decision: decide(s).decision };
       } catch (e) { return { run: d, createdAt: '', error: `unreadable: ${e.message}` }; }
     }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
   // Forward slashes and single quotes ($ and ` stay literal), so it pastes safely into a shell brief.
   where() { const d = baseDir('project').replace(/\\/g, '/'); return { stateDir: d, env: `COORDINATOR_DIR='${d.replace(/'/g, "'\\''")}'` }; },
+  push([run], o) {
+    load(run);
+    return push({ run, dir: runDir(run), base: baseDir('project'), project: projectDir(), to: o.to, message: optText(o.message, 200) ?? undefined, render: (s) => render(s, decide(s)) });
+  },
+  pull([run], o) {
+    safeId(run, 'run');
+    return pull({ run, dir: runDir(run), base: baseDir('project'), project: projectDir(), from: o.from, after: derived });
+  },
   stats(_, o) {
     return stats(commands.list().filter((r) => !r.error && r.closed && (!o.tag || r.tag === o.tag)).map((r) => load(r.run)));
   },
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|close|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|brief|close|push|pull|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

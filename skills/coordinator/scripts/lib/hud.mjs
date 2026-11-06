@@ -10,6 +10,7 @@ import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
 import { badge, behaviourList, blk, chip, cls, dot, esc, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
+import { escapeLine } from './view.mjs';
 
 export { esc };
 const pct = (used, max) => (max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0);
@@ -203,7 +204,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),
     '<h2 data-a="h-Budget">Budget</h2>',
-    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join(''), 'div', ' class="budget"'),
+    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes), 'div', ' class="budget"'),
     '<h2 data-a="h-Units">Units</h2>',
     '<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <b>Needs you</b> = waiting on you; <b>Retrying</b> = the lead is on it; <b>Quiet</b> = the lead is checking on a silent agent. Score dots: red = failed try, green = passed try.</p>',
     blk('units', v.units.length ? [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)].map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
@@ -218,3 +219,10 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
 }
 
+
+// Escapes: defects found after a unit passed, from note --kind escape. Shown once there is a pass.
+function escapeCard(e) {
+  if (!e || (!e.passed && !e.escapes)) return '';
+  const items = e.list.map((x) => `<li>${esc(x.unit)}${x.round ? ` (passed in try ${x.round})` : ''}: ${esc(clip(x.text, 160))}</li>`).join('');
+  return `<div class="card" data-a="budget-escapes" title="Defects found after a unit passed: in a later review, in verify, on test or by a person"><div class="row" style="margin:0"><span>escapes</span><b>${esc(escapeLine(e))}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
+}

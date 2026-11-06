@@ -3,6 +3,7 @@
 // COORDINATOR.md. Read-only; a file that does not parse is skipped, never fatal.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { EVENTS, loadRun } from './events.mjs';
 import { baseDir, isSafeId, projectDir, readJson } from './store.mjs';
 
 export const runsDir = () => join(baseDir('project'), 'runs');
@@ -12,13 +13,13 @@ const contextFile = () => join(projectDir(), 'COORDINATOR.md');
 
 export function runIds() {
   if (!existsSync(runsDir())) return [];
-  return readdirSync(runsDir()).filter((d) => isSafeId(d) && existsSync(stateOf(d)));
+  return readdirSync(runsDir()).filter((d) => isSafeId(d) && (existsSync(stateOf(d)) || existsSync(join(runsDir(), d, EVENTS))));
 }
 
 export function loadRuns() {
   const out = [];
   for (const id of runIds()) {
-    try { const s = readJson(stateOf(id), null); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ }
+    try { const s = loadRun(join(runsDir(), id)); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ }
   }
   return out;
 }
