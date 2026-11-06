@@ -136,7 +136,7 @@ test('rendering: state text escaped, only http(s) links leave the page, every no
   assert.ok(shapes >= 6, 'nodes are links or labelled images');
   assert.match(mapsPage(viewOf([]), T0, staticCtx('', 0)), /No units yet/);
   assert.match(html, /No stacked work/, 'one unit: no critical path shown');
-  assert.match(html, /<div class="map-scroll" tabindex="0" role="region" aria-label="Flow map/);
+  assert.match(html, /<div class="map-scroll flow" tabindex="0" role="region" aria-label="Flow map/);
   const fu = flowSvg(v, staticCtx('', 0), T0);
   assert.ok(fu.indexOf('edge follow-up') > fu.indexOf('nd ref'), 'follow-up edges drawn above the issue nodes');
 });

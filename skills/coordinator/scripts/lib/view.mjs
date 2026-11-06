@@ -69,6 +69,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
         personNotes: personNotes.filter((n) => n.unit === u.id),
         bar: u.bar, behaviours: u.behaviours ?? [], evidenceItems: u.evidence ?? [], links: u.links ?? [],
         roundList: u.rounds, stopReason: u.stopReason ?? null,
+        // Files in the unit's last checked diff (the gaming check records the count); null before one.
+        files: typeof u.detect?.files === 'number' ? u.detect.files : null,
         asks: qs.filter((q) => q.unit === u.id), timeline: unitTimeline(run, u.id),
       };
     }),

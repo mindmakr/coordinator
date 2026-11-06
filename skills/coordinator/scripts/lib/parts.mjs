@@ -13,7 +13,8 @@ import { VERSION } from './version.mjs';
 
 export { esc };
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
-const CLIENT = readFileSync(new URL('./live.client.js', import.meta.url), 'utf8');
+// The live page's script: updates, then the map panels (lib/maptips.mjs).
+const CLIENT = ['./live.client.js', './maptips.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
 const SERVED = [matches, morph, findMatches, highlight, unhighlight];
 
@@ -95,6 +96,8 @@ function evidenceItem(e, repo, ctx, key) {
     const pre = `<pre>${linkify(e.text, repo)}</pre>`;
     body = LONG(e.text) ? toggle(`${key}-${e.id}`, `${esc(e.label ?? e.kind)} · ${e.text.split('\n').length} lines`, pre, 'raw pre') : pre;
   } else if (e.url) body = `<p>${linkify(e.url, repo)}</p>`;
+  // ctx.artHref returning null: the file exists only on the person's machine (the web copy).
+  else if (e.file && !ctx.artHref(e.file)) body = `<p class="cause">${esc(e.file.split('/').pop())}: file kept locally</p>`;
   else if (e.file && e.type === 'image') {
     const src = ctx.embed ? ctx.embed(e.file) : ctx.artHref(e.file);
     const full = ctx.artHref(e.file);

@@ -46,7 +46,8 @@ export function liveCtx({ token, nonce }, run, theme = null, other = null) {
     artHref: (file) => `${base}/artifacts/${file.split('/').map(encodeURIComponent).join('/')}?${t}`,
     runHref: (id) => (id === run ? `/?${t}` : `/run/${encodeURIComponent(id)}?${t}`),
     // The header's page links; a new page adds itself here and to lib/serve.mjs PAGE.
-    pages: [{ path: '/', label: run ?? 'Run', href: `/?${t}` }, { path: '/maps', label: 'Maps', href: `/maps?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
+    // On another run's pages they name and link that run, not the served one.
+    pages: [{ path: base || '/', label: other ?? run ?? 'Run', href: base ? `${base}?${t}` : `/?${t}` }, { path: `${base}/maps`, label: 'Maps', href: `${base}/maps?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
   };
 }
 
@@ -82,13 +83,18 @@ const BUDGET_HELP = {
   'integration rounds': 'Integration checks used, against the cap.',
 };
 
-const hidden = (live, fields) => [['t', live.token], ...(live.back ? [['back', live.back]] : []), ...fields].map(([k, val]) => `<input type="hidden" name="${k}" value="${esc(val)}">`).join('');
+// A form object: the live page's { token } (field `t`, posts to /answer and /note), or a hosted
+// copy's { token, tokenName, post: path prefix, disabled: why this viewer cannot write }.
+const hidden = (live, fields) => [[live.tokenName ?? 't', live.token], ...(live.back ? [['back', live.back]] : []), ...fields].map(([k, val]) => `<input type="hidden" name="${k}" value="${esc(val)}">`).join('');
 const recommended = ' <span class="chip s-pass">Recommended</span>';
+const action = (live, path) => esc(`${live.post ?? ''}${path}`);
+const off = (live) => (live.disabled ? ' disabled' : '');
+const why = (live) => (live.disabled ? `<p class="hint">${esc(live.disabled)}</p>` : '');
 
 export function noteForm(live, unit) {
-  return `<form class="note" method="post" action="/note">${hidden(live, unit ? [['unit', unit]] : [])}`
-    + `<label>${esc(unit ? `Note to the lead about ${unit}` : 'Note to the lead')}<textarea name="text" rows="2" maxlength="1000" required></textarea></label>`
-    + '<button type="submit">Send note</button></form>';
+  return `<form class="note" method="post" action="${action(live, '/note')}">${hidden(live, unit ? [['unit', unit]] : [])}`
+    + `<label>${esc(unit ? `Note to the lead about ${unit}` : 'Note to the lead')}<textarea name="text" rows="2" maxlength="1000" required${off(live)}></textarea></label>`
+    + `<button type="submit"${off(live)}>Send note</button>${why(live)}</form>`;
 }
 
 function answerForm(q, live) {
@@ -99,9 +105,9 @@ function answerForm(q, live) {
   const other = !q.options.length ? `<label class="opt"><span><b>Your answer</b>${box}</span></label>`
     : q.multi ? `<label class="opt"><span><b>Other</b><small>optional, as well as any options above</small>${box}</span></label>`
       : `<label class="opt"><input type="radio" name="choice" value="${OTHER}"${a?.other ? ' checked' : ''}><span><b>Other</b>${box}</span></label>`;
-  return `<form class="ask" method="post" action="/answer">${hidden(live, [['q', q.id]])}`
-    + `<fieldset><legend>${q.options.length ? (q.multi ? 'Pick any' : 'Pick one') : 'Write your answer'}</legend>${opts}${other}</fieldset>`
-    + `<button type="submit">${a ? 'Change answer' : 'Submit'}</button></form>`;
+  return `<form class="ask" method="post" action="${action(live, '/answer')}">${hidden(live, [['q', q.id]])}`
+    + `<fieldset${off(live)}><legend>${q.options.length ? (q.multi ? 'Pick any' : 'Pick one') : 'Write your answer'}</legend>${opts}${other}</fieldset>`
+    + `<button type="submit"${off(live)}>${a ? 'Change answer' : 'Submit'}</button>${why(live)}</form>`;
 }
 
 function optionList(q) {
@@ -152,9 +158,11 @@ function unitCard(u, ctx, form, repo) {
   return blk(`unit-${u.id}`, html, 'section', ` class="card${u.finished ? ' fin' : ''}" id="unit-${esc(u.id)}"`);
 }
 
-function needsYou(v, form) {
+// ctx.readOnlyHint (plain text): where a read-only copy tells people to answer instead.
+function needsYou(v, form, ctx = {}) {
   const hint = form || !(v.needsYou.length + v.answered.length) ? ''
-    : `<p class="hint">This copy is read-only. Answer in the chat, or ask the lead for the answer page (<code>run.mjs serve ${esc(v.id)}</code>).</p>`;
+    : ctx.readOnlyHint ? `<p class="hint">${esc(ctx.readOnlyHint)}</p>`
+      : `<p class="hint">This copy is read-only. Answer in the chat, or ask the lead for the answer page (<code>run.mjs serve ${esc(v.id)}</code>).</p>`;
   const open = v.needsYou.length ? `<div class="needs"><b>Needs you</b><ul>${v.needsYou.map((q) => questionItem(q, form, v.repo)).join('')}</ul>${hint}</div>`
     : `<div class="needs calm">Nothing needs you.${hint}</div>`;
   const answered = v.answered.length
@@ -194,13 +202,14 @@ export function timelineList(events, repo, finished = new Set()) {
 export function hud(v, nowMs = Date.now(), ctx = null) {
   ctx ??= staticCtx('', 0);
   if (ctx.token) ctx = liveCtx(ctx, v.id); // older callers pass { token, nonce }
-  const form = ctx.live && v.open && !ctx.readOnly ? ctx.live : null; // a closed run, or another run's page, takes no answers
+  const live = ctx.form ?? ctx.live; // ctx.form: a hosted copy's forms (no live script)
+  const form = live && v.open && !ctx.readOnly ? live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
     blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}</header>`),
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     blk('goal', goalBlock(v, ctx)),
-    blk('needs', needsYou(v, form)),
+    blk('needs', needsYou(v, form, ctx)),
     form ? blk('note', noteForm(form)) : '',
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),

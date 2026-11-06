@@ -123,7 +123,9 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 - **The coordinator's own page** (`/coordinator`, linked from the header; `run.mjs self` in text): across every run in the project, its age, lessons with their sources, memory (`COORDINATOR.md` and your past answers), pass rate, rounds to pass and time per unit with the trend, history, what each open run waits on, its proposals, and the side studies it ran while waiting (`init --study-budget`). Other runs open read-only at `/run/<run>`.
 - **Looks like your project:** `init --theme app/globals.css` (or `Theme:` in `COORDINATOR.md`) maps your design system's colours, fonts and radius onto it. Light, dark or system.
 
-Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once.
+**From anywhere (beta, self-host):** [`service/`](service/README.md) is a GitHub App and a read-only web dashboard. It reads the `coordinator-state` branch that `run.mjs push` writes and shows each run, drawn by the same renderers, to the people who can read the repo on GitHub. One container plus Postgres; the App manifest and Dokploy notes are in its README.
+
+Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once; with `--remote` it also pulls answers made on the web or by comment commands from the state branch (within a minute, or seconds with the service's doorbell).
 
 ## Project map
 
@@ -157,11 +159,13 @@ skills/coordinator/
     ├── detect.mjs              the bar-gaming detector
     ├── lib/                    pure modules: rules, store, events, eventschema, schema, statesync, gaming, secrets, args,
     │                           workbench, view, plain, questions, hud, unitpage, parts, links, theme, timeline,
-    │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study
+    │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study,
+    │                           maps, heat, mapsvg, mapspage, tracker
     │   └── map/                the project map: scan, resolve, build, event log, page, touches
     └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
 docs/                           the homepage, and install · connect · self-host · permissions · privacy
 tools/                          codex-e2e.mjs (a headless run in Codex CLI) and make-old-runs.mjs (the migration fixtures)
+service/                        the GitHub App and web dashboard (AGPL-3.0, its own dependencies; imports scripts/lib)
 ```
 
 ## Design principles

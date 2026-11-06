@@ -45,4 +45,4 @@ Don't open a public issue. Use GitHub's private vulnerability reporting on this 
 
 ## Licence
 
-By contributing you agree that your work is released under the MIT licence of this project.
+By contributing you agree that your work is released under the MIT licence of this project, or, for anything under `service/`, under its AGPL-3.0 licence.

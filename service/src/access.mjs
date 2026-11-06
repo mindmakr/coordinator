@@ -1,0 +1,64 @@
+// Who may see what. A person sees a repo's runs only while GitHub, asked with
+// that person's own token, says they can read the repo. Answers are cached per
+// person and repo for a short time (ACCESS_TTL_SECONDS, at most 60), never
+// shared between people. Anything else is answered as "not found", so a page
+// never confirms that a private repo exists.
+
+export function access({ gh, db, ttlMs = 60_000, now = Date.now }) {
+  const cache = new Map();
+  const remember = (k, v) => {
+    if (cache.size > 20_000) for (const [x, e] of cache) if (e.until <= now()) cache.delete(x);
+    cache.set(k, { v, until: now() + ttlMs });
+    return v;
+  };
+  const cached = (k) => { const e = cache.get(k); return e && e.until > now() ? e : null; };
+
+  // The repo row when this person may read it, else null.
+  // A repo the service does not know is asked about the same way (and cached the same way), so the
+  // time to answer cannot tell an unknown repo from a known one the viewer cannot read.
+  // The URL names no installation: the row is the one whose repo id GitHub's answer carries, so a
+  // repo deleted and re-created under the same name is another repo, and a stale row of the same
+  // name in another installation cannot hide the real one.
+  const nameKey = (session, fullName) => `${session.userId}\u0000repo\u0000${String(fullName).toLowerCase()}`;
+  const pushKey = (session, repo) => `${session.userId}\u0000push\u0000${repo.installationId}:${repo.id}`;
+  async function readable(session, fullName) {
+    if (!session) return null;
+    const k = nameKey(session, fullName);
+    const hit = cached(k);
+    if (hit) return hit.v === false ? null : db.repoForPage(fullName, hit.v);
+    const token = await session.token();
+    if (!token) return null;
+    const r = await gh.repoAccess(token, fullName);
+    const id = r.repo && r.repo.permissions?.pull === true ? Number(r.repo.id) : null;
+    const repo = id === null ? null : await db.repoForPage(fullName, id);
+    remember(k, repo ? repo.id : false);
+    if (repo) remember(pushKey(session, repo), r.repo.permissions?.push === true); // c12: shown on the page; a write asks again
+    return repo;
+  }
+
+  // c12: whether the last read check also said this person can push (true/false), or null when not cached.
+  const pushCached = (session, repo) => { const hit = cached(pushKey(session, repo)); return hit ? hit.v : null; };
+
+  // Every repo in the read model this person can read, via the App's user installations.
+  async function projects(session) {
+    const k = `${session.userId}\u0000projects`;
+    const hit = cached(k);
+    if (hit) return hit.v;
+    const token = await session.token();
+    if (!token) return [];
+    const known = new Set(await db.installationIds());
+    const out = [];
+    for await (const inst of gh.userInstallations(token)) {
+      if (!known.has(Number(inst.id))) continue;
+      const rows = new Map((await db.repos(Number(inst.id))).map((r) => [r.id, r]));
+      for await (const r of gh.userInstallationRepos(token, inst.id)) {
+        const row = rows.get(Number(r.id));
+        if (row && r.permissions?.pull !== false) { out.push(row); remember(nameKey(session, row.fullName), row.id); }
+      }
+    }
+    out.sort((a, b) => a.fullName.localeCompare(b.fullName));
+    return remember(k, out);
+  }
+
+  return { readable, projects, pushCached, forget: (userId) => { for (const k of cache.keys()) if (k.startsWith(`${userId}\u0000`)) cache.delete(k); } };
+}

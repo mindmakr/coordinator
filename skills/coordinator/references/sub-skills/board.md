@@ -27,6 +27,7 @@ Use the board's own option names; map them once at intake and record the map wit
 - **One way to write.** Use the project's board script or tool if it has one, otherwise `gh project item-edit`. Never two tools for the same board in one run.
 - **Read before you write.** Fetch the card's current status first; if a person moved it since your last write, leave it and note the difference in the situation line.
 - **Board writes are visible to others.** They need the run's approval at intake, like any write outside the run folder.
+- **When the Coordinator App is installed** (`service/`), it keeps the Run and Unit state fields and the one tracker comment per unit current from the state branch (`coordinator.json` names the board, and only in repos of the run's project, as the service's README explains). Then leave those to it and move only what it does not. A tracker comment the lead writes uses the same template, `scripts/lib/tracker.mjs`, so either can edit it.
 
 ## Standup summary
 
