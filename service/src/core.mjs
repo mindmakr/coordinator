@@ -21,3 +21,7 @@ export { isTracker, marker, trackerBody, unitState } from '../../skills/coordina
 export { questions } from '../../skills/coordinator/scripts/lib/questions.mjs';
 export { REPO } from '../../skills/coordinator/scripts/lib/links.mjs';
 export { isSafeId } from '../../skills/coordinator/scripts/lib/store.mjs';
+// c12 writes: the same event a `run.mjs answer` or `note --kind person` appends.
+export { diff, snapshotText } from '../../skills/coordinator/scripts/lib/events.mjs';
+export { answer as answerQuestion, find as findQuestion, fromForm, personNote } from '../../skills/coordinator/scripts/lib/questions.mjs';
+export { render as workbench } from '../../skills/coordinator/scripts/lib/workbench.mjs';

@@ -169,7 +169,7 @@ test('boardConfig accepts only a well-formed board', () => {
   assert.deepEqual(boardConfig({ board: { owner: 'acme', number: 3, status: { passed: 'Done', bogus: 'x', stopped: 7 } } }), { owner: 'acme', number: 3, status: { passed: 'Done' } });
 });
 
-test('maps page renders; evidence files show as kept locally; the needs-you hint points to the chat', async () => {
+test('maps page renders; evidence files show as kept locally; a reader sees why the forms are disabled', async () => {
   const t = await world({ runOpts: { file: true } });
   try {
     const cookie = await signIn(t, 'reader');
@@ -182,7 +182,7 @@ test('maps page renders; evidence files show as kept locally; the needs-you hint
     assert.match(maps.html, /href="\/r\/acme\/web\/run\/r1\/unit\/u1"/, 'map nodes open unit pages here');
     const run = await get('/r/acme/web/run/r1');
     assert.match(run.html, /href="\/r\/acme\/web\/run\/r1\/maps"/);
-    assert.match(run.html, /answer in the chat with the lead/);
+    assert.match(run.html, /You can read this run. Only people who can push/);
     assert.equal(run.html.includes('run.mjs serve'), false);
     const unit = await get('/r/acme/web/run/r1/unit/u1');
     assert.match(unit.html, /file kept locally/);

@@ -30,7 +30,8 @@ From here the run is **unattended**. Do not ask the person anything until the re
 
 **Hear the person at once.** Start two background commands and keep them running until the finish:
 
-- `S/run.mjs watch <run>`: one line per new or changed answer and per note from the person. Run it where its lines wake you (a Monitor in Claude Code; elsewhere a background command whose output you check after each agent report). On a line: read it with `S/run.mjs questions <run>` or `show`, act on it, then `S/run.mjs use-answer <run> qN`. A note from the person is their word on the run: follow it inside the fence and the approvals, log scope changes as usual.
+- `S/run.mjs watch <run> [--remote]`: one line per new or changed answer and per note from the person. Run it where its lines wake you (a Monitor in Claude Code; elsewhere a background command whose output you check after each agent report). On a line: read it with `S/run.mjs questions <run>` or `show`, act on it, then `S/run.mjs use-answer <run> qN`. A note from the person is their word on the run: follow it inside the fence and the approvals, log scope changes as usual.
+  When the run's state is pushed (`push`), add `--remote`: it also pulls the run every 30 s (`--every 10-60`), so answers and notes made on the web HUD or by comment commands arrive within a minute, and within seconds when the coordinator service's doorbell is set (`COORDINATOR_SERVICE`, or `"service"` in `.coordinator/coordinator.json`; it uses your `gh` login). Lines starting `remote:` report the link (doorbell on, pull failed), not answers: no action unless pulls keep failing.
 - `S/run.mjs serve <run>`: the live dashboard on 127.0.0.1, with answer forms and a page per unit. Give the person the URL it prints, once. It holds a token: don't paste it anywhere else (`references/guardrails.md`).
 
 ## 3. Loop

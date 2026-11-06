@@ -17,7 +17,17 @@ const refKey = (full, n) => `${String(full).toLowerCase()}#${Number(n)}`;
 // Pull request and check results become events on the read model (shown in the
 // timelines and the tracker comments) and refresh the trail of every run in the
 // same installation whose units link that PR, through the ingester's per-repo queue (ingest.refreshRuns).
-export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
+// alerts (optional, c12): { github(inst, refKey, kind, detail), security(inst, repoName, detail) }.
+export const SECURITY_EVENTS = { secret_scanning_alert: 'secret', code_scanning_alert: 'code', dependabot_alert: 'dependency' };
+
+export function webhooks({ db, ingest, branch = 'coordinator-state', log, commands = null, alerts = null }) {
+  // c12 alerts: a new secret, code scanning or dependency alert on a repo of this installation.
+  async function securityEvent(event, p) {
+    if (!['created', 'reopened', 'appeared_in_branch'].includes(p.action) || !(await db.installation(Number(p.installation.id)))) return { status: 202, body: `ignored: ${event} ${p.action}` };
+    const detail = { kind: SECURITY_EVENTS[event], number: Number(p.alert?.number) || 0 };
+    return { status: 202, body: 'security alert', work: () => alerts?.security(Number(p.installation.id), String(p.repository.full_name), detail) };
+  }
+
   async function installationEvent(p) {
     const id = Number(p.installation?.id);
     if (p.action === 'deleted') {
@@ -59,6 +69,7 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
     return async () => {
       // A held-back or failed write is flagged, so the next periodic resync lands it (and edits, never re-posts).
       for (const r of await db.runsReferencing(inst, key)) await ingest.refreshRuns(inst, r.repoId, [r.runId]);
+      if (alerts) await alerts.github(inst, key, kind, detail); // c12
     };
   }
 
@@ -94,6 +105,9 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log }) {
           : event === 'installation_repositories' ? await reposEvent(payload)
             : event === 'pull_request' && payload.repository ? await pullRequestEvent(payload)
               : event === 'check_suite' && payload.repository ? await checkSuiteEvent(payload)
+                // c12: comment commands (commands.mjs)
+                : event === 'issue_comment' && payload.repository && commands ? await commands.handle(payload)
+                : Object.hasOwn(SECURITY_EVENTS, event) && payload.repository ? await securityEvent(event, payload)
                 : { status: 202, body: `ignored: ${event}` };
       const done = async () => { if (delivery) await db.recordDelivery(delivery); };
       if (!r.work) { await done(); return r; }

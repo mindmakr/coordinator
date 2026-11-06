@@ -34,6 +34,12 @@ test('installation tokens are asked for read-only contents and metadata', async 
   assert.deepEqual(JSON.parse(seen[0].init.body), { permissions: { contents: 'read', metadata: 'read' } });
 });
 
+test('a write token names the state repo id, so it cannot write any other repo of the installation', async () => {
+  const { f, seen } = fakeFetch([['POST', /\/app\/installations\/7\/access_tokens$/, 201, { token: 'w' }]]);
+  assert.equal(await client(f).installationToken(7, { contents: 'write', metadata: 'read' }, { repositoryIds: ['70'] }), 'w');
+  assert.deepEqual(JSON.parse(seen[0].init.body), { permissions: { contents: 'write', metadata: 'read' }, repository_ids: [70] });
+});
+
 test('repoAccess: a 404 is "no access", never an error; a missing branch is null', async () => {
   const { f } = fakeFetch([['GET', /\/repos\/acme\/web$/, 200, { id: 1, permissions: { pull: true } }]]);
   const gh = client(f);
@@ -62,4 +68,15 @@ test('tokens are sealed with AES-GCM: round trip, and tampering fails', () => {
 test('after sign-in only this service\'s own page paths are followed', () => {
   for (const ok of ['/', '/r/acme/web', '/r/acme/web/run/r1/unit/u1']) assert.equal(safeNext(ok), ok);
   for (const bad of ['//evil.example', 'https://evil.example', '/r/acme/web/../../x', '/\\evil', '/login', null, '/r/acme']) assert.equal(safeNext(bad), '/', String(bad));
+});
+
+test('userPermission: the person\'s permission on a repo, asked as the App; a 404 is none', async () => {
+  const { f, seen } = fakeFetch([
+    ['GET', /\/repos\/acme\/web\/collaborators\/ana\/permission$/, 200, { permission: 'write' }],
+    ['GET', /\/repos\/acme\/web\/collaborators\/bob\/permission$/, 404, { message: 'Not Found' }],
+  ]);
+  const gh = client(f);
+  assert.equal(await gh.userPermission('inst', 'acme/web', 'ana'), 'write');
+  assert.equal(await gh.userPermission('inst', 'acme/web', 'bob'), 'none');
+  assert.equal(seen[0].init.headers.Authorization, 'Bearer inst');
 });

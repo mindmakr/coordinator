@@ -19,7 +19,8 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   if (!u) return null;
   ctx ??= staticCtx('', 1);
   if (ctx.token) ctx = liveCtx(ctx, v.id);
-  const form = ctx.live && v.open && !ctx.readOnly ? { ...ctx.live, back: `/unit/${u.id}` } : null; // forms come back here
+  const live = ctx.form ?? ctx.live;
+  const form = live && v.open && !ctx.readOnly ? { ...live, back: `/unit/${u.id}` } : null; // forms come back here
   const r = v.repo;
   const loose = u.evidenceItems.filter((e) => !e.behaviour);
   const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');

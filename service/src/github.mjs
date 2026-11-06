@@ -14,6 +14,9 @@ export const SCOPES = {
   read: { contents: 'read', metadata: 'read' },                     // ingest
   comments: { issues: 'write', pull_requests: 'write', metadata: 'read' }, // tracker comments
   board: { organization_projects: 'write', issues: 'read', pull_requests: 'read', metadata: 'read' }, // board fields
+  // c12: answers and notes from comment commands, committed to the state branch only (writes.mjs),
+  // always minted for the state repo's id alone (repositoryIds).
+  write: { contents: 'write', metadata: 'read' },
 };
 
 export function github({ appId, privateKey, clientId, clientSecret, api, web, fetch: f = globalThis.fetch }) {
@@ -41,9 +44,11 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
   }
   const ok = (r) => { if (r.status >= 200 && r.status < 300) return r.json; throw new GitHubError(r.status, r.what); };
 
-  // Each token is narrowed to the one job it is minted for (SCOPES), whatever the App holds.
-  async function installationToken(installationId, permissions = SCOPES.read) {
-    const r = await call(appJwt(), 'POST', `/app/installations/${Number(installationId)}/access_tokens`, { permissions }, 'installation token');
+  // Each token is narrowed to the one job it is minted for (SCOPES), whatever the App holds,
+  // and, given repositoryIds, to those repos only (a write token: the state repo alone).
+  async function installationToken(installationId, permissions = SCOPES.read, { repositoryIds = null } = {}) {
+    const body = { permissions, ...(repositoryIds ? { repository_ids: repositoryIds.map(Number) } : {}) };
+    const r = await call(appJwt(), 'POST', `/app/installations/${Number(installationId)}/access_tokens`, body, 'installation token');
     return ok(r).token;
   }
 
@@ -82,6 +87,12 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
 
     // As the App, for ingest.
     installationToken,
+    // c12 alerts: a person's permission on a repo, asked as the App ('admin', 'write', 'read' or 'none'; a 404 is 'none').
+    async userPermission(token, fullName, login) {
+      const r = await call(token, 'GET', `/repos/${fullName.split('/').map(encodeURIComponent).join('/')}/collaborators/${encodeURIComponent(login)}/permission`, null, 'user permission');
+      if (r.status === 404) return 'none';
+      return String(ok(r)?.permission ?? 'none');
+    },
     installationRepos: (token) => pages(token, '/installation/repositories', 'repositories'),
     // The branch tip, or null when the branch does not exist.
     async ref(token, full, branch) {
@@ -115,11 +126,36 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
       ok(r);
       return true;
     },
+    // c12 alerts: removes the App's previous alert comment (a 404, already gone, is fine).
+    async deleteComment(token, full, id) {
+      const r = await call(token, 'DELETE', `/repos/${enc(full)}/issues/comments/${Number(id)}`, null, 'delete comment');
+      if (r.status !== 404) ok(r);
+    },
     async graphql(token, query, variables = {}) {
       const r = ok(await call(token, 'POST', '/graphql', { query, variables }, 'graphql'));
       if (r?.errors?.length) throw Object.assign(new Error(`GitHub graphql: ${String(r.errors[0].message).slice(0, 200)}`), { errors: r.errors });
       return r.data;
     },
+
+    // c12 writes: the Git Data API, for one commit on the state branch (writes.mjs is the only caller).
+    createBlob: async (token, full, buf) => ok(await call(token, 'POST', `/repos/${enc(full)}/git/blobs`, { content: Buffer.from(buf).toString('base64'), encoding: 'base64' }, 'create blob')).sha,
+    createTree: async (token, full, baseTree, entries) => ok(await call(token, 'POST', `/repos/${enc(full)}/git/trees`, { base_tree: baseTree, tree: entries.map(({ path, sha }) => ({ path, mode: '100644', type: 'blob', sha })) }, 'create tree')).sha,
+    createCommit: async (token, full, { message, tree, parents, author }) => ok(await call(token, 'POST', `/repos/${enc(full)}/git/commits`, { message, tree, parents, ...(author ? { author } : {}) }, 'create commit')).sha,
+    // Moves a branch forward, never by force. false: the branch moved meanwhile (not a fast forward).
+    async moveBranch(token, full, branch, sha) {
+      const r = await call(token, 'PATCH', `/repos/${enc(full)}/git/refs/heads/${encodeURIComponent(branch)}`, { sha, force: false }, 'update ref');
+      if (r.status === 422 || r.status === 409) return false;
+      ok(r);
+      return true;
+    },
+    // c12 comment commands: what a user may do on a repo, and reactions on an issue or PR comment.
+    async permission(token, full, login) {
+      const r = await call(token, 'GET', `/repos/${enc(full)}/collaborators/${encodeURIComponent(login)}/permission`, null, 'permission');
+      if (r.status === 404) return { push: false, permission: 'none' };
+      const j = ok(r);
+      return { push: j?.user?.permissions?.push === true || ['admin', 'maintain', 'write'].includes(j?.role_name ?? j?.permission), permission: String(j?.role_name ?? j?.permission ?? 'none') };
+    },
+    react: async (token, full, commentId, content) => { ok(await call(token, 'POST', `/repos/${enc(full)}/issues/comments/${Number(commentId)}/reactions`, { content }, 'reaction')); },
 
     // As the person.
     user: async (token) => ok(await call(token, 'GET', '/user')),

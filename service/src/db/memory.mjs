@@ -7,6 +7,8 @@ export function memoryDb() {
   const deliveries = new Map(); const installations = new Map(); const repos = new Map(); const runs = new Map();
   const sessions = new Map(); const audit = [];
   const refs = new Map(); const ghEvents = new Map(); const trackers = new Map();
+  const commands = new Map(); // c12 writes
+  let trailCounter = 0; // trail_seq values, like Postgres's trail_seq_global
   const repoKey = (i, r) => key(i, r);
   return {
     kind: 'memory',
@@ -21,7 +23,7 @@ export function memoryDb() {
       installations.delete(id);
       for (const [k, r] of repos) if (r.installationId === id) repos.delete(k);
       for (const [k, r] of runs) if (r.installationId === id) runs.delete(k);
-      for (const m of [refs, ghEvents, trackers]) for (const [k, r] of m) if (r.installationId === id) m.delete(k);
+      for (const m of [refs, ghEvents, trackers, commands]) for (const [k, r] of m) if (r.installationId === id) m.delete(k);
     },
 
     async upsertRepo({ installationId, id, fullName, private: priv }) {
@@ -38,8 +40,9 @@ export function memoryDb() {
     async repoByName(installationId, fullName) {
       return clone([...repos.values()].find((r) => r.installationId === installationId && r.fullName.toLowerCase() === String(fullName).toLowerCase())) ?? null;
     },
-    async repoForPage(fullName) {
-      const hit = [...repos.values()].filter((r) => r.fullName.toLowerCase() === String(fullName).toLowerCase())
+    // id: GitHub's id for the repo; only a row with that id is returned (the newest synced, if several).
+    async repoForPage(fullName, id) {
+      const hit = [...repos.values()].filter((r) => r.fullName.toLowerCase() === String(fullName).toLowerCase() && r.id === Number(id))
         .sort((a, b) => String(b.syncedAt ?? '').localeCompare(String(a.syncedAt ?? '')))[0];
       return clone(hit) ?? null;
     },
@@ -63,7 +66,9 @@ export function memoryDb() {
     },
     async markTrailPending(installationId, repoId, runId) {
       const r = runs.get(key(installationId, repoId, runId));
-      if (r) Object.assign(r, { trailPending: true, trailSeq: r.trailSeq + 1 });
+      if (!r) return null;
+      Object.assign(r, { trailPending: true, trailSeq: ++trailCounter }); // one counter for every run: a re-created run never reuses a value
+      return r.trailSeq;
     },
     async clearTrailPending(installationId, repoId, runId, seq) {
       const r = runs.get(key(installationId, repoId, runId));
@@ -101,6 +106,11 @@ export function memoryDb() {
       const k = key(installationId, t.refKey, t.runId, t.unitId);
       trackers.set(k, { commentId: null, bodySha: null, boardSha: null, ...trackers.get(k), ...clone(t), installationId });
     },
+
+    // c12 writes: true when this call claimed the comment (it was not handled before).
+    async claimCommand(installationId, commentId) { const k = key(installationId, commentId); if (commands.has(k)) return false; commands.set(k, { installationId, status: 'claimed' }); return true; },
+    async finishCommand(installationId, commentId, status) { const c = commands.get(key(installationId, commentId)); if (c) c.status = status; },
+    async releaseCommand(installationId, commentId) { commands.delete(key(installationId, commentId)); },
 
     async putSession(s) { sessions.set(s.idHash, clone(s)); },
     async session(idHash) {
