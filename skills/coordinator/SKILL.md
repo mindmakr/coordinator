@@ -24,7 +24,7 @@ Call it as `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare s
 
 - **Ask once, through the question tool.** One batch before the run, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Then decide within the answers, log each decision, and stop only for an unapproved gated action (`references/guardrails.md`).
 - **Short replies.** Outcome first, as short as the content allows; a context line when several pieces of work are active (`references/craft.md`).
-- **The bar decides.** A fresh critic checks the real artifact against a bar written down before building (`references/bar.md`).
+- **The bar decides.** A fresh critic, never the builder, checks the real artifact against a bar written before building (`references/bar.md`).
 - **No slop.** Writing, titles, navigation, prompts and UI meet the craft bar. UI starts from references, never a blank page (`references/craft.md`).
 - **The harness is the team.** Staff the roles from its agents, skills and tools (`references/team.md`).
 - **The state decides.** `.coordinator/runs/<run>/state.json`, written only by `run.mjs`, says what happens next; memory is a cache of it (`references/durability.md`).
