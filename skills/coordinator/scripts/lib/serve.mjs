@@ -3,7 +3,9 @@
 // POST also needs this page's own origin. Writes are callbacks (run.mjs passes
 // its locked state code), so the page changes nothing the CLI could not.
 // GET /                 the dashboard          GET /unit/<id>     a unit's page
-// GET /events?p=<path>  live updates (SSE)     GET /artifacts/<unit>/<file>  a stored screenshot or log
+// GET /coordinator      the coordinator's own page, across every run in the state folder
+// GET /run/<run>[/unit/<id>]  another run's dashboard or unit page, read-only
+// GET /events?p=<path>  live updates (SSE)     GET [/run/<run>]/artifacts/<unit>/<file>  a stored screenshot or log
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -13,8 +15,9 @@ import { csp } from './parts.mjs';
 
 export const HOST = '127.0.0.1';
 const MAX_BODY = 64 * 1024;
-const PAGE = /^\/(?:unit\/([A-Za-z0-9][A-Za-z0-9._-]{0,63}))?$/;
-const ART = /^\/artifacts\/([A-Za-z0-9_][A-Za-z0-9._-]{0,63})\/([^/]+)$/;
+const ID = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
+const PAGE = new RegExp(`^/(?:coordinator|run/${ID}(?:/unit/${ID})?|unit/${ID})?$`);
+const ART = new RegExp(`^(?:/run/(${ID}))?/artifacts/([A-Za-z0-9_][A-Za-z0-9._-]{0,63})/([^/]+)$`);
 
 const sameToken = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -43,8 +46,9 @@ const errorPage = (msg, back) => `<!doctype html><meta charset="utf-8"><meta nam
 const pathOf = (p) => { const m = PAGE.exec(p ?? ''); return m ? p : null; };
 
 // page(path, { token, nonce }) returns the HTML or null; post[path](form) writes
-// and returns the anchor to show next; file(target, name) returns { file, type }
-// for an artifact the state names, or null; version() changes when the state does.
+// and returns the anchor to show next; file(target, name, run) returns { file, type }
+// for an artifact the state names (run: null for the served run, else the run
+// named in /run/<run>/…), or null; version() changes when any page's data does.
 export function serve({ port = 0, page, post, file = () => null, version = () => '' }) {
   const token = randomBytes(24).toString('base64url');
   const live = hub({ version, render: (p) => page(p, { token, nonce: 'patch' }) });
@@ -67,7 +71,7 @@ export function serve({ port = 0, page, post, file = () => null, version = () =>
         }
         const art = ART.exec(url.pathname);
         if (art) {
-          const f = file(decodeURIComponent(art[1]), decodeURIComponent(art[2]));
+          const f = file(decodeURIComponent(art[2]), decodeURIComponent(art[3]), art[1] ?? null);
           if (!f) return send(res, 404, 'not found');
           return send(res, 200, readFileSync(f.file), { 'Content-Type': f.type, 'Content-Security-Policy': "default-src 'none'; img-src 'self'; sandbox", 'Cache-Control': 'private, max-age=60' });
         }

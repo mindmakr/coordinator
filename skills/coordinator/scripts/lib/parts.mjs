@@ -57,6 +57,10 @@ export function csp(live) {
 // The whole page. `body` goes inside <main id="app">, which the live page patches.
 export const dot = (state) => `<span class="dot dot-${cls(state)}" role="img" aria-label="${esc(DOTS[state] ?? state)}" title="${esc(DOTS[state] ?? state)}"></span>`;
 
+// The header's links between pages (ctx.pages, live only); the current one is marked.
+const nav = (ctx, path) => (ctx.pages?.length
+  ? `<nav class="pages" aria-label="Pages">${ctx.pages.map((p) => `<a href="${esc(p.href)}"${p.path === path ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')}</nav>` : '');
+
 export function page({ title, body, ctx, path, closed = false }) {
   const live = ctx.live;
   const status = closed ? `<span id="live" class="live" role="status" data-state="finished">Finished${live ? '' : ' · snapshot'}</span>`
@@ -64,9 +68,9 @@ export function page({ title, body, ctx, path, closed = false }) {
       : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
     csp: csp(live && { nonce: esc(live.nonce) }), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }),
-    top: `<div class="top">${brand()}<div class="tools">${status}${THEME_TOGGLE}</div></div>`,
+    top: `<div class="top">${brand()}${nav(ctx, path)}<div class="tools">${status}${THEME_TOGGLE}</div></div>`,
     body, footer: footer(),
-    attrs: live ? ` data-run="${esc(ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
+    attrs: live ? ` data-run="${esc(ctx.store ?? ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
     script: live ? `<script nonce="${esc(live.nonce)}">${SERVED.map((f) => `const ${f.name} = ${f.toString()};`).join('\n')}\n${CLIENT}</script>` : '',
   };
   return SHELL.replace(/\{\{(\w+)\}\}/g, (_, k) => parts[k] ?? '');

@@ -19,7 +19,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   if (!u) return null;
   ctx ??= staticCtx('', 1);
   if (ctx.token) ctx = liveCtx(ctx, v.id);
-  const form = ctx.live && v.open ? { ...ctx.live, back: `/unit/${u.id}` } : null; // forms come back here
+  const form = ctx.live && v.open && !ctx.readOnly ? { ...ctx.live, back: `/unit/${u.id}` } : null; // forms come back here
   const r = v.repo;
   const loose = u.evidenceItems.filter((e) => !e.behaviour);
   const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
@@ -42,5 +42,5 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     ctx.live ? timelineTools() : '',
     blk('timeline', timelineList([...u.timeline].reverse(), r), 'ol', ' class="timeline" data-tl-list'),
   ].join('\n');
-  return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `/unit/${u.id}`, closed: !v.open });
+  return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/unit/${u.id}`, closed: !v.open });
 }

@@ -42,6 +42,21 @@ Stop it with Ctrl+C, or stop the background command, when the run ends.
 
 **Known issue.** In Chromium, when the top of the screen sits a few pixels below a growing list inside a tall card (for example a unit's open Evidence list), an item appended to that list can shift the view (measured once at 126 px), because the browser anchors to the card that straddles the top of the screen. Content added inside the visible area also moves what is below it, by design. Tracked in issue #23. To reproduce: in Chromium, serve a run with 8 units and 45 or more decisions, one unit with 22 or more evidence items and its Evidence list open; put the top of the screen 5–40 px below the end of that list; then add evidence to that unit from the CLI (`run.mjs evidence <run> <unit> --kind log --text …`).
 
+## The coordinator's page: `S/run.mjs self` and `/coordinator`
+
+About the coordinator itself, across every run in the state folder. `S/run.mjs self` prints it as text (`--json` for the model, `--html` writes `coordinator.html` beside `runs/`); `serve` shows it live at `/coordinator`, linked from the header of every page (the header lists the served run and Coordinator; a new page adds itself to `pages` in `liveCtx` and to `PAGE` in `lib/serve.mjs`). One section per entry of `SECTIONS` in `lib/selfpage.mjs`:
+
+- **Age:** first run, number of runs (and how many are open), units, hours at work (each run's start to its close or last event).
+- **Plans:** each open run: its decision, units finished, the next steps, and for each unit left what it waits on (its builder, a critic, the unit it stacks on, the lead, or you), and open questions.
+- **Working stats:** counted over all runs, open included (the page says so), with the closed-runs-only figures that `run.mjs stats` prints beside them: pass rate and stopped share of finished units, rounds to pass (median and p80), median time per unit (first build to last verdict), the suggested `--max-rounds`, and a table of the same per run (the trend).
+- **Learning:** every lesson of both scopes, best first: tag, text, seen, used, **promote** once seen 3 or more times, the runs it came from (links) and its sources.
+- **Memory:** `COORDINATOR.md` by section, and your answers from past runs (with the decision notes that closed questions).
+- **History:** closed runs with outcome, units passed and stopped, start and close, each linking to its dashboard.
+- **Proposals:** follow-ups, retro notes and `upstream:` notes from every run, and lessons ready to promote, newest first, linkified.
+- **Side study:** the rule, each run's studies against its cap, and the study log with sources and lessons (`learning.md`).
+
+Run links go to `/run/<run>`: any other run of the folder, live and **read-only** (no forms; answer those on that run's own `serve`). Its unit pages are `/run/<run>/unit/<id>`. The page updates live when any run, lesson file or `COORDINATOR.md` changes. Tokens per unit are not recorded yet, so they are not shown.
+
 ## The snapshot: `hud.html` and `units/<unit>.html`
 
 `.coordinator/runs/<run>/hud.html` and one page per unit under `units/` are rewritten after every change, in the same lock as the state. `S/run.mjs hud <run>` rewrites them on demand.

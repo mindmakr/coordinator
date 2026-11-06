@@ -5,6 +5,7 @@
 //   run.mjs init <run> --goal G --bar B --fence F [--paths a,b] [--tag T] [--max-rounds 4]
 //                      [--max-minutes 240] [--max-units 6] [--max-added 2] [--stale-minutes 45]
 //                      [--repo owner/name] (resolves #123 and shas; else the project's git remote) [--theme file.css]
+//                      [--study-budget 2] (side studies allowed while waiting, 0-10)
 //   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
@@ -26,7 +27,7 @@
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …]
 //                  only when next says integrate; a pass needs every goal behaviour passing
-//   run.mjs note <run> --kind situation|decision|follow-up|question|bar|info|person|escape --text T
+//   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person|escape --text T
 //                  escape: --unit U, a passed unit where a defect turned up later (a later review, verify, test, a person); counted by stats
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
 //                  [--unit U] (person: a note from the person about one unit)
@@ -36,7 +37,12 @@
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
 //   run.mjs questions <run>         every question with its options, answer, history and status
-//   run.mjs serve <run> [--port P]  the live dashboard (forms, unit pages, live updates) on 127.0.0.1, behind a per-start token
+//   run.mjs study <run> --topic T --area security|design|stack|other --text "what it learned" --source URL … [--lesson id …] [--by agent]
+//                  one side study while the run waits (capped per run by --study-budget); lessons it added go in with lessons.mjs add --source
+//   run.mjs self [--json] [--html]  the coordinator's own view across every run here (age, learning, memory, stats,
+//                  history, plans, proposals, side study); --html writes coordinator.html in the state folder
+//   run.mjs serve <run> [--port P]  the live dashboard (forms, unit pages, live updates) on 127.0.0.1, behind a per-start token;
+//                  /coordinator is the self view, /run/<other> another run read-only
 //   run.mjs watch <run>             one line per new or changed answer and per note from the person; never exits
 //   run.mjs next <run>     prints what to do and records any stops
 //   run.mjs show <run>     prints the compact text HUD (situation, needs you, time left, units, budget, next step)
@@ -59,11 +65,16 @@ import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
 import { answer, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
+import { selfModel, selfText } from './lib/self.mjs';
+import { loadSelf, selfVersion } from './lib/selfdata.mjs';
+import { selfPage } from './lib/selfpage.mjs';
+import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
 
 const FLAGS = {
-  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme'],
+  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget'],
+  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
@@ -71,7 +82,7 @@ const FLAGS = {
   ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
 };
-const REPEAT = { ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
+const REPEAT = { study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -155,7 +166,7 @@ const commands = {
       budget: {
         maxRounds: num(o['max-rounds'], 4, 1, 8), maxMinutes: num(o['max-minutes'], 240, 5, 10_080),
         maxUnits: num(o['max-units'], 6, 1, 20), maxAdded: num(o['max-added'], 2, 0, 10),
-        staleMinutes: num(o['stale-minutes'], 45, 5, 1440),
+        staleMinutes: num(o['stale-minutes'], 45, 5, 1440), maxStudies: num(o['study-budget'], 2, 0, 10),
       },
       createdAt: now(), frozen: false, addedAfterFreeze: 0, units: [], notes: [], integration: { rounds: [] }, closed: null,
     };
@@ -308,7 +319,7 @@ const commands = {
     });
   },
   note([run], o) {
-    const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'question', 'bar', 'info', 'person', 'escape'], '--kind');
+    const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'retro', 'question', 'bar', 'info', 'person', 'escape'], '--kind');
     if (kind === 'person') return change(run, (s) => personNote(s, { text: o.text, unit: o.unit }));
     if (kind === 'escape') {
       return change(run, (s) => {
@@ -332,7 +343,21 @@ const commands = {
         note.answers = o.answers;
       }
       s.notes.push(note);
-    }, { closedOk: kind === 'follow-up' });
+    }, { closedOk: ['follow-up', 'retro'].includes(kind) });
+  },
+  study([run], o) { let id; const s = change(run, (st) => { id = addStudy(st, o); }); return { ...s, study: id }; },
+  self(_, o) {
+    if (o.json !== undefined && o.html !== undefined) throw new Error('--json or --html, not both');
+    const m = selfModel({ ...loadSelf(), current: null });
+    if (o.json) return m;
+    if (o.html) {
+      const file = join(baseDir('project'), 'coordinator.html');
+      const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html` };
+      writeAtomic(file, selfPage(m, Date.now(), ctx));
+      return { file };
+    }
+    process.stdout.write(selfText(m));
+    return null;
   },
   ask([run], o) { let id; const s = change(run, (st) => { id = ask(st, o); }); return { ...s, asked: id }; },
   answer([run, id], o) { return change(run, (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person' })); },
@@ -341,17 +366,29 @@ const commands = {
   serve([run], o) {
     load(run);
     const write = (fn) => (form) => { let anchor; change(run, (s) => { anchor = fn(s, form); }); return anchor; };
-    const dir = runDir(run);
     serve({
       port: num(o.port, 0, 0, 65_535),
       page: (path, live) => {
-        const s = load(run);
+        const theme = themeFor(load(run));
+        if (path === '/coordinator') return selfPage(selfModel({ ...loadSelf(), current: run }), Date.now(), liveCtx(live, run, theme));
+        // /run/<other>[/unit/<u>]: another run of this folder, read-only; /run/<served> is the served run.
+        const m = /^\/run\/([^/]+)(\/unit\/.+)?$/.exec(path);
+        const id = m ? m[1] : run;
+        if (m && !isSafeId(id)) return null;
+        if (m && !existsSync(stateFile(id))) return null;
+        const s = load(id);
         const v = view(s, decide(s), Date.now(), { repo: repoFor(s) });
-        const ctx = liveCtx(live, run, themeFor(s));
-        return path === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(path.slice('/unit/'.length)), Date.now(), ctx);
+        const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
+        const rest = m ? (m[2] ?? '/') : path;
+        return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
       },
-      version: () => { const st = statSync(stateFile(run)); return `${st.mtimeMs}:${st.size}`; },
-      file: (target, name) => { const a = artifact(load(run), target, name); return a ? { file: join(dir, 'artifacts', a.rel), type: a.type } : null; },
+      version: selfVersion,
+      file: (target, name, other) => {
+        const id = other ?? run;
+        if (!isSafeId(id) || !existsSync(stateFile(id))) return null;
+        const a = artifact(load(id), target, name);
+        return a ? { file: join(runDir(id), 'artifacts', a.rel), type: a.type } : null;
+      },
       post: {
         '/answer': write((s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person' }); return id; }),
         '/note': write((s, f) => { personNote(s, { text: f.get('text'), unit: f.get('unit') || undefined }); return f.get('unit') ? `unit-${f.get('unit')}` : ''; }),
@@ -427,9 +464,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|ask|answer|use-answer|questions|serve|watch|next|show|hud|brief|close|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|brief|close|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

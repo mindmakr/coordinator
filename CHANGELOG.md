@@ -12,6 +12,12 @@
 - **Web-plus-mobile fixture run:** an end-to-end CLI test with two git repos and linked issues: the mobile unit stacked on the web one across repos, briefs with the issue fenced, builds, behaviour verdicts, integration, close, a later escape and stats.
 - **Plugin:** each sub-skill is listed as `/coordinator:<name>` (thin `skills/<name>/SKILL.md` entries).
 - **Codex CLI note** (`references/codex.md`): install path and differences; discovery of all ten skills checked on codex-cli 0.160.0, a full run not yet.
+- **The coordinator's own page:** `run.mjs self` (text; `--json`, or `--html` for `coordinator.html` in the state folder) and `/coordinator` on `serve` (live, same token, themed, linked from every page's header). Across every run in the state folder: age (first run, runs, units, hours), learning (lessons with tag, seen, used, promote, source run and links), memory (`COORDINATOR.md` facts and your past answers), working stats (pass rate, rounds to pass median and p80, stopped share, time per unit, trend per run), history (closed runs with outcome and dates), plans (open runs: what is left, next, and what each unit waits on), proposals (follow-ups, retro and upstream notes, lessons ready to promote) and side study.
+- **Other runs on `serve`:** `/run/<run>` and `/run/<run>/unit/<id>` show any run of the same folder, read-only (no forms), live.
+- **Side study:** `run.mjs study <run> --topic --area security|design|stack|other --text --source URL … [--lesson id …]` logs one study while the run waits; capped per run by `init --study-budget N` (default 2, 0 turns it off). Nothing studied changes the fence or the bar (`references/learning.md`).
+- **Lessons with sources:** `lessons.mjs add --source URL` (repeatable, merged on a repeat); `list` shows `from` and `sources`. Tags stay free (`security`, `design`, …).
+- **Retro notes:** `note --kind retro`, allowed after close like follow-ups; `upstream:` notes show as upstream proposals.
+- Older state and lesson files load: `studies`, `budget.maxStudies` and `sources` are optional.
 
 ## 0.5.0 (2026-11-06)
 
