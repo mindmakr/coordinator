@@ -95,6 +95,16 @@ Every installation's logs are read in turn by a small worker pool, so one instal
 | `PARSE_BUDGET_SECONDS` | 600 | Reading time each installation gets per hour. Past it, its logs wait for the next resync; the repo shows why, and the service logs it |
 | `SYNC_MAX_MB` | 64 | Log bytes one sync of one repo reads. The rest follow at the next sync |
 
+Syncs are queued (c14), so many pushes at once cannot fill the memory. A push for a repo already waiting joins that sync. All optional.
+
+| Variable | Default | What |
+|---|---|---|
+| `SYNC_CONCURRENCY` | 4 | Repo syncs that run at once, in all (1-64) |
+| `SYNC_PER_INSTALLATION` | 2 | Of those, how many one installation may run; installations take turns (1-64) |
+| `SYNC_BLOB_MB` | 64 | Blob bytes fetched and not yet read, in all. A blob is fetched only when it fits (16-4096) |
+
+`npm run sync -- <id> --force` re-reads every log even when the branch tip has not moved. When that is more than `SYNC_MAX_MB`, the repo is marked in the database (`repos.reread`), and every later sync, forced or the service's own, carries the pass on until it is done.
+
 ## Alerts and the doorbell
 
 **Alerts** (design 9). People pick the repos they hear about on `/alerts` (each checked with their own GitHub access, and re-checked whenever they open the page), and set there: an email address (used only after they follow the confirmation link), channels (web push, email, GitHub mention), their time zone and quiet hours, and whether a question's text may be included.
@@ -188,4 +198,5 @@ Logs go to stdout as JSON lines. Deleting the database loses nothing but session
 - Every repo and run query is scoped by installation id (`src/db/index.mjs` refuses a call without one); permission answers are cached per person, never shared.
 - Uninstalling the App deletes that installation's rows at once: repos, runs, links, GitHub events, trackers, comment commands, alerts (sent and waiting for a digest), alert subscriptions and its audit rows, keeping one audit row saying it was removed and by whom. Its doorbell listeners are closed. Settings, push devices and sessions belong to people, not installations, and stay.
 - A repo removed from an installation (c14) takes its runs, links, alert subscriptions and alerts with it, sent and waiting for a digest.
-- Only an `installation` `created` event makes an installation (c14). A push, repository or permissions event for an installation the service does not know is ignored, so an event sent before an uninstall but delivered after it brings nothing back. Installations made before the service was up are added with `npm run sync -- <installation-id>`.
+- Only an `installation` `created` event makes an installation (c14). A push, repository or permissions event for an installation the service does not know is ignored, so an event sent before an uninstall but delivered after it brings nothing back. Installations made before the service was up are added with `npm run sync -- <installation-id>`, which stores one only after GitHub confirms it.
+- An uninstalled installation's id is kept (table `uninstalled`, migration 008; GitHub never reuses an id), so a late `created` event, or `npm run sync` with that id, cannot bring it back.
