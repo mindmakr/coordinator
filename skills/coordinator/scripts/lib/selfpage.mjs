@@ -105,18 +105,21 @@ function plans(m, ctx) {
 
 // Gaps: everything left undone across runs, grouped by run. The filter needs the live page's script;
 // the snapshot lists them all. Resolved gaps stay listed, folded.
-const GAP_BADGE = { stopped: 'stop', unfinished: 'fail', run: 'stop', 'follow-up': 'link', 'out-of-fence': 'strategy', upstream: 'merge', question: 'question', escape: 'fail' };
+const GAP_BADGE = { stopped: 'stop', unfinished: 'fail', run: 'stop', 'follow-up': 'link', 'out-of-fence': 'strategy', deferred: 'note', upstream: 'merge', question: 'question', escape: 'fail' };
 const GAP_CLIP = 220;
+const REASON_CLIP = 160;
 const gapsLine = (g) => `${count(g.openCount, 'open gap')} across ${count(g.openRuns, 'run')}`;
 function gapItem(g, ctx, m) {
   const unit = g.unit ? (m.runIds.includes(g.run) ? ` · unit <a href="${esc(unitHrefIn(ctx, g.run)(g.unit))}">${esc(g.unit)}</a>` : ` · unit ${esc(g.unit)}`) : '';
   const long = g.text.length > GAP_CLIP;
   const text = long ? `${esc(clip(g.text, GAP_CLIP))}${toggle(`gap-${g.id}`, 'Full text', `<p class="say">${linkify(g.text, null)}</p>`)}` : linkify(g.text, null);
   const r = g.resolution;
-  const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : `by ${esc(r.by)}`}: ${linkify(r.reason, null)}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
+  const why = r ? (r.reason.length > REASON_CLIP ? `<span title="${esc(r.reason)}">${esc(clip(r.reason, REASON_CLIP))}</span>` : linkify(r.reason, null)) : '';
+  const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : `by ${esc(r.by)}${r.confirm ? `, their words: “${esc(clip(r.confirm, 120))}”` : ''}`}: ${why}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
+  const carried = g.carried ? `<div class="cause"><b>carried → ${esc(g.carried)}</b>: open until that unit passes or its gap is resolved</div>` : '';
   return `<li data-a="gap-${esc(g.id)}" data-gap data-run="${esc(g.run)}" data-kind="${esc(g.kind)}">${badge(GAP_BADGE[g.kind] ?? 'info', KIND_LABEL[g.kind] ?? g.kind)} ${text}`
     + `${g.cause ? `<div class="cause">cause: ${esc(g.cause)}</div>` : ''}`
-    + `<div class="cause">${runLink(g.run, ctx, m)}${unit}${g.at ? ` · ${stamp(g.at)}` : ''} · from ${esc(g.source)} · <code>${esc(g.id)}</code></div>${res}</li>`;
+    + `<div class="cause">${runLink(g.run, ctx, m)}${unit}${g.at ? ` · ${stamp(g.at)}` : ''} · from ${esc(g.from)} · <code>${esc(g.id)}</code></div>${carried}${res}</li>`;
 }
 const gapGroups = (groups, ctx, m, status) => groups.map((grp) => `<section class="card gap-run" data-gap-group data-run="${esc(grp.run)}" data-status="${status}" data-a="gaps-${status}-${esc(grp.run)}"><h3><span>${runLink(grp.run, ctx, m)}</span><span class="chip" data-gap-n>${grp.items.length}</span></h3>`
   + `<ul class="plain">${grp.items.map((g) => gapItem(g, ctx, m)).join('')}</ul></section>`).join('');
@@ -131,7 +134,7 @@ function gapTools(g) {
 function gapsSection(m, ctx) {
   const g = m.gaps;
   if (!g.openCount && !g.resolvedCount) return empty('No gaps: no stopped or unfinished unit, open follow-up, question, escape or upstream proposal in any run.');
-  const head = `<p class="meta"><b>${gapsLine(g)}</b> · ${g.resolvedCount} resolved. Stopped and unfinished units, runs closed early, follow-ups, out-of-fence items, questions for you, upstream proposals and escapes, from every run. `
+  const head = `<p class="meta"><b>${gapsLine(g)}</b> · ${g.resolvedCount} resolved. Stopped and unfinished units, runs closed early, follow-ups, out-of-fence items, deferred work, questions for you, upstream proposals and escapes, from every run. `
     + 'Close one with <code>run.mjs gap close &lt;run&gt; &lt;id&gt; --reason R</code>: a decision in that run’s log.</p>';
   const open = g.openCount ? `<div class="lists gaps" data-gaps-open>${gapGroups(g.open, ctx, m, 'open')}</div>` : `<div data-gaps-open>${empty('No open gap.')}</div>`;
   const resolved = g.resolvedCount ? `<div data-gaps-resolved>${toggle('self-gaps-resolved', `Resolved · ${g.resolvedCount}`, `<div class="lists gaps">${gapGroups(g.resolved, ctx, m, 'resolved')}</div>`)}</div>` : '';

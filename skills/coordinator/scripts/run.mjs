@@ -59,8 +59,8 @@
 //                  history, plans, proposals, side study); --html writes coordinator.html in the state folder
 //   run.mjs gaps [--json] [--all]   open gaps across every run here (stopped and unfinished units, runs closed early,
 //                  follow-ups, out-of-fence items, open questions, upstream proposals, escapes); --all adds resolved ones
-//   run.mjs gap close|reopen <run> <id> --reason R [--by person|lead]   closes (or reopens) one gap: a decision note
-//                  in that run's log (closed runs too); the id is kind:run:unit:seq as gaps prints it
+//   run.mjs gap close|reopen <run> <id> --reason R [--by lead | --by person --confirm "their words"]   closes (or
+//                  reopens) one gap: a decision note in that run's log (closed runs too); the id as gaps prints it
 //   run.mjs serve <run> [--port P]  the live dashboard (forms, unit pages, live updates) on 127.0.0.1, behind a per-start token;
 //                  /maps the run's maps, /coordinator the self view, /run/<other> another run read-only
 //   run.mjs watch <run> [--remote [--every S]]   one line per new or changed answer and per note from the person; never exits.
@@ -146,7 +146,7 @@ const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues'],
   extend: ['rounds', 'reason', 'answer'],
   start: ['model', 'why', 'force-model'], models: ['role', 'class'],
-  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all'], gap: ['reason', 'by'],
+  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all'], gap: ['reason', 'by', 'confirm'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
@@ -622,7 +622,7 @@ const commands = {
     if (!found) throw new Error(`no gap ${id} in run ${run} (run.mjs gaps --all lists them)`);
     if (!reopen && found.status === 'resolved' && !found.resolution.derived) throw new Error(`gap ${id} is already closed: ${found.resolution.reason}`);
     if (reopen && (found.status === 'open' || found.resolution.derived)) throw new Error(`gap ${id} was not closed by a note${found.status === 'resolved' ? ` (the state resolves it: ${found.resolution.reason})` : ''}`);
-    return change(run, 'note', (s) => closeGap(s, id, { reason, by: o.by ?? 'lead', reopen }), { closedOk: true, unit: p.unit && load(run).units.some((u) => u.id === p.unit) ? p.unit : null });
+    return change(run, 'note', (s) => closeGap(s, id, { reason, by: o.by ?? 'lead', confirm: o.confirm === undefined ? null : o.confirm === true ? '' : String(o.confirm), reopen }), { closedOk: true, unit: p.unit && load(run).units.some((u) => u.id === p.unit) ? p.unit : null });
   },
   ask([run], o) { let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id }; },
   answer([run, id], o) {
