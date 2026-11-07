@@ -4,6 +4,7 @@
 // (lib/selfdata.mjs) loads the inputs; `run.mjs self` and the /coordinator
 // page both read this one model.
 import { answerText, questions } from './questions.mjs';
+import { chainUnits } from './chain.mjs';
 import { decide, stats } from './rules.mjs';
 import { clip, dotState, stateBadge } from './plain.mjs';
 
@@ -49,11 +50,12 @@ function runStats(run) {
 // The same figures as `run.mjs stats` (closed runs only; stopped share over all their units).
 function closedStats(runs) {
   const s = stats(runs);
-  const finished = runs.flatMap((r) => r.units.filter((u) => ['pass', 'stopped'].includes(u.status)));
+  const finished = chainUnits(runs).filter((u) => ['pass', 'stopped'].includes(u.status));
   return {
     runs: s.runs, units: s.units, passRate: pctOf(finished.filter((u) => u.status === 'pass').length, finished.length),
     medianRoundsToPass: s.medianRoundsToPass, p80RoundsToPass: s.p80RoundsToPass,
     stoppedShare: s.stoppedShare === null ? null : Math.round(s.stoppedShare * 100),
+    unfinished: s.unfinished,
   };
 }
 
@@ -152,7 +154,9 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
   const all = mergeLessons(lessons.global, lessons.project);
   const s = stats(sorted);
   const perRun = sorted.map(runStats);
-  const finishedUnits = sorted.flatMap((r) => r.units.filter((u) => ['pass', 'stopped'].includes(u.status)));
+  // A unit finished in a follow-on run counts once (lib/chain.mjs).
+  const work = chainUnits(sorted);
+  const finishedUnits = work.filter((u) => ['pass', 'stopped'].includes(u.status));
   const mins = sorted.flatMap((r) => r.units.map((u) => unitMinutes(r, u))).filter((m) => m !== null).sort((a, b) => a - b);
   const ids = new Set(sorted.map((r) => r.id));
   return {
@@ -179,6 +183,8 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
       basis: 'all runs, open included',
       closed: closedStats(sorted.filter((r) => r.closed)),
     },
+    // Work that ran across runs, oldest run first, with its rounds added up.
+    chains: work.filter((c) => c.links.length > 1).map((c) => ({ unit: c.id, status: c.outcome, rounds: c.rounds, links: c.links })),
     history: sorted.filter((r) => r.closed).reverse().map((r) => ({
       run: r.id, tag: r.tag, outcome: r.closed.outcome, started: r.createdAt, closed: r.closed.at, goal: clip(r.goal, 160),
       passed: r.units.filter((u) => u.status === 'pass').length, stopped: r.units.filter((u) => u.status === 'stopped').length, units: r.units.length,
@@ -204,7 +210,7 @@ export function selfText(m) {
   const st = m.stats;
   L.push('', `stats     pass rate ${n(st.passRate, '%')} · rounds to pass median ${n(st.medianRoundsToPass)}, p80 ${n(st.p80RoundsToPass)} · stopped ${n(st.stoppedShare, '%')} · ${n(st.minutesPerUnit, ' min')} per unit (median) · ${count(st.units, 'finished unit')} (${st.basis})`);
   const c = st.closed;
-  L.push(`closed    ${c.runs ? `pass rate ${n(c.passRate, '%')} · rounds to pass median ${n(c.medianRoundsToPass)}, p80 ${n(c.p80RoundsToPass)} · stopped ${n(c.stoppedShare, '%')} · ${count(c.units, 'unit')} in ${count(c.runs, 'closed run')} (as run.mjs stats)` : 'no closed run yet (run.mjs stats counts closed runs only)'}`);
+  L.push(`closed    ${c.runs ? `pass rate ${n(c.passRate, '%')} · rounds to pass median ${n(c.medianRoundsToPass)}, p80 ${n(c.p80RoundsToPass)} · stopped ${n(c.stoppedShare, '%')}${c.unfinished ? ` · unfinished ${c.unfinished} (left open when the run closed)` : ''} · ${count(c.units, 'unit')} in ${count(c.runs, 'closed run')} (as run.mjs stats)` : 'no closed run yet (run.mjs stats counts closed runs only)'}`);
   if (st.trend.length) L.push(`trend     ${st.trend.map((r) => `${r.run} ${n(r.passRate, '%')}`).join(' → ')}`);
   L.push('', `learning  ${count(m.learning.lessons.length, 'lesson')} · ${m.learning.promoted} ready to promote${m.learning.tags.length ? ` · tags ${m.learning.tags.join(', ')}` : ''}`);
   for (const l of m.learning.lessons.slice(0, 8)) L.push(`  ${l.id} [${l.tag}] seen ${l.seen} used ${l.used}${l.promote ? ' PROMOTE' : ''}  ${clip(l.text, 110)}${l.from.length ? ` (from ${l.from.join(', ')})` : ''}${l.sources.length ? ` ${l.sources[0]}` : ''}`);
@@ -217,6 +223,10 @@ export function selfText(m) {
   }
   L.push('', `history   ${m.history.length ? count(m.history.length, 'closed run') : 'no closed run'}`);
   for (const h of m.history.slice(0, 10)) L.push(`  ${h.run} ${h.outcome} · ${h.passed}/${h.units} passed${h.stopped ? `, ${h.stopped} stopped` : ''} · ${day(h.started)} → ${day(h.closed)}`);
+  if (m.chains.length) {
+    L.push('', `chains    ${count(m.chains.length, 'unit')} worked across runs, each counted once in the stats`);
+    for (const c of m.chains.slice(0, 10)) L.push(`  ${c.unit}: ${c.links.map((l) => `${l.run}${l.unit !== c.unit ? `:${l.unit}` : ''} (${l.rounds}, ${l.status})`).join(' → ')} · ${c.rounds} rounds, ${c.status}`);
+  }
   L.push('', `proposals ${m.proposals.length}`);
   for (const p of m.proposals.slice(0, 8)) L.push(`  [${p.kind}] ${clip(p.text, 130)}${p.run ? ` (${p.run})` : ''}`);
   L.push('', `study     ${count(m.study.log.length, 'study', 'studies')}${m.study.runs.filter((r) => r.open).map((r) => ` · ${r.run} ${r.used}/${r.cap}`).join('')}`);

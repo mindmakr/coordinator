@@ -28,6 +28,8 @@ Record them with `S/run.mjs add <run> <unit> --behaviour "…"` (repeat the flag
 - **A new build is checked again:** `start` sets every behaviour back to unchecked.
 - **Evidence goes on the behaviour it proves:** `S/run.mjs evidence <run> <unit> --behaviour B1 --kind test --text "…"`, or `--kind screenshot --file shot.png`, or `--kind link --url …` (limits in `guardrails.md`).
 - Behaviours describe outcomes. "Uses a Map" is not a behaviour; "answers in under 200 ms for 10k orders" is.
+- **Closed, never open-ended.** "Catch every X", "any phrasing" or "all such messages" cannot be checked: each round the builder adds cases and the critic finds a new one, so the score falls while the work gets better. State it as a closed list of cases ("these six templates") or as "every entry in this inventory" (a file, a registry, the committed keys). If no closed set exists, it is a review question for a person, not a behaviour (`sub-skills/investigate.md`, Bound the bar).
+- **Guard tests get their own unit.** A guard or invariant test (a lint rule, a "no message claims X" test) goes in a unit of its own, apart from the product fix it protects, so a guard that keeps failing cannot stop a fix that passed. When a no-progress stop finds one behaviour failing in each of the last rounds while the rest pass, its reason names that behaviour: narrow it or move it out.
 
 ## Rules
 

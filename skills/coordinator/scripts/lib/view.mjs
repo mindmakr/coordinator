@@ -3,7 +3,9 @@
 import { byModel, modelLine, unrecorded, UNSPECIFIED, whoUnit } from './models.mjs';
 import { attention, attentionLabel, clip, dotState, sentence, situation, stateBadge, timeLeft, waitIds } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
-import { bySetup, escapes, unmet } from './rules.mjs';
+import { chainLine, chainOf } from './chain.mjs';
+import { pendingSyncs, syncStep } from './overlap.mjs';
+import { bySetup, escapes, roundCap, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 
 const MINUTE = 60_000;
@@ -26,7 +28,8 @@ function nextStep(run, plan) {
   }
 }
 
-export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
+// linked: the runs this one continues or was continued in (lib/chain.mjs linkedRuns); without them a chain still shows, its other runs as "not here".
+export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null } = {}) {
   const end = run.closed ? Date.parse(run.closed.at) : nowMs;
   const next = new Map(plan.units.map((u) => [u.id, u]));
   const integ = run.integration?.rounds ?? [];
@@ -36,11 +39,13 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
   const personNotes = notes.filter((n) => n.kind === 'person').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at }));
   const timeline = runTimeline(run).reverse();
   const goalBehaviours = run.goalBehaviours ?? [];
+  const syncs = run.closed ? new Map() : pendingSyncs(run);
   // Each unit's state, and which units wait on which (for the links both ways).
   const dots = new Map(run.units.map((u) => [u.id, dotState(u, next.get(u.id), run.closed ? [] : qs)]));
   const brief = (id) => { const x = run.units.find((y) => y.id === id); const st = dots.get(id); return { id, title: x?.title ?? null, status: x?.status ?? null, dot: st ?? null, badge: x ? stateBadge(st, x, next.get(id)) : null }; };
   return {
     id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo,
+    continues: Array.isArray(run.continues) ? run.continues : [],
     goalCheck: {
       behaviours: goalBehaviours, evidence: run.goalEvidence ?? [],
       met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
@@ -65,13 +70,18 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
     units: run.units.map((u) => {
       const last = u.rounds.at(-1);
       const d = next.get(u.id);
+      const chain = chainOf(linked ?? new Map([[run.id, run]]), run.id, u.id);
       return {
         id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, after: u.after ?? null,
         sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
         dot: dots.get(u.id), badge: stateBadge(dots.get(u.id), u, d), finished: ['passed', 'stopped'].includes(dots.get(u.id)),
         // Depends on (its after) and blocks (units whose after names it), each with its state.
         dependsOn: waitIds(u).map(brief), dependents: run.units.filter((x) => waitIds(x).includes(u.id)).map((x) => brief(x.id)),
-        rounds: u.rounds.length, maxRounds: run.budget.maxRounds,
+        rounds: u.rounds.length, maxRounds: roundCap(u, run), extraRounds: u.extraRounds ?? 0,
+        // The same work in other runs (#36): earlier tries before, the run that finished it after.
+        chain, chainText: chainLine(chain, u.id),
+        // Files an already merged unit changed too (#37): take the target in before review.
+        sync: syncs.has(u.id) ? syncStep(run.id, u.id, syncs.get(u.id), u.status === 'pass') : null,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
         evidence: last?.evidence ?? null,
@@ -131,6 +141,8 @@ export function text(v) {
     lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
+    if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
+    if (u.chainText) lines.push(`${' '.repeat(w)}↔ ${clip(u.chainText, 200)}`);
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);
   if (v.models?.length || v.modelsUnrecorded) lines.push(`models   ${modelLine(v.models, v.modelsUnrecorded)}`);

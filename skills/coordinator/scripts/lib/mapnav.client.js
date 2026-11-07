@@ -30,7 +30,7 @@
     const h = el && el.getAttribute('href'); if (!h) return null;
     try { const u = new URL(h, location.href); return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null; } catch { return null; }
   };
-  const OPEN = { unit: 'Open unit', issue: 'Open issue', pr: 'Open PR', 'follow-up': 'Open follow-up', goal: 'Open the dashboard' };
+  const OPEN = { unit: 'Open unit', issue: 'Open issue', pr: 'Open PR', 'follow-up': 'Open follow-up', run: 'Open run', goal: 'Open the dashboard' };
   const h = (tag, attrs, text) => { const el = document.createElement(tag); for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v); if (text !== undefined) el.textContent = text; return el; };
 
   let sel = null; // { map, path: [key…] }
