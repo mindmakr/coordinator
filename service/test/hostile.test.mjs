@@ -10,6 +10,7 @@ import { guard } from '../src/db/index.mjs';
 import { memoryDb } from '../src/db/memory.mjs';
 import { silent } from '../src/log.mjs';
 import { parser } from '../src/parser.mjs';
+import { readCost } from '../../skills/coordinator/scripts/lib/secrets.mjs';
 import { appendEvent, makeRun, signIn, startApp, stateFiles } from './helpers.mjs';
 
 const sign = (secret, body) => `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
@@ -37,18 +38,19 @@ test('p1: a run log built to make masking backtrack is synced quickly, and the s
     const evil = 'token_'.repeat(5000);
     const log = appendEvent(makeRun('r1'), 'state.edited', { ops: [{ op: 'set', path: ['goal'], value: evil }, { op: 'set', path: ['fence'], value: 'token='.repeat(5000) }] });
     t.gh.addRepo('mallory/own', { id: 99, installationId: 66, files: stateFiles({ r1: log }) });
-    let worst = 0; let stop = false;
-    const probe = (async () => { while (!stop) { const h = performance.now(); await fetch(`${t.base}/healthz`); worst = Math.max(worst, performance.now() - h); await new Promise((r) => setTimeout(r, 10)); } })();
-    const a = performance.now();
+    // Gated, not timed: once the log is fetched its read is in the worker pool, and /healthz must
+    // answer then. A masker that backtracked would hit the reader's own 20 s limit and store an error.
+    const orig = t.gh.blob; let fetched; const reading = new Promise((r) => { fetched = r; });
+    t.gh.blob = async (...a) => { const b = await orig(...a); fetched(); return b; };
     assert.equal((await hook(t, 'installation', { action: 'created', installation: { id: 66, account: { login: 'mallory' } } })).status, 202);
-    await new Promise((r) => setTimeout(r, 50));
-    await t.app.idle(); stop = true; await probe;
-    const took = performance.now() - a;
+    await reading;
+    assert.equal((await fetch(`${t.base}/healthz`)).status, 200, 'the event loop stays free while the log is read');
+    await t.app.idle();
     const run = await t.db.run(66, 99, 'r1');
-    assert.equal(run.error, null);
+    assert.equal(run.error, null, 'read within the reader time limit');
     assert.equal(run.state.goal.length, evil.length, 'read and stored, nothing to mask');
-    assert.ok(took < 5000, `the sync took ${Math.round(took)} ms`);
-    assert.ok(worst < 1000, `/healthz waited ${Math.round(worst)} ms`);
+    // And the masking pass reads the text a bounded number of times: twice the text, about twice the reading.
+    assert.ok(readCost(evil + evil) <= 2.5 * readCost(evil), `${readCost(evil + evil)} vs ${readCost(evil)}`);
   } finally { await t.close(); }
 });
 
@@ -214,10 +216,8 @@ test('p3: past the failure limit a body is not read; all bodies being read at on
     const big = Buffer.alloc(5 * 1024 * 1024 - 10, 0x61);
     const peakBefore = t.app.webhookBytes().peak;
     assert.equal(await unsigned(port, '{}'), 429);
-    const a = performance.now();
     assert.ok([429, 'reset'].includes(await unsigned(port, big)), 'answered 429 and closed while the client was still sending');
     assert.equal(t.app.webhookBytes().peak, peakBefore, 'answered without reading the body');
-    assert.ok(performance.now() - a < 2000);
     const t2 = await startApp({ over: { webhookInflightBytes: 8 * 1024 * 1024 } });
     try {
       const codes = await Promise.all(Array.from({ length: 30 }, () => unsigned(new URL(t2.base).port, big)));

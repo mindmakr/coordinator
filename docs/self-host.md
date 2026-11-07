@@ -48,7 +48,7 @@ The service and Postgres together, both bound to `127.0.0.1`. From the repositor
    docker compose -f service/docker-compose.yml up --build -d
    ```
 
-3. Check it: `curl http://127.0.0.1:3000/healthz` answers `ok`. The service applied its migrations (`service/sql/001` to `007`) before it began listening; `docker compose -f service/docker-compose.yml logs service` shows a `listening` line, or `could not start` with the cause.
+3. Check it: `curl http://127.0.0.1:3000/healthz` answers `ok`. The service applied its migrations (`service/sql/001` to `008`) before it began listening; `docker compose -f service/docker-compose.yml logs service` shows a `listening` line, or `could not start` with the cause.
 4. Stop it with `docker compose -f service/docker-compose.yml down` (add `-v` to delete the database too).
 
 To reach it from the internet, put it behind a reverse proxy with HTTPS on your domain, set `BASE_URL` to that domain and `TRUST_PROXY=1`, and change the `ports` line in `docker-compose.yml` if the proxy runs elsewhere. See [Behind a proxy](#behind-a-proxy) first: with `TRUST_PROXY=1` the service's port must be reachable from the proxy alone.
@@ -106,7 +106,11 @@ The installation id is the number at the end of the installation's settings page
 | `PARSE_WORKERS` | no | Worker threads that read run and map logs, so a slow log never blocks the server. A large log never takes the last one. Default 2 (1–32). With 1, a large log may take the only worker, on purpose, so small reads wait behind it: the guarantee that a small read never waits behind a large one needs at least 2 |
 | `PARSE_SMALL_KB` | no | A log up to this size counts as small and may use any worker. Default 512 (1–16384) |
 | `PARSE_BUDGET_SECONDS` | no | Reading time each installation gets per hour. Past it, its logs wait for the next resync. Default 600 (1–3600) |
-| `SYNC_MAX_MB` | no | Log bytes one sync of one repo reads; the rest follow at the next sync, and a forced sync carries on where the last stopped. Default 64 (8–4096) |
+| `SYNC_MAX_MB` | no | Log bytes one sync of one repo reads; the rest follow at the next sync. A forced sync (`npm run sync -- <id> --force`) that needs more is marked in the database and carried on by every later sync until it is done. Default 64 (8–4096) |
+| `SYNC_CONCURRENCY` | no | Repo syncs that run at once, in all. A push for a repo already waiting joins that sync. Default 4 (1–64) |
+| `SYNC_PER_INSTALLATION` | no | Of those, how many one installation may run; installations take turns. Default 2 (1–64) |
+| `SYNC_BLOB_MB` | no | Log bytes fetched from GitHub and not yet read, in all; a log is fetched only when it fits. Default 64 (16–4096) |
+| `WEBHOOK_SOURCES` | no | Who counts as GitHub for webhooks: `github` (default: GitHub's published hook ranges), a comma-separated list of CIDRs (for GitHub Enterprise Server), or `any` ([Webhook sources](#webhook-sources)) |
 | `GITHUB_API_URL`, `GITHUB_WEB_URL` | no | Another GitHub host. Defaults `https://api.github.com` and `https://github.com`; other hosts are untested |
 
 ## Behind a proxy
@@ -135,7 +139,16 @@ The service counts these in memory, per client address (see `TRUST_PROXY`), and 
 | Sign-in attempts | 30 per 10 minutes |
 | Doorbell tokens | 30 per 10 minutes |
 
-Other limits count per person or per installation instead: answers and notes (30 a minute per person), "Sync now" (6 per 10 minutes per person), comment commands (10 an hour per commenter, 60 an hour per installation), confirmation emails (3 a day per person and per address), and tracker comment writes (200 per 10 minutes per installation).
+Other limits count per person or per installation instead: answers and notes (30 a minute per person), "Sync now" (6 per 10 minutes per person), comment commands (10 an hour per commenter, 60 an hour per installation), confirmation emails (3 a day per person, and 3 a day per mailbox: the address in lower case without a `+tag`, and for Gmail without dots), and tracker comment writes (200 per 10 minutes per installation).
+
+## Webhook sources
+
+GitHub sends webhooks from published address ranges (`hooks` in `GET /meta`). With `WEBHOOK_SOURCES=github`, the default, the service fetches them from `GITHUB_API_URL/meta` when it starts and every 24 hours, and uses a built-in copy until a fetch succeeds or when one fails. Only those addresses may use the last 6 MB of the webhook budget, and only from them does the App's own delivery header skip the limit on refused deliveries. Behind a proxy that hides the real address (see [Behind a proxy](#behind-a-proxy)), GitHub looks like everyone else and loses that reserve.
+
+- A list of CIDRs is used as given and never fetched: use it for GitHub Enterprise Server.
+- `any` trusts no address: every address group gets the same 512 KB, bodies of 64 KB or less may use the reserve, and the App header is believed from anyone. Use it only when you cannot see client addresses at all.
+
+The list lives in memory; nothing is stored.
 
 ## Backups
 

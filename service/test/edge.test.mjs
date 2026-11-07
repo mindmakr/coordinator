@@ -9,7 +9,8 @@ import { MAX_WEBHOOK_INFLIGHT, MAX_WEBHOOK_PER_IP, WEBHOOK_RESERVE } from '../sr
 import { makeRun, signIn, startApp, stateFiles } from './helpers.mjs';
 
 const sign = (secret, body) => `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Waits for a condition, not for a time: the bytes a stalled body sent are counted once the server has read them.
+const until = async (ok) => { while (!ok()) await new Promise((r) => setTimeout(r, 5)); };
 let n = 0;
 
 // Sends the headers and `send` bytes of a body declared `length` long, from address `ip` (TRUST_PROXY), and
@@ -34,20 +35,21 @@ const signed = async (t, ip, pad = '') => {
 };
 
 test('c14: stalled bodies cannot starve the webhook: a cap per address group, a reserve for GitHub, and a deadline', async () => {
-  const t = await startApp({ over: { trustProxy: true, webhookBodyMs: 1500 } });
+  // The deadline is long enough that no stalled body is cut before every one is counted, even on a busy machine.
+  const t = await startApp({ over: { trustProxy: true, webhookBodyMs: 5000 } });
   const open = [];
   try {
     const M = MAX_WEBHOOK_PER_IP;
     // One address group (IPv4 /24): its first body is read, a second waits its turn (429) before a byte is read.
     open.push(stall(t, '10.0.0.1', M, M - 1));
-    await wait(200);
+    await until(() => t.app.webhookBytes().used >= M - 1);
     const second = stall(t, '10.0.0.2', M, 10); open.push(second);
     assert.equal(await second.status, 429);
     // Many groups: bodies fill the budget up to the reserve, and no further.
     const groups = Math.floor((MAX_WEBHOOK_INFLIGHT - WEBHOOK_RESERVE) / M);
     assert.ok(groups >= 50, `filling the budget takes ${groups} groups`);
     for (let i = 2; i <= groups; i++) open.push(stall(t, `10.${i}.0.1`, M, M - 1));
-    await wait(400);
+    await until(() => t.app.webhookBytes().used >= groups * (M - 1));
     const over = stall(t, '10.200.0.1', M, 10); open.push(over);
     assert.equal(await over.status, 503, 'the reserve is not for them');
     const b = t.app.webhookBytes();

@@ -20,7 +20,8 @@ Coordinator runs on your machine. The hosted service at [app.coordinator.mindmak
 | What | Why | Kept for |
 |---|---|---|
 | A copy of each run on the state branch, masked again, and its project map | To draw the dashboard | While the run is on the branch. Removed at the next sync after it leaves, and at once if you uninstall |
-| Installed repos: name, private or public, branch tip, `coordinator.json`, project lessons | To know what to read and where to write | Until the repo is removed from the installation, or the App is uninstalled |
+| Installed repos: name, private or public, branch tip, `coordinator.json`, project lessons, and whether a forced re-read is under way (`reread`) | To know what to read and where to write, and to finish a forced re-read over several syncs | Until the repo is removed from the installation, or the App is uninstalled |
+| Ids of uninstalled installations, with the time (`uninstalled`): a number and a date, nothing about the account | GitHub never reuses an installation id, so a late or replayed event for a removed installation is refused instead of bringing it, and its data, back | For good |
 | Which issues and PRs each unit links | To keep their trackers and timelines current | Same as the run |
 | For each tracker comment and board card made: the issue or PR, run and unit, the comment id and a hash of what was last written | To edit the same comment and card each time | Until the App is uninstalled. Kept after the run leaves the branch or the repo leaves the installation, so a run that comes back reuses its comment |
 | Merges, closes and check results of linked PRs | To show them in the run's timeline | 180 days |
@@ -34,8 +35,9 @@ Coordinator runs on your machine. The hosted service at [app.coordinator.mindmak
 | Comment commands handled: installation and comment id | To act on each comment once | 30 days |
 | "May this person read this repo", per person | So every page doesn't ask GitHub again | In memory, at most 60 seconds, never shared between people |
 | Rate counters (below) | To keep one client or tenant from crowding out the rest | In memory, for their window. A restart resets them |
+| GitHub's published webhook address ranges (from `GET /meta`, public) | To tell GitHub's deliveries from others' | In memory, refreshed daily |
 
-**Uninstalling the App** deletes everything about that installation at once: runs, repos, links, trackers, merges and checks, handled comment commands, the alerts made for its repos (sent or waiting for a digest), everyone's follows of its repos, and its audit rows. One audit row stays: `installation.deleted`, with who removed it. What is yours rather than the installation's stays as above: your session, alert settings, email and push subscriptions, and audit rows about you that name no installation (sign-in and sign-out, refused access, email confirmed or unsubscribed). Your repo keeps its state branch.
+**Uninstalling the App** deletes everything about that installation at once: runs, repos, links, trackers, merges and checks, handled comment commands, the alerts made for its repos (sent or waiting for a digest), everyone's follows of its repos, and its audit rows. Two things stay: one audit row, `installation.deleted`, with who removed it (for 90 days), and the installation's id in `uninstalled` (above). What is yours rather than the installation's stays as above: your session, alert settings, email and push subscriptions, and audit rows about you that name no installation (sign-in and sign-out, refused access, email confirmed or unsubscribed). Your repo keeps its state branch.
 
 **Removing one repo** from the installation deletes its runs, links, follows and the alerts made for it.
 
@@ -43,12 +45,13 @@ Coordinator runs on your machine. The hosted service at [app.coordinator.mindmak
 
 ### Rate counters
 
-Kept in memory only, each for its own window, and reset by a restart:
+Kept in memory only, each for its own window, and reset by a restart. A "client address" is grouped: an IPv6 address counts as its /64 (one host usually has a whole /64), an IPv4 address as itself, except for webhook bytes, where IPv4 counts by /24:
 
 | Counted by | What | Window |
 |---|---|---|
-| Client address (IP; see `TRUST_PROXY` in [Self-host](self-host.md)) | Page views; sign-in attempts; doorbell tokens; refused webhook deliveries; webhook bytes being read | 1 minute; 10 minutes; 10 minutes; 1 minute; while the body is read |
-| Email address (normalised, lower case) | Confirmation emails sent to it | 24 hours |
+| Client address group (see `TRUST_PROXY` in [Self-host](self-host.md)) | Page views; sign-in attempts; doorbell tokens; refused webhook deliveries | 1 minute; 10 minutes; 10 minutes; 1 minute |
+| Webhook address group (IPv4 /24, IPv6 /64), outside GitHub's hook addresses | Webhook body bytes being read, at most 512 KB per group | While the body is read (at most 10 seconds) |
+| Mailbox: the email address in lower case, without a `+tag`, and for Gmail (or googlemail.com) without dots | Confirmation emails sent to it, so `ann+1@` and `ann+2@` count as one | 24 hours |
 | GitHub user id | Confirmation emails asked for; answers and notes from the web; "Sync now" | 24 hours; 1 minute; 10 minutes |
 | Commenter id (per installation) | Comment commands | 1 hour |
 | Installation | Comment commands, refusal replies, tracker comment writes, and reading time for its logs | 1 hour; 1 hour; 10 minutes; 1 hour |
@@ -87,7 +90,7 @@ A security alert (secret scanning, code scanning, Dependabot) is kept only as it
 
 **Not done:** no model calls, no analytics or tracking, no advertising, no selling or sharing of data.
 
-Server logs are JSON lines: one per request (method, path, status and timing; never headers, cookies, query strings or bodies), plus a few events. Lines that name a person: "signed in" and a failed token refresh carry the login; an opened doorbell stream, an alert that could not be delivered and a failed access check carry the login too. Lines that carry a client IP address: a webhook whose signature is refused, and a webhook body that arrived too slowly. Secrets are masked in every line as a second net. They are kept for **[TO BE SET AT DEPLOY: log retention period]**.
+Server logs are JSON lines: one per request (method, path, status and timing; never headers, cookies, query strings or bodies), plus a few events. Lines that name a person: "signed in" and a failed token refresh carry the login; an opened doorbell stream, an alert that could not be delivered and a failed access check carry the login too. Lines that carry a client address: a webhook whose signature is refused, and a webhook body that arrived too slowly. They log the address group: a full IPv4 address, or an IPv6 address cut to its /64. Secrets are masked in every line as a second net. They are kept for **[TO BE SET AT DEPLOY: log retention period]**.
 
 ## Who can see a run
 
