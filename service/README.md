@@ -84,6 +84,17 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `ALERT_SWEEP_SECONDS` | no | How often leads gone quiet are looked for and due digests are sent (default 60) |
 | `DOORBELL_MAX_STREAMS` | no | Open doorbell streams at most (default 500; 0 turns the doorbell off) |
 
+### Reading runs fairly
+
+Every installation's logs are read in turn by a small worker pool, so one installation pushing many large logs cannot hold up the others. All optional.
+
+| Variable | Default | What |
+|---|---|---|
+| `PARSE_WORKERS` | 2 | Worker threads that read logs. A large file never takes the last one, so a small run is read at once |
+| `PARSE_SMALL_KB` | 512 | Files up to this size count as small |
+| `PARSE_BUDGET_SECONDS` | 600 | Reading time each installation gets per hour. Past it, its logs wait for the next resync; the repo shows why, and the service logs it |
+| `SYNC_MAX_MB` | 64 | Log bytes one sync of one repo reads. The rest follow at the next sync |
+
 ## Alerts and the doorbell
 
 **Alerts** (design 9). People pick the repos they hear about on `/alerts` (each checked with their own GitHub access, and re-checked whenever they open the page), and set there: an email address (used only after they follow the confirmation link), channels (web push, email, GitHub mention), their time zone and quiet hours, and whether a question's text may be included.
