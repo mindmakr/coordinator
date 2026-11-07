@@ -4,7 +4,15 @@
 import { linkify } from './links.mjs';
 import { whoRound } from './models.mjs';
 import { liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
-import { behaviourList, blk, chip, dot, esc, evidenceList, hash, keyed, page, stamp, timelineTools } from './parts.mjs';
+import { behaviourList, blk, blocksLine, chip, esc, evidenceList, hash, keyed, linkWaits, page, stamp, stateChip, timelineTools, unitDot, unitLink } from './parts.mjs';
+
+// Depends on / Blocks: each linked unit with its state dot and badge, linked to its page.
+function links(u, ctx) {
+  const row = (x) => `<li data-a="dep-${esc(x.id)}">${x.dot ? `${unitDot(x)} ${unitLink(x.id, ctx)}${x.title ? ` ${esc(x.title)}` : ''} ${stateChip(x, ctx)}` : `${esc(x.id)} <span class="cause">not in this run</span>`}</li>`;
+  const part = (h, list, none) => `<h3 class="sub">${h}</h3>${list.length ? `<ul class="deps">${list.map(row).join('')}</ul>` : `<p class="empty">${none}</p>`}`;
+  return `<section class="card">${part('Depends on', u.dependsOn, 'Nothing: it can start on its own.')}${part('Blocks', u.dependents, 'No unit waits on it.')}</section>`;
+}
+
 
 function round(r, repo) {
   const marks = (r.behaviours ?? []).map((m) => `<li data-a="r${r.n}-${esc(m.id)}">${chip(m.status, m.status)} <b>${esc(m.id)}</b>${m.evidence ? ` ${linkify(m.evidence, repo)}` : ''}</li>`).join('');
@@ -28,9 +36,10 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
-    blk('head', `<header class="run"><h1>${dot(u.dot)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${chip(u.status, u.status)}`
+    blk('head', `<header class="run"><h1>${unitDot(u)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${stateChip(u, ctx)}`
       + `<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span></header>`
-      + unitLinks(u, r) + triesRow(u) + scoreChart(u.roundList) + `<p class="say" data-a="say">${esc(u.sentence)}</p><div class="next" data-a="next"><b>Next</b>${esc(u.next)}</div>`),
+      + unitLinks(u, r) + triesRow(u) + scoreChart(u.roundList) + `<p class="say" data-a="say">${linkWaits(u.sentence, u.dependsOn.map((x) => x.id), ctx)}</p>${blocksLine(u, ctx)}<div class="next" data-a="next"><b>Next</b>${linkWaits(u.next, u.dependsOn.map((x) => x.id), ctx)}</div>`),
+    ...(u.dependsOn.length || u.dependents.length ? ['<h2 data-a="h-Deps">Depends on / Blocks</h2>', blk('deps', links(u, ctx))] : []),
     '<h2 data-a="h-Bar">Bar and behaviours</h2>',
     blk('behaviours', `<section class="card"><p>${linkify(u.bar, r)}</p>${behaviourList(u.behaviours, r, u.evidenceItems, ctx, `p-${u.id}`)}</section>`),
     '<h2 data-a="h-Evidence">Evidence and artifacts</h2>',

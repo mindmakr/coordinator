@@ -56,7 +56,36 @@ export function csp(live) {
 }
 
 // The whole page. `body` goes inside <main id="app">, which the live page patches.
-export const dot = (state) => `<span class="dot dot-${cls(state)}" role="img" aria-label="${esc(DOTS[state] ?? state)}" title="${esc(DOTS[state] ?? state)}"></span>`;
+export const dot = (state, words = DOTS[state] ?? state) => `<span class="dot dot-${cls(state)}" role="img" aria-label="${esc(words)}" title="${esc(words)}"></span>`;
+// A unit's dot with its own words: a blocked one names the units it waits for.
+export const unitDot = (u) => dot(u.dot, u.badge?.kind === 'blocked' ? `blocked: ${u.badge.label.toLowerCase()}` : undefined);
+
+// Links to other units of the same run (ctx.unitHref keeps a live page's token).
+export const unitLink = (id, ctx) => `<a class="ulink" href="${esc(ctx.unitHref(id))}">${esc(id)}</a>`;
+// The state in words: "Waiting for A" (A linked), "Up next", "Needs you"; else the status chip.
+export function stateChip(u, ctx) {
+  const b = u.badge;
+  if (!b) return chip(u.status, u.status);
+  const label = b.kind === 'blocked' && b.ids.length ? `Waiting for ${b.ids.map((id) => unitLink(id, ctx)).join(', ')}` : esc(b.label);
+  return `<span class="chip s-${cls(b.kind)}" title="${esc(DOTS[b.kind])}">${label}</span>`;
+}
+// Escaped text with the last "waiting for X" / "after X" for each id turned into a link to X.
+export function linkWaits(text, ids, ctx) {
+  let out = esc(text);
+  for (const id of ids) {
+    const e = esc(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`((?:waiting for|after) )${e}(?![\\w-])`, 'gi');
+    const hits = [...out.matchAll(re)];
+    const m = hits.at(-1);
+    if (m) out = out.slice(0, m.index) + m[1] + unitLink(id, ctx) + out.slice(m.index + m[0].length);
+  }
+  return out;
+}
+// "Blocks: D, E": units that wait on this one, linked, while they still do.
+export function blocksLine(u, ctx) {
+  const ids = u.dependents.filter((x) => x.dot === 'blocked').map((x) => x.id);
+  return ids.length ? `<p class="cause blocks" data-a="blocks-${esc(u.id)}"><b>Blocks:</b> ${ids.map((id) => unitLink(id, ctx)).join(', ')}</p>` : '';
+}
 
 // The header's links between pages (ctx.pages, live only); the current one is marked.
 const nav = (ctx, path) => (ctx.pages?.length

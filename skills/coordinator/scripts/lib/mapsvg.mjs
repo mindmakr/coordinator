@@ -17,6 +17,8 @@ const r1 = (n) => Math.round(n * 10) / 10;
 const st = (s) => `st-${String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '')}`;
 const STATUS = { ...DOTS, met: 'met', 'not-yet': 'not met yet', pass: 'pass', fail: 'fail', unchecked: 'unchecked', evidence: 'evidence' };
 const said = (s) => STATUS[s] ?? s;
+// Unit states, in the words the dashboard uses; only needs-you takes the needs-you colour.
+const STATES = [['st-needs-you', 'needs you'], ['st-blocked', 'waiting for another unit'], ['st-queued', 'up next'], ['st-working', 'working'], ['st-retrying', 'retrying'], ['st-stale', 'quiet'], ['st-passed', 'passed'], ['st-stopped', 'stopped']];
 
 // A focusable link around a shape. Internal hrefs come from ctx (already encoded); external ones must be http(s).
 // attrs: trusted markup from lib/maptips.mjs (classes, aria-describedby), or a class list (cls).
@@ -111,7 +113,7 @@ export function mindSvg(v, ctx) {
   const [x0, y0, x1, y1] = box(draw(0, 0).pts);
   const M = 12; const { body } = draw(M - x0, M - y0);
   return svg(x1 - x0 + 2 * M, y1 - y0 + 2 * M, 'Mind map: the goal, its units, their behaviours and evidence', body, ' mind')
-    + legend([['st-working', 'working'], ['st-waiting', 'waiting or retrying'], ['st-stale', 'quiet'], ['st-passed', 'passed'], ['st-stopped', 'stopped'], ['st-pass', 'behaviour pass'], ['st-fail', 'behaviour fail'], ['st-unchecked', 'unchecked'], ['ev', 'evidence']])
+    + legend([...STATES, ['st-pass', 'behaviour pass'], ['st-fail', 'behaviour fail'], ['st-unchecked', 'unchecked'], ['ev', 'evidence']])
     + marksLegend();
 }
 
@@ -230,7 +232,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
     + svg(width, height, 'Flow map: stacked units, linked issues and PRs, follow-ups, and the critical path', `${defs}${heads}${nav.hitLayers()}<g class="edges">${edges}</g>${nodes}`, ' flow', ' data-nav="flow"')
     + `<style>${nav.rules('flow')}</style>`
     + lineKey([['after', 'waits on: the arrow points to the unit it waits for (--after)'], ['crit', 'waits on, on the critical path'], ['link', 'links an issue or PR: a ring at the issue end'], ['fu', 'filed a follow-up: an open arrowhead at the follow-up']])
-    + legend([['ref cross', 'another repo']])
+    + legend([...STATES, ['ref cross', 'another repo']])
     + marksLegend() + navHelp(!!ctx.live);
 }
 

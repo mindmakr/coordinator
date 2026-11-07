@@ -65,16 +65,30 @@ export function timeLeft(run, plan, nowMs) {
 const failStreak = (rounds) => { let k = 0; for (let i = rounds.length - 1; i >= 0 && rounds[i].verdict === 'fail'; i--) k++; return k; };
 
 // The unit's status dot, with the words a screen reader and a tooltip say.
+// Each state says who it waits on: only needs-you means the person.
 export const DOTS = {
-  working: 'working', waiting: 'waiting', retrying: 'retrying: the lead is on it', stale: 'quiet: no word from its agent', passed: 'passed', stopped: 'stopped',
+  working: 'working', 'needs-you': 'needs you: only you can unblock it', blocked: 'waiting for another unit', queued: 'up next: ready, not started',
+  retrying: 'retrying: the lead is on it', stale: 'quiet: no word from its agent', passed: 'passed', stopped: 'stopped',
 };
-export function dotState(u, d) {
+// The ids a unit waits on (`after`: one id today; a list is read the same way).
+export const waitIds = (u) => (Array.isArray(u?.after) ? u.after : u?.after ? [u.after] : []).map(String);
+// `asks`: the run's questions; an open one on this unit means it needs the person.
+export function dotState(u, d, asks = []) {
   if (u.status === 'pass') return 'passed';
+  if (asks.some((q) => q.open && q.unit === u.id)) return 'needs-you';
   if (u.status === 'stopped' || d?.action === 'stop' || d?.action === 'stopped') return 'stopped';
   if (d?.action === 'check-stale') return 'stale';
   if (attention(u, d)) return 'retrying';
   if (['building', 'judging'].includes(u.status)) return 'working';
-  return 'waiting';
+  if (d?.action === 'wait' && String(d.reason ?? '').startsWith('after ')) return 'blocked';
+  return 'queued';
+}
+// The badge that names the state in words, so colour is never alone; null keeps the status chip.
+export function stateBadge(state, u) {
+  if (state === 'blocked') { const ids = waitIds(u); return { kind: 'blocked', label: ids.length ? `Waiting for ${ids.join(', ')}` : 'Waiting for another unit', ids }; }
+  if (state === 'queued') return { kind: 'queued', label: 'Up next', ids: [] };
+  if (state === 'needs-you') return { kind: 'needs-you', label: 'Needs you', ids: [] };
+  return null;
 }
 
 // The badge's label: the lead is handling it. Only Needs you and question cards address the person.

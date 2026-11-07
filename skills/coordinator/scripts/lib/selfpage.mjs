@@ -4,7 +4,7 @@
 // render(model, ctx) }. Same shell, theme and escaping rules as the dashboard.
 import { anchor, linkify, webUrl } from './links.mjs';
 import { count } from './self.mjs';
-import { badge, blk, chip, esc, hash, keyed, page, stamp, toggle } from './parts.mjs';
+import { badge, blk, chip, esc, hash, keyed, page, stamp, toggle, unitDot } from './parts.mjs';
 
 const LESSONS_SHOWN = 12;
 const pct = (v) => (v === null || v === undefined ? '–' : `${v}%`);
@@ -80,7 +80,7 @@ function history(m, ctx) {
 function plans(m, ctx) {
   if (!m.plans.length) return empty('No open run.');
   return `<div class="grid">${m.plans.map((p) => {
-    const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}"><b>${esc(u.id)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${chip(u.status, u.status)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
+    const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}">${u.dot ? `${unitDot(u)} ` : ''}<b>${esc(u.id)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${u.badge ? `<span class="chip s-${esc(u.badge.kind)}">${esc(u.badge.label)}</span>` : chip(u.status, u.status)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
     const needs = p.needsYou.length ? `<p class="from"><b>Needs you:</b> ${p.needsYou.map((q) => `${esc(q.id)} ${esc(q.text)}`).join(' · ')}</p>` : '';
     return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${chip(p.decision, p.decision)}</h3>`
       + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.done} of ${count(p.total, 'unit')} finished</span></div>${meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`

@@ -89,7 +89,7 @@ test('the badge says the lead is on it, never that the person must act', () => {
   assert.match(html, /<span class="chip flag" title="The lead is on it: failed twice in a row">Retrying<\/span>/);
   assert.match(render(state(), 100).html, /<span class="chip flag" title="The lead is on it: no word from its agent for a while">Quiet<\/span>/);
   assert.doesNotMatch(html, /needs attention/i);
-  assert.match(html, /<p class="legend">.*<b>Needs you<\/b> = waiting on you; <b>Retrying<\/b> = the lead is on it/);
+  assert.match(html, /<p class="legend">.*<b>Needs you<\/b> = only you can unblock it;.*<b>Retrying<\/b> = the lead is on it/);
 });
 
 test('lead and agent text is escaped everywhere, and a non-web link is not a link', () => {
