@@ -7,6 +7,7 @@ const key = (...p) => p.join('\u0000');
 
 export function memoryDb() {
   const deliveries = new Map(); const installations = new Map(); const repos = new Map(); const runs = new Map();
+  const uninstalled = new Set(); // c14: installation ids removed for good (GitHub never reuses one)
   const sessions = new Map(); const audit = [];
   const refs = new Map(); const ghEvents = new Map(); const trackers = new Map();
   const commands = new Map(); // c12 writes
@@ -20,10 +21,13 @@ export function memoryDb() {
     async seenDelivery(id) { return deliveries.has(id); },
     async recordDelivery(id) { deliveries.set(id, Date.now()); },
 
-    async upsertInstallation({ id, account }) { installations.set(id, { id, account }); },
+    // false (and nothing stored) for an id that was uninstalled: GitHub never reuses one, so a late event cannot bring it back.
+    async upsertInstallation({ id, account }) { if (uninstalled.has(id)) return false; installations.set(id, { id, account }); return true; },
+    async wasUninstalled(id) { return uninstalled.has(id); },
     async installation(id) { return clone(installations.get(id)) ?? null; },
     async installationIds() { return [...installations.keys()]; },
     async deleteInstallation(id) {
+      uninstalled.add(id);
       installations.delete(id);
       for (const [k, r] of repos) if (r.installationId === id) repos.delete(k);
       for (const [k, r] of runs) if (r.installationId === id) runs.delete(k);
@@ -34,7 +38,7 @@ export function memoryDb() {
     async upsertRepo({ installationId, id, fullName, private: priv }) {
       const k = repoKey(installationId, id);
       const prev = repos.get(k);
-      repos.set(k, { headSha: null, syncedAt: null, error: null, lessons: null, config: null, private: null, ...prev, installationId, id, fullName, ...(priv === undefined ? {} : { private: priv }) });
+      repos.set(k, { headSha: null, syncedAt: null, error: null, lessons: null, config: null, private: null, reread: false, ...prev, installationId, id, fullName, ...(priv === undefined ? {} : { private: priv }) });
     },
     async removeRepo(installationId, id) {
       repos.delete(repoKey(installationId, id));
@@ -55,10 +59,17 @@ export function memoryDb() {
         .sort((a, b) => String(b.syncedAt ?? '').localeCompare(String(a.syncedAt ?? '')))[0];
       return clone(hit) ?? null;
     },
-    async setRepoSync(installationId, id, { headSha, error = null, lessons, config }) {
+    async setRepoSync(installationId, id, { headSha, error = null, lessons, config, reread }) {
       const r = repos.get(repoKey(installationId, id));
       if (!r) return;
-      Object.assign(r, { headSha, error, syncedAt: new Date().toISOString() }, lessons !== undefined ? { lessons: clone(lessons) } : {}, config !== undefined ? { config: clone(config) } : {});
+      Object.assign(r, { headSha, error, syncedAt: new Date().toISOString() }, lessons !== undefined ? { lessons: clone(lessons) } : {}, config !== undefined ? { config: clone(config) } : {}, reread !== undefined ? { reread } : {});
+    },
+    // c14: a forced re-read starts (unless one is unfinished): the runs' blob shas are forgotten, so each is read again.
+    async startReread(installationId, id) {
+      const r = repos.get(repoKey(installationId, id));
+      if (!r || r.reread) return;
+      r.reread = true;
+      for (const x of runs.values()) if (x.installationId === installationId && x.repoId === id) Object.assign(x, { eventsSha: null, mapSha: null });
     },
 
     async runs(installationId, repoId) {

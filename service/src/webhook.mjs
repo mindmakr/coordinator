@@ -43,7 +43,8 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
     // c14: only "created" makes an installation. Any other event for one this service does not
     // know may be late, sent before an uninstall that was delivered first, and must not bring it back.
     if (p.action !== 'created' && !(await db.installation(id))) return { status: 202, body: 'ignored: unknown installation' };
-    await db.upsertInstallation({ id, account: String(p.installation?.account?.login ?? '') });
+    // c14: nor may a late "created": an uninstalled id is kept (GitHub never reuses one) and refused here.
+    if (!(await db.upsertInstallation({ id, account: String(p.installation?.account?.login ?? '') }))) return { status: 202, body: 'ignored: uninstalled' };
     await db.audit(`installation.${p.action}`, { installationId: id, login: p.sender?.login ?? null });
     if (p.action === 'created' || p.action === 'new_permissions_accepted' || p.action === 'unsuspend') return { status: 202, body: 'syncing', work: () => ingest.syncInstallation(id) };
     return { status: 200, body: 'ok' };

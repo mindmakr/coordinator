@@ -6,6 +6,7 @@
 // validation keeps the last good state and records why; other runs go on.
 import { isSafeId, mapFromText, maskSecrets, parseLog, replay, unitRefs, validRun } from './core.mjs';
 import { DEFERRED, parser } from './parser.mjs';
+import { byteBudget, syncQueue, syncSettings } from './syncqueue.mjs';
 
 const RUN_LOG = /^runs\/([^/]+)\/events\.jsonl$/;
 const MAP_LOG = /^runs\/([^/]+)\/map\/events\.jsonl$/;
@@ -97,14 +98,18 @@ export const refsOf = (state) => state.units.flatMap((u) => unitRefs(u).slice(0,
 // onChange (optional, c12 doorbell and alerts): (installationId, repo, [{ runId, before, after }]) after a sync
 // that changed runs; it must not throw (the server runs its work in the background).
 // parse (tests): the readers; by default parser.mjs, which runs them in a worker thread with a timeout.
-export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null, onChange = null, parse = null }) {
+// limits (tests): { concurrency, perInstallation, blobBytes } in place of syncSettings() (syncqueue.mjs).
+export function ingester({ db, gh, branch = 'coordinator-state', log, trail = null, onChange = null, parse = null, limits = null }) {
   const reader = parse ?? parser();
+  const settings = { ...syncSettings(), ...limits };
+  const queue = syncQueue(settings); // c14: how many syncs run at once, in all and per installation
+  const held = byteBudget(settings.blobBytes); // c14: blob bytes fetched and not yet read, in all
   const chains = new Map(); // one sync or trail refresh per repo at a time; a second waits for the first
-  // A forced sync re-reads every log, but the byte cap may stop it partway. The files a forced pass has
-  // already re-read (path and blob sha) are kept per repo until a forced sync finishes with nothing left,
-  // so the next --force carries on where the last stopped instead of re-reading the same first logs.
-  // In memory: a restart starts the pass again.
-  const forced = new Map(); // `${installationId}:${repoId}` -> Set of `${path}@${sha}`
+  // A blob is fetched only once its bytes fit the budget, and they stay counted until it is read.
+  const readBlob = async (token, repo, e, read) => {
+    const n = await held.take(e.size);
+    try { return await read(await gh.blob(token, repo.fullName, e.sha)); } finally { held.give(n); }
+  };
   const serial = (k, fn) => {
     const next = (chains.get(k) ?? Promise.resolve()).catch(() => {}).then(fn);
     chains.set(k, next);
@@ -112,90 +117,96 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     return next;
   };
 
-  async function syncRepo(installationId, repo, { force = false, token = null } = {}) {
-    return serial(`${installationId}:${repo.id}`, async () => {
-      token ??= await gh.installationToken(installationId);
-      const current = (await db.repos(installationId)).find((r) => r.id === repo.id);
-      const head = await gh.ref(token, repo.fullName, branch);
-      if (!head) {
-        await db.dropRunsExcept(installationId, repo.id, []);
-        await db.setRepoSync(installationId, repo.id, { headSha: null, error: null, lessons: null });
-        return { repo: repo.fullName, head: null, runs: 0 };
+  // Queued (syncqueue.mjs): a request for a repo already waiting joins it, a forced one making it forced.
+  function syncRepo(installationId, repo, opts = {}) {
+    const key = `${installationId}:${repo.id}`;
+    const merge = (a, b) => ({ force: Boolean(a.force || b.force), token: a.token ?? b.token ?? null });
+    return queue.submit(installationId, key, merge({}, opts), (o) => serial(key, () => syncNow(installationId, repo, o)), merge);
+  }
+
+  // A forced sync re-reads every log, but the byte cap may stop it partway. It forgets the blob shas the
+  // repo's runs were read from and marks the repo (db.startReread, kept in the database); every later sync,
+  // forced or not, then reads what is left without skipping the repo as unchanged, and the sync that
+  // reads the last of it clears the mark. A --force while a pass is unfinished carries it on.
+  async function syncNow(installationId, repo, { force = false, token = null }) {
+    token ??= await gh.installationToken(installationId);
+    if (force) await db.startReread(installationId, repo.id);
+    const head = await gh.ref(token, repo.fullName, branch);
+    if (!head) {
+      await db.dropRunsExcept(installationId, repo.id, []);
+      await db.setRepoSync(installationId, repo.id, { headSha: null, error: null, lessons: null, reread: false });
+      return { repo: repo.fullName, head: null, runs: 0 };
+    }
+    const current = (await db.repos(installationId)).find((r) => r.id === repo.id);
+    if (current?.headSha === head && !current?.reread) {
+      const retried = await retrail(installationId, current, []);
+      return { repo: repo.fullName, head, unchanged: true, ...(retried.length ? { retried } : {}) };
+    }
+    const tree = await gh.tree(token, repo.fullName, head);
+    const entries = tree.tree ?? [];
+    if (!entries.some((e) => e.path === MARKER && e.type === 'blob')) {
+      await db.setRepoSync(installationId, repo.id, { headSha: head, error: `${branch} holds no coordinator state (no ${MARKER} marker)`, reread: false });
+      return { repo: repo.fullName, head, error: 'no marker' };
+    }
+    const logs = entries.filter((e) => e.type === 'blob' && RUN_LOG.test(e.path)).map((e) => ({ ...e, runId: RUN_LOG.exec(e.path)[1] }))
+      .filter((e) => isSafeId(e.runId)).slice(0, LIMITS.runs);
+    const have = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
+    const out = { repo: repo.fullName, head, runs: logs.length, updated: [], failed: [] };
+    const changes = [];
+    // A log left for later (the sync's byte cap, or the installation's reading budget) keeps its last
+    // state, and the repo keeps its old head, so the next sync or resync reads it.
+    const later = []; const reasons = new Set(); let bytes = 0;
+    // Already read and unchanged: skipped (a forced pass forgot the shas it has not re-read yet).
+    const same = (prevSha, e) => prevSha === e.sha;
+    const fits = (size) => { if (bytes && bytes + size > LIMITS.syncBytes) { reasons.add(`this sync read its ${LIMITS.syncBytes / MB} MB`); return false; } bytes += size; return true; };
+    for (const e of logs) {
+      const prev = have.get(e.runId);
+      if (same(prev?.eventsSha, e)) continue; // same bytes, same result
+      if (e.size <= LIMITS.logBytes && !fits(e.size)) { later.push(e.runId); continue; }
+      const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : await readBlob(token, repo, e, (buf) => reader.readLog(e.runId, buf, installationId));
+      if (r.deferred) { later.push(e.runId); reasons.add(DEFERRED); continue; }
+      if (r.error) {
+        // Keep the last good state; record the failure against this blob.
+        await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: prev?.seq ?? null, state: prev?.state ?? null, error: r.error });
+        out.failed.push(e.runId);
+        log?.warn('run log rejected', { repo: repo.fullName, run: e.runId, reason: r.error });
+      } else {
+        await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: r.seq, state: r.state, error: null });
+        await db.setUnitRefs(installationId, repo.id, e.runId, refsOf(r.state));
+        out.updated.push(e.runId);
+        changes.push({ runId: e.runId, before: prev?.state ?? null, after: r.state });
       }
-      if (!force && current?.headSha === head) {
-        const retried = await retrail(installationId, current, []);
-        return { repo: repo.fullName, head, unchanged: true, ...(retried.length ? { retried } : {}) };
-      }
-      const tree = await gh.tree(token, repo.fullName, head);
-      const entries = tree.tree ?? [];
-      if (!entries.some((e) => e.path === MARKER && e.type === 'blob')) {
-        await db.setRepoSync(installationId, repo.id, { headSha: head, error: `${branch} holds no coordinator state (no ${MARKER} marker)` });
-        return { repo: repo.fullName, head, error: 'no marker' };
-      }
-      const logs = entries.filter((e) => e.type === 'blob' && RUN_LOG.test(e.path)).map((e) => ({ ...e, runId: RUN_LOG.exec(e.path)[1] }))
-        .filter((e) => isSafeId(e.runId)).slice(0, LIMITS.runs);
-      const have = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
-      const out = { repo: repo.fullName, head, runs: logs.length, updated: [], failed: [] };
-      const changes = [];
-      // A log left for later (the sync's byte cap, or the installation's reading budget) keeps its last
-      // state, and the repo keeps its old head, so the next sync or resync reads it.
-      const later = []; const reasons = new Set(); let bytes = 0;
-      const done = force ? (forced.get(`${installationId}:${repo.id}`) ?? new Set()) : null;
-      const tag = (e) => `${e.path}@${e.sha}`;
-      // Already read and unchanged: skipped, unless this is a forced pass that has not re-read it yet.
-      const same = (prevSha, e) => prevSha === e.sha && (!force || done.has(tag(e)));
-      const fits = (size) => { if (bytes && bytes + size > LIMITS.syncBytes) { reasons.add(`this sync read its ${LIMITS.syncBytes / MB} MB`); return false; } bytes += size; return true; };
-      for (const e of logs) {
-        const prev = have.get(e.runId);
-        if (same(prev?.eventsSha, e)) continue; // same bytes, same result
-        if (e.size <= LIMITS.logBytes && !fits(e.size)) { later.push(e.runId); continue; }
-        const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : await reader.readLog(e.runId, await gh.blob(token, repo.fullName, e.sha), installationId);
-        if (r.deferred) { later.push(e.runId); reasons.add(DEFERRED); continue; }
-        done?.add(tag(e));
-        if (r.error) {
-          // Keep the last good state; record the failure against this blob.
-          await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: prev?.seq ?? null, state: prev?.state ?? null, error: r.error });
-          out.failed.push(e.runId);
-          log?.warn('run log rejected', { repo: repo.fullName, run: e.runId, reason: r.error });
-        } else {
-          await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: r.seq, state: r.state, error: null });
-          await db.setUnitRefs(installationId, repo.id, e.runId, refsOf(r.state));
-          out.updated.push(e.runId);
-          changes.push({ runId: e.runId, before: prev?.state ?? null, after: r.state });
-        }
-      }
-      await db.dropRunsExcept(installationId, repo.id, logs.map((e) => e.runId));
-      // Each run's project map, when it pushed one: same rules, keyed by its own blob.
-      const runIds = new Set(logs.map((e) => e.runId));
-      const rows = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
-      for (const e of entries.filter((x) => x.type === 'blob' && MAP_LOG.test(x.path))) {
-        const runId = MAP_LOG.exec(e.path)[1];
-        const prev = rows.get(runId);
-        if (!runIds.has(runId) || !prev || same(prev.mapSha, e)) continue;
-        if (e.size <= LIMITS.mapBytes && !fits(e.size)) { later.push(`${runId} (map)`); continue; }
-        const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : await reader.readMap(await gh.blob(token, repo.fullName, e.sha), installationId);
-        if (r.deferred) { later.push(`${runId} (map)`); reasons.add(DEFERRED); continue; }
-        done?.add(tag(e));
-        await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? prev.map ?? null, mapError: r.error ?? null });
-        if (r.error) log?.warn('map log rejected', { repo: repo.fullName, run: runId, reason: r.error });
-      }
-      // Lessons and coordinator.json are optional: one that cannot be read is left out and named in the sync error.
-      const lessons = await readSide(installationId, token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes, 'lessons');
-      const config = await readSide(installationId, token, repo, entries, 'coordinator.json', LIMITS.configBytes, 'config');
-      if (lessons.deferred || config.deferred) { later.push('side files'); reasons.add(DEFERRED); }
-      const owed = later.length ? `${later.length} file${later.length === 1 ? '' : 's'} left for the next sync: ${[...reasons].join('; ')}` : null;
-      if (force) { if (later.length) forced.set(`${installationId}:${repo.id}`, done); else forced.delete(`${installationId}:${repo.id}`); }
-      if (owed) { out.later = later; log?.warn('sync left logs for later', { repo: repo.fullName, installation: installationId, later: later.slice(0, 20), count: later.length }); }
-      const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, owed, lessons.error, config.error].filter(Boolean);
-      // With logs left over the old head stays, so the next sync (a push, a write or the resync) is not skipped as unchanged.
-      const side = { ...(lessons.deferred ? {} : { lessons: lessons.value }), ...(config.deferred ? {} : { config: config.value }) };
-      await db.setRepoSync(installationId, repo.id, { headSha: later.length ? (current?.headSha ?? null) : head, error: errors.length ? errors.join('; ') : null, ...side });
-      const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
-      if (onChange && changes.length) onChange(installationId, fresh ?? repo, changes);
-      const retried = await retrail(installationId, fresh, out.updated);
-      if (retried.length) out.retried = retried;
-      return out;
-    });
+    }
+    await db.dropRunsExcept(installationId, repo.id, logs.map((e) => e.runId));
+    // Each run's project map, when it pushed one: same rules, keyed by its own blob.
+    const runIds = new Set(logs.map((e) => e.runId));
+    const rows = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
+    for (const e of entries.filter((x) => x.type === 'blob' && MAP_LOG.test(x.path))) {
+      const runId = MAP_LOG.exec(e.path)[1];
+      const prev = rows.get(runId);
+      if (!runIds.has(runId) || !prev || same(prev.mapSha, e)) continue;
+      if (e.size <= LIMITS.mapBytes && !fits(e.size)) { later.push(`${runId} (map)`); continue; }
+      const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : await readBlob(token, repo, e, (buf) => reader.readMap(buf, installationId));
+      if (r.deferred) { later.push(`${runId} (map)`); reasons.add(DEFERRED); continue; }
+      await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? prev.map ?? null, mapError: r.error ?? null });
+      if (r.error) log?.warn('map log rejected', { repo: repo.fullName, run: runId, reason: r.error });
+    }
+    // Lessons and coordinator.json are optional: one that cannot be read is left out and named in the sync error.
+    const lessons = await readSide(installationId, token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes, 'lessons');
+    const config = await readSide(installationId, token, repo, entries, 'coordinator.json', LIMITS.configBytes, 'config');
+    if (lessons.deferred || config.deferred) { later.push('side files'); reasons.add(DEFERRED); }
+    const owed = later.length ? `${later.length} file${later.length === 1 ? '' : 's'} left for the next sync: ${[...reasons].join('; ')}` : null;
+    if (owed) { out.later = later; log?.warn('sync left logs for later', { repo: repo.fullName, installation: installationId, later: later.slice(0, 20), count: later.length }); }
+    const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, owed, lessons.error, config.error].filter(Boolean);
+    // With logs left over the old head stays, so the next sync (a push, a write or the resync) is not skipped as unchanged.
+    const side = { ...(lessons.deferred ? {} : { lessons: lessons.value }), ...(config.deferred ? {} : { config: config.value }) };
+    // A forced pass (current.reread) ends with the sync that leaves nothing for later.
+    await db.setRepoSync(installationId, repo.id, { headSha: later.length ? (current?.headSha ?? null) : head, error: errors.length ? errors.join('; ') : null, ...side, ...(later.length ? {} : { reread: false }) });
+    const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
+    if (onChange && changes.length) onChange(installationId, fresh ?? repo, changes);
+    const retried = await retrail(installationId, fresh, out.updated);
+    if (retried.length) out.retried = retried;
+    return out;
   }
 
   // Refreshes the trail of the changed runs plus every run still owed a comment, and records which
@@ -233,7 +244,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     if (!e) return { value: null };
     if (e.size > max) return { value: null, error: `${path}: larger than ${max} bytes` };
     let r;
-    try { r = await reader.readJson(kind, await gh.blob(token, repo.fullName, e.sha), installationId); } catch (err) { r = { error: why(err, 200) }; }
+    try { r = await readBlob(token, repo, e, (buf) => reader.readJson(kind, buf, installationId)); } catch (err) { r = { error: why(err, 200) }; }
     if (r.deferred) return { value: null, deferred: true };
     return r.error ? { value: null, error: `${path}: ${r.error}` } : { value: r.value ?? null };
   }
@@ -253,5 +264,6 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     return results;
   }
 
-  return { syncRepo, syncInstallation, refreshRuns, close: () => reader.close() };
+  // stats (tests, logs): the sync queue and the blob bytes held.
+  return { syncRepo, syncInstallation, refreshRuns, stats: () => ({ ...queue.stats(), blobBytes: held.stats() }), close: () => { queue.close(); return reader.close(); } };
 }
