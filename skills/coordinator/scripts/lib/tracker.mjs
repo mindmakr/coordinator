@@ -16,6 +16,9 @@ const score = (n) => (typeof n === 'number' && Number.isFinite(n) ? n : '–');
 export const isTracker = (body, run, unit) => String(body ?? '').startsWith(marker(run, unit));
 
 const MAX = 200;
+// The comment stays small whatever the run holds (#42): the last few scores and question headers only;
+// the unit's page has the rest.
+export const SHOWN = { scores: 5, questions: 3 };
 // One line of untrusted text as an inline code span: whitespace collapsed, clipped, and fenced
 // with one more backtick than the longest run inside, so it cannot close the span early.
 export function md(text, max = MAX) {
@@ -44,7 +47,8 @@ export function trackerBody(run, unitId, { url = null, detail = false, github = 
   if (!u) return null;
   const rounds = Array.isArray(u.rounds) ? u.rounds.filter((x) => x !== null && typeof x === 'object') : [];
   const last = rounds.at(-1);
-  const scores = rounds.map((x) => score(x.score)).join(' → ');
+  const shown = rounds.slice(-SHOWN.scores).map((x) => score(x.score));
+  const scores = shown.length ? `${rounds.length > shown.length ? '… → ' : ''}${shown.join(' → ')}` : '';
   const lines = [
     marker(run.id, u.id),
     `**Coordinator** · run ${md(run.id, 64)} · unit ${md(u.id, 64)}${u.title ? `: ${md(u.title, 120)}` : ''}`,
@@ -54,7 +58,7 @@ export function trackerBody(run, unitId, { url = null, detail = false, github = 
   ];
   if (detail && last && last.verdict !== 'pass' && (last.gap || last.cause)) lines.push(`- **Last gap:** ${md(last.gap ?? '')}${last.cause ? ` (cause: ${md(last.cause, 80)})` : ''}`);
   const open = run.closed ? [] : questions(run).filter((q) => q.open && q.unit === u.id);
-  if (open.length) lines.push(`- **Waiting on a person:** ${open.length} open question${open.length === 1 ? '' : 's'}${detail ? ` (${open.map((q) => md(q.header || q.text, 60)).join('; ')})` : ''}`);
+  if (open.length) lines.push(`- **Waiting on a person:** ${open.length} open question${open.length === 1 ? '' : 's'}${detail ? ` (${open.slice(0, SHOWN.questions).map((q) => md(q.header || q.text, 60)).join('; ')}${open.length > SHOWN.questions ? '; …' : ''})` : ''}`);
   for (const g of github) lines.push(`- ${md(g)}`);
   if (url) lines.push('', `[Open the unit on the dashboard](${url})`);
   lines.push('', '<sub>Kept current by the coordinator. Edits here are overwritten.</sub>');
