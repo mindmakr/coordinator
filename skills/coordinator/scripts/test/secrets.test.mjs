@@ -212,3 +212,10 @@ test('release-note shapes stay linear', () => {
     assert.ok(readCost(large) <= 5 * large.length + 4 * WINDOW && readCost(huge) <= 5 * huge.length + 4 * WINDOW, JSON.stringify(large.slice(0, 20)));
   }
 });
+
+test('a verification code with a full stop after it is masked; an error code or a version is not', () => {
+  for (const s of ['Your verification code is 557201.', 'Passcode: 9931 4410, then sign in.', 'The code is 482190!']) {
+    assert.doesNotMatch(maskSecrets(s), /557201|9931 4410|482190/, s);
+  }
+  for (const s of ['Release 1.0.1 code freeze on Monday.', 'The code is 1.2.3.4 compatible.', 'See code: src/app.ts:4012.']) assert.equal(maskSecrets(s), s, s);
+});

@@ -24,7 +24,7 @@ const tryJson = (f) => { try { return existsSync(f) ? readJson(f, null) : null; 
 // it (--i-checked). Nearby: within the next six words on its line, or the first word of the next line
 // when the word ends its line with ":". A value is a word with a letter and a digit or symbol, a run of
 // four or more digits, or any non-plain word right after "<word>:" or "<word> is". Values are never echoed.
-const CRED = /(?:\b(?:pass(?:word|wd|phrase|code)?|pwd|pw|token|secret|api[_ -]?key|private[_ -]?key|credentials?|login|otp|pin)\b(?![.\/_-]\w)|كلمة (?:المرور|السر)|پاس ?ورڈ|\bpasswort\b|\bkennwort\b|\bmot de passe\b|\bcontraseña|\bsenha\b)/giu;
+const CRED = /(?:\b(?:pass(?:word|wd|phrase|code)?|pwd|pw|token|secret|api[_ -]?key|private[_ -]?key|credentials?|login|otp|pin|passcode|verification|code)\b(?![.\/_-]\w)|كلمة (?:المرور|السر)|پاس ?ورڈ|\bpasswort\b|\bkennwort\b|\bmot de passe\b|\bcontraseña|\bsenha\b)/giu;
 const AFTER_PASS = /^\s*(?:[:=]|is\b)\s*["'`]?([^\s"'`|,;]{6,})/i;
 const plainWord = (v) => /^[a-z]+[.,;:!?)]*$/.test(v) || /^[A-Z][A-Z0-9_]*$/.test(v) || /^[A-Z][a-z]+[.,;:!?)]*$/.test(v);
 // A file, a file:line, a URL, a PR or a value already masked is not a credential.

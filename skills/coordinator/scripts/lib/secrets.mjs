@@ -45,7 +45,8 @@ const PATTERNS = [
   /\b(?:login|log-in|sign-?in|credentials?|creds)[ \t]{0,4}:[ \t]{0,8}[^\s/]{1,64}[ \t]{0,4}\/[ \t]{0,4}[^\s]{6,128}/gi,
   /(?<=\b[\w.+-]{1,64}@[\w-]{1,64}(?:\.[\w-]{1,64}){0,4}[ \t]{0,4}\/[ \t]{0,4})(?=[^\s]{0,128}[0-9!@#$%^&*+=])(?=[^\s]{0,128}[A-Za-z])[^\s]{6,128}/g,
   // A one-time code or PIN next to its word: "OTP for the demo user: 834921", "PIN: 4821-9930". Not otp.service.ts:415.
-  /(?<=\b(?:OTP|PIN|passcode|one[- ]time (?:code|password)|verification code)\b(?![.\w/])[^\n:=]{0,30}?(?:[:=]|\bis\b)[ \t]{0,8})[0-9][0-9 -]{2,14}[0-9](?![\w:.])/gi,
+  // Trailing punctuation is allowed: "Your verification code is 557201.".
+  /(?<=\b(?:OTP|PIN|passcode|one[- ]time (?:code|password)|verification|code)\b(?![.\w/])[^\n:=]{0,30}?(?:[:=]|\bis\b)[ \t]{0,8})[0-9][0-9 -]{2,14}[0-9](?![\w:]|[.,][0-9A-Za-z])/gi,
   // Password labels in other languages: Arabic, Urdu, German, French, Spanish, Portuguese, Turkish.
   /(?<=(?:كلمة (?:المرور|السر)|پاس ?ورڈ|Passwort|Kennwort|mot de passe|contraseña|senha|şifre|parola)[ \t]{0,4}(?::|：|هي|ہے|ist|est|es|é)[ \t]{0,8})[^\s]{6,128}/giu,
 ];

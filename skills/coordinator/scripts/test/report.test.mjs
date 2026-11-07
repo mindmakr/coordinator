@@ -220,3 +220,16 @@ test('round 4: the closed rule refuses a credential word with a value nearby, ne
   run('init', 'r5', '--goal', 'g', '--bar', 'b', '--fence', 'f');
   assert.match(readFileSync(join(runDir('r5'), 'report.html'), 'utf8'), /Release notes never carry credentials, tokens or one-time codes\. Name the setting \(e\.g\. API_TOKEN\), never its value\./);
 });
+
+test('the closed rule shows beside stored notes too; a code word with a value is refused', () => {
+  const notes = join(root, 'r6.md');
+  writeFileSync(notes, '## Changes\n- Payouts settle once.\n');
+  run('report', 'r5', '--file', notes);
+  const html = readFileSync(join(runDir('r5'), 'report.html'), 'utf8');
+  assert.match(html, /class="report-rule"><b>Release notes never carry credentials/);
+  assert.match(html, /Payouts settle once/);
+  writeFileSync(notes, '## Ops\nThe sandbox code stays 55720123 for testers.\n');
+  const r = cli('report', 'r5', '--file', notes);
+  assert.notEqual(r.status, 0);
+  assert.ok(!(r.stdout + r.stderr).includes('55720123'));
+});

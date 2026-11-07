@@ -10,15 +10,17 @@ import { markdown } from './md.mjs';
 
 const code = (t) => `<code>${esc(t)}</code>`;
 const SEV = { high: 'fail', medium: 'not-yet', low: '' };
-export const RULE = 'Release notes never carry credentials, tokens or one-time codes. Name the setting (e.g. API_TOKEN), never its value.';
+// The closed rule for release notes, shown with them whether they are written or not.
+const RULE = 'Release notes never carry credentials, tokens or one-time codes. Name the setting (e.g. API_TOKEN), never its value.';
+const rule = `<p class="report-rule"><b>${esc(RULE)}</b></p>`;
 const STYLE = '<style>.md{overflow-wrap:anywhere}.md h2,.md h3,.md h4,.md h5{margin:16px 0 6px}.md ul,.md ol{padding-left:20px}.md table{margin:6px 0}.report-note{border-left:4px solid var(--wait)}.ev{font:12px var(--mono);overflow-wrap:anywhere}.ev li{margin:2px 0}@media (max-width:560px){.changes table,.changes tbody,.changes tr,.changes th,.changes td{display:block}.changes thead{display:none}.changes tr{border-top:1px solid var(--line);padding:6px 0}.changes tr:first-child{border-top:0}.changes th,.changes td{border:0;padding:2px 12px;min-width:0}}</style>';
 
 function notes(v, report, run) {
   if (!report?.text) {
-    return `<section class="card report-note"><h3>Not written yet</h3><p><b>Release notes never carry credentials, tokens or one-time codes. Name the setting (e.g. API_TOKEN), never its value.</b></p><p>The lead writes these with the release-notes sub-skill (references/sub-skills/release-notes.md), starting from the draft, then stores them:</p>`
+    return `<section class="card report-note"><h3>Not written yet</h3>${rule}<p>The lead writes these with the release-notes sub-skill (references/sub-skills/release-notes.md), starting from the draft, then stores them:</p>`
       + `<pre>run.mjs report ${esc(run)} --draft\nrun.mjs report ${esc(run)} --file notes.md</pre></section>`;
   }
-  return `<section class="card md">${markdown(report.text, v.repo)}<p class="meta">Stored ${stamp(report.at)}${report.source ? ` from ${code(report.source)}` : ''}.</p></section>`;
+  return `<section class="card md">${rule}${markdown(report.text, v.repo)}<p class="meta">Stored ${stamp(report.at)}${report.source ? ` from ${code(report.source)}` : ''}.</p></section>`;
 }
 
 function changes(v, ctx) {
