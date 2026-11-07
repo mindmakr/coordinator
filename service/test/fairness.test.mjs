@@ -138,6 +138,21 @@ test('sync byte cap: one sync reads at most LIMITS.syncBytes of logs, the rest f
   } finally { LIMITS.syncBytes = keep; await t.ingest.close(); }
 });
 
+test('sync byte cap with --force: each forced sync carries on where the last stopped, then a new pass starts', async () => {
+  const keep = LIMITS.syncBytes;
+  const t = setup({ r1: run('r1'), r2: run('r2'), r3: run('r3') }, null);
+  try {
+    await t.prep();
+    for (let i = 0; i < 3; i++) await t.ingest.syncRepo(7, REPO); // all three stored
+    LIMITS.syncBytes = 1; // every sync reads one log
+    const seen = [];
+    for (let i = 0; i < 3; i++) seen.push((await t.ingest.syncRepo(7, REPO, { force: true })).updated);
+    assert.deepEqual(seen, [['r1'], ['r2'], ['r3']], 'not r1 three times');
+    assert.equal((await t.db.repos(7))[0].error, null, 'the forced pass finished');
+    assert.deepEqual((await t.ingest.syncRepo(7, REPO, { force: true })).updated, ['r1'], 'the next --force is a new pass');
+  } finally { LIMITS.syncBytes = keep; await t.ingest.close(); }
+});
+
 test('readLog: a log under another run folder is refused from its first line, before the masking pass', () => {
   const big = bigLog('r1', 2 * 1024 * 1024);
   const a = performance.now(); const r = readLog('r9', big); const took = performance.now() - a;

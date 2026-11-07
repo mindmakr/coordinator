@@ -61,6 +61,15 @@ When you sign in, GitHub gives the service a user token that expires and refresh
 
 Actions, workflows, repository secrets, administration, members, and your email address on GitHub. An email for alerts is one you type in and confirm ([Privacy](privacy.md)).
 
+## How much one installation or address can use
+
+What GitHub lets the App read is one thing; how much of the service one tenant can take is another. These keep one installation, or one client address, from crowding out the rest:
+
+- **Webhooks, per client address:** deliveries that fail the signature check, are too large (over 5 MB), too slow (not in full within 10 seconds) or cut short count as refusals; past 30 a minute, that address is answered 429 before its body is read, except deliveries addressed to this App. Bodies being read at once are capped per address (5 MB, 1 MB of it for small bodies) and in all (32 MB). The address is the connection's, or with `TRUST_PROXY=1` the last `X-Forwarded-For` entry: behind a proxy, set it, or every client shares one address and one allowance.
+- **Reading logs, per installation:** logs are read in a small pool of worker threads (`PARSE_WORKERS`, default 2), taken in turn per installation; a large log (over `PARSE_SMALL_KB`, default 512 KB) never takes the last worker. Each installation has `PARSE_BUDGET_SECONDS` of reading time per hour (default 600); past it, its logs wait for the next resync. One sync of one repo reads at most `SYNC_MAX_MB` of logs (default 64); the rest follow at the next sync.
+
+Every limit and its default is in [Self-host](self-host.md#limits-per-client-address).
+
 ## Where writes go
 
 - Answers and notes: only to `coordinator-state` in the state repo.

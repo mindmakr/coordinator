@@ -1,6 +1,6 @@
 # Self-host
 
-The hosted service at [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com) and a self-hosted one run the same code from `service/`. Self-hosting needs one container, Postgres, and a GitHub App you register yourself. Your App is private to you; it never talks to ours.
+The hosted service at [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com) and a self-hosted one run the same code from `service/`. Self-hosting needs one container, Postgres, and a GitHub App you register yourself. Your App and your service are yours alone: they never talk to ours, and nothing you store reaches us.
 
 The service code and its full reference are in [`service/README.md`](../service/README.md). Licence: AGPL-3.0.
 
@@ -9,6 +9,7 @@ The service code and its full reference are in [`service/README.md`](../service/
 The App is made from [`service/app-manifest.json`](../service/app-manifest.json), which asks only for the [permissions](permissions.md) the service uses.
 
 1. In a copy of the manifest, replace `https://coordinator.example.com` with your public address (`BASE_URL`) in all four places.
+   Then change `"public": true` to `"public": false`. The manifest is the hosted App's, and `true` lets any GitHub account install it. With `false`, only the account or organisation that owns the App can install it, which is what a self-hosted service is for. Keep `true` only if you mean to serve other people's accounts too; then their runs, sign-ins and alert settings are stored in your database, and [Privacy](privacy.md) describes what you would be keeping for them.
 2. Save this as a local HTML file, paste the manifest into `value`, and open it in a browser. For an organisation, post to `https://github.com/organizations/<org>/settings/apps/new` instead.
 
    ```html
@@ -89,19 +90,37 @@ The installation id is the number at the end of the installation's settings page
 | `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE` | yes | The App's PEM: one line with `\n`, or a mounted file |
 | `DATABASE_URL` | for real use | Postgres. Unset, everything is kept in memory and lost on restart |
 | `GITHUB_APP_SLUG` | no | Shows an "install the App" link |
-| `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` |
+| `TRUST_PROXY` | behind a proxy | `1` to read the client address from the last `X-Forwarded-For` entry. Every per-address limit (below) uses it: behind a proxy without it, all clients share the proxy's address, and one busy or hostile client uses up everyone's allowance |
 | `PORT` | no | Default 3000 |
 | `STATE_BRANCH` | no | Default `coordinator-state` |
 | `ACCESS_TTL_SECONDS` | no | How long a "may read this repo" answer is reused, per person. Default and maximum 60 |
 | `SESSION_DAYS` | no | Default 7 |
-| `MAX_CONNECTIONS` | no | Default 1000 |
+| `MAX_CONNECTIONS` | no | Open connections the server accepts at once. Default 1000 (10–100000) |
 | `RESYNC_MINUTES` | no | Re-read every installation this often. Default 15; 0 turns it off |
-| `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off everywhere |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | no | Email alerts. Without `SMTP_HOST`, no email. Port 587 by default; `SMTP_SECURE=1` for TLS from the start (465) |
+| `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off everywhere. Default: on |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | no | Email alerts. Without `SMTP_HOST`, no email. Port 587 by default; `SMTP_SECURE=1` for TLS from the start (465). `SMTP_FROM` defaults to `Coordinator <coordinator@localhost>`, which most mail servers refuse: set it to an address your server may send from |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | no | Web push alerts (`npx web-push generate-vapid-keys`). Both keys or neither; the subject is a `mailto:` or `https:` URL |
 | `ALERT_SWEEP_SECONDS` | no | How often quiet leads are looked for and due digests sent. Default 60 |
 | `DOORBELL_MAX_STREAMS` | no | Open doorbell streams at most. Default 500; 0 turns the doorbell off |
+| `PARSE_WORKERS` | no | Worker threads that read run and map logs, so a slow log never blocks the server. A large log never takes the last one. Default 2 (1–32) |
+| `PARSE_SMALL_KB` | no | A log up to this size counts as small and may use any worker. Default 512 (1–16384) |
+| `PARSE_BUDGET_SECONDS` | no | Reading time each installation gets per hour. Past it, its logs wait for the next resync. Default 600 (1–3600) |
+| `SYNC_MAX_MB` | no | Log bytes one sync of one repo reads; the rest follow at the next sync, and a forced sync carries on where the last stopped. Default 64 (8–4096) |
 | `GITHUB_API_URL`, `GITHUB_WEB_URL` | no | Another GitHub host. Defaults `https://api.github.com` and `https://github.com`; other hosts are untested |
+
+## Limits per client address
+
+The service counts these in memory, per client address (see `TRUST_PROXY`), and a restart resets them:
+
+| What | Limit |
+|---|---|
+| Webhook deliveries that fail the signature check, are too large, too slow or cut short | 30 a minute; past that, unsigned-looking deliveries are answered 429 before their body is read. A delivery addressed to this App is always read |
+| Webhook bodies being read at once | 5 MB per address, of which 1 MB for bodies of 64 KB or less; 32 MB in all, with 4 MB kept for small bodies. A body must arrive within 10 seconds |
+| Page views | 600 a minute |
+| Sign-in attempts | 30 per 10 minutes |
+| Doorbell tokens | 30 per 10 minutes |
+
+Other limits count per person or per installation instead: answers and notes (30 a minute per person), "Sync now" (6 per 10 minutes per person), comment commands (10 an hour per commenter, 60 an hour per installation), confirmation emails (3 a day per person and per address), and tracker comment writes (200 per 10 minutes per installation).
 
 ## Backups
 

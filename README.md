@@ -173,7 +173,8 @@ service/                        the GitHub App and web dashboard (AGPL-3.0, its 
 - **Short files, one job each.** Load only the playbook you need. Logic lives in pure, tested modules.
 - **State over memory.** Every run is an append-only event log (`events.jsonl`) with a snapshot derived from it (`state.json`), written atomically behind a lock, with a readable `workbench.md`. Crashes and context resets resume from it. At pit stops (a unit merged, a decision, the run closed) `run.mjs push` copies the run, masked, to a `coordinator-state` branch, and `run.mjs pull` picks it up on another machine.
 - **Safe by default.**
-  - No network calls, no shell strings, and ids validated against path traversal.
+  - Network calls only where you ask for them: `run.mjs push` and `pull` run git against your own remotes at pit stops (and `push` may ask `gh` whether the repo is public); `run.mjs watch --remote` pulls the state branch on a timer and, if you name a coordinator service, swaps your `gh` token there for a short doorbell token and keeps one connection open (`lib/remote.mjs`, `lib/doorbell.mjs`). Nothing else connects anywhere.
+  - No shell strings, and ids validated against path traversal.
   - Secrets are refused in lessons and masked in run state.
   - Merging, deploying, deleting, spending or posting needs your approval, given up front.
 - **Extensible.** New playbooks are commands or domain files that reuse the core. They never fork it.
