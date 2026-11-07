@@ -127,7 +127,7 @@ export function flowGraph(v, nowMs = Date.now()) {
     if (!others.has(id)) others.set(id, { id, kind: 'run', run: l.run, label: l.run, known: l.known, units: [], says: [] });
     const node = others.get(id);
     if (!node.units.includes(u.id)) node.units.push(u.id);
-    node.says.push(`${dir === 'before' ? `${u.id} continues it` : `${u.id} continued in it`}${l.known ? ` (${l.rounds.length} ${l.rounds.length === 1 ? 'try' : 'tries'}, ${l.status})` : ''}`);
+    node.says.push(`${dir === 'before' ? `${u.id} continues ${l.unit === u.id ? 'it' : l.unit}` : `${u.id} continued in ${l.unit === u.id ? 'it' : l.unit}`}${l.known ? ` (${l.rounds.length} ${l.rounds.length === 1 ? 'try' : 'tries'}, ${l.outcome})` : ''}`);
     edges.push({ from: `u:${u.id}`, to: id, kind: 'chain', dir, crit: false });
   }
   nodes.push(...others.values());

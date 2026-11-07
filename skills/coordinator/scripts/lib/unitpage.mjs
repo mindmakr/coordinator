@@ -18,11 +18,11 @@ function round(r, repo) {
 }
 
 // The rounds this unit had in the runs it continues (#36), oldest first, one line each.
-function earlier(c, repo) {
+function earlier(c, repo, id) {
   const runs = (c?.before ?? []).filter((l) => l.known);
   if (!runs.length) return '';
-  const line = (l, r) => `<li>${chip(r.verdict, r.verdict)} <b>${esc(l.run)}</b> round ${esc(r.n)}${typeof r.score === 'number' ? ` · score ${esc(r.score)}` : ''}${r.gap ? ` · ${linkify(clip(r.gap, 200), repo)}` : ''}${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''}</li>`;
-  const stops = runs.filter((l) => l.stopReason).map((l) => `<p><b>Stopped in ${esc(l.run)}:</b> ${esc(l.stopReason)}</p>`).join('');
+  const line = (l, r) => `<li>${chip(r.verdict, r.verdict)} <b>${esc(l.run)}${l.unit !== id ? `:${esc(l.unit)}` : ''}</b> round ${esc(r.n)}${typeof r.score === 'number' ? ` · score ${esc(r.score)}` : ''}${r.gap ? ` · ${linkify(clip(r.gap, 200), repo)}` : ''}${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''}</li>`;
+  const stops = runs.filter((l) => l.stopReason).map((l) => `<p><b>Stopped in ${esc(l.run)}${l.unit !== id ? `:${esc(l.unit)}` : ''}:</b> ${esc(l.stopReason)}</p>`).join('');
   return `<h3 data-a="h-earlier">Earlier runs</h3><ol class="earlier">${runs.flatMap((l) => l.rounds.map((r) => line(l, r))).join('') || '<li class="empty">No round there.</li>'}</ol>${stops}`;
 }
 
@@ -46,7 +46,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     '<h2 data-a="h-Evidence">Evidence and artifacts</h2>',
     blk('evidence', `<section class="card">${loose.length ? evidenceList(loose, r, ctx, `p-${u.id}-ev`) : '<p class="empty">No evidence outside the behaviours.</p>'}</section>`),
     '<h2 data-a="h-Rounds">Rounds</h2>',
-    blk('rounds', `<section class="card">${earlier(u.chain, r)}${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
+    blk('rounds', `<section class="card">${earlier(u.chain, r, u.id)}${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
     '<h2 data-a="h-Notes">Notes and questions</h2>',
     blk('notes', `<section class="card">${u.asks.length ? `<ul class="needs-list">${u.asks.map((q) => questionItem(q, form, r)).join('')}</ul>` : ''}`
       + (notes ? `<ul>${notes}</ul>` : (u.asks.length ? '' : '<p class="empty">None.</p>'))

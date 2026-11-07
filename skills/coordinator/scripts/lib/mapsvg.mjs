@@ -216,7 +216,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
       return link(ctx.unitHref(n.unit), label, `<rect class="nd ${st(n.status)}${n.crit ? ' crit' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="8"/>${txt(nx + 10, y + 19, `${mark(status)} ${clip(n.label, 18)}`, 'b')}${txt(nx + 10, y + 36, clip(n.title, 24), 'sm muted')}`, false, nav.node(n.id, `u u${i} hl`, ` aria-describedby="${tipId(i)}"${data(n, 'unit')}`));
     }
     if (n.kind === 'follow-up') return link(n.url ?? ctx.home, `Follow-up${n.units.length ? ` from ${n.units.join(', ')}` : ''}: ${clip(n.text, 200)}`, `<rect class="nd fu" x="${nx}" y="${y}" width="${w}" height="${h}" rx="6"/>${txt(nx + 10, y + 16, clip(`${n.label}${n.units.length ? ` · from ${n.units.join(', ')}` : ''}`, 42), 'xs muted')}${txt(nx + 10, y + 32, clip(n.text, 36), 'sm')}`, !!n.url, nav.node(n.id, 'hl', data(n, 'follow-up')));
-    if (n.kind === 'run') return link(n.known && ctx.runHref ? ctx.runHref(n.run) : null, `Run ${n.run}: ${n.says.join('; ')}`, `<rect class="nd ref cross" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 18, clip(`run ${n.run}`, 26), 'sm')}${txt(nx + 12, y + 34, clip(n.says.join('; '), 30), 'xs muted')}`, false, nav.node(n.id, 'hl', data(n, 'run')));
+    if (n.kind === 'run') return link(n.known && ctx.runHref ? ctx.runHref(n.run) : null, `Run ${n.run}: ${n.says.join('; ')}`, `<rect class="nd ref run" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 18, clip(`run ${n.run}`, 26), 'sm')}${txt(nx + 12, y + 34, clip(n.says.join('; '), 30), 'xs muted')}`, false, nav.node(n.id, 'hl', data(n, 'run')));
     return link(n.url, `${what(n)} ${n.repo}#${n.label.split('#')[1]}${n.cross ? ' (another repo)' : ''}, linked by ${n.units.join(', ')}`, `<rect class="nd ref${n.cross ? ' cross' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 18, clip(`${what(n)} ${n.label}`, 26), 'sm')}${txt(nx + 12, y + 34, clip(`linked by ${n.units.join(', ')}`, 30), 'xs muted')}`, true, nav.node(n.id, 'hl', data(n, n.kind)));
   };
   const placed = [...pos.values()];
@@ -231,7 +231,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
     + svg(width, height, 'Flow map: stacked units, linked issues and PRs, follow-ups, and the critical path', `${defs}${heads}${nav.hitLayers()}<g class="edges">${edges}</g>${nodes}`, ' flow', ' data-nav="flow"')
     + `<style>${nav.rules('flow')}</style>`
     + lineKey([['after', 'waits on: the arrow points to the unit it waits for (--after)'], ['crit', 'waits on, on the critical path'], ['link', 'links an issue or PR: a ring at the issue end'], ['fu', 'filed a follow-up: an open arrowhead at the follow-up'], ...(kinds('chain') ? [['link', 'continues, or was continued in, another run: a ring at the run']] : [])])
-    + legend([['ref cross', 'another repo']])
+    + legend([['ref cross', 'another repo'], ...(kinds('chain') ? [['ref run', 'another run of this project']] : [])])
     + marksLegend() + navHelp(!!ctx.live);
 }
 

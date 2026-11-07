@@ -86,7 +86,7 @@ export function answerChange(id, pick) {
   const mutate = (s) => {
     const q = findQuestion(s, id);
     unit = q.unit ?? null;
-    answerQuestion(s, id, { ...pick(q), by: 'person' });
+    answerQuestion(s, id, { ...pick(q), by: 'person', via: 'web' });
   };
   return { mutate, unit: () => unit };
 }
@@ -143,7 +143,7 @@ export function writer({ db, gh, config, ingest, acl = null, log, now = Date.now
       change = a.mutate; what = `answer ${id}`;
     } else {
       unit = form.get('unit') || null;
-      change = (s) => personNote(s, { text: mask(form.get('text')), unit: unit ?? undefined });
+      change = (s) => personNote(s, { text: mask(form.get('text')), unit: unit ?? undefined, via: 'web' });
       what = unit ? `note on ${unit}` : 'note';
     }
     const r = await commitRun({ gh, token, fullName: repo.fullName, branch, configured: branch, runId, kind, unit, mutate: change, message: `coordinator: ${what} on ${runId} (web, @${session.login})` });
@@ -163,7 +163,7 @@ export function writer({ db, gh, config, ingest, acl = null, log, now = Date.now
       change = a.mutate; what = `answer ${cmd.question}`;
     } else {
       eventUnit = unit;
-      change = (s) => personNote(s, { text: mask(cmd.text), unit: unit ?? undefined });
+      change = (s) => personNote(s, { text: mask(cmd.text), unit: unit ?? undefined, via: 'web' });
       what = unit ? `note on ${unit}` : 'note';
     }
     const r = await commitRun({ gh, token, fullName: repo.fullName, branch, configured: branch, runId, kind: cmd.verb, unit: eventUnit, mutate: change, author, message: `coordinator: ${what} on ${runId} (comment by @${login})\n\n${source}` });

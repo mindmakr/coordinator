@@ -10,7 +10,15 @@ import { clip } from './plain.mjs';
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 // The exact shapes run.mjs answer and note --kind person write: anything more is not replayed.
-const keysAre = (o, keys) => !!o && typeof o === 'object' && JSON.stringify(Object.keys(o).sort()) === JSON.stringify([...keys].sort());
+// An entry may also say where it was given (via) and carry the person's confirmed words (confirm),
+// as lib/questions.mjs writes them (lib/approval.mjs); nothing else.
+const keysAre = (o, keys) => {
+  if (!o || typeof o !== 'object') return false;
+  const { via, confirm, ...rest } = o;
+  if (via !== undefined && !['dashboard', 'web', 'cli'].includes(via)) return false;
+  if (confirm !== undefined && !(via === 'cli' && (confirm === true || (typeof confirm === 'string' && confirm.length <= 1000)))) return false;
+  return JSON.stringify(Object.keys(rest).sort()) === JSON.stringify([...keys].sort());
+};
 const ENTRY = ['choices', 'other', 'by', 'at'];
 const NOTE = ['kind', 'text', 'unit', 'at'];
 const lines = (log) => log.events.map((_, i) => log.buf.subarray(i ? log.ends[i - 1] : 0, log.ends[i]).toString('utf8'));
@@ -78,7 +86,7 @@ export function holds(s, act) {
 export function replayAct(s, act) {
   if (holds(s, act)) return;
   if (act.note) {
-    personNote(s, { text: act.note.text, unit: act.note.unit ?? undefined });
+    personNote(s, { text: act.note.text, unit: act.note.unit ?? undefined, via: act.note.via, confirm: act.note.confirm === true });
     s.notes.at(-1).at = act.note.at;
   } else {
     const q = s.notes.length ? questionAt(s, act.q) : null;
@@ -87,7 +95,7 @@ export function replayAct(s, act) {
       personNote(s, { text: clip(`answer changed after use: ${act.q} → ${answerText(act.entry)} (the lead keeps the answer it used)`, 1000), unit: q.unit ?? undefined });
       Object.assign(s.notes.at(-1), { at: act.entry.at, changedAfterUse: lateOf(act) });
     } else {
-      answer(s, act.q, { choices: act.entry.choices ?? [], other: act.entry.other ?? null, by: act.entry.by });
+      answer(s, act.q, { choices: act.entry.choices ?? [], other: act.entry.other ?? null, by: act.entry.by, via: act.entry.via, confirm: act.entry.confirm });
       questionAt(s, act.q).history.at(-1).at = act.entry.at;
     }
   }

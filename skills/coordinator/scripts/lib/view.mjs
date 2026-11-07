@@ -73,7 +73,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)), dot: dotState(u, d), finished: ['passed', 'stopped'].includes(dotState(u, d)),
         rounds: u.rounds.length, maxRounds: roundCap(u, run), extraRounds: u.extraRounds ?? 0,
         // The same work in other runs (#36): earlier tries before, the run that finished it after.
-        chain, chainText: chainLine(chain),
+        chain, chainText: chainLine(chain, u.id),
         // Files an already merged unit changed too (#37): take the target in before review.
         sync: syncs.has(u.id) ? syncStep(run.id, u.id, syncs.get(u.id), u.status === 'pass') : null,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),

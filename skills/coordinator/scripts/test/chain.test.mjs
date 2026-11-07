@@ -8,9 +8,11 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chainLine, chainOf, chainUnits, linkedRuns, parseContinues } from '../lib/chain.mjs';
+import { answerRefusal, noteApproves, noteRefusal } from '../lib/approval.mjs';
 import { decide, decideUnit, stats } from '../lib/rules.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
 import { flowGraph } from '../lib/maps.mjs';
+import { flowSvg } from '../lib/mapsvg.mjs';
 import { text as textView, view } from '../lib/view.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,18 +47,18 @@ test('a chain runs oldest first and reads the same from any link', () => {
   const c = chainOf(runs, 'coordinator-1.0c', 'c14');
   assert.deepEqual(c.before.map((l) => l.run), ['coordinator-1.0b']);
   assert.deepEqual(c.after.map((l) => [l.run, l.status]), [['coordinator-1.0d', 'pass']]);
-  assert.deepEqual(c.final, { run: 'coordinator-1.0d', status: 'pass', outcome: 'partial' });
+  assert.deepEqual(c.final, { run: 'coordinator-1.0d', unit: 'c14', status: 'pass', outcome: 'pass' });
   assert.equal(c.rounds, 4);
   assert.equal(chainOf(runs, 'coordinator-1.0', 'c11').after[0].status, 'pass', 'the parent sees the final outcome');
   assert.equal(chainOf(runs, 'coordinator-1.0', 'c19'), null, 'a unit on its own has no chain');
-  assert.equal(chainLine(chainOf(runs, 'coordinator-1.0d', 'c14')), 'continues coordinator-1.0b (1 try, stopped) → coordinator-1.0c (2 tries, stopped)');
+  assert.equal(chainLine(chainOf(runs, 'coordinator-1.0d', 'c14'), 'c14'), 'continues coordinator-1.0b (1 try, stopped) → coordinator-1.0c (2 tries, stopped)');
 });
 
 test('a run whose other end is not loaded still shows the link', () => {
   const [parent] = real();
   const c = chainOf([parent], 'coordinator-1.0', 'c11');
   assert.deepEqual(c.after, [{ run: 'coordinator-1.0b', unit: 'c11', known: false, status: null, stopReason: null, rounds: [], outcome: null }]);
-  assert.equal(chainLine(c), 'continued in coordinator-1.0b (not here)');
+  assert.equal(chainLine(c, 'c11'), 'continued in coordinator-1.0b (not here)');
 });
 
 test('stats count a chain as one unit: rounds added up, outcome from the last run', () => {
@@ -89,6 +91,10 @@ test('the view, the text HUD, the flow map and the coordinator page show the cha
   const g = flowGraph(v, Date.parse(T));
   assert.deepEqual(g.nodes.filter((n) => n.kind === 'run').map((n) => n.run), ['coordinator-1.0b', 'coordinator-1.0c']);
   assert.ok(g.edges.some((e) => e.kind === 'chain' && e.from === 'u:c14' && e.to === 'c:coordinator-1.0b' && e.dir === 'before'));
+  const svg = flowSvg(v, { unitHref: (id) => `units/${id}.html`, home: 'hud.html', runHref: (id) => `../${id}/hud.html` }, Date.parse(T));
+  assert.match(svg, /<rect class="nd ref run"/, 'a run box is drawn as a run, not as another repo');
+  assert.match(svg, /<i class="sw ref run" aria-hidden="true"><\/i>another run of this project/);
+  assert.doesNotMatch(svg, /<rect class="nd ref cross"/);
   const m = selfModel({ runs, nowMs: Date.parse(T) });
   assert.deepEqual(m.chains.map((c) => [c.unit, c.rounds, c.status, c.links.length]), [['c11', 6, 'pass', 2], ['c14', 4, 'pass', 3]]);
   assert.equal(m.stats.units, 3, 'finished units: each chain once');
@@ -107,14 +113,15 @@ test('init --continues links both runs; freeze wants the unit; link --continues 
   assert.deepEqual(state('c').continues, [{ run: 'p', unit: 'm3' }]);
   assert.equal(state('p').units[1].continuedIn[0].run, 'c', 'the parent records it too');
   run('add', 'c', 'other', '--bar', 'b');
-  assert.match(run('freeze', 'c').err, /continues p:m3; add m3 under the same id/);
+  assert.match(run('freeze', 'c').err, /continues p:m3; add m3/);
   run('add', 'c', 'm3', '--bar', 'b'); assert.equal(run('freeze', 'c').code, 0);
   assert.match(run('show', 'p').out, /↔ continued in c \(0 tries, open\)/);
   assert.match(readFileSync(join(dir, 'runs', 'c', 'units', 'm3.html'), 'utf8'), /Continues <a href="[^"]*p\/hud\.html">p<\/a>/);
   // A follow-on run made before the flag existed: linked afterwards, on a closed run too.
   run('init', 'c2', '--goal', 'g', '--bar', 'b', '--fence', 'f'); run('add', 'c2', 'm1', '--bar', 'b');
   run('close', 'p', '--outcome', 'stopped', '--reason', 'finish in follow-on runs');
-  assert.match(run('link', 'c2', 'm1', '--continues', 'p:m3').err, /keeps the unit's id/);
+  assert.match(run('link', 'c2', 'm1', '--continues', 'p:m3').err, /p:m3 is already continued in c; continue that run's unit instead/, 'no forks');
+  assert.match(run('init', 'c3', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--continues', 'p:m3').err, /already continued in c/);
   assert.equal(run('link', 'c2', 'm1', '--continues', 'p:m1').code, 0);
   assert.equal(state('p').units[0].continuedIn[0].run, 'c2');
   assert.equal(run('link', 'c2', 'm1', '--continues', 'p:m1').code, 0, 'twice is a no-op');
@@ -122,7 +129,7 @@ test('init --continues links both runs; freeze wants the unit; link --continues 
   assert.equal(state('p').units[0].continuedIn.length, 1);
 });
 
-test('extend: more rounds only for a round-budget stop, only with the person\'s approval, recorded as a decision', () => {
+test('extend: more rounds only for a round-budget stop, only with the person\'s explicit yes, quoted in the decision', () => {
   run('init', 'e', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'e', 'm1', '--bar', 'b'); run('add', 'e', 'm2', '--bar', 'b'); run('freeze', 'e');
   for (const u of ['m1', 'm2']) { run('start', 'e', u); run('built', 'e', u); }
@@ -130,25 +137,92 @@ test('extend: more rounds only for a round-budget stop, only with the person\'s 
   assert.match(run('extend', 'e', 'm2', '--rounds', '1', '--reason', 'r').err, /m2 is judging/);
   assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r').err, /no approval from the person/);
   assert.match(run('extend', 'e', 'm1', '--rounds', '9', '--reason', 'r').err, /1-4/);
-  run('ask', 'e', '--question', 'One more round for m1?', '--header', 'm1', '--option', 'yes|one more', '--option', 'no|stop it', '--unit', 'm1');
-  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q1').err, /no answer from the person/);
-  run('answer', 'e', 'q1', '--choice', 'yes', '--by', 'lead');
-  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q1').err, /no answer from the person/, 'the lead cannot approve its own extension');
-  run('answer', 'e', 'q1', '--choice', 'yes');
-  assert.equal(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'close to the bar', '--answer', 'q1').code, 0);
+  // A question with no approving option never approves.
+  run('ask', 'e', '--question', 'What next for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop it', '--unit', 'm1');
+  run('answer', 'e', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q1').err, /q1 marks no option as approving/);
+  assert.match(run('ask', 'e', '--question', 'q', '--header', 'h', '--option', 'Yes|a', '--option', 'No|b', '--approves', 'Maybe').err, /--approves must name one of the options/);
+  run('ask', 'e', '--question', 'One more round for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop it', '--unit', 'm1', '--approves', 'Yes');
+  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q2').err, /q2 has no answer yet/);
+  run('answer', 'e', 'q2', '--choice', 'No', '--by', 'person', '--confirm', 'No, stop m1');
+  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q2').err, /q2 was answered "No", not "Yes"/, 'No never approves');
+  run('answer', 'e', 'q2', '--other', 'Yes but only if it is quick', '--by', 'person', '--confirm', 'Yes but only if it is quick');
+  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q2').err, /not "Yes"/, 'free text never approves');
+  run('answer', 'e', 'q2', '--choice', 'Yes');
+  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q2').err, /not given by the person on the dashboard or the web/, 'the lead cannot answer for the person');
+  run('answer', 'e', 'q2', '--choice', 'Yes', '--by', 'lead');
+  assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r', '--answer', 'q2').err, /not given by the person/);
+  assert.match(run('answer', 'e', 'q2', '--choice', 'Yes', '--confirm', 'yes').err, /--confirm needs an explicit --by person/);
+  assert.equal(run('answer', 'e', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, give m1 one more round').code, 0);
+  assert.equal(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'close to the bar', '--answer', 'q2').code, 0);
   const s = state('e'); const m1 = s.units[0];
   assert.deepEqual([m1.status, m1.stopReason, m1.extraRounds], ['open', null, 1]);
-  assert.match(s.notes.at(-1).text, /^m1: 1 more round \(now 2\), approved by the person \(q1: yes\): close to the bar$/);
-  assert.equal(s.notes.at(-1).answers, 'q1');
+  assert.equal(s.notes.at(-1).text, 'm1: 1 more round (now 2), approved by the person (q2 "m1: One more round for m1?" answered "Yes" via cli, their words: "Yes, give m1 one more round"): close to the bar');
+  assert.equal(s.notes.at(-1).answers, 'q2');
   assert.equal(run('next', 'e').out.units[0].action, 'build');
   run('start', 'e', 'm1'); run('built', 'e', 'm1');
   assert.equal(run('verdict', 'e', 'm1', 'pass', '--evidence', 'suite green', '--score', '9').code, 0, 'the extended unit can pass');
   assert.equal(state('e').units[0].status, 'pass');
-  // A person's note on the unit, after its last verdict, approves too.
+  // A person's note: only a clear "approved", and only from the person.
   run('verdict', 'e', 'm2', 'fail', '--score', '6', '--gap', 'g'); run('next', 'e');
-  run('note', 'e', '--kind', 'person', '--unit', 'm2', '--text', 'ok, one more for m2');
+  run('note', 'e', '--kind', 'person', '--unit', 'm2', '--text', 'Approved: one more round for m2');
+  assert.match(run('extend', 'e', 'm2', '--rounds', '1', '--reason', 'r').err, /not added by the person on the dashboard or the web/);
+  for (const t of ['No, not approved', 'ok, one more for m2', 'Approved?', 'Approved, but only if quick', "I don't approve"]) {
+    run('note', 'e', '--kind', 'person', '--unit', 'm2', '--text', t, '--confirm');
+    assert.match(run('extend', 'e', 'm2', '--rounds', '1', '--reason', 'r').err, /does not clearly approve/, t);
+  }
+  run('note', 'e', '--kind', 'person', '--unit', 'm2', '--text', 'Approved: one more round for m2', '--confirm');
   assert.equal(run('extend', 'e', 'm2', '--rounds', '1', '--reason', 'person asked').code, 0);
-  assert.match(state('e').notes.at(-1).text, /their note: ok, one more for m2/);
+  assert.match(state('e').notes.at(-1).text, /approved by the person \(their note via cli: "Approved: one more round for m2"\): person asked$/);
+});
+
+test('approval: from the dashboard or the web counts; a lead\'s entry without the person\'s words does not', () => {
+  const q = (answer, approves = 'Yes') => ({ id: 'q1', approves, answer });
+  const a = (via, extra = {}) => ({ choices: ['Yes'], other: null, by: 'person', via, at: T, ...extra });
+  assert.equal(answerRefusal(q(a('dashboard'))), null);
+  assert.equal(answerRefusal(q(a('web'))), null);
+  assert.equal(answerRefusal(q(a('cli', { confirm: 'yes please' }))), null);
+  assert.match(answerRefusal(q(a('cli'))), /not given by the person/);
+  assert.match(answerRefusal(q({ choices: ['Yes'], other: null, by: 'person', at: T })), /not given by the person/, 'older entries without via do not count');
+  assert.match(answerRefusal(q(a('web', { by: 'lead' }))), /not given by the person/);
+  assert.match(answerRefusal(q(a('web', { choices: ['No'] }))), /answered "No"/);
+  assert.equal(noteRefusal({ text: 'Approved, go ahead with one more round', via: 'web' }), null);
+  assert.equal(noteApproves('approve one more round for m1'), true);
+  for (const t of ['no', 'not approved', 'approved?', "can't approve", 'approve if green', 'maybe approved', 'yes', 'go']) assert.equal(noteApproves(t), false, t);
+});
+
+test('a chain may change the unit id: both ids show, stats count it once, a parent is continued once', () => {
+  run('init', 'w1', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
+  run('add', 'w1', 'u1213', '--bar', 'b'); run('freeze', 'w1');
+  run('start', 'w1', 'u1213'); run('built', 'w1', 'u1213'); run('verdict', 'w1', 'u1213', 'fail', '--score', '5', '--gap', 'x'); run('next', 'w1');
+  run('close', 'w1', '--outcome', 'stopped', '--reason', 'finish in a follow-on run');
+  run('init', 'fin', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  assert.equal(run('add', 'fin', 'u1213b', '--bar', 'b', '--continues', 'w1:u1213').code, 0);
+  assert.deepEqual(state('fin').continues, [{ run: 'w1', unit: 'u1213', as: 'u1213b' }]);
+  assert.deepEqual(state('w1').units[0].continuedIn.map((c) => [c.run, c.unit]), [['fin', 'u1213b']]);
+  assert.match(run('add', 'fin', 'u1213c', '--bar', 'b', '--continues', 'w1:u1213').err, /already continued in fin:u1213b/, 'no fork inside one run either');
+  run('freeze', 'fin');
+  assert.match(run('show', 'fin').out, /↔ continues w1:u1213 \(1 try, stopped\)/);
+  assert.match(run('show', 'w1').out, /↔ continued in fin:u1213b \(0 tries, open\)/);
+  run('start', 'fin', 'u1213b'); run('built', 'fin', 'u1213b'); run('verdict', 'fin', 'u1213b', 'pass', '--evidence', 'green', '--score', '9'); run('integrate', 'fin', 'pass', '--evidence', 'ok');
+  run('close', 'fin', '--outcome', 'done');
+  const st = run('stats').out;
+  const both = [state('w1'), state('fin')];
+  assert.deepEqual(chainUnits(both).map((u) => [u.id, u.status, u.rounds, u.links.map((l) => `${l.run}:${l.unit}`).join(' → ')]), [['u1213b', 'pass', 2, 'w1:u1213 → fin:u1213b']]);
+  assert.ok(st.units >= 1 && chainUnits(both).length === 1);
+});
+
+test('a chain left open in a closed run is unfinished: neither passed nor stopped', () => {
+  const runs = real().slice(0, 3); // stops at 1.0c, where c14 sits open below
+  runs[2].units[0] = { ...runs[2].units[0], status: 'open', stopReason: null };
+  const c14 = chainUnits(runs).find((u) => u.id === 'c14');
+  assert.deepEqual([c14.status, c14.outcome, c14.rounds], ['open', 'unfinished', 3]);
+  const s = stats(runs);
+  assert.deepEqual([s.units, s.stoppedShare, s.unfinished, s.unfinishedShare], [3, 0, 1, 0.33]);
+  assert.equal(chainOf(runs, 'coordinator-1.0b', 'c14').final.outcome, 'unfinished');
+  const m = selfModel({ runs, nowMs: Date.parse(T) });
+  assert.equal(m.chains.find((c) => c.unit === 'c14').status, 'unfinished');
+  assert.match(selfText(m), /unfinished 1 \(left open when the run closed\)/);
 });
 
 test('a unit with extra rounds stops at the raised cap', () => {

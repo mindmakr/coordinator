@@ -59,7 +59,7 @@ function stats(m, ctx) {
   if (!s.units) return empty('No finished unit yet: the numbers start with the first pass or stop.');
   const c = s.closed;
   const basis = `<p class="meta">Counted over ${count(s.units, 'finished unit')} in all runs, open included. `
-    + (c.runs ? `Closed runs only, as <code>run.mjs stats</code> counts: pass rate ${pct(c.passRate)}, rounds to pass median ${num(c.medianRoundsToPass)} (p80 ${num(c.p80RoundsToPass)}), stopped ${pct(c.stoppedShare)} of ${count(c.units, 'unit')} in ${count(c.runs, 'closed run')}.</p>`
+    + (c.runs ? `Closed runs only, as <code>run.mjs stats</code> counts: pass rate ${pct(c.passRate)}, rounds to pass median ${num(c.medianRoundsToPass)} (p80 ${num(c.p80RoundsToPass)}), stopped ${pct(c.stoppedShare)}${c.unfinished ? `, unfinished ${c.unfinished} (left open when the run closed: neither passed nor stopped)` : ''} of ${count(c.units, 'unit')} in ${count(c.runs, 'closed run')}.</p>`
       : 'No closed run yet, so <code>run.mjs stats</code> has nothing to count.</p>');
   const cards = basis + `<div class="budget">${stat('Pass rate', pct(s.passRate), 'Finished units that passed.')}`
     + stat('Rounds to pass', `${num(s.medianRoundsToPass)} <span class="cause">median · p80 ${num(s.p80RoundsToPass)}</span>`, 'Tries a passing unit needed.')
@@ -73,7 +73,7 @@ function stats(m, ctx) {
 // Units finished across runs (#36): each chain is one unit in the stats above.
 function chains(m, ctx) {
   if (!m.chains?.length) return '';
-  const rows = m.chains.map((c) => `<li data-a="chain-${esc(c.links[0].run)}-${esc(c.unit)}"><b>${esc(c.unit)}</b> ${c.links.map((l) => `${runLink(l.run, ctx, m)} <span class="cause">(${l.rounds} ${l.rounds === 1 ? 'try' : 'tries'}, ${esc(l.status)})</span>`).join(' → ')} · ${c.rounds} ${c.rounds === 1 ? 'round' : 'rounds'} ${chip(c.status, c.status)}</li>`).join('');
+  const rows = m.chains.map((c) => `<li data-a="chain-${esc(c.links[0].run)}-${esc(c.unit)}"><b>${esc(c.unit)}</b> ${c.links.map((l) => `${runLink(l.run, ctx, m)}${l.unit !== c.unit ? `<span class="cause">:${esc(l.unit)}</span>` : ''} <span class="cause">(${l.rounds} ${l.rounds === 1 ? 'try' : 'tries'}, ${esc(l.status)})</span>`).join(' → ')} · ${c.rounds} ${c.rounds === 1 ? 'round' : 'rounds'} ${chip(c.status, c.status)}</li>`).join('');
   return `<h3 class="sub">Work across runs</h3><p class="meta">A unit stopped in one run and finished in a follow-on run counts once in the stats, with its rounds added up.</p><ul class="plain">${rows}</ul>`;
 }
 

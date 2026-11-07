@@ -4,6 +4,7 @@
 // Without `ctx.live` it is the static hud.html: no scripts, no network, a
 // read-only snapshot. With it (lib/serve.mjs) it is the live dashboard: forms,
 // and one script, allowed by a per-response nonce, that patches blocks in place.
+import { linkName } from './chain.mjs';
 import { modelLine } from './models.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -145,10 +146,10 @@ export function triesRow(u) {
 export function chainRow(u, ctx) {
   const c = u.chain;
   if (!c) return '';
-  const name = (l) => (l.known && ctx?.runHref ? `<a href="${esc(ctx.runHref(l.run))}">${esc(l.run)}</a>` : esc(l.run));
-  const one = (l) => `${name(l)} <span class="cause">(${l.known ? `${l.rounds.length} ${l.rounds.length === 1 ? 'try' : 'tries'}, ${esc(l.status)}` : 'not here'})</span>`;
+  const name = (l) => { const t = esc(linkName(l, u.id)); return l.known && ctx?.runHref ? `<a href="${esc(ctx.runHref(l.run))}">${t}</a>` : t; };
+  const one = (l) => `${name(l)} <span class="cause">(${l.known ? `${l.rounds.length} ${l.rounds.length === 1 ? 'try' : 'tries'}, ${esc(l.outcome)}` : 'not here'})</span>`;
   const parts = [c.before.length && `Continues ${c.before.map(one).join(' → ')}`, c.after.length && `Continued in ${c.after.map(one).join(' → ')}`].filter(Boolean);
-  return `<p class="cause chain" data-a="chain-${esc(u.id)}">${parts.join(' · ')}${c.after.length ? ` · finally ${chip(c.final.status ?? 'unknown', c.final.status ?? '')}` : ''}</p>`;
+  return `<p class="cause chain" data-a="chain-${esc(u.id)}">${parts.join(' · ')}${c.after.length ? ` · finally ${chip(c.final.outcome ?? 'unknown', c.final.outcome ?? '')}` : ''}</p>`;
 }
 
 function unitCard(u, ctx, form, repo) {

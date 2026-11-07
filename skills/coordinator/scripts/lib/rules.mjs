@@ -139,11 +139,12 @@ export function bySetup(runs) {
 // A unit finished in a follow-on run counts once, with its rounds added up (lib/chain.mjs).
 export function stats(runs) {
   const passRounds = [];
-  let total = 0; let stopped = 0;
+  let total = 0; let stopped = 0; let unfinished = 0;
   for (const u of chainUnits(runs)) {
     total++;
     if (u.status === 'pass') passRounds.push(u.rounds);
-    if (u.status === 'stopped') stopped++;
+    else if (u.status === 'stopped') stopped++;
+    else if (u.outcome === 'unfinished') unfinished++; // its run closed with it open: neither a pass nor a stop
   }
   passRounds.sort((a, b) => a - b);
   const pct = (p) => (passRounds.length ? passRounds[Math.min(passRounds.length - 1, Math.ceil(p * passRounds.length) - 1)] : null);
@@ -152,6 +153,7 @@ export function stats(runs) {
     runs: runs.length, units: total,
     medianRoundsToPass: pct(0.5), p80RoundsToPass: p80,
     stoppedShare: total ? Math.round((stopped / total) * 100) / 100 : null,
+    unfinished, unfinishedShare: total ? Math.round((unfinished / total) * 100) / 100 : null,
     suggestedMaxRounds: p80 === null ? null : Math.min(8, p80 + 1),
     ...escapeTotals(runs),
   };
