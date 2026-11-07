@@ -12,10 +12,13 @@
   const tipOf = (box) => box && document.getElementById(box.getAttribute('aria-describedby'));
   const boxOf = (el) => el && el.closest && el.closest(BOX);
 
-  // What a box lights: itself, the boxes it connects to (c<i>) and its edges (e<i> on the run maps, x<i> on the project map).
+  // What a box lights: itself, the boxes it connects to (c<i>) and its edges (e<i> on the mind and heat maps, x<i> on the project map).
   function lit(box) {
     const id = box.getAttribute('aria-describedby'); const m = /^tip-([un])(\d+)$/.exec(id); if (!m) return [box];
     const root = box.closest('svg') || document;
+    // On a walkable map (lib/mapnav.mjs) a box lights its children (k<j>) and the lines to them (o<j>).
+    const n = root.dataset && root.dataset.nav && [...box.classList].find((c) => /^n\d+$/.test(c));
+    if (n) return [box, ...root.querySelectorAll(`.k${n.slice(1)}, .o${n.slice(1)}`)];
     const sel = m[1] === 'u' ? `.c${m[2]}, .e${m[2]}` : `.c${m[2]}, .x${m[2]}`;
     return [box, ...root.querySelectorAll(sel)];
   }
@@ -42,7 +45,7 @@
     Object.assign(tip.style, { left: `${Math.round(best.x)}px`, top: `${Math.round(best.y)}px`, right: 'auto', bottom: 'auto' });
   }
   const placeSoon = (box) => { place(box); requestAnimationFrame(() => place(box)); };
-  function unpin() { if (pinned) { const t = tipOf(pinned); if (t) t.classList.remove('pinned'); pinned.blur(); pinned = null; } }
+  function unpin() { if (pinned) { const t = tipOf(pinned); if (t) t.classList.remove('pinned'); pinned.blur(); pinned = null; remember(null); } }
   function close() { unpin(); body.dataset.tips = 'off'; }
 
   // Entering a box (not moving inside it) brings panels back after Escape.
@@ -52,16 +55,32 @@
   });
   document.addEventListener('focusin', (e) => { const box = boxOf(e.target); if (!box) return; if (box === hush) { hush = null; return; } delete body.dataset.tips; placeSoon(box); });
   document.addEventListener('pointerdown', (e) => { touch = e.pointerType === 'touch' || e.pointerType === 'pen'; }, true);
+  // The pinned panel outlives a reload and a live patch (which resets its class).
+  const PIN = `coordinator:${body.dataset.run}:pin:${body.dataset.path}`;
+  const remember = (id) => { try { if (id) sessionStorage.setItem(PIN, id); else sessionStorage.removeItem(PIN); } catch { /* storage blocked */ } };
+  function pin(box) {
+    const tip = tipOf(box); if (!tip) return;
+    pinned = box; tip.classList.add('pinned'); remember(tip.id); placeSoon(box);
+  }
   document.addEventListener('click', (e) => {
     const box = boxOf(e.target);
-    if (box && touch && box !== pinned) {
+    // A box on a walkable map (lib/mapnav.mjs) selects on click; mapnav.client.js handles it.
+    if (box && touch && box !== pinned && !box.closest('svg[data-nav]')) {
       e.preventDefault(); unpin(); delete body.dataset.tips;
-      const tip = tipOf(box); if (!tip) return;
-      pinned = box; tip.classList.add('pinned'); box.focus({ preventScroll: true }); placeSoon(box);
+      pin(box); box.focus({ preventScroll: true });
       return;
     }
     if (!box && !(e.target.closest && e.target.closest('.tip'))) unpin();
   });
+  const restorePin = () => {
+    let id = null; try { id = sessionStorage.getItem(PIN); } catch { /* storage blocked */ }
+    if (pinned && pinned.isConnected) { const t = tipOf(pinned); if (t) t.classList.add('pinned'); return; }
+    pinned = null;
+    const box = id && [...document.querySelectorAll(BOX)].find((b) => b.getAttribute('aria-describedby') === id);
+    if (box) pin(box); else if (id) remember(null);
+  };
+  document.addEventListener('coordinator:patched', restorePin);
+  requestAnimationFrame(restorePin);
 
   // Keyboard: Tab from a box enters its panel; Tab past the panel's last link goes on from the box; Shift+Tab goes back.
   const inTip = (el) => el && el.closest && el.closest('.tip');

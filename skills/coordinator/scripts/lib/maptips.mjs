@@ -64,6 +64,6 @@ export const SHOW = 'visibility:visible;transition-delay:0s';
 export function unitTips(v, ctx, nowMs) {
   if (!v.units.length) return '';
   const rules = v.units.map((_, i) => `body:not([data-tips=off]):has(.u${i}:is(:hover,:focus)) #${tipId(i)}{${SHOW}}`
-    + `svg.map:has(.u${i}:is(:hover,:focus)) :is(.u${i},.c${i},.e${i}),body:has(#${tipId(i)}:focus-within) svg.map :is(.u${i},.c${i},.e${i}){opacity:1}`).join('');
+    + `svg.map:not([data-nav]):has(.u${i}:is(:hover,:focus)) :is(.u${i},.c${i},.e${i}),svg.map[data-nav]:has(.u${i}:is(:hover,:focus-visible)) .u${i},body:has(#${tipId(i)}:focus-within) svg.map :is(.u${i},.c${i},.e${i}){opacity:1}`).join('');
   return `<div class="tips">${v.units.map((u, i) => unitTip(u, i, ctx, nowMs)).join('')}</div><style>${rules}</style>`;
 }

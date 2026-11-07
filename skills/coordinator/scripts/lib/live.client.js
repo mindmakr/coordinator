@@ -25,7 +25,7 @@
     all.forEach((d) => { d.open = openSet.has(d.dataset.d); });
   };
   document.addEventListener('toggle', (e) => {
-    const d = e.target; if (!d.dataset || !d.dataset.d) return;
+    const d = e.target; if (!d.dataset || !d.dataset.d || d.dataset.po) return; // po: opened only for print
     if (d.open) openSet.add(d.dataset.d); else openSet.delete(d.dataset.d);
     save(key('open'), [...openSet]);
   }, true);
@@ -117,8 +117,21 @@
     morph(app, tpl.content, { busy, skipped: () => { pending = true; }, added: applyOpen });
     localTimes(app);
     applyTimeline();
+    document.dispatchEvent(new CustomEvent('coordinator:patched')); // the maps put back what the morph reset
   }
   document.addEventListener('focusout', () => setTimeout(() => { if (pending && latest) patch(latest); }, 0));
+
+  // Export PDF: the browser's print, with every toggle open for the paper and closed again after.
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-print]')) print(); });
+  addEventListener('beforeprint', () => {
+    document.querySelectorAll('details:not([open])').forEach((d) => { d.dataset.po = '1'; d.open = true; });
+    const at = document.querySelector('[data-printed]'); if (at) at.textContent = `Exported ${full.format(Date.now())}`;
+  });
+  addEventListener('afterprint', () => {
+    const opened = [...document.querySelectorAll('details[data-po]')];
+    opened.forEach((d) => { d.open = false; });
+    setTimeout(() => opened.forEach((d) => { delete d.dataset.po; }), 400); // after their toggle events
+  });
 
   // Live updates: Server-Sent Events, reconnect with backoff, a watchdog on the heartbeat.
   // A refused token (the server restarted) or five failed tries in a row stop the retries;
