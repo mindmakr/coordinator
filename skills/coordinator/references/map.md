@@ -40,6 +40,21 @@ A build stopped by the time cap is marked `partial`. Over a complete map it is r
 
 `map.html` (and `/map` or `/run/<run>/map` on the live dashboard, linked as **Project map →** from the run's header): an import graph in inline SVG, one box per file for small projects and per folder otherwise, importers on the left. Arrows carry the import count; cycles are dashed and hidden until **Cycles** is on or a box is hovered. Filters are checkboxes read by CSS, so the snapshot needs no script: areas (top folders), links (all, 3+, 10+ imports), tests. Below: routes with the files behind them, screens with the routes they call, message key counts, settings with read and write sites, shared helpers and reuse candidates (150 rows each; the rest are in `map.json`). Boxes and rows open the file on GitHub when the repo is known, at the commit when it is pushed, else at `HEAD`.
 
+## Function calls
+
+`S/run.mjs calls <run> <unit> [--base ref --head ref | --files a,b] [--root dir] [--max-seconds 60] [--json]` finds the JS/TS functions a unit changed and, for each, what it calls and what calls it, one level each way plus a second behind a toggle.
+
+- **What the unit changed:** the lines of `git diff base...head` (default: the base and head its `detect.mjs --unit` run recorded), read at the head commit; else `--files` (whole files); else the files whose module record changed in the last `map --unit U` build (not the first build, which has no baseline). With none of these it says so and records nothing. `run.mjs map <run> --unit U` computes it for U as well, within the same time cap.
+- **The index:** every function, method, class and arrow bound to a name, with its line range and the calls in its body: `f()`, `ns.f()` and `Class.f()` through imports (named, default, namespace, `require`, destructured `require`, `await import()`, re-exports and barrels, tsconfig paths), `this.f()` (up the `extends` chain), `this.svc.f()` and `svc.f()` where the field or variable is typed or built with `new`, `new X()` (its constructor), and object-literal methods (`module.exports = { … }`). A name passed as an argument (`setTimeout(fn)`, `app.get('/x', handler)`) or as a JSX handler (`onClick={save}`) counts as a call marked "passed". Parameters and locals shadow same-named functions. Calls at module level belong to the file's "(top level)".
+- **Scanner:** comments and string contents are blanked before anything is matched, so a call in a comment or a string is not a call; template expressions are code. TS interfaces, type literals, function types and overload signatures are not functions. Never runs the code.
+- **Speed:** each file's scan is cached in `map/calls-cache.json` by its SHA-1, so a rerun rescans only changed files. Past the time cap, unscanned files are skipped and the result is marked partial. On a 1,685-file TypeScript monorepo: about 3 s to scan and link cold, under 1 s warm, on an idle machine; the cache is about 7 MB.
+- **Storage:** `map/calls/<unit>.json`. Neither file ships at a pit stop; both are derived.
+- **Where it shows:** the unit page's **Function calls** section (a small graph, callers left, touched functions centre, callees right, then a table) and the maps page's **Calls** view (pick a unit). Every name links to its file and line on GitHub when the repo is known, at the unit's head commit.
+
+Limits, on top of those below: calls through a variable holding a function, computed members (`handlers[name]()`), callbacks the scanner cannot name, `.call`/`.apply`/`bind`, dependency injection by string, decorators and JSX components (`<Card />`) are missed or listed as unresolved, with their name. A method on a value whose type it cannot see (a parameter typed by an interface, a return value) stays unresolved. Two functions with the same qualified name in one file are told apart by a `~2` suffix.
+
+Spot check (2026-11, 30 functions checked by hand: 10 in this repo, 20 in a 1,685-file TypeScript app): no wrong edge among those listed; 62 of 63 project calls found (the miss: `MAGIC[ext](raw)`, a computed member) and all 114 callers.
+
 ## Limits
 
 It reads patterns, not a type-checked AST:

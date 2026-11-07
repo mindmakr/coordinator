@@ -1,7 +1,9 @@
 // One unit's page (/unit/<id> when served, units/<id>.html on disk): its bar
 // and behaviours with their evidence, every round, notes and questions for it,
-// its links and its own timeline. Same shell, same rules as the dashboard.
+// its links and its own timeline, and the functions its diff touched (when
+// computed). Same shell, same rules as the dashboard.
 import { linkify } from './links.mjs';
+import { unitCalls } from './map/callsview.mjs';
 import { whoRound } from './models.mjs';
 import { liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
 import { behaviourList, blk, blocksLine, chip, esc, evidenceList, hash, keyed, linkWaits, page, stamp, stateChip, timelineTools, unitDot, unitLink } from './parts.mjs';
@@ -33,6 +35,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   const form = live && v.open && !ctx.readOnly ? { ...live, back: `/unit/${u.id}` } : null; // forms come back here
   const r = v.repo;
   const loose = u.evidenceItems.filter((e) => !e.behaviour);
+  const calls = ctx.calls?.get(u.id) ?? null; // lib/map/calls.mjs, map/calls/<unit>.json
   const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
@@ -44,6 +47,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     blk('behaviours', `<section class="card"><p>${linkify(u.bar, r)}</p>${behaviourList(u.behaviours, r, u.evidenceItems, ctx, `p-${u.id}`)}</section>`),
     '<h2 data-a="h-Evidence">Evidence and artifacts</h2>',
     blk('evidence', `<section class="card">${loose.length ? evidenceList(loose, r, ctx, `p-${u.id}-ev`) : '<p class="empty">No evidence outside the behaviours.</p>'}</section>`),
+    ...(calls ? ['<h2 data-a="h-Calls">Function calls</h2>', blk('calls', `<section class="card">${unitCalls(calls, r, v.id, u.id)}</section>`)] : []),
     '<h2 data-a="h-Rounds">Rounds</h2>',
     blk('rounds', `<section class="card">${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
     '<h2 data-a="h-Notes">Notes and questions</h2>',
