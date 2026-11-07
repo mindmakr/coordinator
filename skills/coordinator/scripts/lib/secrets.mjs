@@ -27,7 +27,34 @@ const PATTERNS = [
   /\bauthorization\s*:\s*[A-Za-z]+\s+[A-Za-z0-9._~+/=-]{12,}/gi,
   /\b(bearer|basic)\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{16,}/gi,
   /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^/\s:@]{1,256}:[^@\s]{1,256}@/gi,
+  // Prose and Markdown (release notes, notes; the list is in references/quality.md). Every rule is
+  // bounded, so a window always holds a match whole; a label is kept where a lookbehind can do it.
+  // A value on the line after a credential word that ends its line with ":" or "to:" ("Set the password to:").
+  /(?<=\b(?:pass(?:word|wd|phrase|code)?|pwd|pw|token|secret|(?:api[_ -]?)?key|otp|pin)(?:[ \t]{1,4}to)?[ \t]{0,4}:[ \t]{0,8}\r?\n[ \t]{0,8}(?:[-*>][ \t]{0,4})?`?)[^\s|`]{6,128}/gi,
+  // A line that starts with a password-like key and a colon (YAML): its value, whatever its shape.
+  /(?<=(?:^|\n)[ \t]{0,16}(?:[-*][ \t]{1,4})?["']?(?:[A-Za-z0-9]{1,30}[_-])?(?:password|passwd|passphrase|pwd|pw)["']?[ \t]{0,4}:[ \t]{0,8})(?!\[redacted\])[^\s#]{6,128}/gi,
+  // A Markdown table row whose name cell holds TOKEN, KEY, SECRET, PASSWORD, PASS or PWD, then the value cell.
+  /\|[ \t]{0,8}`?[A-Za-z0-9_. -]{0,40}(?:TOKEN|KEY|SECRET|PASSWORD|PASS|PWD)[A-Za-z0-9_. -]{0,40}`?[ \t]{0,8}\|[ \t]{0,8}`?(?=[^\s|`]{0,128}[0-9!@#$%^&*+=])(?=[^\s|`]{0,128}[A-Za-z])[^\s|`]{8,128}/gi,
+  // ... a row whose kind cell says password, token or secret ("| SMTP | password | value |").
+  /(?<=\|[ \t]{0,8}(?:password|passwd|pwd|token|secret|api[_ -]?key|key)[ \t]{0,8}\|[ \t]{0,8}`?)(?=[^\s|`]{0,128}[0-9!@#$%^&*+=])(?=[^\s|`]{0,128}[A-Za-z])[^\s|`]{8,128}/gi,
+  // ... and a value wrapped onto the next row after a credential row.
+  /(?<=\|[ \t]{0,8}`?[A-Za-z0-9_. -]{0,40}(?:TOKEN|KEY|SECRET|PASSWORD|PASS|PWD)[A-Za-z0-9_. -]{0,40}`?[ \t]{0,8}\|[^\n]{0,80}\r?\n\|[ \t]{0,8}\|[ \t]{0,8}`?)[^\s|`]{6,128}/gi,
+  // A user and a password side by side ("user: qa password: letmein"): the value, whatever its shape.
+  /\b(?:user(?:name)?|login|e-?mail|account)[ \t]{0,4}[:=][ \t]{0,8}[^\s]{1,64}[ \t,;]{1,8}(?:password|passwd|pass|pwd|pw)[ \t]{0,4}[:=][ \t]{0,8}[^\s]{3,128}/gi,
+  // A login in prose: "login: user / password", "credentials: user / password", "admin@x.sa / password".
+  /\b(?:login|log-in|sign-?in|credentials?|creds)[ \t]{0,4}:[ \t]{0,8}[^\s/]{1,64}[ \t]{0,4}\/[ \t]{0,4}[^\s]{6,128}/gi,
+  /(?<=\b[\w.+-]{1,64}@[\w-]{1,64}(?:\.[\w-]{1,64}){0,4}[ \t]{0,4}\/[ \t]{0,4})(?=[^\s]{0,128}[0-9!@#$%^&*+=])(?=[^\s]{0,128}[A-Za-z])[^\s]{6,128}/g,
+  // A one-time code or PIN next to its word: "OTP for the demo user: 834921", "PIN: 4821-9930". Not otp.service.ts:415.
+  // Trailing punctuation is allowed: "Your verification code is 557201.".
+  /(?<=\b(?:OTP|PIN|passcode|one[- ]time (?:code|password)|verification|code)\b(?![.\w/])[^\n:=]{0,30}?(?:[:=]|\bis\b)[ \t]{0,8})[0-9][0-9 -]{2,14}[0-9](?![\w:]|[.,][0-9A-Za-z])/gi,
+  // Password labels in other languages: Arabic, Urdu, German, French, Spanish, Portuguese, Turkish.
+  /(?<=(?:كلمة (?:المرور|السر)|پاس ?ورڈ|Passwort|Kennwort|mot de passe|contraseña|senha|şifre|parola)[ \t]{0,4}(?::|：|هي|ہے|ist|est|es|é)[ \t]{0,8})[^\s]{6,128}/giu,
 ];
+
+// An environment variable that looks like a secret whatever its name: UPPER_SNAKE=value of 12+ characters
+// with lowercase, uppercase and a digit, and no '/' or ':' (so a URL or a path is left alone).
+// Run after the named rule, which masks DB_PASSWORD=… whole; this one catches the names it does not know.
+const ENV = /(?<=\b[A-Z][A-Z0-9]{1,30}(?:_[A-Z0-9]{1,30}){1,6}=)(?=[^\s]{0,128}[0-9])(?=[^\s]{0,128}[a-z])(?=[^\s]{0,128}[A-Z])[A-Za-z0-9_+=.~-]{12,128}(?![^\s])/g;
 
 // Long random-looking runs are likely keys. No '/' or '.', so paths survive.
 const ENTROPIC = /(?<![A-Za-z0-9_/.-])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_/.-])/g;
@@ -36,7 +63,7 @@ const looksRandom = (s) => /[a-z]/.test(s) && /[A-Z]/.test(s) && /\d/.test(s) &&
 // ---- Named values: a name holding a credential word, then ":"/"=" or " is ", then a value.
 // The name is a run of [A-Za-z0-9] segments joined by single "_" or "-"; one segment (or two
 // adjacent ones) must be the credential word, e.g. DB_PASSWORD, api-key, JWT_SECRET_KEY.
-const WORDS = new Set(['secret', 'token', 'pass', 'pwd', 'jwt', 'auth', 'passwd', 'passwod', 'passwrd', 'password', 'apikey', 'privatekey', 'accesskey', 'clientsecret', 'stripekey']);
+const WORDS = new Set(['secret', 'token', 'pass', 'pwd', 'pw', 'jwt', 'auth', 'passwd', 'passwod', 'passwrd', 'password', 'apikey', 'privatekey', 'accesskey', 'clientsecret', 'stripekey']);
 const PAIRS = new Set(['api key', 'private key', 'access key', 'client secret', 'stripe key']);
 const isAlnum = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
 const isSep = (c) => c === 95 || c === 45; // _ -
@@ -105,7 +132,8 @@ function nameStart(t, a, b, from, quoted) {
   // Mid-word after an earlier match: the name cannot start right after a letter or digit.
   if (segs.length && segs[0][0] === from && from > 0 && isAlnum(t.charCodeAt(from - 1))) segs.shift();
   if (!segs.length) return -1;
-  const words = segs.map(([x, y]) => t.slice(x, y).toLowerCase());
+  // camelCase names are split too: dbPassword, apiKey, clientSecret.
+  const words = segs.flatMap(([x, y]) => t.slice(x, y).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(' '));
   const hit = words.some((w, i) => WORDS.has(w) || (i + 1 < words.length && PAIRS.has(`${w} ${words[i + 1]}`)));
   if (!hit) return -1;
   const s = segs[0][0];
@@ -199,6 +227,7 @@ function maskMarks(t, far) {
   const pass = (matches) => { if (matches.length) { marks = apply(marks, matches); out = rebuild(t, marks); } };
   for (const re of PATTERNS) pass(regexMatches(out, re));
   for (const form of ['assign', 'is']) pass([...named(out, form, far)]);
+  pass(regexMatches(out, ENV));
   pass(regexMatches(out, ENTROPIC, looksRandom));
   return marks;
 }

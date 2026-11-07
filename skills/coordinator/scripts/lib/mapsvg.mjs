@@ -180,7 +180,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   }
   const mid = (ids) => ids.reduce((s, id) => s + pos.get(`u:${id}`).y + UH / 2, 0) / Math.max(1, ids.length);
   let x = P + (D + 1) * (UW + GX);
-  const refs = g.nodes.filter((n) => n.kind === 'issue' || n.kind === 'pr').map((n) => ({ ...n, want: mid(n.units) - RH / 2 }));
+  const refs = g.nodes.filter((n) => n.kind === 'issue' || n.kind === 'pr' || n.kind === 'run').map((n) => ({ ...n, want: mid(n.units) - RH / 2 }));
   const refX = x; if (refs.length) x += RW + GX;
   for (const n of stack(refs, RH, 8)) pos.set(n.id, { x: refX, y: n.y, w: RW, h: RH, n });
   const fus = g.nodes.filter((n) => n.kind === 'follow-up').map((n) => ({ ...n, want: n.units.length ? mid(n.units) - FH / 2 : Infinity }));
@@ -188,17 +188,17 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   for (const n of stack(fus, FH, 8)) pos.set(n.id, { x: fuX, y: n.y, w: FW, h: FH, n });
   const width = x - GX + P; const height = Math.max(...[...pos.values()].map((p) => p.y + p.h)) + P;
   const what = (n) => (n.kind === 'pr' ? 'PR' : 'Issue');
-  const name = (n) => (n.kind === 'unit' ? n.unit : n.kind === 'follow-up' ? n.label : `${what(n)} ${n.label}`);
+  const name = (n) => (n.kind === 'unit' ? n.unit : n.kind === 'follow-up' ? n.label : n.kind === 'run' ? `run ${n.run}` : `${what(n)} ${n.label}`);
   const said2 = (e) => { const a = node.get(e.from); const b = node.get(e.to);
-    return e.kind === 'after' ? `${name(b)} waits on ${name(a)}${e.crit ? ' (critical path)' : ''}` : e.kind === 'link' ? `${name(a)} links ${name(b)}` : `${name(a)} filed ${name(b)}`; };
+    return e.kind === 'after' ? `${name(b)} waits on ${name(a)}${e.crit ? ' (critical path)' : ''}` : e.kind === 'link' ? `${name(a)} links ${name(b)}` : e.kind === 'chain' ? `${name(a)} ${e.dir === 'before' ? 'continues' : 'continued in'} ${name(b)}` : `${name(a)} filed ${name(b)}`; };
   // A stacked unit waits on the one before it: that line's arrowhead points back to it, and the line says so.
   const port = ports(g.edges, (k) => pos.get(k));
   const edge = (e, m) => {
     const a = pos.get(e.from); const b = pos.get(e.to);
     const x1 = a.x + a.w; const x2 = b.x; const [y1, y2] = port(m);
-    const end = e.crit ? 'flow-arrow-crit' : e.kind === 'after' ? 'flow-arrow-after' : e.kind === 'link' ? 'flow-arrow-link' : 'flow-arrow-fu';
+    const end = e.crit ? 'flow-arrow-crit' : e.kind === 'after' ? 'flow-arrow-after' : e.kind === 'link' || e.kind === 'chain' ? 'flow-arrow-link' : 'flow-arrow-fu';
     const d = bez(x1, y1, x2, y2);
-    const path = line2(d, `${e.kind}${e.crit ? ' crit' : ''}`, end, e.kind === 'after' ? 'start' : 'end');
+    const path = line2(d, `${e.kind === 'chain' ? 'link chain' : e.kind}${e.crit ? ' crit' : ''}`, end, e.kind === 'after' ? 'start' : 'end');
     const words = e.kind === 'after' ? `<text class="xs muted elabel" x="${r1((x1 + x2) / 2)}" y="${r1((y1 + y2) / 2 - 6)}" text-anchor="middle">waits on</text>` : '';
     return nav.edge(m, e, said2(e), d, path + words);
   };
@@ -209,7 +209,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const all = g.edges.map((e, m) => [e, m]);
   const edges = all.map(([e, m]) => edge(e, m)).join('');
   const late = all.filter(([e]) => e.kind === 'follow-up').map(([e, m]) => copy(e, m)).join('');
-  const heads = [txt(P, 20, D ? 'Units, stacked left to right' : 'Units', 'h'), refs.length ? txt(refX, 20, 'Issues and PRs', 'h') : '', fus.length ? txt(fuX, 20, 'Follow-ups', 'h') : ''].join('');
+  const heads = [txt(P, 20, D ? 'Units, stacked left to right' : 'Units', 'h'), refs.length ? txt(refX, 20, refs.some((n) => n.kind === 'run') ? 'Issues, PRs and runs' : 'Issues and PRs', 'h') : '', fus.length ? txt(fuX, 20, 'Follow-ups', 'h') : ''].join('');
   const data = (n, kind) => ` data-name="${esc(name(n))}" data-kind="${kind}"`;
   const nodeOf = ({ x: nx, y, w, h, n }) => {
     if (n.kind === 'unit') {
@@ -218,6 +218,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
       return link(ctx.unitHref(n.unit), label, `<rect class="nd ${st(n.status)}${n.crit ? ' crit' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="8"/>${txt(nx + 10, y + 19, `${mark(status)} ${clip(n.label, 18)}`, 'b')}${txt(nx + 10, y + 36, clip(n.title, 24), 'sm muted')}`, false, nav.node(n.id, `u u${i} hl`, ` aria-describedby="${tipId(i)}"${data(n, 'unit')}`));
     }
     if (n.kind === 'follow-up') return link(n.url ?? ctx.home, `Follow-up${n.units.length ? ` from ${n.units.join(', ')}` : ''}: ${clip(n.text, 200)}`, `<rect class="nd fu" x="${nx}" y="${y}" width="${w}" height="${h}" rx="6"/>${txt(nx + 10, y + 16, clip(`${n.label}${n.units.length ? ` · from ${n.units.join(', ')}` : ''}`, 42), 'xs muted')}${txt(nx + 10, y + 32, clip(n.text, 36), 'sm')}`, !!n.url, nav.node(n.id, 'hl', data(n, 'follow-up')));
+    if (n.kind === 'run') return link(n.known && ctx.runHref ? ctx.runHref(n.run) : null, `Run ${n.run}: ${n.says.join('; ')}`, `<rect class="nd ref run" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 18, clip(`run ${n.run}`, 26), 'sm')}${txt(nx + 12, y + 34, clip(n.says.join('; '), 30), 'xs muted')}`, false, nav.node(n.id, 'hl', data(n, 'run')));
     return link(n.url, `${what(n)} ${n.repo}#${n.label.split('#')[1]}${n.cross ? ' (another repo)' : ''}, linked by ${n.units.join(', ')}`, `<rect class="nd ref${n.cross ? ' cross' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 18, clip(`${what(n)} ${n.label}`, 26), 'sm')}${txt(nx + 12, y + 34, clip(`linked by ${n.units.join(', ')}`, 30), 'xs muted')}`, true, nav.node(n.id, 'hl', data(n, n.kind)));
   };
   const placed = [...pos.values()];
@@ -227,12 +228,12 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const say = !c.stacked ? '<p class="map-say cause">No stacked work: the units run side by side, so there is no critical path.</p>' : c.path.length
     ? `<p class="map-say"><b>Critical path:</b> ${c.path.map((id) => `<a href="${esc(ctx.unitHref(id))}">${esc(id)}</a>`).join(' → ')} <span class="cause">· about ${esc(duration(c.minutes))} of work, ${esc(count(c.left, 'unit'))} left (an unfinished unit counts as ${esc(duration(c.estimate))}, the median of finished ones, or its time so far if longer)</span></p>` : '';
   const kinds = (k) => g.edges.filter((e) => e.kind === k).length;
-  return say + counts([[units.length, units.length === 1 ? 'unit' : 'units'], [refs.length, 'issues and PRs'], [fus.length, fus.length === 1 ? 'follow-up' : 'follow-ups'], [kinds('after'), 'waits on'], [g.edges.length, g.edges.length === 1 ? 'line' : 'lines']])
+  return say + counts([[units.length, units.length === 1 ? 'unit' : 'units'], [refs.filter((n) => n.kind !== 'run').length, 'issues and PRs'], ...(kinds('chain') ? [[refs.length - refs.filter((n) => n.kind !== 'run').length, 'other runs']] : []), [fus.length, fus.length === 1 ? 'follow-up' : 'follow-ups'], [kinds('after'), 'waits on'], [g.edges.length, g.edges.length === 1 ? 'line' : 'lines']])
     + (ctx.live ? navTools('flow', 'unit, issue or follow-up') : '')
     + svg(width, height, 'Flow map: stacked units, linked issues and PRs, follow-ups, and the critical path', `${defs}${heads}${nav.hitLayers()}<g class="edges">${edges}</g>${nodes}`, ' flow', ' data-nav="flow"')
     + `<style>${nav.rules('flow')}</style>`
-    + lineKey([['after', 'waits on: the arrow points to the unit it waits for (--after)'], ['crit', 'waits on, on the critical path'], ['link', 'links an issue or PR: a ring at the issue end'], ['fu', 'filed a follow-up: an open arrowhead at the follow-up']])
-    + legend([...STATES, ['ref cross', 'another repo']])
+    + lineKey([['after', 'waits on: the arrow points to the unit it waits for (--after)'], ['crit', 'waits on, on the critical path'], ['link', 'links an issue or PR: a ring at the issue end'], ['fu', 'filed a follow-up: an open arrowhead at the follow-up'], ...(kinds('chain') ? [['link', 'continues, or was continued in, another run: a ring at the run']] : [])])
+    + legend([...STATES, ['ref cross', 'another repo'], ...(kinds('chain') ? [['ref run', 'another run of this project']] : [])])
     + marksLegend() + navHelp(!!ctx.live);
 }
 

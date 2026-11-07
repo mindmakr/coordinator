@@ -57,7 +57,7 @@ test('the model: age, stats, history, plans with who each unit waits on, proposa
   assert.deepEqual(m.study.runs, [{ run: 'r-b', used: 0, cap: 2, open: true }], 'old state: default study cap');
   assert.equal(m.learning.lessons[0].sources.length, 0, 'an old lesson without sources loads');
   assert.equal(m.stats.basis, 'all runs, open included');
-  assert.deepEqual(m.stats.closed, { runs: 1, units: 3, passRate: 67, medianRoundsToPass: 1, p80RoundsToPass: 3, stoppedShare: 33 });
+  assert.deepEqual(m.stats.closed, { runs: 1, units: 3, passRate: 67, medianRoundsToPass: 1, p80RoundsToPass: 3, stoppedShare: 33, unfinished: 0 });
   const t = selfText(m);
   for (const w of ['(all runs, open included)', 'stopped 33% · 3 units in 1 closed run (as run.mjs stats)', '2 runs (1 open)', 'pass rate 67%', 'median 1, p80 3', 'v2 open · waits on v1', 'r-a partial', '[upstream]', '0 studies']) assert.ok(t.includes(w), w);
 });
@@ -139,7 +139,7 @@ test('serve: /coordinator and /run/<other> need the token; other runs are read-o
   assert.match(self.body, /<a href="\/coordinator\?t=[^"]+" aria-current="page">Coordinator<\/a>/);
   assert.match(self.body, /<a href="\/run\/w2\?t=/); assert.match(self.body, /data-path="\/coordinator"/);
   const home = (await get(`/?t=${t}`)).body;
-  assert.match(home, /<nav class="pages" aria-label="Pages"><a href="\/\?t=[^"]+" aria-current="page">w1<\/a><a href="\/maps\?t=[^"]+">Maps<\/a><a href="\/coordinator\?t=/);
+  assert.match(home, /<nav class="pages" aria-label="Pages"><a href="\/\?t=[^"]+" aria-current="page">w1<\/a><a href="\/maps\?t=[^"]+">Maps<\/a><a href="\/report\?t=[^"]+">Report<\/a><a href="\/retro\?t=[^"]+">Retro<\/a><a href="\/coordinator\?t=/);
   const other = await get(`/run/w2?t=${t}`);
   assert.equal(other.status, 200);
   assert.doesNotMatch(other.body, /<form class="(ask|note)"/, 'no forms on another run');

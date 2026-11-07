@@ -41,10 +41,12 @@ export function lex(src) {
       i = end; last = c; continue;
     }
     if (c === '`') { emit(i, i + 1, true, true); i++; template(); continue; }
-    if (c === '/' && (last === '' || REGEX_BEFORE.has(last) || REGEX_WORDS.test(src.slice(Math.max(0, i - 8), i).trimEnd()))) {
+    // Not `/>` (closes a JSX tag) and not `/ ` (JSX text such as `{a} / {b}`; a regex rarely starts with a space).
+    if (c === '/' && d !== '>' && d !== ' ' && (last === '' || REGEX_BEFORE.has(last) || REGEX_WORDS.test(src.slice(Math.max(0, i - 8), i).trimEnd()))) {
       let j = i + 1; let cls = false;
       while (j < n && src[j] !== '\n' && (cls || src[j] !== '/')) { if (src[j] === '\\') j++; else if (src[j] === '[') cls = true; else if (src[j] === ']') cls = false; j++; }
-      if (j < n && src[j] === '/') { emit(i, i + 1, true, true); emit(i + 1, j, true, false); emit(j, j + 1, true, true); i = j + 1; last = 'x'; continue; }
+      // `({a}/{b})</span>` in JSX text reaches the `/` of a closing tag: a regex never ends in `<`.
+      if (j < n && src[j] === '/' && src[j - 1] !== '<') { emit(i, i + 1, true, true); emit(i + 1, j, true, false); emit(j, j + 1, true, true); i = j + 1; last = 'x'; continue; }
     }
     if (c === '{') depth++;
     if (c === '}') {

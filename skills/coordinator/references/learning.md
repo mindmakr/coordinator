@@ -4,6 +4,8 @@ The skill improves in two ways: the lessons it carries into the next run, and th
 
 ## The retro, at the end of every run
 
+When every unit has passed or stopped, the dashboard shows **Retro pending** with the command. The lead asks the person, through the question tool, to run `/coordinator:retro <run>` before close; `close` warns while the run has no retro note. Everything below shows on the run's **Retro** page (`/retro`, `retro.html`): retro notes, lessons whose `--from` is the run, budgets, upstream proposals and escapes.
+
 1. **Repeated gaps.** For each gap the critic raised in two or more rounds, write one lesson: what went wrong, and what fixed it.
 
    `S/lessons.mjs add --tag <domain> --text "<one sentence, at most 300 characters>" --from <run> [--source <url>]`

@@ -4,6 +4,7 @@
 // its locked state code), so the page changes nothing the CLI could not.
 // GET /                 the dashboard          GET /unit/<id>     a unit's page
 // GET /maps             the run's maps (mind map, flow, heatmaps, goal relevance)
+// GET /report           release notes, changes, devops facts, quality signals   GET /retro  the run's retro
 // GET /coordinator      the coordinator's own page, across every run in the state folder
 // GET /run/<run>[/unit/<id>|/maps|/map]  another run's dashboard, unit page or maps, read-only
 // GET [/run/<run>]/maps  the run maps          GET [/run/<run>]/map  the project map, when one is built
@@ -18,7 +19,7 @@ import { csp } from './parts.mjs';
 export const HOST = '127.0.0.1';
 const MAX_BODY = 64 * 1024;
 const ID = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
-const PAGE = new RegExp(`^/(?:coordinator|maps|map|run/${ID}(?:/unit/${ID}|/maps|/map)?|unit/${ID})?$`);
+const PAGE = new RegExp(`^/(?:coordinator|maps|map|report|retro|run/${ID}(?:/unit/${ID}|/maps|/map|/report|/retro)?|unit/${ID})?$`);
 const ART = new RegExp(`^(?:/run/(${ID}))?/artifacts/([A-Za-z0-9_][A-Za-z0-9._-]{0,63})/([^/]+)$`);
 
 const sameToken = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));

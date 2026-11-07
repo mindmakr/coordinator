@@ -34,15 +34,21 @@ export function ask(s, o) {
   const header = text(o.header, 'header', 100);
   if (header.length > HEADER_MAX) throw new Error(`--header is ${HEADER_MAX} characters at most`);
   if (o.multi !== undefined && o.multi !== true) throw new Error('--multi takes no value');
+  // --approves: the option that means "yes" to a step only the person may approve (lib/approval.mjs).
+  const approves = o.approves === undefined ? null : options.find((x) => x.label.toLowerCase() === String(o.approves).trim().toLowerCase())?.label;
+  if (approves === undefined) throw new Error(`--approves must name one of the options (${options.map((x) => x.label).join(', ')})`);
+  if (approves && o.multi === true) throw new Error('--approves goes with a single-answer question');
   s.notes.push({
     kind: 'question', text: text(o.question, 'question', 1000), header, options, multi: o.multi === true,
-    unit: hasUnit(s, o.unit), recommend: options[0].label, at: now(), history: [], usedAt: null,
+    unit: hasUnit(s, o.unit), recommend: options[0].label, at: now(), history: [], usedAt: null, ...(approves ? { approves } : {}),
   });
   return `q${asked(s).length}`;
 }
 
 // Records an answer, or changes it until the lead has used it. Every answer is kept.
-export function answer(s, id, { choices = [], other = null, by = 'person' }) {
+// via: where it was given (lib/approval.mjs): 'dashboard', 'web' or 'cli'; confirm: the person's words, for a CLI answer.
+const VIA = ['dashboard', 'web', 'cli'];
+export function answer(s, id, { choices = [], other = null, by = 'person', via = undefined, confirm = undefined }) {
   const q = find(s, id);
   if (q.usedAt) throw new Error(`${id} is already used by the lead; its answer can no longer change`);
   if (decided(s, id)) throw new Error(`${id} is closed by a decision`);
@@ -55,7 +61,9 @@ export function answer(s, id, { choices = [], other = null, by = 'person' }) {
   const free = optText(other, 1000);
   if (!picked.length && !free) throw new Error('give an answer: --choice or --other');
   if (!q.multi && picked.length + (free ? 1 : 0) > 1) throw new Error(`${id} takes one answer: one --choice, or --other`);
-  q.history = [...(q.history ?? []), { choices: picked, other: free, by: oneOf(by, ['person', 'lead'], '--by'), at: now() }];
+  const words = confirm === undefined ? null : text(confirm, 'confirm (the person\'s own words)', 1000);
+  if (words && (by !== 'person' || via !== 'cli')) throw new Error('--confirm goes with --by person, on the CLI');
+  q.history = [...(q.history ?? []), { choices: picked, other: free, by: oneOf(by, ['person', 'lead'], '--by'), ...(via !== undefined ? { via: oneOf(via, VIA, 'via') } : {}), ...(words ? { confirm: words } : {}), at: now() }];
 }
 
 export function useAnswer(s, id) {
@@ -71,8 +79,9 @@ export function fromForm(q, choice, other) {
   return choice.includes(OTHER) || !choice.length ? { choices: [], other } : { choices: choice.slice(0, 1), other: null };
 }
 
-export function personNote(s, { text: t, unit }) {
-  s.notes.push({ kind: 'person', text: text(t, 'text', 1000), unit: hasUnit(s, unit || undefined), at: now() });
+export function personNote(s, { text: t, unit, via = undefined, confirm = false }) {
+  if (confirm && via !== 'cli') throw new Error('--confirm goes with a note typed on the CLI');
+  s.notes.push({ kind: 'person', text: text(t, 'text', 1000), unit: hasUnit(s, unit || undefined), ...(via !== undefined ? { via: oneOf(via, VIA, 'via') } : {}), ...(confirm ? { confirm: true } : {}), at: now() });
 }
 
 export const answerText = (a) => (a ? [...a.choices, ...(a.other ? [`"${a.other}"`] : [])].join(', ') : '');
@@ -85,7 +94,7 @@ export function questions(run) {
     const status = n.usedAt ? 'used' : decided(run, id) ? 'decided' : history.length ? 'answered' : 'open';
     return {
       id, text: n.text, header: n.header ?? null, options: n.options ?? [], multi: !!n.multi, unit: n.unit ?? null,
-      recommend: n.recommend ?? null, at: n.at, answer: history.at(-1) ?? null, history, usedAt: n.usedAt ?? null,
+      recommend: n.recommend ?? null, approves: n.approves ?? null, at: n.at, answer: history.at(-1) ?? null, history, usedAt: n.usedAt ?? null,
       status, open: status === 'open',
     };
   });

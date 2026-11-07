@@ -2,12 +2,13 @@
 // (map/events.jsonl, map/map.json, map/map.md, and map.html beside hud.html),
 // stage it at a pit stop, and answer "what does this file touch".
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { esc } from '../links.mjs';
 import { page } from '../parts.mjs';
 import { withLock, writeAtomic } from '../store.mjs';
 import { buildMap } from './build.mjs';
+import { callsText, unitCalls } from './calls.mjs';
 import { files, load, record } from './log.mjs';
 import { mapPage } from './page.mjs';
 import { summary } from './summary.mjs';
@@ -141,6 +142,42 @@ export function mapView(run, runDir, ctx) {
       + `<div class="needs"><p><b>The map's log could not be read.</b></p><p>${esc(e.message)}</p></div>`;
     return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map` });
   }
+}
+
+// Function calls per unit (lib/map/calls.mjs): map/calls/<unit>.json, and the scan cache
+// map/calls-cache.json keyed by file hash. Both are local and derived: a pit stop ships neither.
+const callsFile = (runDir, unit) => join(mapDir(runDir), 'calls', `${unit}.json`);
+export function computeCalls(runDir, opts) {
+  const data = unitCalls(opts.root, { ...opts, cacheFile: join(mapDir(runDir), 'calls-cache.json') });
+  mkdirSync(join(mapDir(runDir), 'calls'), { recursive: true });
+  writeAtomic(callsFile(runDir, opts.unit), `${JSON.stringify(data)}\n`);
+  return data;
+}
+export { callsText };
+
+// The files a map build tagged with this unit changed (modules set or removed): the fallback when no diff is recorded.
+export function unitFiles(runDir, unit) {
+  const f = files(mapDir(runDir)).events;
+  if (!existsSync(f)) return [];
+  const events = readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const n = events.filter((e) => e.kind === 'map.build' && e.unit === unit).at(-1)?.build;
+  if (n === undefined || n === events.find((e) => e.kind === 'map.build')?.build) return []; // a first build has no baseline: every file is new to it
+  return [...new Set(events.filter((e) => e.kind === 'map.delta' && e.build === n && e.coll === 'modules').flatMap((e) => [...e.set.map((r) => r.id), ...e.del]))].sort();
+}
+
+// What the pages read: one unit's data, or every unit's, read once per render.
+export function readCalls(runDir) {
+  const memo = new Map();
+  const get = (unit) => {
+    if (!memo.has(unit)) { let d = null; try { d = JSON.parse(readFileSync(callsFile(runDir, unit), 'utf8')); } catch { /* none yet */ } memo.set(unit, d?.v === 1 ? d : null); }
+    return memo.get(unit);
+  };
+  const list = () => {
+    let names = [];
+    try { names = readdirSync(join(mapDir(runDir), 'calls')).filter((n) => n.endsWith('.json')).map((n) => n.slice(0, -5)).sort(); } catch { /* none */ }
+    return names.map((unit) => ({ unit, data: get(unit) })).filter((x) => x.data);
+  };
+  return { get, list };
 }
 
 export function touchesOf(run, runDir, path, json = false) {

@@ -1,6 +1,8 @@
 // The loop's decisions, as pure functions: what each unit should do next, and
 // when the loop must stop. No I/O here, so every rule is unit-tested.
 
+import { chainUnits } from './chain.mjs';
+
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
 
@@ -30,6 +32,9 @@ export function sameGap(a, b) {
   return sameWords(A.gap, B.gap);
 }
 
+// The run's round budget plus any extra rounds the person approved for this unit (`run.mjs extend`).
+export const roundCap = (unit, run) => run.budget.maxRounds + (Number.isInteger(unit.extraRounds) ? unit.extraRounds : 0);
+
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
 
@@ -51,7 +56,7 @@ export function decideUnit(unit, run, nowMs) {
   const rounds = unit.rounds;
   const last = rounds.at(-1);
   if (!last) return { action: 'build' };
-  if (rounds.length >= budget.maxRounds) return stop('budget: rounds');
+  if (rounds.length >= roundCap(unit, run)) return stop('budget: rounds');
 
   const prev = rounds.at(-2);
   if (prev && sameGap(prev, last)) {
@@ -63,9 +68,25 @@ export function decideUnit(unit, run, nowMs) {
   const scores = rounds.map((r) => r.score).filter((s) => typeof s === 'number');
   if (scores.length > NO_PROGRESS_ROUNDS) {
     const before = Math.max(...scores.slice(0, -NO_PROGRESS_ROUNDS));
-    if (scores.slice(-NO_PROGRESS_ROUNDS).every((s) => s <= before)) return stop('no progress');
+    if (scores.slice(-NO_PROGRESS_ROUNDS).every((s) => s <= before)) return stop(noProgress(unit));
   }
   return { action: 'build', gap: last.gap };
+}
+
+// The no-progress reason. When one behaviour failed in each of the last rounds
+// and every other behaviour marked in the last round passed, the stop names it:
+// that is usually an open-ended line ("catch every X"), not worse work (#35).
+export function noProgress(unit) {
+  const window = unit.rounds.slice(-NO_PROGRESS_ROUNDS);
+  const failing = (r) => (r.behaviours ?? []).filter((m) => m.status === 'fail').map((m) => m.id);
+  const last = unit.rounds.at(-1)?.behaviours ?? [];
+  const lone = failing(unit.rounds.at(-1) ?? {});
+  if (lone.length !== 1 || !last.some((m) => m.status === 'pass')) return 'no progress';
+  const id = lone[0];
+  if (!window.every((r) => failing(r).includes(id))) return 'no progress';
+  const words = (unit.behaviours ?? []).find((b) => b.id === id)?.text;
+  const quoted = words ? ` ("${words.length > 120 ? `${words.slice(0, 119)}…` : words}")` : '';
+  return `no progress: only ${id}${quoted} kept failing while the rest passed; state it as a closed list or a fixed inventory, or move it to its own unit (references/bar.md)`;
 }
 
 export function decide(run, nowMs = Date.now()) {
@@ -115,13 +136,15 @@ export function bySetup(runs) {
   return [...groups.values()].map((g) => ({ ...g, rate: Math.round((g.escapes / g.passed) * 100) / 100 })).sort((a, b) => a.setup.localeCompare(b.setup));
 }
 
+// A unit finished in a follow-on run counts once, with its rounds added up (lib/chain.mjs).
 export function stats(runs) {
   const passRounds = [];
-  let total = 0; let stopped = 0;
-  for (const run of runs) for (const u of run.units) {
+  let total = 0; let stopped = 0; let unfinished = 0;
+  for (const u of chainUnits(runs)) {
     total++;
-    if (u.status === 'pass') passRounds.push(u.rounds.length);
-    if (u.status === 'stopped') stopped++;
+    if (u.status === 'pass') passRounds.push(u.rounds);
+    else if (u.status === 'stopped') stopped++;
+    else if (u.outcome === 'unfinished') unfinished++; // its run closed with it open: neither a pass nor a stop
   }
   passRounds.sort((a, b) => a - b);
   const pct = (p) => (passRounds.length ? passRounds[Math.min(passRounds.length - 1, Math.ceil(p * passRounds.length) - 1)] : null);
@@ -130,6 +153,7 @@ export function stats(runs) {
     runs: runs.length, units: total,
     medianRoundsToPass: pct(0.5), p80RoundsToPass: p80,
     stoppedShare: total ? Math.round((stopped / total) * 100) / 100 : null,
+    unfinished, unfinishedShare: total ? Math.round((unfinished / total) * 100) / 100 : null,
     suggestedMaxRounds: p80 === null ? null : Math.min(8, p80 + 1),
     ...escapeTotals(runs),
   };
