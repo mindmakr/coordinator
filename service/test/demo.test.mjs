@@ -66,6 +66,9 @@ test('the demo refuses to start off loopback, in production, or beside a real Gi
   assert.throws(() => demoGuard({ host: '127.0.0.1', env: { NODE_ENV: 'production' } }), /NODE_ENV is production/);
   assert.throws(() => demoGuard({ host: '127.0.0.1', env: { APP_ENV: ' Production ' } }), /APP_ENV is production/);
   for (const v of ['prod', 'PRD', 'live']) assert.throws(() => demoGuard({ host: '127.0.0.1', env: { APP_ENV: v } }), /APP_ENV is/);
+  // Fail closed: only unset, empty or a known local name passes.
+  for (const v of ['staging', 'stage', 'prodution', 'qa', 'uat', 'preview', 'development2']) assert.throws(() => demoGuard({ host: '127.0.0.1', env: { NODE_ENV: v } }), /NODE_ENV is .*runs only with it unset/);
+  for (const v of ['', '  ', 'local', ' Demo ', 'TEST', 'development']) assert.doesNotThrow(() => demoGuard({ host: '127.0.0.1', env: { APP_ENV: v, NODE_ENV: v } }), v);
   assert.throws(() => demoGuard({ host: '127.0.0.1', env: { NODE_ENV: 'live' } }), /NODE_ENV is live/);
   for (const k of ['GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_CLIENT_SECRET', 'GITHUB_WEBHOOK_SECRET', 'SESSION_SECRET', 'DATABASE_URL']) {
     assert.throws(() => demoGuard({ host: '127.0.0.1', env: { [k]: 'x' } }), new RegExp(`${k} is set`));
