@@ -11,6 +11,7 @@ import { maskSecrets } from './secrets.mjs';
 import { checkSettings, readSettings } from './settings.mjs';
 import { themeFile } from './theme.mjs';
 import { readRegistry } from './registry.mjs';
+import { staleCommands } from './pkg-scripts.mjs';
 
 export const RELEASES = 'https://github.com/mindmakr/coordinator';
 const LOCK_STALE_MS = 30_000;
@@ -76,32 +77,19 @@ export function gitCheck(ctx) {
   return out('git', 'ok', `git repo, remote ${origin.replace(/\s*\(fetch\)$/, '').replace(/\t/, ' ')}`);
 }
 
-// Commands quoted in COORDINATOR.md must still be scripts in package.json.
-const BUILTIN = new Set(['install', 'i', 'ci', 'add', 'exec', 'x', 'dlx', 'create', 'init', 'publish', 'version', 'outdated', 'audit', 'ls', 'update', 'remove', 'link', 'pack', 'why', 'config', 'login', 'whoami']);
-export function staleCommands(doc, project) {
-  const missing = [];
-  for (const [, code] of doc.matchAll(/`([^`\n]+)`/g)) {
-    for (const m of code.matchAll(/(?:^|&&|;|\|\|)\s*(?:cd\s+([^\s&;]+)\s*&&\s*)?(npm|pnpm|yarn|bun)\s+(run\s+)?([\w:.-]+)/g)) {
-      const [, dir, tool, run, script] = m;
-      if (!run && (BUILTIN.has(script) || (tool === 'npm' && !['test', 'start', 'stop', 'restart'].includes(script)))) continue;
-      const pkg = join(project, dir ?? '', 'package.json');
-      let scripts = null;
-      try { scripts = JSON.parse(readFileSync(pkg, 'utf8')).scripts ?? {}; } catch { /* no package.json */ }
-      if (!scripts || !(script in scripts)) missing.push(`${dir ? `${dir}: ` : ''}${tool} ${run ? 'run ' : ''}${script}`);
-    }
-  }
-  return [...new Set(missing)];
-}
-
 export function contextCheck(ctx) {
   const file = join(ctx.project, 'COORDINATOR.md');
   if (!existsSync(file)) return out('context', 'warn', 'no COORDINATOR.md: every run re-learns the project', '/coordinator:init');
   const doc = readFileSync(file, 'utf8');
-  const missing = staleCommands(doc, ctx.project);
-  if (missing.length) return out('context', 'warn', `COORDINATOR.md names commands no package.json has: ${missing.join(', ')}`, '/coordinator:init to refresh it');
+  // Commands quoted in COORDINATOR.md must still be scripts in a package.json (lib/pkg-scripts.mjs).
+  const { missing, searched, found, unreadable } = staleCommands(doc, ctx.project);
+  const bad = unreadable.length ? `; could not read ${unreadable.join(', ')} (not valid JSON)` : '';
+  if (missing.length) return out('context', 'warn', `COORDINATOR.md names commands no package.json has: ${missing.join(', ')} (searched ${searched.join(', ')})${bad}`, '/coordinator:init to refresh it');
+  if (bad) return out('context', 'warn', `COORDINATOR.md commands found${bad.replace(';', ',')}`, 'fix the package.json');
   const theme = themeFile({}, ctx.project);
   if (theme && !existsSync(theme)) return out('context', 'warn', `COORDINATOR.md Theme: file not found (${rel(ctx.project, theme)})`, 'fix the Theme: line or remove it');
-  return out('context', 'ok', 'COORDINATOR.md present; its commands exist');
+  const where = Object.entries(found).map(([file, names]) => `${names.join(', ')} in ${file}`);
+  return out('context', 'ok', `COORDINATOR.md present; its commands exist${where.length ? ` (${where.join('; ')})` : ''}`);
 }
 
 export function stateDirCheck(ctx) {
