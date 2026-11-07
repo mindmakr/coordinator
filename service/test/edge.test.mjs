@@ -27,33 +27,34 @@ function stall(t, ip, length, send) {
   if (send) s.write(Buffer.alloc(send, 0x61));
   return { status, socket: s };
 }
-const signed = async (t, ip) => {
-  const b = JSON.stringify({ zen: 'hi', hook_id: 1, installation: { id: 7 } });
+const signed = async (t, ip, pad = '') => {
+  const b = JSON.stringify({ zen: 'hi', hook_id: 1, installation: { id: 7 }, pad });
   const r = await fetch(`${t.base}/webhook`, { method: 'POST', body: b, headers: { 'X-Forwarded-For': ip, 'X-GitHub-Event': 'ping', 'X-GitHub-Delivery': `e-${++n}`, 'X-Hub-Signature-256': sign(t.cfg.github.webhookSecret, b) } });
   return r.status;
 };
 
-test('c14: stalled bodies cannot starve the webhook: a cap per address, a reserve for small bodies, and a deadline', async () => {
+test('c14: stalled bodies cannot starve the webhook: a cap per address group, a reserve for GitHub, and a deadline', async () => {
   const t = await startApp({ over: { trustProxy: true, webhookBodyMs: 1500 } });
   const open = [];
   try {
     const M = MAX_WEBHOOK_PER_IP;
-    // One address: its first large body is read, a second waits its turn (429) before a byte is read.
+    // One address group (IPv4 /24): its first body is read, a second waits its turn (429) before a byte is read.
     open.push(stall(t, '10.0.0.1', M, M - 1));
     await wait(200);
-    const second = stall(t, '10.0.0.1', M, 10); open.push(second);
+    const second = stall(t, '10.0.0.2', M, 10); open.push(second);
     assert.equal(await second.status, 429);
-    // Many addresses: large bodies fill the budget up to the reserve, and no further.
-    const large = Math.floor((MAX_WEBHOOK_INFLIGHT - WEBHOOK_RESERVE) / M);
-    for (let i = 2; i <= large; i++) open.push(stall(t, `10.0.0.${i}`, M, M - 1));
-    await wait(300);
-    const over = stall(t, '10.0.1.1', M, 10); open.push(over);
-    assert.equal(await over.status, 503, 'the reserve is not for large bodies');
+    // Many groups: bodies fill the budget up to the reserve, and no further.
+    const groups = Math.floor((MAX_WEBHOOK_INFLIGHT - WEBHOOK_RESERVE) / M);
+    assert.ok(groups >= 50, `filling the budget takes ${groups} groups`);
+    for (let i = 2; i <= groups; i++) open.push(stall(t, `10.${i}.0.1`, M, M - 1));
+    await wait(400);
+    const over = stall(t, '10.200.0.1', M, 10); open.push(over);
+    assert.equal(await over.status, 503, 'the reserve is not for them');
     const b = t.app.webhookBytes();
-    assert.ok(b.used >= large * (M - 1) && b.used <= MAX_WEBHOOK_INFLIGHT - WEBHOOK_RESERVE, `${b.used}`);
-    // GitHub's usual small deliveries still get through, from anywhere, the stalling addresses included.
-    assert.equal(await signed(t, '192.0.2.10'), 200);
-    assert.equal(await signed(t, '10.0.0.1'), 200);
+    assert.ok(b.used >= groups * (M - 1) && b.used <= MAX_WEBHOOK_INFLIGHT - WEBHOOK_RESERVE, `${b.used}`);
+    // GitHub's deliveries still get through, from its hook addresses; nobody else reaches the reserve.
+    assert.equal(await signed(t, '140.82.115.1', 'x'.repeat(6000)), 200);
+    assert.equal(await signed(t, '192.0.2.10', 'x'.repeat(6000)), 503);
     // The deadline: every stalled body is cut, its bytes are released, and it counts as a refusal.
     const codes = await Promise.all(open.slice(0, 1).concat(open.slice(2, -1)).map((x) => x.status));
     assert.ok(codes.every((c) => c === 408 || c === 'closed'), String(codes));
