@@ -5,7 +5,7 @@
 // sending signed webhooks to the service's own /webhook. Nothing leaves the machine:
 // the server listens on loopback only and no code path here reaches for the network.
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,17 +56,39 @@ function bannered(res) {
 }
 
 // runs: run folders to copy. env: checked by demoGuard. → { url, close(), outbox, projects, app, gh }
+// The copies hold raw logs, so they never outlive the demo: removed on close, on exit, and,
+// after a hard kill, at the next start (a folder whose recorded pid is no longer running).
+const PREFIX = 'coordinator-demo-';
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+export function sweepStale(root = tmpdir()) {
+  const gone = [];
+  for (const name of readdirSync(root)) {
+    if (!name.startsWith(PREFIX)) continue;
+    let pid;
+    try { pid = Number(readFileSync(join(root, name, 'pid'), 'utf8').trim()); } catch { continue; }
+    if (Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid && !alive(pid)) { rmSync(join(root, name), { recursive: true, force: true }); gone.push(name); }
+  }
+  return gone;
+}
+
 export async function startDemo({ runs = [], host = '127.0.0.1', port = 0, env = process.env, log = null, now = Date.now } = {}) {
   demoGuard({ host, env });
   if (!runs.length) throw new Error('give at least one run folder: --runs <project>/.coordinator/runs/<run>');
-  const tmp = mkdtempSync(join(tmpdir(), 'coordinator-demo-'));
+  const swept = sweepStale();
+  const tmp = mkdtempSync(join(tmpdir(), PREFIX));
+  writeFileSync(join(tmp, 'pid'), `${process.pid}\n`);
+  const onExit = () => rmSync(tmp, { recursive: true, force: true });
+  process.on('exit', onExit);
   try {
-    return await boot({ runs, host, port, log, now, tmp });
-  } catch (e) { rmSync(tmp, { recursive: true, force: true }); throw e; }
+    const demo = await boot({ runs, host, port, log, now, tmp });
+    const close = demo.close;
+    return Object.assign(demo, { swept, async close() { await close(); process.off('exit', onExit); } });
+  } catch (e) { onExit(); process.off('exit', onExit); throw e; }
 }
 
 async function boot({ runs, host, port, log, now, tmp }) {
-  const projects = copyRuns(runs, tmp);
+  const { projects, skipped } = copyRuns(runs, tmp);
+  if (!projects.length) throw new Error(`no run could be loaded: ${skipped.join('; ')}`);
   port ||= await freePort(host);
   const baseUrl = `http://${host.includes(':') ? `[${host}]` : host}:${port}`;
   const webhookSecret = randomBytes(24).toString('hex');
@@ -116,20 +138,29 @@ async function boot({ runs, host, port, log, now, tmp }) {
   for (const [owner, id] of installs) await db.upsertInstallation({ id, account: owner });
 
   // The first pit stop of every copied run, then the service reads the branches the normal way.
-  const warnings = [];
+  const warnings = [...skipped];
   for (const p of projects) {
     for (const run of p.runs) { try { pitStop(p, run); } catch (e) { warnings.push(`${run.id}: ${e.message}`); } }
     gh.setFiles(p.repo, readFolder(p.branch));
   }
   for (const id of installs.values()) await app.ingest.syncInstallation(id);
   await app.idle();
+  // What the service itself refused (a cap, a log that fails validation), as the hosted App would.
+  for (const p of projects) for (const run of p.runs) {
+    const row = await db.run(p.installationId, p.repoId, run.id);
+    if (!row?.state) warnings.push(`${run.id}: the service did not load it${row?.error ? `: ${row.error}` : ''}`);
+    else if (row.error) warnings.push(`${run.id}: the service kept an older copy: ${row.error}`);
+  }
 
   const sign = (body) => `sha256=${createHmac('sha256', webhookSecret).update(body).digest('hex')}`;
   let deliveries = 0;
+  // Each delivery has its own id, in the header and in the body: the service skips a body it has seen
+  // before (a replay), so two pushes or merges in a row must differ, as GitHub's own do.
   async function deliver(event, payload) {
-    const body = JSON.stringify(payload);
+    const id = `demo-${++deliveries}-${randomUUID()}`;
+    const body = JSON.stringify({ ...payload, demo_delivery: id });
     const r = await fetch(`${baseUrl}/webhook`, { method: 'POST', body, headers: {
-      'Content-Type': 'application/json', 'X-GitHub-Event': event, 'X-GitHub-Delivery': `demo-${++deliveries}-${randomUUID()}`, 'X-Hub-Signature-256': sign(body),
+      'Content-Type': 'application/json', 'X-GitHub-Event': event, 'X-GitHub-Delivery': id, 'X-Hub-Signature-256': sign(body),
       'X-GitHub-Hook-Installation-Target-Type': 'integration', 'X-GitHub-Hook-Installation-Target-ID': APP_ID,
     } });
     const text = await r.text();
@@ -141,12 +172,14 @@ async function boot({ runs, host, port, log, now, tmp }) {
   async function leadPush(act = null) {
     const out = [];
     for (const p of projects) {
+      const before = await gh.ref(null, p.repo);
       writeFolder(p.branch, gh.repos.get(p.repo).files);
       for (const run of p.runs) {
         try { pullFrom(p, run); if (act) act(p, run); pitStop(p, run); } catch (e) { out.push(`${run.id}: ${e.message}`); }
       }
       gh.setFiles(p.repo, readFolder(p.branch));
-      out.push(await deliver('push', { ref: 'refs/heads/coordinator-state', installation: { id: p.installationId }, repository: { id: p.repoId, full_name: p.repo, private: true } }));
+      const after = await gh.ref(null, p.repo);
+      out.push(await deliver('push', { ref: 'refs/heads/coordinator-state', before, after, head_commit: { id: after, timestamp: new Date(now()).toISOString() }, installation: { id: p.installationId }, repository: { id: p.repoId, full_name: p.repo, private: true } }));
     }
     return out.join(' · ');
   }
@@ -173,7 +206,7 @@ async function boot({ runs, host, port, log, now, tmp }) {
       const at = new Date(now()).toISOString();
       const base = { installation: { id }, repository: { id: 0, full_name: m[1] } };
       out.push(kind === 'merge'
-        ? await deliver('pull_request', { ...base, action: 'closed', pull_request: { number: Number(m[2]), merged: f.get('how') !== 'closed', merged_at: at, closed_at: at, updated_at: at } })
+        ? await deliver('pull_request', { ...base, action: 'closed', pull_request: { id: deliveries + 1, number: Number(m[2]), merged: f.get('how') !== 'closed', merged_at: at, closed_at: at, updated_at: at } })
         : await deliver('check_suite', { ...base, action: 'completed', check_suite: { id: ++checkId, conclusion: f.get('conclusion') === 'success' ? 'success' : 'failure', head_sha: 'demo', updated_at: at, pull_requests: [{ number: Number(m[2]) }] } }));
     }
     return out.join(' · ');

@@ -13,7 +13,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { demoGuard } from '../src/demo/guard.mjs';
-import { startDemo } from '../src/demo/index.mjs';
+import { startDemo, sweepStale } from '../src/demo/index.mjs';
+import { copyRuns, pitStop } from '../src/demo/runs.mjs';
 import { BANNER_TEXT } from '../src/demo/ui.mjs';
 import { startApp } from './helpers.mjs';
 
@@ -64,7 +65,9 @@ test('the demo refuses to start off loopback, in production, or beside a real Gi
   for (const host of ['0.0.0.0', '::', 'localhost', '192.168.1.5', '']) assert.throws(() => demoGuard({ host, env: CLEAN }), /127\.0\.0\.1 or ::1 only/);
   assert.throws(() => demoGuard({ host: '127.0.0.1', env: { NODE_ENV: 'production' } }), /NODE_ENV is production/);
   assert.throws(() => demoGuard({ host: '127.0.0.1', env: { APP_ENV: ' Production ' } }), /APP_ENV is production/);
-  for (const k of ['GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_CLIENT_SECRET', 'GITHUB_WEBHOOK_SECRET']) {
+  for (const v of ['prod', 'PRD', 'live']) assert.throws(() => demoGuard({ host: '127.0.0.1', env: { APP_ENV: v } }), /APP_ENV is/);
+  assert.throws(() => demoGuard({ host: '127.0.0.1', env: { NODE_ENV: 'live' } }), /NODE_ENV is live/);
+  for (const k of ['GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_PRIVATE_KEY_FILE', 'GITHUB_CLIENT_SECRET', 'GITHUB_WEBHOOK_SECRET', 'SESSION_SECRET', 'DATABASE_URL']) {
     assert.throws(() => demoGuard({ host: '127.0.0.1', env: { [k]: 'x' } }), new RegExp(`${k} is set`));
   }
   assert.doesNotThrow(() => demoGuard({ host: '::1', env: { NODE_ENV: 'development', GITHUB_APP_ID: '' } }));
@@ -180,5 +183,73 @@ test('the demo end to end: copies only, banner everywhere, both people, answers,
     const outside = seen.filter((h) => !['127.0.0.1', '::1'].includes(h.replace(/^dns:/, '')));
     assert.deepEqual(outside, [], 'no connection or lookup leaves the machine');
     assert.ok(seen.includes('127.0.0.1'), 'the watch saw the local requests');
+  } finally { rmSync(src.root, { recursive: true, force: true }); }
+});
+
+const quiet = { info() {}, warn() {}, error() {} };
+
+test('every push, merge and check reaches the service: the lead asks twice and both questions show and alert', async () => {
+  const src = project();
+  const demo = await startDemo({ runs: [src.run], env: CLEAN, log: quiet });
+  try {
+    const base = demo.url;
+    const post = (p, body) => fetch(`${base}${p}`, { method: 'POST', redirect: 'manual', body: new URLSearchParams(body), headers: { Origin: base, 'Content-Type': 'application/x-www-form-urlencoded' } });
+    const flash = async () => /<div class="goal"><p>([^<]*)<\/p>/.exec(await (await fetch(`${base}/demo`)).text())?.[1] ?? '';
+    for (const q of ['q1', 'q2']) {
+      assert.equal((await post('/demo/ask', { run: 'acme/web r1' })).status, 303);
+      const said = await flash();
+      assert.match(said, new RegExp(`asked ${q}`));
+      assert.doesNotMatch(said, /duplicate/);
+      // A plain push after the question changes nothing on the branch, but is still delivered.
+      assert.equal((await post('/demo/push', {})).status, 303);
+      assert.doesNotMatch(await flash(), /duplicate/);
+    }
+    // Both questions are on the run page.
+    const start = await fetch(`${base}/login`, { redirect: 'manual' });
+    const state = new URL(start.headers.get('location')).searchParams.get('state');
+    const back = await fetch(`${base}/auth/callback?code=ana&state=${state}`, { headers: { Cookie: start.headers.get('set-cookie').split(';')[0] }, redirect: 'manual' });
+    const cookie = back.headers.getSetCookie().find((c) => c.startsWith('coordinator=')).split(';')[0];
+    const page = await (await fetch(`${base}/r/acme/web/run/r1`, { headers: { Cookie: cookie } })).text();
+    for (const q of ['q1', 'q2']) assert.match(page, new RegExp(`id="${q}"`));
+    const needs = demo.outbox.filter((x) => x.title === 'Coordinator: needs you' && x.channel === 'email' && x.to === 'ana@demo.invalid');
+    assert.equal(needs.length, 2, 'one alert per question');
+    for (let i = 0; i < 2; i++) {
+      assert.equal((await post('/demo/merge', { ref: 'acme/web#12', how: 'closed' })).status, 303);
+      assert.doesNotMatch(await flash(), /duplicate/);
+      assert.equal((await post('/demo/checks', { ref: 'acme/web#12', conclusion: 'success' })).status, 303);
+      assert.doesNotMatch(await flash(), /duplicate/);
+    }
+  } finally { await demo.close(); rmSync(src.root, { recursive: true, force: true }); }
+});
+
+test('copies: logs over the cap are left out and listed, the pit stop never asks GitHub, stale copies are swept', async () => {
+  const src = project();
+  try {
+    // A temp folder inside the project: without the copy's "visibility" the pit stop would ask `gh repo view`.
+    const inside = mkdtempSync(join(src.root, 'tmp-'));
+    const { projects, skipped } = copyRuns([src.run], inside);
+    assert.deepEqual(skipped, []);
+    assert.match(readFileSync(join(projects[0].base, 'coordinator.json'), 'utf8'), /"visibility": "private"/);
+    assert.ok(pitStop(projects[0], projects[0].runs[0]).pushed);
+
+    const big = join(src.root, '.coordinator', 'runs', 'huge');
+    mkdirSync(big);
+    writeFileSync(join(big, 'events.jsonl'), Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
+    const two = copyRuns([src.run, big], mkdtempSync(join(tmpdir(), 'coord-demo-cap-')));
+    assert.deepEqual(two.projects[0].runs.map((r) => r.id), ['r1']);
+    assert.match(two.skipped[0], /^huge: its log is 8\.0 MB, over the service's 8 MB cap/);
+    await assert.rejects(startDemo({ runs: [big], env: CLEAN, log: quiet }), /no run could be loaded: huge/);
+    rmSync(two.projects[0].root, { recursive: true, force: true });
+
+    // Stale copies: only a folder whose recorded pid has exited goes.
+    const root = mkdtempSync(join(tmpdir(), 'coord-demo-sweep-'));
+    const dead = spawnSync(process.execPath, ['-e', '0']).pid;
+    for (const [name, pid] of [['coordinator-demo-dead', dead], ['coordinator-demo-alive', process.ppid], ['coordinator-demo-nopid', null], ['other-dead', dead]]) {
+      mkdirSync(join(root, name));
+      if (pid) writeFileSync(join(root, name, 'pid'), `${pid}\n`);
+    }
+    assert.deepEqual(sweepStale(root), ['coordinator-demo-dead']);
+    assert.deepEqual(readdirSync(root).sort(), ['coordinator-demo-alive', 'coordinator-demo-nopid', 'other-dead']);
+    rmSync(root, { recursive: true, force: true });
   } finally { rmSync(src.root, { recursive: true, force: true }); }
 });

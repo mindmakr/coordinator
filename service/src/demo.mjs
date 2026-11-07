@@ -18,11 +18,16 @@ try {
   const demo = await startDemo({ runs: args.runs, host: args.host, port });
   const runs = demo.projects.flatMap((p) => p.runs.map((r) => `  ${p.repo}  ${r.id}`));
   console.log(`Coordinator local demo — nothing here is real or shared.\n\nCopied ${runs.length} run${runs.length === 1 ? '' : 's'} (the folders you passed are only read):\n${runs.join('\n')}`);
-  for (const w of demo.warnings) console.log(`  not loaded: ${w}`);
+  if (demo.warnings.length) console.log(`\nNot shown, or shown with a warning:\n${demo.warnings.map((w) => `  ${w}`).join('\n')}`);
+  if (demo.swept.length) console.log(`\nRemoved ${demo.swept.length} copy folder${demo.swept.length === 1 ? '' : 's'} left by an earlier demo that was killed.`);
   console.log(`\nOpen ${demo.url}/ and press "Demo sign in".\nControls: ${demo.url}/demo   Alerts outbox: ${demo.url}/demo/outbox\nCtrl+C stops it and deletes the copies (pid ${process.pid}).`);
-  const stop = async () => { await demo.close(); process.exit(0); };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
+  // Every way out removes the copies (a hard kill is swept at the next start).
+  let stopping = false;
+  const stop = async (code = 0) => { if (stopping) return; stopping = true; await demo.close().catch(() => {}); process.exit(code); };
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(sig, () => stop(0));
+  const crash = (e) => { console.error(`demo stopped: ${e?.stack ?? e}`); stop(1); };
+  process.on('uncaughtException', crash);
+  process.on('unhandledRejection', crash);
 } catch (e) {
   console.error(`demo not started: ${e.message}`);
   process.exit(1);

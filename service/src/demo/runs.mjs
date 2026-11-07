@@ -4,10 +4,11 @@
 // folders are only ever read. Only a run's log, its snapshot and its project map are
 // copied: never evidence files, never anything named .env*.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO, decide, isSafeId, mapAttach, mapRestore, pullRun, pushRun, workbench } from '../core.mjs';
+import { LIMITS } from '../ingest.mjs';
 
 const RUN_MJS = fileURLToPath(new URL('../../../skills/coordinator/scripts/run.mjs', import.meta.url));
 // What a copy holds: the log, its snapshot, and the map (staged for the pit stop, and the working one).
@@ -34,20 +35,28 @@ const slug = (s) => String(s).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+/
 
 // folders: run folders (<project>/.coordinator/runs/<run>). Copies each into tmp, grouped by
 // project; each project becomes one repo: the name a run of it records, else local/<folder>.
-// → [{ repo, original, root, base, branch, runs: [{ id, dir, original }] }]
+// A log over the service's cap (LIMITS.logBytes) is not copied: the service would refuse it.
+// → { projects: [{ repo, original, root, base, branch, runs: [{ id, dir, original }] }], skipped: ['run: why'] }
 export function copyRuns(folders, tmp) {
   const projects = new Map();
+  const skipped = [];
   for (const raw of folders) {
     const from = resolve(raw);
     const id = basename(from);
     if (!existsSync(join(from, 'events.jsonl'))) throw new Error(`not a run folder (no events.jsonl): ${from}`);
     if (!isSafeId(id)) throw new Error(`not a run id: ${id}`);
+    const size = statSync(join(from, 'events.jsonl')).size;
+    if (size > LIMITS.logBytes) { skipped.push(`${id}: its log is ${(size / 2 ** 20).toFixed(1)} MB, over the service's ${LIMITS.logBytes / 2 ** 20} MB cap`); continue; }
     const base = dirname(dirname(from)); // <project>/.coordinator
     const original = dirname(base);
     if (!projects.has(original)) {
       const i = projects.size + 1;
       const root = join(tmp, `project-${i}`);
       projects.set(original, { repo: null, original, root, base: join(root, '.coordinator'), branch: join(tmp, `branch-${i}`), runs: [] });
+      // The pit stop asks GitHub whether a repo is public when its target folder sits inside the project
+      // (the temp folder can be inside it). The copy says private, so it never asks.
+      mkdirSync(join(root, '.coordinator'), { recursive: true });
+      writeFileSync(join(root, '.coordinator', 'coordinator.json'), '{ "visibility": "private" }\n');
     }
     const p = projects.get(original);
     if (p.runs.some((r) => r.id === id)) throw new Error(`run ${id} given twice`);
@@ -64,7 +73,7 @@ export function copyRuns(folders, tmp) {
     p.repo = name;
     mkdirSync(p.branch, { recursive: true });
   }
-  return [...projects.values()];
+  return { projects: [...projects.values()], skipped };
 }
 
 // The pit stop: the run's log (masked by the skill's own redactor, the original project
