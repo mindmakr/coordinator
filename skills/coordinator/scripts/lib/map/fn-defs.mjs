@@ -5,6 +5,9 @@
 // and every parameter list with the body it scopes (lib/map/fn-locals.mjs).
 import { bodyAfter, exprEnd, GEN, ID, KEYWORDS, MODS } from './fn-syntax.mjs';
 
+// `const Card = forwardRef((props, ref) => …)`, `memo(function Row() {})`: the function inside takes the binding's name.
+const WRAP = /(?:React\.)?(?:forwardRef|memo)\s*(?:<[^()]*?>)?\s*\(\s*$/;
+const unwrap = (before) => { const w = WRAP.exec(before); return { head: w ? before.slice(0, w.index) : before, wrapped: !!w }; };
 const back = (bare, close) => { let d = 0; let j = close; for (; j >= 0; j--) { if (bare[j] === ')') d++; else if (bare[j] === '(' && --d === 0) break; } return j; };
 
 // ctx: { bare, br (braces), mt (pairs), kind (open → what it opens), lineOf }
@@ -30,8 +33,8 @@ export function definitions({ bare, br, mt, kind, lineOf }) {
     let name = m[1]; let nameAt = m[1] ? m.index + m[0].indexOf(m[1], 8) : m.index;
     if (!name) {
       const before = bare.slice(Math.max(0, m.index - 200), m.index);
-      const b = /(?:\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=;]+)?=|(?:module\.)?exports\.([\w$]+)\s*=|(?:^|[{,\s])([\w$]+)\s*:|\bexport\s+default)\s*(?:async\s+)?$/.exec(before);
-      if (!b) continue;
+      const b = /(?:\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=;]+)?=|(?:module\.)?exports\.([\w$]+)\s*=|(?:^|[{,\s])([\w$]+)\s*:|\bexport\s+default)\s*(?:async\s+)?$/.exec(unwrap(before).head);
+      if (!b || (unwrap(before).wrapped && !b[1])) continue;
       name = b[1] ?? b[2] ?? b[3] ?? 'default';
       nameAt = m.index - before.length + b.index;
       if (b[3] && inArg(nameAt)) continue;
@@ -62,11 +65,11 @@ export function definitions({ bare, br, mt, kind, lineOf }) {
     const before = bare.slice(Math.max(0, start - 200), start);
     if (/\btype\s+[\w$]+(?:\s*<[^=]*>)?\s*=\s*$/.test(before)) continue; // a function type
     // `onClick: () => void` in a type literal: the "body" is a type
-    if (bare[s] !== '{' && /^(?:void|string|number|boolean|any|unknown|never|null|undefined|Promise\s*<|[A-Z][\w$.]*\s*(?:<|\[\]|[;,})\n|]|$))/.test(bare.slice(s, end + 1))) continue;
-    const b = /(?:\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=;]+)?=|(?:module\.)?exports\.([\w$]+)\s*=|(?:^|[{};,\s])(?:(?:public|private|protected|static|readonly|override)\s+)*(#?[\w$]+)\s*[?!]?\s*(?::[^=;{}]+)?=|(?:^|[{,\s])([\w$]+)\s*:|\bexport\s+default)\s*(?:async\s*)?(?:<[^<>]*>\s*)?$/.exec(before);
-    if (!b) continue;
+    if (bare[s] !== '{' && /^(?:(?:void|string|number|boolean|any|unknown|never|null|undefined)\b(?![\w$.(])|Promise\s*<|[A-Z][\w$]*(?![\w$.(])\s*(?:<|\[\]|[;,})\n|]|$))/.test(bare.slice(s, end + 1))) continue;
+    const b = /(?:\b(?:const|let|var)\s+([\w$]+)\s*(?::[^=;]+)?=|(?:module\.)?exports\.([\w$]+)\s*=|(?:^|[{};,\s])(?:(?:public|private|protected|static|readonly|override)\s+)*(#?[\w$]+)\s*[?!]?\s*(?::[^=;{}]+)?=|(?:^|[{,\s])([\w$]+)\s*:|\bexport\s+default)\s*(?:async\s*)?(?:<[^<>]*>\s*)?$/.exec(unwrap(before).head);
+    if (!b || (unwrap(before).wrapped && !b[1])) continue;
     const name = b[1] ?? b[2] ?? b[3] ?? b[4] ?? 'default';
-    if (KEYWORDS.has(name) && name !== 'default') continue;
+    if (KEYWORDS.has(name) && !['default', 'get', 'set', 'as'].includes(name)) continue; // `get: () => …` is a function
     const nameAt = start - before.length + b.index + b[0].search(/[\w$#]/);
     const holder = br.inner(nameAt); const hk = kind(holder);
     if (hk.kind === 'type') continue;
@@ -96,6 +99,17 @@ export function definitions({ bare, br, mt, kind, lineOf }) {
   // Nesting, owners and qualified names.
   fns.sort((a, b) => a.open - b.open);
   const out = []; const stack = [];
+  // An object's name, nested ones included: `const api = { users: { list() {} } }` → api.users; '' for module.exports.
+  const ownerOf = (open, depth = 0) => {
+    const k = kind(open);
+    if (k.kind !== 'object' || depth > 6) return null;
+    if (k.name !== null) return k.exportsAll ? '' : k.name;
+    const key = /([\w$]+)\s*:\s*$/.exec(bare.slice(Math.max(0, open - 80), open));
+    const outer = br.inner(open);
+    if (!key || outer < 0) return null;
+    const up = ownerOf(outer, depth + 1);
+    return up === null ? null : up === '' ? key[1] : `${up}.${key[1]}`;
+  };
   const named = (holder) => /\b(?:const|let|var)\s+([\w$]+)\s*=\s*class\b[^{]*$/.exec(bare.slice(Math.max(0, holder - 200), holder))?.[1];
   for (const f of fns) {
     while (stack.length && stack.at(-1).close <= f.open) stack.pop();
@@ -107,11 +121,12 @@ export function definitions({ bare, br, mt, kind, lineOf }) {
       // a class's name: its own, else the binding it is assigned to (`const X = class {`)
       cls = hk.name ?? named(holder) ?? (/\bexport\s+default\s+class\b[^{]*$/.test(bare.slice(Math.max(0, holder - 200), holder)) ? 'default' : null);
       q = `${cls ?? 'class'}.${f.name}`;
-    } else if (hk.kind === 'object' && hk.name !== null && !(parent && parent.open < holder)) {
-      q = hk.exportsAll ? f.name : `${hk.name}.${f.name}`;
+    } else if (hk.kind === 'object' && !(parent && parent.open < holder)) {
+      const owner = ownerOf(holder);
+      if (owner !== null) q = owner === '' ? f.name : `${owner}.${f.name}`;
     }
     if (parent && !cls && parent.open < f.nameAt) q = `${parent.q}>${q}`;
-    const rec = { q, name: f.name, line: lineOf(f.nameAt), end: lineOf(Math.max(f.nameAt, f.end - 1)), open: f.open, close: f.end, parent: parent ? out.indexOf(parent) : -1, ...(cls ? { cls } : {}) };
+    const rec = { q, name: f.name, line: lineOf(f.nameAt), end: lineOf(bare[f.end] === '}' ? f.end : Math.max(f.nameAt, f.end - 1)), open: f.open, close: f.end, parent: parent ? out.indexOf(parent) : -1, ...(cls ? { cls } : {}) };
     out.push(rec);
     stack.push(rec);
   }

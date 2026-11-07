@@ -130,6 +130,13 @@ export function link({ files, scans, read }) {
         else if (b.classes.has(r)) to = method(fn.file, r, c.n);
         else if (b.qs.has(`${r}.${c.n}`)) to = b.qs.get(`${r}.${c.n}`);
         else if (s.types[r]) { const k = classAt(fn.file, s.types[r]); if (k) to = method(k.file, k.cls, c.n); else ext = b.imports.get(s.types[r])?.ext ?? null; }
+      } else if (/^[\w$]+(?:\.[\w$]+)+$/.test(r) && !c.sh) {
+        // a method of a nested object: api.users.list()
+        const [root, ...rest] = r.split('.');
+        const im = b.imports.get(root);
+        if (im?.to) to = im.name === '*' ? fnExported(im.to, rest[0], [...rest.slice(1), c.n].join('.') || null) : fnExported(im.to, im.name, [...rest, c.n].join('.'));
+        else if (im) ext = im.ext;
+        else to = b.qs.get(`${r}.${c.n}`) ?? null;
       }
       if (to === fn.id && c.k === 'ref') continue;
       if (c.k === 'ref' && !to) continue; // a passed name that is not a known function: a value

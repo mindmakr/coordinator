@@ -16,7 +16,7 @@ import { locals } from './fn-locals.mjs';
 import { modulePart } from './fn-module.mjs';
 import { afterTypeArgs, bodyAfter, braces, chainBefore, kindOf, KEYWORDS, pairs } from './fn-syntax.mjs';
 
-export const SCAN_VERSION = 13;
+export const SCAN_VERSION = 18;
 export const JSX_FILE = /\.[cm]?[jt]sx$/;
 
 export function scanFns(src, file = '') {
@@ -38,7 +38,7 @@ export function scanFns(src, file = '') {
   const ownerAt = (off) => { let best = -1; for (const [o, c, i] of owners) if (o <= off && off < c && (best < 0 || o >= owners[best][0])) best = i; return best; };
   const calls = out.map(() => []); const top = [];
   const push = (off, c) => {
-    const root = c.r ? (/^[\w$]+$/.test(c.r) ? c.r : null) : c.n;
+    const root = c.r ? (/^[\w$]+(?:\.[\w$#]+)*$/.test(c.r) && !c.r.startsWith('this.') ? c.r.split('.')[0] : null) : c.n;
     const o = ownerAt(off);
     (o < 0 ? top : calls[o]).push({ ...c, ...(root && isLocal(root, off) ? { sh: 1 } : {}) });
   };

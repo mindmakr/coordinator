@@ -8,8 +8,10 @@ import { esc } from '../links.mjs';
 import { clip } from '../plain.mjs';
 import { link } from '../mapsvg.mjs';
 
-export const LIMITS = 'Read from the code at one commit, never run. Counted: direct calls, `new X()`, methods through `this`, imports and typed fields, names passed as arguments or JSX handlers (marked passed), and JSX elements (`<Card />`, marked JSX). Not counted: decorators, calls through computed names (`handlers[name]()`), `.call`/`.apply`/`.bind`, functions held in variables or passed on as callbacks under another name, and dependency injection by string; a name it cannot tie to a project function (an outside package, a global, a dynamic call) is listed as unresolved.';
+export const LIMITS = 'Read from the code at one commit, never run. Counted: direct calls, `new X()`, methods through `this`, imports and typed fields, names passed as arguments or JSX handlers (marked passed), and JSX elements (`<Card />`, marked JSX). Not counted: decorators, calls through computed names (`handlers[name]()`), `.call`/`.apply`/`.bind`, functions held in variables or passed on as callbacks under another name, and dependency injection by string. A function wrapped in a call other than `forwardRef` or `memo` (`withAuth(() => …)`) is not indexed under the name it is bound to. A name it cannot tie to a project function (an outside package, a global, a dynamic call) is listed as unresolved.';
 const SHOW = 6;
+// Escaped text with `code` spans shown as code (the text is escaped first, so a span cannot carry markup).
+const prose = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>");
 
 // Links only at the commit every file was read at (r.ref); without one (not a git repository) there are none.
 const blob = (r, repo, file, line) => (repo && file && r.ref ? `https://github.com/${repo}/blob/${encodeURIComponent(r.ref)}/${file.split('/').map(encodeURIComponent).join('/')}${line ? `#L${line}` : ''}` : null);
@@ -118,7 +120,7 @@ export function unitCalls(r, repo, run, unit) {
   if (!r) return `<p class="empty">No call data yet. <code>run.mjs calls ${esc(run)} ${esc(unit)}</code> computes it from the unit's diff.</p>`;
   const meta = `<p class="meta">From ${source(r)}: ${esc(r.touchedTotal)} function${r.touchedTotal === 1 ? '' : 's'} touched in ${r.files.length} JS/TS file${r.files.length === 1 ? '' : 's'}`
     + `${r.outside ? `, ${esc(r.outside)} changed line${r.outside === 1 ? '' : 's'} outside any function` : ''}; ${esc(r.functions)} functions indexed${r.ref ? ` at ${esc(String(r.ref).slice(0, 8))}` : ''}${r.partial ? ' (partial: the time cap stopped the scan)' : ''}.</p>`
-    + (r.note ? `<div class="needs"><p>${esc(r.note)}</p></div>` : '') + `<p class="meta">${esc(LIMITS)}</p>`;
+    + (r.note ? `<div class="needs"><p>${esc(r.note)}</p></div>` : '') + `<p class="meta">${prose(LIMITS)}</p>`;
   return `${STYLE}${meta}${callsGraph(r, repo, `Calls around ${unit}`)}${callsTable(r, repo)}`;
 }
 

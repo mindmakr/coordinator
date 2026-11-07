@@ -78,7 +78,7 @@ test('cache: unchanged files are not rescanned; a changed one is', () => {
   const copy = join(dir, 'cached');
   cpSync(root, copy, { recursive: true });
   const cacheFile = join(dir, 'cache.json');
-  assert.equal(scanAll(copy, { cacheFile }).fresh, 9);
+  assert.equal(scanAll(copy, { cacheFile }).fresh, 11);
   assert.equal(scanAll(copy, { cacheFile }).fresh, 0);
   writeFileSync(join(copy, 'cjs/lib.js'), `${readFileSync(join(copy, 'cjs/lib.js'), 'utf8')}\nfunction four() { return 4; }\n`);
   const again = scanAll(copy, { cacheFile });
@@ -96,7 +96,7 @@ test('cache: an entry whose hash matches but whose scan is broken is rescanned, 
   for (const k of Object.keys(c.blobs)) c.blobs[k] = { ...c.blobs[k], fns: 'oops' };
   writeFileSync(cacheFile, JSON.stringify(c));
   const again = scanAll(copy, { cacheFile });
-  assert.equal(again.fresh, 9);
+  assert.equal(again.fresh, 11);
   assert.ok(link(again).fns.has('src/b.ts#helper'));
 });
 
@@ -117,7 +117,7 @@ test('jsx: <Component /> is a call, JSX text is not; inline queryFn and onSucces
   assert.ok(page.calls.some((c) => c.n === 'fmt' && c.line === 13 && !c.to), 'the block-local fmt is a value');
   assert.deepEqual(page.calls.filter((c) => c.to === 'src/b.ts#fmt').map((c) => c.line), [7, 18], 'outside the block, fmt is the import');
   assert.deepEqual(page.calls.filter((c) => c.k === 'ref').map((c) => c.line), [9, 19], 'setTimeout(\\n save, …) is on the line of save; onClick={save}');
-  assert.deepEqual(index.callers.get('src/ui/Card.tsx#Card').map((c) => [c.from, c.line, c.k]), [['src/ui/Page.tsx#Page', 18, 'jsx']]);
+  assert.deepEqual(index.callers.get('src/ui/Card.tsx#Card').filter((c) => c.from.startsWith('src/ui/Page')).map((c) => [c.from, c.line, c.k]), [['src/ui/Page.tsx#Page', 18, 'jsx']]);
   assert.ok(!fn('src/ui/Card.tsx#Card').calls.some((c) => c.n === 'onClick'), 'a function type in a type literal is not a function');
 });
 
@@ -145,6 +145,35 @@ test('unit: the functions a diff touched, what they call and what calls them, tw
   assert.deepEqual(t.callers.map((c) => c.id), ['src/svc/service.ts#Service.run', 'src/svc/service.ts#Service.stop']);
   assert.deepEqual(t.callers[0].more.map((c) => c.id).sort(), ['src/app.ts#App.start', 'src/app.ts#main2'], 'second level: who calls run');
   assert.match(callsText(r), /Service\.inner src\/svc\/service\.ts:21-24\n {2}calls: helper/);
+});
+
+test('jsx on one line: an arrow returning an element, in an attribute or a condition, keeps every function range', () => {
+  const f = (q) => fn(`src/ui/jsx4.tsx#${q}`);
+  assert.deepEqual([f('Attr').line, f('Attr').end], [5, 7]);
+  assert.deepEqual([f('Cond').line, f('Cond').end], [9, 11]);
+  for (const q of ['After1', 'After2', 'Wrap', 'Gen', 'Cmp', 'anyish', 'typed']) assert.ok(f(q), `${q} is its own function, not nested under one that ended early`);
+  assert.deepEqual(to('src/ui/jsx4.tsx#Attr'), ['src/ui/Card.tsx#Card', 'src/ui/jsx4.tsx#Wrap']);
+  assert.deepEqual(to('src/ui/jsx4.tsx#After1'), ['src/b.ts#helper']);
+  assert.deepEqual(to('src/ui/jsx4.tsx#anyish'), ['src/ui/jsx4.tsx#anyOf'], 'a body starting with "any" is code, not a type');
+  assert.equal(fn('src/ui/jsx4.tsx#(top)'), undefined, 'nothing left at the top level');
+});
+
+test('index: a child on its parent\'s line, get/set/as keys, forwardRef and memo, objects in objects', () => {
+  const k = (q) => `src/ui/kinds.tsx#${q}`;
+  assert.deepEqual(to(k('Same')), ['src/ui/Card.tsx#Card']);
+  for (const q of ['hasAny', 'typed', 'store.get', 'store.set', 'store.as', 'Fancy', 'Row', 'Light', 'api.users.list', 'api.users.one']) assert.ok(fn(k(q)), q);
+  assert.deepEqual(to(k('Fancy')), [k('fmt')]);
+  assert.deepEqual(to(k('Row')), [k('go')]);
+  assert.deepEqual(to(k('useIt')), [k('api.users.list')], 'a method of a nested object');
+  assert.deepEqual(to(k('api.users.list')), [k('fetchUsers')]);
+  assert.deepEqual([fn(k('Ratio')).line, fn(k('Ratio')).end], [17, 19], '`{a} / {b}` and `({a}/{b})</p>` in JSX text are not regexes');
+  assert.deepEqual(to(k('AfterRatio')), [k('go')], 'and the next function is its own');
+});
+
+test('view: the limits read as prose, code spans as code', () => {
+  const html = unitCallsHtml({ v: 1, unit: 'u', touched: [], touchedTotal: 0, files: [], functions: 0, ref: null, source: 'files' }, null, 'run', 'u');
+  assert.match(html, /<code>forwardRef<\/code>/);
+  assert.ok(!/`/.test(html.replace(/<style>[\s\S]*?<\/style>/g, '')), 'no raw backticks');
 });
 
 test('unit: every file is read at the head commit, so lines and links agree; a gone head is said', () => {
