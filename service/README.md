@@ -107,7 +107,7 @@ Syncs are queued (c14), so many pushes at once cannot fill the memory. A push fo
 | `SYNC_JOB_SECONDS` | 300 | One sync of one repo stops reading after this; the rest follow at the next sync. A job that waited more than 30 minutes mints a fresh token (10-1200) |
 | `TRAIL_CONCURRENCY` | 4 | Trail refreshes (tracker comments, board cards) at once. They run after the sync has given its slot back, so a slow trail never holds a sync slot (1-64) |
 | `TRAIL_PER_INSTALLATION` | 1 | Of those, how many one installation may run; installations take turns (1-64) |
-| `TRAIL_READS` | 300 | GitHub reads (comment pages, board queries, a linked repo's `coordinator.json`) one installation's trail may make per 10 minutes. Past it the run stays owed and the next sync carries on, like comment writes past their 200. A card found not on the board is asked about again only when the unit's state changes (10-100000) |
+| `TRAIL_READS` | 300 | GitHub calls one installation's trail may make per 10 minutes, other than comment writes: each search for the App's own comment, each board query or field write, each read of a linked repo's `coordinator.json`. Past it the run stays owed and the next sync carries on, like comment writes past their 200. A card found not on the board is asked about again only when the unit's state changes (10-100000) |
 
 The periodic resync lists a few installations at a time and queues all their repos at once, so installations take turns in the queue. After an uninstall its queued syncs and trail refreshes are dropped, and a running one writes nothing more.
 

@@ -109,7 +109,11 @@ The installation id is the number at the end of the installation's settings page
 | `SYNC_MAX_MB` | no | Log bytes one sync of one repo reads; the rest follow at the next sync. A forced sync (`npm run sync -- <id> --force`) that needs more is marked in the database and carried on by every later sync until it is done. Default 64 (8–4096) |
 | `SYNC_CONCURRENCY` | no | Repo syncs that run at once, in all. A push for a repo already waiting joins that sync. Default 4 (1–64) |
 | `SYNC_PER_INSTALLATION` | no | Of those, how many one installation may run; installations take turns. Default 2 (1–64) |
-| `SYNC_BLOB_MB` | no | Log bytes fetched from GitHub and not yet read, in all; a log is fetched only when it fits. Default 64 (16–4096) |
+| `SYNC_BLOB_MB` | no | Memory the logs being read may take, in all. Each log counts 5 times its size (GitHub's base64 text, the parsed string, the bytes, the worker's copy and the text read from it), and is fetched only when it fits. Default 192 (16–4096) |
+| `SYNC_JOB_SECONDS` | no | One sync of one repo stops reading after this; the rest follow at the next sync. Default 300 (10–1200) |
+| `TRAIL_CONCURRENCY` | no | Trail refreshes (tracker comments, board cards) at once, in all. They run after the sync has given its slot back, so a slow trail never holds a sync slot. Default 4 (1–64) |
+| `TRAIL_PER_INSTALLATION` | no | Of those, how many one installation may run; installations take turns. Default 1 (1–64) |
+| `TRAIL_READS` | no | GitHub calls one installation's trail may make per 10 minutes, other than comment writes (searches for the App's own comment, board queries and field writes, a linked repo's `coordinator.json`). Past it the run stays owed and a later sync carries on. Default 300 (10–100000) |
 | `WEBHOOK_SOURCES` | no | Who counts as GitHub for webhooks: `github` (default: GitHub's published hook ranges), a comma-separated list of CIDRs (for GitHub Enterprise Server), or `any` ([Webhook sources](#webhook-sources)) |
 | `GITHUB_API_URL`, `GITHUB_WEB_URL` | no | Another GitHub host. Defaults `https://api.github.com` and `https://github.com`; other hosts are untested |
 
@@ -134,16 +138,18 @@ The service counts these in memory, per client address (see `TRUST_PROXY`), and 
 | What | Limit |
 |---|---|
 | Webhook deliveries that fail the signature check, are too large, too slow or cut short | 30 a minute; past that, deliveries are answered 429 before their body is read. One from GitHub's hook addresses naming this App is always read |
-| Webhook bodies being read at once | 512 KB per address group (IPv4 /24, IPv6 /64) outside GitHub's hook addresses, so filling the budget takes 52 groups; a larger body from there is refused (413). 32 MB in all, of which the last 6 MB only GitHub's addresses may use ([Webhook sources](#webhook-sources)). A body must arrive within 10 seconds |
+| Webhook bodies being read at once | 512 KB per address group (IPv4 /24, IPv6 /64) outside GitHub's hook addresses, so filling the budget takes 52 groups; a larger body from there is refused (413). 32 MB in all, of which the last 6 MB only GitHub's addresses may use, and only for deliveries that name this App ([Webhook sources](#webhook-sources)). A body must arrive within 10 seconds |
 | Page views | 600 a minute |
 | Sign-in attempts | 30 per 10 minutes |
 | Doorbell tokens | 30 per 10 minutes |
 
-Other limits count per person or per installation instead: answers and notes (30 a minute per person), "Sync now" (6 per 10 minutes per person), comment commands (10 an hour per commenter, 60 an hour per installation), confirmation emails (3 a day per person, and 3 a day per mailbox: the address in lower case without a `+tag`, and for Gmail without dots), and tracker comment writes (200 per 10 minutes per installation).
+Other limits count per person or per installation instead: syncs (`SYNC_CONCURRENCY` at once, `SYNC_PER_INSTALLATION` per installation, each stopping after `SYNC_JOB_SECONDS`), trail refreshes (`TRAIL_CONCURRENCY` at once, `TRAIL_PER_INSTALLATION` per installation, `TRAIL_READS` GitHub calls per 10 minutes per installation),  answers and notes (30 a minute per person), "Sync now" (6 per 10 minutes per person), comment commands (10 an hour per commenter, 60 an hour per installation), confirmation emails (3 a day per person, and 3 a day per mailbox: the address in lower case without a `+tag`, and for Gmail without dots), and tracker comment writes (200 per 10 minutes per installation).
 
 ## Webhook sources
 
 GitHub sends webhooks from published address ranges (`hooks` in `GET /meta`). With `WEBHOOK_SOURCES=github`, the default, the service fetches them from `GITHUB_API_URL/meta` when it starts and every 24 hours, and uses a built-in copy until a fetch succeeds. A later failed fetch keeps the last fetched list. Only those addresses may use the last 6 MB of the webhook budget, and only from them does the App's own delivery header skip the limit on refused deliveries. Behind a proxy that hides the real address (see [Behind a proxy](#behind-a-proxy)), GitHub looks like everyone else and loses that reserve.
+
+GitHub's addresses also deliver every other repo's and App's hooks, so anyone can point their own hooks at this service. From those addresses, only a delivery that names this App (`X-GitHub-Hook-Installation-Target-Type: integration` and `X-GitHub-Hook-Installation-Target-ID` the App id) is uncapped and may use the reserve. Any other counts under the hook target it names, capped at 512 KB like an address group, and stays out of the reserve.
 
 - A list of CIDRs is used as given and never fetched: use it for GitHub Enterprise Server.
 - `any` trusts no address: every address group gets the same 512 KB, bodies of 64 KB or less may use the reserve, and the App header is believed from anyone. Use it only when you cannot see client addresses at all.
