@@ -4,14 +4,13 @@
 // "DB_PASSWORD=Sup3rS3cret!" is a secret. A named value counts only when it
 // looks like a credential (mixed letters and digits/symbols, or quoted).
 //
-// Linear time on any input: the text is read in bounded windows, every regex
+// Linear time on any input: the text is read in bounded, overlapping windows, every regex
 // below has bounded repeats or a single place to start, and the named-value
 // rule ("<name> = <value>", "<name> is <value>") is a small tokenizer rather
 // than one regex (a regex for it backtracks catastrophically on "token_token_…").
 
-// Windows break at a newline (else a space) near their end, so a secret is never cut in two in practice.
+// Text longer than this is read in overlapping windows (see marksOf).
 export const WINDOW = 8192;
-const SLACK = 1024;
 
 // Private keys span lines, so they are found on the whole text first.
 const PEM = /-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,40}PRIVATE KEY-----|$)/g;
@@ -154,45 +153,94 @@ function replaceNamed(t, form) {
   return last ? out + t.slice(last) : t;
 }
 
-// The text in windows of at most WINDOW characters, each ending at a line break or space when one is near.
-function windows(text) {
-  if (text.length <= WINDOW) return [text];
-  const out = [];
-  for (let i = 0; i < text.length;) {
-    let j = Math.min(text.length, i + WINDOW);
-    if (j < text.length) {
-      const tail = text.slice(j - SLACK, j);
-      let k = tail.lastIndexOf('\n');
-      if (k < 0) { k = SLACK - 1; while (k >= 0 && !SPACE.test(tail[k])) k--; }
-      if (k >= 0) j = j - SLACK + k + 1;
-    }
-    out.push(text.slice(i, j)); i = j;
+// ---- Spans: each pass replaces matches with "[redacted]" in the text so far, as before; the
+// replaced spans are also kept in input coordinates, so a window knows where its secrets are.
+const PLACE = '[redacted]';
+
+// The text with each [a, b) span in marks replaced by one placeholder.
+function rebuild(t, marks) {
+  let out = ''; let last = 0;
+  for (const [a, b] of marks) { out += t.slice(last, a) + PLACE; last = b; }
+  return out + t.slice(last);
+}
+
+// Merge one pass's matches ([s, e) in the current text) into marks (input coordinates).
+// A match that touches a placeholder takes in the whole span behind it.
+function apply(marks, matches) {
+  if (!matches.length) return marks;
+  const out = []; let k = 0;
+  let shift = 0; // input index minus text index, after the marks before k
+  const start = () => marks[k][0] - shift; // where mark k's placeholder starts in the text
+  const pass = () => { shift += marks[k][1] - marks[k][0] - PLACE.length; k++; };
+  for (const [s, e] of matches) {
+    while (k < marks.length && start() + PLACE.length <= s) { out.push(marks[k]); pass(); }
+    const a = k < marks.length && start() < s ? marks[k][0] : s + shift;
+    let b = -1;
+    while (k < marks.length && start() < e) { b = e <= start() + PLACE.length ? marks[k][1] : -1; pass(); }
+    out.push([a, b >= 0 ? b : e + shift]);
   }
+  while (k < marks.length) out.push(marks[k++]);
   return out;
 }
 
-function findIn(w) {
-  for (const re of PATTERNS) { re.lastIndex = 0; if (re.test(w)) return true; }
-  if (!named(w, 'assign').next().done || !named(w, 'is').next().done) return true;
-  return (w.match(ENTROPIC) ?? []).some(looksRandom);
+function regexMatches(t, re, keep) {
+  const out = [];
+  re.lastIndex = 0;
+  for (const m of t.matchAll(re)) if (!keep || keep(m[0])) out.push([m.index, m.index + m[0].length]);
+  return out;
 }
 
-function maskIn(w) {
-  let out = w;
-  for (const re of PATTERNS) { re.lastIndex = 0; out = out.replace(re, '[redacted]'); }
-  out = replaceNamed(replaceNamed(out, 'assign'), 'is');
-  return out.replace(ENTROPIC, (m) => (looksRandom(m) ? '[redacted]' : m));
+// The [a, b) spans of t that masking replaces, sorted and disjoint.
+function maskMarks(t) {
+  let marks = [];
+  let out = t;
+  const pass = (matches) => { if (matches.length) { marks = apply(marks, matches); out = rebuild(t, marks); } };
+  for (const re of PATTERNS) pass(regexMatches(out, re));
+  for (const form of ['assign', 'is']) pass([...named(out, form)]);
+  pass(regexMatches(out, ENTROPIC, looksRandom));
+  return marks;
+}
+
+// ---- Windows. Text longer than WINDOW is read in overlapping windows: a window covers
+// [pos - CONTEXT, pos + WINDOW + OVERLAP) and keeps the spans that start in [pos, pos + WINDOW).
+// A kept span that runs past pos + WINDOW moves the next window's start to its end. Every
+// pattern spans at most ~550 characters (the URL rule) except unbounded runs of key characters;
+// OVERLAP covers the bounded ones with margin, and a run that reaches the window's end is
+// followed to its real end. CONTEXT gives the next window the characters before its start,
+// so "mytoken=" cut after "my" is still read as "mytoken".
+const OVERLAP = 2048;
+const CONTEXT = 512;
+const RUN_CHAR = /[A-Za-z0-9_.~+/=-]/;
+
+function marksOf(t) {
+  if (t.length <= WINDOW) return maskMarks(t);
+  const n = t.length; const all = [];
+  for (let pos = 0; pos < n;) {
+    const lo = Math.max(0, pos - CONTEXT); const hi = Math.min(n, pos + WINDOW + OVERLAP);
+    let cut = hi === n ? n : pos + WINDOW;
+    for (let [a, b] of maskMarks(t.slice(lo, hi))) {
+      a += lo; b += lo;
+      if (b <= pos || a >= cut) continue; // the last window's, or the next one's
+      if (a < pos) a = pos; // runs over the last cut: mask the rest of it
+      if (b === hi && hi < n) while (b < n && RUN_CHAR.test(t[b])) b++; // longer than the overlap
+      all.push([a, b]);
+      if (b > cut) cut = b;
+    }
+    pos = cut;
+  }
+  return all;
 }
 
 export function findSecret(text) {
   const s = String(text ?? '');
   PEM.lastIndex = 0;
   if (PEM.test(s)) return true;
-  return windows(s).some(findIn);
+  return marksOf(s).length > 0;
 }
 
 export function maskSecrets(text) {
   const s = String(text ?? '');
   PEM.lastIndex = 0;
-  return windows(s.replace(PEM, '[redacted]')).map(maskIn).join('');
+  const t = s.replace(PEM, PLACE);
+  return rebuild(t, marksOf(t));
 }
