@@ -60,8 +60,8 @@
 //   run.mjs gaps [--json] [--all]   open gaps across every run here (stopped and unfinished units, runs closed early,
 //                  follow-ups, out-of-fence items, open questions, upstream proposals, escapes); --all adds resolved ones
 //   run.mjs gaps --check [--run R] [--dry-run]   asks GitHub through gh (opt-in; the gaps view's only network call)
-//                  whether the issues and PRs open gaps name are closed or merged, and closes those gaps with a
-//                  decision note "checked on <date>: <ref> merged" (a stopped unit's merged PR is also linked);
+//                  whether a stopped unit's own PR merged (closes it, links the merge) and whether an unverified
+//                  tracked ref exists (closes it), each with a decision note "checked on <date>: …";
 //                  --dry-run lists them and changes nothing; no gh, or not signed in: says so, changes nothing
 //   run.mjs gap close|reopen <run> <id> --reason R [--by lead | --by person --confirm "their words"]   closes (or
 //                  reopens) one gap: a decision note in that run's log (closed runs too); the id as gaps prints it

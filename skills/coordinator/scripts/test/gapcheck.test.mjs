@@ -37,48 +37,51 @@ const merged = (sha = 'abc1234') => ({ state: 'closed', pull_request: { merged_a
 const closedIssue = { state: 'closed', state_reason: 'completed' };
 const openIssue = { state: 'open' };
 
+// The critic's sentences: a note that only mentions a ref never closes its gap, whatever GitHub says.
+const MENTIONS = [
+  'see #1230 for context; the mobile side is still missing',
+  'Compare with https://github.com/acme/web/pull/1230 behaviour; the same bug exists in the export',
+  'listed in release notes on acme/web#1230 still to write',
+  'Compare with acme/web#1230 behaviour; the same bug exists…',
+];
 function fixture() {
   const r = {
     id: 'r1', repo: 'acme/web', createdAt: T0, closed: { outcome: 'partial', decision: 'stopped', at: at(100) }, notes: [],
     units: [
       { id: 'u1', status: 'stopped', rounds: [{ n: 1, gap: 'g', at: at(10) }], log: [{ kind: 'stop', at: at(11) }], links: [{ kind: 'issue', url: 'https://github.com/acme/web/issues/1' }, { kind: 'pr', url: 'https://github.com/acme/web/pull/2' }] },
-      { id: 'u2', status: 'stopped', rounds: [{ n: 1, gap: 'g', at: at(10) }], links: [{ kind: 'issue', url: 'https://github.com/acme/web/issues/3' }] },
+      { id: 'u2', status: 'stopped', rounds: [{ n: 1, gap: 'see #1230 for context', at: at(10) }], links: [{ kind: 'issue', url: 'https://github.com/acme/web/issues/3' }] },
       { id: 'u3', status: 'stopped', rounds: [{ n: 1, gap: 'g', at: at(10) }], links: [{ kind: 'pr', url: 'https://github.com/acme/web/pull/4' }] },
     ],
   };
+  for (const [i, text] of MENTIONS.entries()) r.notes.push({ kind: 'follow-up', text, at: at(i + 1) });
   r.notes.push(
-    { kind: 'follow-up', text: 'Bulk emails, fixed by PR #20 and #21', at: at(1) }, // both done: closes
-    { kind: 'follow-up', text: '#1: the menu still misses a link', at: at(2) }, // the work's own issue: never asked
-    { kind: 'follow-up', text: 'Delete the branch after PR #22 merges', at: at(3) }, // a wait: never asked
-    { kind: 'follow-up', text: 'Needs PR #23 and #24 too', at: at(4) }, // one still open: stays
-    { kind: 'follow-up', text: 'No reference at all', at: at(5) },
+    { kind: 'follow-up', text: 'Filed as acme/mobile#5', at: at(10) }, // tracked, in a repo no run links: unverified until checked
+    { kind: 'follow-up', text: 'Filed as acme/mobile#6', at: at(11) }, // tracked, but #6 does not exist
   );
   return r;
 }
-const TABLE = { 'acme/web#1': closedIssue, 'acme/web#2': merged('def5678'), 'acme/web#3': closedIssue, 'acme/web#4': { state: 'closed', pull_request: { merged_at: null } }, 'acme/web#20': merged(), 'acme/web#21': closedIssue, 'acme/web#23': closedIssue, 'acme/web#24': openIssue };
+const TABLE = { 'acme/web#1': closedIssue, 'acme/web#2': merged('def5678'), 'acme/web#3': closedIssue, 'acme/web#4': { state: 'closed', pull_request: { merged_at: null } }, 'acme/web#1230': merged(), 'acme/mobile#5': openIssue };
 
-test('which references each open gap asks about: unit links, refs in the text, never the work itself or a ref it waits on', () => {
+test('which references each open gap asks about: the unit\'s own PRs and unverified tracked refs, never a ref a note only mentions', () => {
   const asks = refsToCheck([fixture()]);
   const by = Object.fromEntries(asks.map((a) => [a.gap.id, a.refs.map((r) => `${r.repo}#${r.n}`).sort()]));
-  assert.deepEqual(by['stopped:r1:u1:1'], ['acme/web#1', 'acme/web#2']);
-  assert.deepEqual(by['follow-up:r1:-:1'], ['acme/web#20', 'acme/web#21']);
-  assert.equal(by['follow-up:r1:-:2'], undefined, 'the unit\'s own issue');
-  assert.equal(by['follow-up:r1:-:3'], undefined, 'after PR #22 merges: a wait');
-  assert.deepEqual(by['follow-up:r1:-:4'], ['acme/web#23', 'acme/web#24']);
+  assert.deepEqual(by, { 'stopped:r1:u1:1': ['acme/web#2'], 'stopped:r1:u3:1': ['acme/web#4'], 'follow-up:r1:-:5': ['acme/mobile#5'], 'follow-up:r1:-:6': ['acme/mobile#6'] });
   assert.equal(refsToCheck([fixture()], 'other').length, 0, '--run narrows it');
 });
 
-test('the plan: merged PR or closed issues close a gap; anything open keeps it; each reference is asked once', () => {
+test('the plan: a unit\'s own merged PR or a tracked ref that exists closes; the critic\'s mentions never do; each reference is asked once', () => {
   const gh = fakeGh(TABLE);
   const p = planCheck([fixture()], { gh, today: '2026-11-07' });
   assert.equal(p.ok, true);
   const c = Object.fromEntries(p.closes.map((x) => [x.gap, x]));
-  assert.deepEqual(Object.keys(c).sort(), ['follow-up:r1:-:1', 'stopped:r1:u1:1', 'stopped:r1:u2:1']);
-  assert.equal(c['stopped:r1:u1:1'].reason, 'checked on 2026-11-07: https://github.com/acme/web/pull/2 merged');
+  assert.deepEqual(Object.keys(c).sort(), ['follow-up:r1:-:5', 'stopped:r1:u1:1']);
+  assert.equal(c['stopped:r1:u1:1'].reason, "checked on 2026-11-07: its PR https://github.com/acme/web/pull/2 merged; the critic's last gap was not re-checked");
   assert.equal(c['stopped:r1:u1:1'].merge, 'https://github.com/acme/web/commit/def5678', 'its own PR merged: the merge is recorded');
-  assert.equal(c['stopped:r1:u2:1'].reason, 'checked on 2026-11-07: https://github.com/acme/web/issues/3 closed');
-  assert.equal(c['stopped:r1:u2:1'].merge, null);
+  assert.equal(c['follow-up:r1:-:5'].reason, 'checked on 2026-11-07: tracked in https://github.com/acme/mobile/issues/5, which exists (open)');
+  for (const g of ['follow-up:r1:-:1', 'follow-up:r1:-:2', 'follow-up:r1:-:3', 'follow-up:r1:-:4', 'stopped:r1:u2:1']) assert.equal(c[g], undefined, `${g}: a mention, though #1230 merged`);
   assert.equal(c['stopped:r1:u3:1'], undefined, 'a PR closed without merging closes nothing');
+  assert.equal(c['follow-up:r1:-:6'], undefined, 'a tracked ref that does not exist closes nothing');
+  assert.equal(gh.calls.some((x) => x.includes('1230')), false, 'a mention is never even asked');
   const apiCalls = gh.calls.filter((x) => x.startsWith('api repos/') && x.includes('/issues/'));
   assert.equal(apiCalls.length, new Set(apiCalls).size, 'each reference once');
 });
@@ -123,10 +126,10 @@ test('cli: --dry-run changes nothing; --check writes the closures and the merge 
 
   const dry = run(env, 'gaps', '--check', '--dry-run');
   assert.equal(dry.code, 0, dry.err);
-  assert.equal(dry.out.closes.length, 3); assert.equal(dry.out.dryRun, true);
+  assert.equal(dry.out.closes.length, 2); assert.equal(dry.out.dryRun, true);
   assert.equal(readFileSync(join(runDir, 'state.json'), 'utf8'), before, 'dry run: nothing written');
   assert.equal(existsSync(join(runDir, 'events.jsonl')), false); assert.equal(existsSync(join(state, 'gaps-check.json')), false);
-  assert.match(readFileSync(log, 'utf8'), /api repos\/acme\/web\/issues\/20/, 'the fake gh on PATH answered');
+  assert.match(readFileSync(log, 'utf8'), /api repos\/acme\/web\/issues\/2\b/, 'the fake gh on PATH answered');
 
   const none = run({ ...env, PATH: join(dir, 'empty') }, 'gaps', '--check');
   assert.match(none.err, /not installed/); assert.equal(none.out.checked, false);
@@ -138,22 +141,14 @@ test('cli: --dry-run changes nothing; --check writes the closures and the merge 
   assert.equal(real.code, 0, real.err);
   const after = JSON.parse(readFileSync(join(runDir, 'state.json'), 'utf8'));
   const closes = after.notes.filter((n) => n.gap);
-  assert.deepEqual(closes.map((n) => n.gap).sort(), ['follow-up:r1:-:1', 'stopped:r1:u1:1', 'stopped:r1:u2:1']);
-  assert.ok(closes.every((n) => n.by === 'lead' && n.checked?.ref && /^checked on \d{4}-\d{2}-\d{2}: https:\/\/github\.com\//.test(n.reason)));
+  assert.deepEqual(closes.map((n) => n.gap).sort(), ['follow-up:r1:-:5', 'stopped:r1:u1:1']);
+  assert.ok(closes.every((n) => n.by === 'lead' && n.checked?.ref && /^checked on \d{4}-\d{2}-\d{2}: (?:its PR|tracked in) https:\/\/github\.com\//.test(n.reason)));
   assert.deepEqual(after.units[0].links.at(-1).url, 'https://github.com/acme/web/commit/def5678');
   const last = JSON.parse(readFileSync(join(state, 'gaps-check.json'), 'utf8'));
-  assert.equal(last.closed, 3);
+  assert.equal(last.closed, 2);
   const g = gaps([after]).find((x) => x.id === 'stopped:r1:u1:1');
   assert.equal(g.resolution.checked.state, 'merged');
   const html = selfPage(selfModel({ runs: [after], gapsCheck: last }), Date.now(), { ...staticCtx('', 0), runHref: (id) => `runs/${id}/hud.html` });
   assert.match(html, /by lead, checked with gh/); assert.match(html, /Last checked against GitHub <time/);
   assert.match(run(env, 'gaps', '--dry-run').err, /go with --check/);
-});
-
-test('a bare #n counts as the run repo\'s number only after PR, issue and similar words; "mobile #237" is another repo\'s', () => {
-  const r = fixture(); r.notes = [{ kind: 'follow-up', text: 'Done in web, mobile #237 and listed on #238; see #239', at: at(1) }];
-  const refs = refsToCheck([r]).find((a) => a.gap.kind === 'follow-up').refs.map((x) => x.n);
-  assert.deepEqual(refs, [239]);
-  const u = refsToCheck([fixture()]).find((a) => a.gap.id === 'stopped:r1:u1:1').refs;
-  assert.equal(u.find((x) => x.n === 2).kind, 'pr', 'the unit\'s own link keeps its kind');
 });

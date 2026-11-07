@@ -116,10 +116,11 @@ function gapItem(g, ctx, m) {
   const r = g.resolution;
   const why = r ? (r.reason.length > REASON_CLIP ? `<span title="${esc(r.reason)}">${esc(clip(r.reason, REASON_CLIP))}</span>` : linkify(r.reason, null)) : '';
   const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : r.checked ? `by ${esc(r.by)}, checked with gh` : `by ${esc(r.by)}${r.confirm ? `, their words: “${esc(clip(r.confirm, 120))}”` : ''}`}: ${why}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
+  const unverified = g.unverified ? `<div class="cause"><b>tracked (unverified)</b>: ${g.unverified.map((u) => linkify(u, null)).join(', ')}, a repo the runs do not link; <code>run.mjs gaps --check</code> confirms it exists</div>` : '';
   const carried = g.carried ? `<div class="cause"><b>carried → ${esc(g.carried)}</b>: open until that unit passes or its gap is resolved</div>` : '';
   return `<li data-a="gap-${esc(g.id)}" data-gap data-run="${esc(g.run)}" data-kind="${esc(g.kind)}">${badge(GAP_BADGE[g.kind] ?? 'info', KIND_LABEL[g.kind] ?? g.kind)} ${text}`
     + `${g.cause ? `<div class="cause">cause: ${esc(g.cause)}</div>` : ''}`
-    + `<div class="cause">${runLink(g.run, ctx, m)}${unit}${g.at ? ` · ${stamp(g.at)}` : ''} · from ${esc(g.from)} · <code>${esc(g.id)}</code></div>${carried}${res}</li>`;
+    + `<div class="cause">${runLink(g.run, ctx, m)}${unit}${g.at ? ` · ${stamp(g.at)}` : ''} · from ${esc(g.from)} · <code>${esc(g.id)}</code></div>${carried}${unverified}${res}</li>`;
 }
 const gapGroups = (groups, ctx, m, status) => groups.map((grp) => `<section class="card gap-run" data-gap-group data-run="${esc(grp.run)}" data-status="${status}" data-a="gaps-${status}-${esc(grp.run)}"><h3><span>${runLink(grp.run, ctx, m)}</span><span class="chip" data-gap-n>${grp.items.length}</span></h3>`
   + `<ul class="plain">${grp.items.map((g) => gapItem(g, ctx, m)).join('')}</ul></section>`).join('');

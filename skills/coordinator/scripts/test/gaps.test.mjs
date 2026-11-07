@@ -66,22 +66,38 @@ test('every kind is derived from the state, with where it came from, its time an
   for (const g of list) assert.deepEqual(parseGapId(g.id)?.run, 'r-a', g.id);
 });
 
-test('references: tracked or filed resolves, owner-less refs count against the run repo, a PR the note waits on does not', () => {
+test('references: only a ref right after a tracking verb resolves, in any repo; the critic\'s mentions stay open; an unknown repo is tracked (unverified)', () => {
   const a = mkRun('r-ref', [unit('u1', 'pass', { links: [{ kind: 'pr', url: 'https://github.com/acme/web/pull/3' }] })], null);
   const texts = [
-    'Mobile label: payday-employee-react-native#240 (web only)', // another repo's issue, no owner
+    'see #1230 for context; the mobile side is still missing',
+    'Compare with https://github.com/acme/web/pull/1230 behaviour; the same bug exists…',
+    'listed in release notes on acme/web#1230 still to write',
+    'Mobile label: payday-employee-react-native#240 (web only)',
     'Moved to #42',
-    'Waiting on https://github.com/acme/web/pull/7 to merge',
-    'Delete the branch after PR #239 merges',
-    '#1207: menu misses a link',
     'Tracked in https://github.com/acme/web/issues/9',
-    'Waits on mobile#5',
+    'The issue is acme/web#11',
+    'Filed as payday-employee-react-native#240',
+    'Delete the branch after PR #239 merges',
   ];
   for (const [i, text] of texts.entries()) a.notes.push({ kind: 'follow-up', text, at: at(i) });
-  const st = gaps([a]).map((g) => [g.text, g.status, g.resolution?.reason ?? null]);
-  assert.deepEqual(st.map((x) => x[1]), ['resolved', 'resolved', 'open', 'open', 'open', 'resolved', 'open']);
-  assert.match(st[0][2], /https:\/\/github\.com\/acme\/payday-employee-react-native\/issues\/240/, 'resolved against the run repo (from its links)');
-  assert.match(st[1][2], /https:\/\/github\.com\/acme\/web\/issues\/42/);
+  const st = gaps([a]);
+  assert.deepEqual(st.map((g) => g.status), ['open', 'open', 'open', 'open', 'resolved', 'resolved', 'resolved', 'open', 'open']);
+  assert.equal(st[4].resolution.reason, 'tracked in https://github.com/acme/web/issues/42', 'resolved against the run repo (from its links)');
+  assert.deepEqual(st[7].unverified, ['https://github.com/acme/payday-employee-react-native/issues/240'], 'a repo no run links: unverified, still open');
+  assert.equal(st[3].unverified, null, 'a mention is not even unverified');
+  assert.match(gapsText(st), /\[tracked \(unverified\): https:\/\/github\.com\/acme\/payday-employee-react-native\/issues\/240\]/);
+  const b = mkRun('r-b', [unit('m', 'pass', { links: [{ kind: 'issue', url: 'https://github.com/acme/payday-employee-react-native/issues/1' }] })], null);
+  assert.equal(gaps([a, b]).find((g) => g.id === 'follow-up:r-ref:-:8').status, 'resolved', 'once a run links that repo, it is known');
+});
+
+test('upstream proposals are one gap per file and function named, whatever the wording', () => {
+  const a = mkRun('r-up2', [], null);
+  a.notes.push(
+    { kind: 'follow-up', text: "Upstream: coordinator board.mjs crashes when given a PR URL with '#1249' (url.match returns null).", at: at(1) },
+    { kind: 'retro', text: "upstream: board.mjs crashes when given a PR URL argument with '#<n>' (url.match returns null), so PR cards are not moved.", at: at(2) },
+    { kind: 'retro', text: 'upstream: detect.mjs --allow repeated gives given twice', at: at(3) },
+  );
+  assert.deepEqual(gaps([a]).map((g) => g.id), ['follow-up:r-up2:-:1', 'retro:r-up2:-:3']);
 });
 
 test('a stopped unit merged after its stop is resolved; stop ids use the stop count; folded follow-ups resolve when the unit passed', () => {

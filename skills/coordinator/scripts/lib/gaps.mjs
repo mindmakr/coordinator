@@ -40,8 +40,7 @@ const FOLDED = /\bfold(?:ed)?\s+in(?:to)?\s+([A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-
 const REF = /https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(issues|pull)\/(\d+)|(?<![\w/.-])(?:([A-Za-z0-9][A-Za-z0-9-]{0,38})\/)?([A-Za-z0-9][A-Za-z0-9._-]{0,99})?#(\d{1,7})\b/g;
 // A reference tracks the gap only right after one of these (references/hud.md); a URL or #n
 // anywhere else is the work itself or a PR it waits on. repo#n of another repo counts unless a PR or a wait precedes it.
-const TRACK = /\b(?:tracked|filed|opened|moved|logged|raised|continues?|continued)(?:\s+(?:as|in|at|to|under))?\s*(?:an?\s+)?(?:(?:follow-up\s+)?issue|pr|pull request)?\s*:?\s*$/i;
-const WAIT = /\b(?:pr|pull|waits?|waiting|after|until|merges?|on)\s*$/i;
+export const TRACK = /(?:\b(?:tracked|filed|opened|moved|logged|raised|continues?|continued)(?:\s+(?:as|in|at|to|under))?\s*(?:an?\s+)?(?:(?:follow-up\s+)?issue|pr|pull request)?|\bissue\s+is)\s*:?\s*$/i;
 
 // Every issue or PR reference in a text, as { owner, repo, n, url, before } (the 48 characters before it).
 export function allRefs(text, repo) {
@@ -62,22 +61,10 @@ export function allRefs(text, repo) {
 // The run's repo: --repo, else the one its unit links name most.
 export const runRepo = (run) => (typeof run?.repo === 'string' ? run.repo : repoFromText(JSON.stringify(run?.units ?? [])));
 
-function trackedRefs(text, repo) {
-  const out = [];
-  for (const m of String(text ?? '').matchAll(REF)) {
-    const before = text.slice(Math.max(0, m.index - 48), m.index);
-    let url; let named = false;
-    if (m[1]) url = `https://github.com/${m[1]}/${m[2]}/${m[3]}`;
-    else {
-      const owner = m[4] ?? repo?.split('/')[0]; const name = m[5] ?? (m[4] ? null : repo?.split('/')[1]);
-      if (m[4] && !m[5]) continue; // "owner/#1" is not a reference
-      named = !!m[5];
-      if (!owner || !name) { if (TRACK.test(before)) out.push(m[0]); continue; }
-      url = `https://github.com/${owner}/${name}/issues/${m[6]}`;
-    }
-    if (TRACK.test(before) || (named && !WAIT.test(before))) out.push(url);
-  }
-  return [...new Set(out)];
+// The refs a text says the work is tracked in: each must come right after a tracking verb (TRACK),
+// in any repo; a ref merely mentioned ("see #1230", "compare with …/pull/1230") never counts.
+export function trackedRefs(text, repo) {
+  return [...new Map(allRefs(text, repo).filter((r) => TRACK.test(r.before)).map((r) => [r.url, { url: r.url, repo: r.repo }])).values()];
 }
 
 export const gapId = (source, run, unit, seq) => `${source}:${run}:${unit ?? '-'}:${seq}`;
@@ -114,7 +101,8 @@ function mergedByNote(run, u, stoppedAt) {
   return i < 0 ? null : { reason: `merged after stop, says ${run.notes[i].kind} note ${i + 1}: ${clip(run.notes[i].text, 120)}`, by: 'state', derived: true, at: run.notes[i].at ?? null };
 }
 
-const trackedBy = (text, repo, what = 'tracked in') => { const r = trackedRefs(text, repo); return r.length ? { reason: `${what} ${r.join(', ')}`, by: 'state', derived: true } : null; };
+// A resolution by tracked refs; gaps() keeps it only for refs in a repo it knows (else: tracked, unverified).
+const trackedBy = (text, repo, what = 'tracked in') => { const r = trackedRefs(text, repo); return r.length ? { reason: `${what} ${r.map((x) => x.url).join(', ')}`, what, refs: r, by: 'state', derived: true } : null; };
 
 function unitGaps(run, repo, out) {
   for (const u of run.units ?? []) {
@@ -127,7 +115,7 @@ function unitGaps(run, repo, out) {
         kind: 'stopped', source: 'stopped', run: run.id, unit: u.id, seq: Math.max(1, st.length), at,
         text: r?.gap ? `${why} Last gap: ${r.gap}` : why, cause: r?.cause ?? null,
         from: r ? `verdict, round ${r.n ?? (u.rounds ?? []).indexOf(r) + 1}` : 'the stop rule',
-        auto: mergedAfterStop(u, st.at(-1)?.at ?? null) ?? mergedByNote(run, u, (u.rounds ?? []).at(-1)?.at ?? st.at(-1)?.at ?? null) ?? (r?.gap ? trackedBy(r.gap, repo, 'its last gap is tracked in') : null), chain: true,
+        auto: mergedAfterStop(u, st.at(-1)?.at ?? null) ?? mergedByNote(run, u, (u.rounds ?? []).at(-1)?.at ?? st.at(-1)?.at ?? null) ?? (r?.gap ? trackedBy(r.gap, repo, 'its last gap is tracked in') : null), chain: true, repo,
       });
     } else if (run.closed && u.status !== 'pass') {
       out.push({
@@ -149,6 +137,17 @@ function folded(text, run, list) {
   return null;
 }
 
+// What an upstream proposal is about: the files and functions it names ("board.mjs", "url.match()"),
+// so two wordings of one proposal are one gap; with none named, its words.
+const FILE = /\b[A-Za-z_][\w-]*\.(?:mjs|cjs|js|ts|tsx|jsx|md|json|html|css|py|sh)\b/g;
+const FUNC = /\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?=\s*\()|\b[a-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\b/g;
+export function upstreamKey(text) {
+  const t = String(text ?? '');
+  const files = new Set((t.match(FILE) ?? []).map((x) => x.toLowerCase()));
+  const funcs = new Set((t.replace(FILE, ' ').match(FUNC) ?? []).map((x) => x.toLowerCase()));
+  return files.size || funcs.size ? `${[...files].sort().join(',')}|${[...funcs].sort().join(',')}` : t.trim().replace(/\s+/g, ' ').toLowerCase().replace(/^upstream\s*:\s*/, '');
+}
+
 function noteGaps(run, list, repo, out) {
   const notes = Array.isArray(run.notes) ? run.notes : [];
   const filed = notes.filter((n) => n && FILED.test(String(n.text ?? '')));
@@ -157,22 +156,22 @@ function noteGaps(run, list, repo, out) {
   notes.forEach((n, i) => {
     if (!n || typeof n.text !== 'string' || typeof n.gap === 'string') return;
     const base = { source: n.kind, run: run.id, unit: typeof n.unit === 'string' ? n.unit : null, seq: i + 1, at: n.at ?? null, text: n.text, cause: null };
-    const tracked = () => { const r = trackedRefs(n.text, repo); return r.length ? { reason: `tracked in ${r.join(', ')}`, by: 'state', derived: true } : null; };
+    const tracked = () => trackedBy(n.text, repo);
     if (n.kind === 'escape') return out.push({ ...base, kind: 'escape', from: `escape note${n.round ? `, after the pass in round ${n.round}` : ''}`, auto: null });
     if (['decision', 'info'].includes(n.kind)) {
       if (n.answers || /^closed early as /.test(n.text) || !DEFER.test(n.text)) return;
-      return out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'deferred', from: `${n.kind} note`, auto: tracked() ?? folded(n.text, run, list) });
+      return out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'deferred', from: `${n.kind} note`, auto: folded(n.text, run, list) ?? tracked() });
     }
     if (!['follow-up', 'retro'].includes(n.kind) || FILED.test(n.text)) return;
     if (UPSTREAM.test(n.text)) {
-      const key = n.text.trim().replace(/\s+/g, ' ').toLowerCase();
-      if (seenUp.has(key)) return; // the same proposal twice in one run is one gap
+      const key = upstreamKey(n.text);
+      if (seenUp.has(key)) return; // the same proposal twice in one run (same files and functions) is one gap
       seenUp.add(key);
-      const auto = tracked() ?? (filed.length ? { reason: `the run records upstream issues filed${filedRefs.length ? `: ${filedRefs.join(', ')}` : ''}`, by: 'state', derived: true } : null);
-      return out.push({ ...base, kind: 'upstream', from: `${n.kind} note`, auto });
+      const auto = (filed.length ? { reason: `the run records upstream issues filed${filedRefs.length ? `: ${filedRefs.join(', ')}` : ''}`, by: 'state', derived: true } : null);
+      return out.push({ ...base, kind: 'upstream', from: `${n.kind} note`, auto: auto ?? tracked() });
     }
     if (n.kind !== 'follow-up') return; // a retro note that is not an upstream proposal is a lesson, not a gap
-    out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'follow-up', from: 'follow-up note', auto: tracked() ?? folded(n.text, run, list) });
+    out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'follow-up', from: 'follow-up note', auto: folded(n.text, run, list) ?? tracked() });
   });
 }
 
@@ -220,11 +219,21 @@ export function gaps(runs) {
     const rg = runGap(run, repo, out); if (rg) runGaps.push([rg, units]);
   }
   const closed = new Map(list.map((r) => [r.id, closures(r)]));
+  // Repos the state itself knows: every run's repo and every repo a unit links. A ref elsewhere is
+  // "tracked (unverified)" and keeps its gap open until `gaps --check` finds it exists.
+  const known = new Set(list.flatMap((r) => [runRepo(r), ...JSON.stringify(r.units).matchAll(/https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\//g)].map((x) => (Array.isArray(x) ? x[1] : x))).filter(Boolean));
+  const verified = (res) => {
+    if (!res?.refs) return { res, unverified: null };
+    const ok = res.refs.filter((r) => known.has(r.repo)); const not = res.refs.filter((r) => !known.has(r.repo)).map((r) => r.url);
+    const { refs: _r, what, ...rest } = res;
+    return { res: ok.length ? { ...rest, reason: `${what} ${ok.map((r) => r.url).join(', ')}` } : null, unverified: not.length ? not : null };
+  };
   const settled = new Map();
   const settle = (g, extra = null) => {
     const id = gapId(g.source, g.run, g.unit, g.seq);
-    const resolution = closed.get(g.run)?.get(id) ?? g.auto ?? extra ?? null;
-    const s = { id, kind: g.kind, run: g.run, unit: g.unit, at: g.at, text: g.text, cause: g.cause, from: g.from, carried: g.carried ?? null, status: resolution ? 'resolved' : 'open', resolution };
+    const auto = verified(g.auto);
+    const resolution = closed.get(g.run)?.get(id) ?? auto.res ?? extra ?? null;
+    const s = { id, kind: g.kind, run: g.run, unit: g.unit, at: g.at, text: g.text, cause: g.cause, from: g.from, carried: g.carried ?? null, status: resolution ? 'resolved' : 'open', resolution, unverified: resolution ? null : auto.unverified };
     settled.set(g, s); return s;
   };
   // Unit gaps settle on their own first; then a chain follows its end: resolved once the last
@@ -276,7 +285,7 @@ export function closeGap(s, id, { reason, by = 'lead', confirm = null, reopen = 
 export function gapsText(list) {
   const open = list.filter((g) => g.status === 'open');
   const runs = new Set(open.map((g) => g.run)).size;
-  const lines = list.map((g) => `${g.id}  [${KIND_LABEL[g.kind]}] ${g.status === 'open' ? (g.carried ? `[carried → ${g.carried}] ` : '') : `[resolved: ${clip(g.resolution.reason, 80)}] `}${clip(g.text.replace(/\s+/g, ' '), 140)}`);
+  const lines = list.map((g) => `${g.id}  [${KIND_LABEL[g.kind]}] ${g.status === 'open' ? `${g.carried ? `[carried → ${g.carried}] ` : ''}${g.unverified ? `[tracked (unverified): ${g.unverified.join(', ')}] ` : ''}` : `[resolved: ${clip(g.resolution.reason, 80)}] `}${clip(g.text.replace(/\s+/g, ' '), 140)}`);
   lines.push(`${open.length} open gap${open.length === 1 ? '' : 's'} across ${runs} run${runs === 1 ? '' : 's'}`);
   return `${lines.join('\n')}\n`;
 }
