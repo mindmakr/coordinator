@@ -79,10 +79,13 @@ Then add `.coordinator/` to your project's `.gitignore`.
 
 | Command | What it does |
 |---|---|
-| `/coordinator:init` | Learns the project once: checks, protected branches, risk areas, standing rules. Writes `COORDINATOR.md` |
+| `/coordinator:init` | Learns the project once: checks, protected branches, risk areas, standing rules. Asks the setup questions (where run state goes, theme, budgets, merge rule, hosted app). Writes `COORDINATOR.md` and `.coordinator/coordinator.json`, then runs doctor |
+| `/coordinator:doctor` | Checks the setup, one line each with a fix: Node, plugin version, `gh` login and scopes, git remote, `COORDINATOR.md`, settings, stale locks and dashboards, stored artifacts, worktree links, lessons, Codex. `--json`, `--offline` |
 | `/coordinator:run <task>` | Intake, then the loop until the bar is met. Takes an issue, a PR, or a plain description |
 | `/coordinator:status [run]` | Where a run stands (a compact text HUD), or picks it up after a break or a crash |
 | `/coordinator:retro <run>` | Lessons, budgets and upstream improvements from a finished run |
+
+Screenshots and reports a run mentions in a worktree are copied into the run with `run.mjs adopt <run>` before the worktree goes, so the dashboard keeps them (`references/durability.md`).
 
 Example:
 

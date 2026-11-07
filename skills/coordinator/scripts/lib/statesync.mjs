@@ -31,13 +31,14 @@ export function redactor(project) {
 }
 const redactLog = (log, red) => Buffer.from(log.events.map((e) => `${JSON.stringify(red(e))}\n`).join(''));
 
-// .coordinator/coordinator.json (optional): { visibility, remote, stateRepo, branch }.
+// .coordinator/coordinator.json (optional): { visibility, state, remote, stateRepo, branch } (lib/settings.mjs).
 function config(base) {
   const file = join(base, 'coordinator.json');
   if (!existsSync(file)) return {};
   const c = JSON.parse(readFileSync(file, 'utf8'));
   if (!isObj(c)) throw new Error(`${file}: expected an object`);
   if (c.visibility !== undefined && !['private', 'internal', 'public'].includes(c.visibility)) throw new Error(`${file}: visibility must be private, internal or public`);
+  if (c.state !== undefined && !['local', 'repo'].includes(c.state)) throw new Error(`${file}: state must be local or repo`);
   for (const k of ['remote', 'stateRepo', 'branch']) if (c[k] !== undefined && (typeof c[k] !== 'string' || !c[k] || c[k].startsWith('-'))) throw new Error(`${file}: ${k} must be a non-empty string`);
   return c;
 }
@@ -64,6 +65,7 @@ function destination(project, cfg, t) {
     if (inside) gate(project, cfg, `the folder ${t.folder} is inside the repo`);
     return { folder: t.folder };
   }
+  if (cfg.state === 'local') throw new Error('refused: "state" is "local" in .coordinator/coordinator.json, so run state stays on this machine; push to a folder outside the repo, or set "state" to "repo"');
   const branch = t.branch;
   if (branch.startsWith('-') || tryGit(project, ['check-ref-format', '--branch', branch]) === null) throw new Error(`not a branch name: ${branch}`);
   if (['main', 'master', 'HEAD'].includes(branch)) throw new Error(`refused: state never goes to ${branch}; use ${BRANCH}`);

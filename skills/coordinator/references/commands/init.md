@@ -1,6 +1,6 @@
 # /coordinator init
 
-Learn the project once, so that every later run starts informed and asks only about the task.
+Learn the project once, so that every later run starts informed and asks only about the task, and set up what the coordinator needs on this machine (where run state goes, theme, budgets, merge rule, hosted app). It ends by running doctor.
 
 ## Steps
 
@@ -27,6 +27,37 @@ Learn the project once, so that every later run starts informed and asks only ab
 ```
 
 4. Add `.coordinator/` to `.gitignore`.
+5. **Setup questions**, below, then run doctor and show its result.
+
+## Setup questions
+
+What the coordinator needs on this machine. Ask them in the same batch as step 2, through the question tool, each with your recommendation first. On a re-run, read `.coordinator/coordinator.json` and `COORDINATOR.md` first, show each current value as the first option ("Keep: …"), and change only what the person changes.
+
+| Question | Options (recommended first) | Written to |
+|---|---|---|
+| Where does run state go? | Private repo: the `coordinator-state` branch of this repo, at pit stops (when the repo is private) · A private companion repo (when this repo is public; ask its name) · Local only | `state` (`repo` or `local`), `stateRepo`, `visibility` |
+| The dashboard's theme file? | The project's design-system CSS you found (e.g. `app/globals.css`) · Built-in theme | `theme`, and a `Theme:` line in `COORDINATOR.md` |
+| Default budgets per unit? | 4 rounds, 240 minutes (or the `stats` 80th percentile + 1 when there are closed runs) · Other | `budgets: { rounds, minutes }` |
+| Which branches may a run merge into when the review passes? | The working branch you found (e.g. `test`) · None: open the PR only | `merge: [branches]`, and a line under `## Standing rules` |
+| Connect the hosted app (web dashboard, answers from anywhere)? | Not now · Yes: ask for its URL (https) | `service` |
+
+Leave other keys to their own questions (model routing: `models`). Write `.coordinator/coordinator.json` with only the keys answered; merge into what is there, never drop a key the person did not change. The file is local (`.coordinator/` is ignored) and holds no secrets: never a token, a password or a URL with credentials.
+
+`coordinator.json` keys, all optional (checked by `scripts/lib/settings.mjs`):
+
+| Key | Value | Used by |
+|---|---|---|
+| `state` | `local` (run state never leaves this machine; `push` to a branch is refused) or `repo` | `run.mjs push` |
+| `visibility` | `private`, `internal` or `public` (else `gh` is asked) | `push` |
+| `stateRepo` | a private companion repo, `owner/name` or URL | `push`, `pull`, `watch --remote` |
+| `remote`, `branch` | where `push` writes (`origin`, `coordinator-state`) | `push` |
+| `service` | the hosted app's URL, https (http only on localhost) | `watch --remote` |
+| `theme` | a `.css` file; `COORDINATOR.md`'s `Theme:` line wins | the dashboard |
+| `budgets` | `{ "rounds": 1-8, "minutes": 5-10080 }` | `run.mjs init` defaults; flags still win |
+| `merge` | branch names a run may merge into on a pass; `[]` = PR only | the lead (`guardrails.md`) |
+| `models` | `false` (routing off), absent (built-in routing), or `{ strong, critic, specialist, visual-critic, integrator, builder, researcher, mechanical, or a task class: model name }`; doctor warns when a judge is below `strong` | staffing (`team.md`) |
+
+Then run `node <skill-dir>/scripts/doctor.mjs` and show its lines. Fix what the answers cover; list the rest as the person's to-do, each with its fix line.
 
 ## Updating it
 

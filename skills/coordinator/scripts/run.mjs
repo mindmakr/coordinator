@@ -55,7 +55,10 @@
 //   run.mjs show <run>     prints the compact text HUD (situation, needs you, time left, units, budget, next step)
 //   run.mjs hud <run>      rewrites hud.html, maps.html and units/<unit>.html beside state.json now and prints its path
 //                          (every change rewrites it too, with workbench.md)
-//   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run
+//   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run;
+//                  warns when files the run mentions are not adopted yet
+//   run.mjs adopt <run> [--dry-run]  copy files the run mentions by path (screenshots, PDFs, logs, json and md reports in
+//                  worktrees or scratch folders) into the run folder as evidence, so deleting a worktree loses nothing
 //   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--fresh | --reset-stage] [--force] [--pit-stop [--dest dir]]
 //                  the project map (modules, helpers, settings, surfaces, reuse) into the run's map/ and map.html;
 //                  --fresh starts a new log (the old map/ is kept aside); --reset-stage also replaces the staged and pushed
@@ -72,11 +75,13 @@
 //                  copy's newer events; never overwrites local events the copy lacks. After the lead's own
 //                  later events, it replays the copy's extra answers and person notes (nothing else) on top
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
 import { addEvidence, artifact } from './lib/evidence.mjs';
+import { adopt, table } from './lib/adopt.mjs';
+import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
 import { allows, decide, decideUnit, stats } from './lib/rules.mjs';
 import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
@@ -87,6 +92,7 @@ import { atLeast, byModel, escalation, judgeAllowed, modelName, route, routing, 
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
+import { readSettings } from './lib/settings.mjs';
 import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
@@ -109,7 +115,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], adopt: ['dry-run'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -136,7 +142,10 @@ const hudFile = (run) => join(runsDir(), safeId(run, 'run'), 'hud.html');
 const runDir = (run) => join(runsDir(), safeId(run, 'run'));
 // The run's repo: --repo, else the project's GitHub remote, else the GitHub links already in the state.
 const repoFor = (s) => s.repo ?? inferRepo(projectDir()) ?? repoFromText(JSON.stringify(s));
-const themeFor = (s) => loadTheme(themeFile(s, projectDir()));
+// Settings from .coordinator/coordinator.json; a broken file means defaults here (doctor reports it).
+const asArg = (v) => (Number.isInteger(v) ? String(v) : undefined);
+const settings = () => readSettings(baseDir('project')).settings;
+const themeFor = (s) => { const t = settings().theme; return loadTheme(themeFile(s, projectDir()) ?? (typeof t === 'string' && t ? resolve(projectDir(), t) : null)); };
 
 // The files people read: rewritten inside the state's lock after every change.
 // hud.html and units/<unit>.html are static snapshots: no script, no network.
@@ -196,11 +205,12 @@ const commands = {
     const routeOn = o.models === undefined ? undefined : oneOf(o.models, ['on', 'off'], '--models') === 'on';
     if (run === undefined && routeOn !== undefined) return { models: setRouting(baseDir('project'), routeOn), file: join(baseDir('project'), 'coordinator.json') };
     safeId(run, 'run');
+    const b = settings().budgets ?? {};
     const fresh = {
       id: run, tag: safeId(o.tag ?? 'general', 'tag'),
       goal: text(o.goal, 'goal'), bar: text(o.bar, 'bar'), fence: text(o.fence, 'fence'), paths: list(o.paths),
       budget: {
-        maxRounds: num(o['max-rounds'], 4, 1, 8), maxMinutes: num(o['max-minutes'], 240, 5, 10_080),
+        maxRounds: num(o['max-rounds'] ?? asArg(b.rounds), 4, 1, 8), maxMinutes: num(o['max-minutes'] ?? asArg(b.minutes), 240, 5, 10_080),
         maxUnits: num(o['max-units'], 6, 1, 20), maxAdded: num(o['max-added'], 2, 0, 10),
         staleMinutes: num(o['stale-minutes'], 45, 5, 1440), maxStudies: num(o['study-budget'], 2, 0, 10),
       },
@@ -443,6 +453,7 @@ const commands = {
         const s = load(id);
         const v = view(s, decide(s), Date.now(), { repo: repoFor(s) });
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
+        ctx.has = (file) => existsSync(join(runDir(id), 'artifacts', ...file.split('/')));
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
         if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx, id) }) : null;
@@ -460,7 +471,16 @@ const commands = {
         '/answer': write('answer', (s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person' }); return id; }),
         '/note': write('note', (s, f) => { personNote(s, { text: f.get('text'), unit: f.get('unit') || undefined }); return f.get('unit') ? `unit-${f.get('unit')}` : ''; }),
       },
-    }).then(({ url }) => console.log(JSON.stringify({ url, note: 'local only; stop with Ctrl+C' })), (e) => { console.error(`error: ${e.message}`); process.exit(1); });
+    }).then(({ server, url }) => {
+      // So `doctor` can tell a running dashboard from a stale one. No token: the URL stays in this output only.
+      const rec = join(runDir(run), 'serve.json');
+      writeAtomic(rec, `${JSON.stringify({ pid: process.pid, port: server.address().port, at: now() })}
+`);
+      const drop = () => { try { if (JSON.parse(readFileSync(rec, 'utf8')).pid === process.pid) rmSync(rec); } catch { /* gone */ } };
+      process.on('exit', drop);
+      for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
+      console.log(JSON.stringify({ url, note: 'local only; stop with Ctrl+C' }));
+    }, (e) => { console.error(`error: ${e.message}`); process.exit(1); });
     return null;
   },
   // Polls every 2 s (fs.watch misses renames on some systems); the state file is
@@ -516,7 +536,7 @@ const commands = {
   },
   close([run], o) {
     const outcome = oneOf(o.outcome, ['done', 'partial', 'stopped'], '--outcome');
-    return change(run, 'run.close', (s) => {
+    const closed = change(run, 'run.close', (s) => {
       applyStops(s); // an expired budget ends in-progress units first
       const busy = s.units.filter((u) => ['building', 'judging'].includes(u.status)).map((u) => u.id);
       if (busy.length) throw new Error(`close refused: ${busy.join(', ')} still in progress`);
@@ -527,6 +547,18 @@ const commands = {
       if (expected && d !== expected) s.notes.push({ kind: 'decision', text: `closed early as ${outcome} at "${d}": ${text(o.reason, 'reason (closing before the rules end the run)', 500)}`, at: now() });
       s.closed = { outcome, decision: d, at: now() };
     });
+    const loose = adopt(load(run), runDir(run), { project: projectDir(), home: homedir() }).filter((r) => ['adoptable', 'repairable', 'unclear'].includes(r.status));
+    return loose.length ? Object.assign(closed, { warning: `${loose.length} file(s) the run mentions are not safely stored in its folder (outside it, damaged, or an unclear path); run: run.mjs adopt ${run} --dry-run` }) : closed;
+  },
+  adopt([run], o) {
+    const dry = o['dry-run'] !== undefined;
+    let rows;
+    if (dry) rows = adopt(load(run), runDir(run), { project: projectDir(), home: homedir() });
+    else change(run, 'evidence', (s) => { rows = adopt(s, runDir(run), { project: projectDir(), home: homedir(), apply: true }); }, { closedOk: true });
+    const count = (k) => rows.filter((r) => r.status === k).length;
+    console.log(rows.length ? table(rows) : 'no file paths mentioned');
+    console.log(`${dry ? 'adoptable' : 'adopted'} ${count(dry ? 'adoptable' : 'adopted')}, ${dry ? 'repairable' : 'repaired'} ${count(dry ? 'repairable' : 'repaired')}, already ${count('already')}, inside ${count('inside')}, tracked ${count('tracked')}, missing ${count('missing')}, unclear ${count('unclear')}, refused ${count('refused')}`);
+    return null;
   },
   list() {
     if (!existsSync(runsDir())) return [];
@@ -585,9 +617,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

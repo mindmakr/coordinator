@@ -27,6 +27,7 @@ export function staticCtx(runDir, depth = 0, theme = null) {
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
+    has: (file) => !runDir || existsSync(join(runDir, 'artifacts', ...file.split('/'))),
     // Small screenshots go inline, so the snapshot shows them without loading anything.
     embed: (file) => {
       if (!runDir) return null;
