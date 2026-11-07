@@ -12,6 +12,8 @@ import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
 import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
+import { viewer, viewerEntries } from './evview.mjs';
+import { readStored, storedPath } from './evidence.mjs';
 import { escapeLine } from './view.mjs';
 import { pendingBanner } from './retro.mjs';
 
@@ -24,16 +26,20 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
+    live: null, theme, run: null, artifacts: !!runDir, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
-    has: (file) => !runDir || existsSync(join(runDir, 'artifacts', ...file.split('/'))),
+    // Every read goes through storedPath: the state's file names are checked, links never followed.
+    has: (file) => !runDir || storedPath(runDir, file) !== null,
+    // A stored text file's words, for the viewer (lib/evview.mjs caps them).
+    readText: (file) => readStored(runDir, file, 'utf8'),
     // Small screenshots go inline, so the snapshot shows them without loading anything.
     embed: (file) => {
       if (!runDir) return null;
-      try { const b = readFileSync(join(runDir, 'artifacts', file)); return b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null; } catch { return null; }
+      const b = readStored(runDir, file);
+      return b && b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null;
     },
   };
 }
@@ -211,9 +217,9 @@ function questionsCard(v, repo) {
     + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, `<ul class="answered">${done}</ul>`) : '') + '</section>';
 }
 
-export function timelineList(events, repo, finished = new Set()) {
+export function timelineList(events, repo, finished = new Set(), ctx = null) {
   // Each row's key holds its time, kind, who, a hash of its text, and a number if two still match.
-  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit))).join('') : '<li class="empty">Nothing yet.</li>';
+  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit), ctx)).join('') : '<li class="empty">Nothing yet.</li>';
 }
 
 export function hud(v, nowMs = Date.now(), ctx = null) {
@@ -242,7 +248,8 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
       list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
     '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
-    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id))), 'ol', ' class="timeline" data-tl-list'),
+    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id)), ctx), 'ol', ' class="timeline" data-tl-list data-ev-list'),
+    blk('evv', viewer(viewerEntries(v), ctx, r)),
   ].join('\n');
   return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
 }
