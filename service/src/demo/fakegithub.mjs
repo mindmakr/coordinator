@@ -48,7 +48,19 @@ export function fakeGitHub() {
       const f = repoOf(full)?.defaultFiles?.[path];
       return f === undefined ? null : Buffer.from(typeof f === 'string' ? f : JSON.stringify(f));
     },
-    issueComments(token, full, n) { calls.push(['issueComments', full, n]); return it(comments.get(`${full}#${n}`) ?? []); },
+    // Pages of 100 like github.mjs: spend() before each one, at most maxPages.
+    issueComments(token, full, n, { maxPages = 10, spend = null } = {}) {
+      calls.push(['issueComments', full, n]);
+      const list = comments.get(`${full}#${n}`) ?? [];
+      return (async function* () {
+        for (let p = 0; p < maxPages; p++) {
+          spend?.(); calls.push(['commentPage', full, n]);
+          const page = list.slice(p * 100, p * 100 + 100);
+          yield* page;
+          if (page.length < 100) return;
+        }
+      })();
+    },
     async createComment(token, full, n, body) {
       calls.push(['createComment', full, n, token]);
       const c = { id: nextComment++, body, performed_via_github_app: { id: 1 } };

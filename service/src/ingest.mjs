@@ -271,7 +271,9 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
       // its mark cannot lose the write. The clear holds only if nobody marked the run meanwhile.
       const seq = await db.markTrailPending(installationId, repo.id, runId);
       if (now() > deadline) continue; // out of time: left owed, for the next sync
-      const r = await trail.refreshRun(installationId, repo, runId);
+      // #42: the deadline and an uninstall are checked inside the refresh too, between its refs.
+      const r = await trail.refreshRun(installationId, repo, runId, { late: () => now() > deadline, gone: () => removed.has(installationId) });
+      if (r?.removed || removed.has(installationId)) break;
       if (!trailOwed(r) && seq !== null) await db.clearTrailPending(installationId, repo.id, runId, seq);
     }
     return retried;

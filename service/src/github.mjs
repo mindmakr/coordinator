@@ -52,8 +52,11 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
     return ok(r).token;
   }
 
-  async function* pages(token, path, key) {
-    for (let p = 1; p <= 10; p++) {
+  // maxPages: at most this many pages of 100; spend (optional): called before every page is fetched,
+  // so a caller with a read budget pays for each one (it throws when the budget is spent).
+  async function* pages(token, path, key, { maxPages = 10, spend = null } = {}) {
+    for (let p = 1; p <= maxPages; p++) {
+      spend?.();
       const r = ok(await call(token, 'GET', `${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${p}`));
       const items = key ? r[key] : r;
       yield* items;
@@ -117,7 +120,7 @@ export function github({ appId, privateKey, clientId, clientSecret, api, web, fe
     },
 
     // Tracker comments (an issue's or a PR's conversation).
-    issueComments: (token, full, n) => pages(token, `/repos/${enc(full)}/issues/${Number(n)}/comments`),
+    issueComments: (token, full, n, opts) => pages(token, `/repos/${enc(full)}/issues/${Number(n)}/comments`, null, opts),
     createComment: async (token, full, n, body) => ok(await call(token, 'POST', `/repos/${enc(full)}/issues/${Number(n)}/comments`, { body }, 'create comment')).id,
     // false when the comment is gone (deleted by someone), so a new one is made.
     async updateComment(token, full, id, body) {

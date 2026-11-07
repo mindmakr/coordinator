@@ -33,7 +33,14 @@ export function githubLines(events) {
 }
 
 // Caps on what one run log can make the App write: a hostile log is pusher-controlled.
-export const CAPS = { units: 50, refsPerUnit: MAX_REFS_PER_UNIT, commentWritesPerInstallation: 200, windowMs: 10 * 60_000 };
+// searchPages: pages of 100 comments read to find the App's own comment when no id is recorded;
+// readsPerRefresh: GitHub reads one refresh may make, whatever the window has left (#42: the window
+// resets every 10 minutes, so on its own it let one refresh run for an hour); notOnBoardMs: how long a
+// "not on board" answer is trusted before the board is asked again.
+export const CAPS = {
+  units: 50, refsPerUnit: MAX_REFS_PER_UNIT, commentWritesPerInstallation: 200, windowMs: 10 * 60_000,
+  searchPages: 2, readsPerRefresh: 100, notOnBoardMs: 24 * 3600_000,
+};
 // c14 round 5: GitHub reads the trail makes (comment pages, board queries, a linked repo's
 // coordinator.json) are budgeted per installation too, TRAIL_READS per window; past it the run is left
 // owed (out.deferred) and the next sync carries on, so one log cannot spend the installation's GitHub
@@ -48,10 +55,16 @@ export function trail({ db, gh, config, log, now = Date.now }) {
   const writes = limiter({ max: CAPS.commentWritesPerInstallation, windowMs: CAPS.windowMs, now });
   const reads = limiter({ max: readMax, windowMs: CAPS.windowMs, now });
   // One GitHub read for this installation, or ReadsSpent.
-  const reader = (installationId) => () => { if (reads.hit(String(installationId))) throw new ReadsSpent(); };
+  // Also counted against this refresh's own cap, so one refresh cannot spend window after window.
+  const reader = (installationId) => {
+    let used = 0;
+    const max = config.trailRefreshReads ?? CAPS.readsPerRefresh;
+    return () => { if (++used > max || reads.hit(String(installationId))) throw new ReadsSpent(); };
+  };
 
-  async function findOurs(token, ref, runId, unitId) {
-    for await (const c of gh.issueComments(token, ref.repo, ref.n)) {
+  // Every page fetched is charged (spend), and only the first CAPS.searchPages are read.
+  async function findOurs(token, ref, runId, unitId, spend) {
+    for await (const c of gh.issueComments(token, ref.repo, ref.n, { maxPages: CAPS.searchPages, spend })) {
       if (isTracker(c.body, runId, unitId) && String(c.performed_via_github_app?.id ?? '') === String(config.github.appId)) return c.id;
     }
     return null;
@@ -62,21 +75,28 @@ export function trail({ db, gh, config, log, now = Date.now }) {
     const hash = sha256(body);
     if (t?.bodySha === hash) return 'unchanged';
     if (writes.hit(String(installationId))) return 'deferred'; // over this installation's write budget
-    if (t?.commentId && await gh.updateComment(token, ref.repo, t.commentId, body)) {
-      await db.putTracker(installationId, { refKey: ref.key, runId, unitId, commentId: t.commentId, bodySha: hash });
-      return 'updated';
+    let id = null;
+    if (t?.commentId) {
+      if (await gh.updateComment(token, ref.repo, t.commentId, body)) {
+        await db.putTracker(installationId, { refKey: ref.key, runId, unitId, commentId: t.commentId, bodySha: hash });
+        return 'updated';
+      }
+      // Someone deleted it: a new one is posted, with no search (the recorded one was ours).
+    } else {
+      // No id recorded (a crash between posting and recording it): adopt this App's own comment if
+      // it is on the first pages, else post.
+      id = await findOurs(token, ref, runId, unitId, spend);
+      if (id && !(await gh.updateComment(token, ref.repo, id, body))) id = null;
     }
-    // No comment known, or someone deleted it: adopt this App's own comment if there is one, else post.
-    spend();
-    let id = await findOurs(token, ref, runId, unitId);
-    if (id) await gh.updateComment(token, ref.repo, id, body);
-    else id = await gh.createComment(token, ref.repo, ref.n, body);
+    id ??= await gh.createComment(token, ref.repo, ref.n, body);
     await db.putTracker(installationId, { refKey: ref.key, runId, unitId, commentId: id, bodySha: hash });
     return 'created';
   }
 
   // repo: the state repo's row; runId: a run in it. Never throws: a failure is logged.
-  async function refreshRun(installationId, repo, runId) {
+  // late (optional): true once the caller's job is out of time; the rest is left owed (out.deferred).
+  // gone (optional): true once the installation was removed; nothing more is written (out.removed).
+  async function refreshRun(installationId, repo, runId, { late = () => false, gone = () => false } = {}) {
     const out = { comments: [], board: [] };
     try {
       const row = await db.run(installationId, repo.id, runId);
@@ -90,6 +110,8 @@ export function trail({ db, gh, config, log, now = Date.now }) {
       const spend = reader(installationId);
       for (const u of state.units.slice(0, CAPS.units)) {
         for (const ref of unitRefs(u).slice(0, CAPS.refsPerUnit)) {
+          if (gone()) { out.removed = true; return out; }
+          if (late()) { out.deferred = true; return out; } // left owed: the next sync carries on
           const target = await db.repoByName(installationId, ref.repo); // this installation's row only
           if (!(await fence.allows(repo, target, token, spend))) { out.skipped = [...(out.skipped ?? []), ref.key]; continue; } // outside the project: read-only
           const events = await db.ghEvents(installationId, [ref.key]);
@@ -106,11 +128,13 @@ export function trail({ db, gh, config, log, now = Date.now }) {
             const t = await db.tracker(installationId, ref.key, state.id, u.id);
             if (t?.boardSha === hash) { out.board.push([ref.key, u.id, 'unchanged']); continue; }
             // c14 round 5: a card found not on the board is remembered against the same hash, so it is
-            // asked about again only when the unit's state (or the board) changes, not at every refresh.
-            if (t?.boardSha === `off:${hash}`) { out.board.push([ref.key, u.id, 'not on board']); continue; }
+            // asked about again only when the unit's state (or the board) changes, not at every refresh,
+            // or once the answer is a day old (#42: a card added to the board later is picked up).
+            const off = /^off:([0-9a-f]+)@(\d+)$/.exec(t?.boardSha ?? '');
+            if (off && off[1] === hash && now() - Number(off[2]) < CAPS.notOnBoardMs) { out.board.push([ref.key, u.id, 'not on board']); continue; }
             session ??= boardSession({ gh, token: await gh.installationToken(installationId, SCOPES.board), board, spend });
             const r = await session.update(ref, { runId: state.id, state: st });
-            if (r === 'set' || r === 'not on board') await db.putTracker(installationId, { refKey: ref.key, runId: state.id, unitId: u.id, boardSha: r === 'set' ? hash : `off:${hash}` });
+            if (r === 'set' || r === 'not on board') await db.putTracker(installationId, { refKey: ref.key, runId: state.id, unitId: u.id, boardSha: r === 'set' ? hash : `off:${hash}@${now()}` });
             out.board.push([ref.key, u.id, r]);
           }
         }
