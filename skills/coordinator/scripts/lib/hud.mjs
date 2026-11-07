@@ -4,6 +4,7 @@
 // Without `ctx.live` it is the static hud.html: no scripts, no network, a
 // read-only snapshot. With it (lib/serve.mjs) it is the live dashboard: forms,
 // and one script, allowed by a per-response nonce, that patches blocks in place.
+import { linkName } from './chain.mjs';
 import { modelLine } from './models.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -141,6 +142,16 @@ export function triesRow(u) {
   return `<div class="row" title="${esc(help)}"><span>Tries used: ${u.rounds} of ${u.maxRounds}${u.after ? ` · after ${esc(u.after)}` : ''}</span></div>${bar(u.rounds, u.maxRounds, tone, help)}`;
 }
 
+// The same work in other runs (#36): "Continues run-a (3 tries, stopped) · Continued in run-b: pass".
+export function chainRow(u, ctx) {
+  const c = u.chain;
+  if (!c) return '';
+  const name = (l) => { const t = esc(linkName(l, u.id)); return l.known && ctx?.runHref ? `<a href="${esc(ctx.runHref(l.run))}">${t}</a>` : t; };
+  const one = (l) => `${name(l)} <span class="cause">(${l.known ? `${l.rounds.length} ${l.rounds.length === 1 ? 'try' : 'tries'}, ${esc(l.outcome)}` : 'not here'})</span>`;
+  const parts = [c.before.length && `Continues ${c.before.map(one).join(' → ')}`, c.after.length && `Continued in ${c.after.map(one).join(' → ')}`].filter(Boolean);
+  return `<p class="cause chain" data-a="chain-${esc(u.id)}">${parts.join(' · ')}${c.after.length ? ` · finally ${chip(c.final.outcome ?? 'unknown', c.final.outcome ?? '')}` : ''}</p>`;
+}
+
 function unitCard(u, ctx, form, repo) {
   const raw = [u.gap && `<dt>Last gap</dt><dd>${linkify(u.gap, repo)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${linkify(u.evidence, repo)}</dd>`].filter(Boolean).join('');
   const passing = u.behaviours.filter((b) => b.status === 'pass').length;
@@ -150,6 +161,7 @@ function unitCard(u, ctx, form, repo) {
     + `<p class="say" data-a="say-${esc(u.id)}">${linkWaits(u.sentence, waits, ctx)}</p>`
     + blocksLine(u, ctx)
     + triesRow(u)
+    + chainRow(u, ctx)
     + (u.who ? `<p class="cause" data-a="who-${esc(u.id)}">${esc(u.who)}</p>` : '')
     + scoreChart(u.roundList)
     + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo, [], null, `u-${u.id}`)) : '')
