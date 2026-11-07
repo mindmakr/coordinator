@@ -5,12 +5,21 @@
 // redelivered webhook or a repeated sync changes nothing. A log that fails
 // validation keeps the last good state and records why; other runs go on.
 import { isSafeId, mapFromText, maskSecrets, parseLog, replay, unitRefs, validRun } from './core.mjs';
-import { parser } from './parser.mjs';
+import { DEFERRED, parser } from './parser.mjs';
 
 const RUN_LOG = /^runs\/([^/]+)\/events\.jsonl$/;
 const MAP_LOG = /^runs\/([^/]+)\/map\/events\.jsonl$/;
 const MARKER = '.coordinator-state';
-export const LIMITS = { mapBytes: 16 * 1024 * 1024, logBytes: 8 * 1024 * 1024, runs: 500, lessonsBytes: 1024 * 1024, configBytes: 64 * 1024 };
+const MB = 1024 * 1024;
+// syncBytes: the run and map log bytes one sync of one repo reads (SYNC_MAX_MB); past it, the
+// rest wait for the next sync, so one push of 500 large logs is read over several syncs.
+const syncMb = (v = process.env.SYNC_MAX_MB) => {
+  if (v === undefined || v === '') return 64;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 8 || n > 4096) throw new Error(`setting out of range: SYNC_MAX_MB=${v} (8-4096)`);
+  return n;
+};
+export const LIMITS = { mapBytes: 16 * MB, logBytes: 8 * MB, runs: 500, lessonsBytes: MB, configBytes: 64 * 1024, syncBytes: syncMb() * MB };
 
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const MAX_DEPTH = 64;
@@ -29,6 +38,8 @@ const why = (e, n = 500) => maskSecrets(String(e?.message ?? e).slice(0, 2 * n))
 // The run a log describes, or an error message. Never throws. Pure: parser.mjs runs it in a worker.
 export function readLog(runId, buf) {
   try {
+    const named = firstRunId(buf); // cheap: the first line only, before parsing, replaying and masking
+    if (named !== null && named !== runId) return { error: `the log describes run ${JSON.stringify(String(named).slice(0, 64))}, not ${runId}` };
     const log = parseLog(buf, `runs/${runId}/events.jsonl`);
     if (!log.events.length) return { error: 'the event log is empty' };
     const state = replay(log.events);
@@ -38,6 +49,17 @@ export function readLog(runId, buf) {
     if (state.units.length > MAX_UNITS) return { error: `the run has ${state.units.length} units; at most ${MAX_UNITS} are read` };
     return { state: maskDeep(state), seq: log.events.length };
   } catch (e) { return { error: why(e) }; }
+}
+
+// The run id the log's first event (run.init) sets, or null when the first line does not say plainly.
+function firstRunId(buf) {
+  const nl = buf.indexOf(10);
+  if (nl < 0 || nl > LIMITS.logBytes) return null;
+  try {
+    const e = JSON.parse(buf.subarray(0, nl).toString('utf8'));
+    const op = e?.kind === 'run.init' && Array.isArray(e.payload?.ops) ? e.payload.ops[0] : null;
+    return op?.op === 'set' && Array.isArray(op.path) && op.path.length === 0 && typeof op.value?.id === 'string' ? op.value.id : null;
+  } catch { return null; }
 }
 
 // The project map a run pushed (lib/map), or an error message. Never throws.
@@ -110,10 +132,16 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
       const have = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
       const out = { repo: repo.fullName, head, runs: logs.length, updated: [], failed: [] };
       const changes = [];
+      // A log left for later (the sync's byte cap, or the installation's reading budget) keeps its last
+      // state, and the repo keeps its old head, so the next sync or resync reads it.
+      const later = []; const reasons = new Set(); let bytes = 0;
+      const fits = (size) => { if (bytes && bytes + size > LIMITS.syncBytes) { reasons.add(`this sync read its ${LIMITS.syncBytes / MB} MB`); return false; } bytes += size; return true; };
       for (const e of logs) {
         const prev = have.get(e.runId);
         if (prev?.eventsSha === e.sha && !force) continue; // same bytes, same result
-        const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : await reader.readLog(e.runId, await gh.blob(token, repo.fullName, e.sha));
+        if (e.size <= LIMITS.logBytes && !fits(e.size)) { later.push(e.runId); continue; }
+        const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : await reader.readLog(e.runId, await gh.blob(token, repo.fullName, e.sha), installationId);
+        if (r.deferred) { later.push(e.runId); reasons.add(DEFERRED); continue; }
         if (r.error) {
           // Keep the last good state; record the failure against this blob.
           await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: prev?.seq ?? null, state: prev?.state ?? null, error: r.error });
@@ -134,15 +162,22 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
         const runId = MAP_LOG.exec(e.path)[1];
         const prev = rows.get(runId);
         if (!runIds.has(runId) || !prev || (prev.mapSha === e.sha && !force)) continue;
-        const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : await reader.readMap(await gh.blob(token, repo.fullName, e.sha));
+        if (e.size <= LIMITS.mapBytes && !fits(e.size)) { later.push(`${runId} (map)`); continue; }
+        const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : await reader.readMap(await gh.blob(token, repo.fullName, e.sha), installationId);
+        if (r.deferred) { later.push(`${runId} (map)`); reasons.add(DEFERRED); continue; }
         await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? prev.map ?? null, mapError: r.error ?? null });
         if (r.error) log?.warn('map log rejected', { repo: repo.fullName, run: runId, reason: r.error });
       }
       // Lessons and coordinator.json are optional: one that cannot be read is left out and named in the sync error.
-      const lessons = await readSide(token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes, 'lessons');
-      const config = await readSide(token, repo, entries, 'coordinator.json', LIMITS.configBytes, 'config');
-      const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, lessons.error, config.error].filter(Boolean);
-      await db.setRepoSync(installationId, repo.id, { headSha: head, error: errors.length ? errors.join('; ') : null, lessons: lessons.value, config: config.value });
+      const lessons = await readSide(installationId, token, repo, entries, 'lessons/lessons.json', LIMITS.lessonsBytes, 'lessons');
+      const config = await readSide(installationId, token, repo, entries, 'coordinator.json', LIMITS.configBytes, 'config');
+      if (lessons.deferred || config.deferred) { later.push('side files'); reasons.add(DEFERRED); }
+      const owed = later.length ? `${later.length} file${later.length === 1 ? '' : 's'} left for the next sync: ${[...reasons].join('; ')}` : null;
+      if (owed) { out.later = later; log?.warn('sync left logs for later', { repo: repo.fullName, installation: installationId, later: later.slice(0, 20), count: later.length }); }
+      const errors = [tree.truncated ? 'the branch tree was too large to read whole; some runs may be missing' : null, owed, lessons.error, config.error].filter(Boolean);
+      // With logs left over the old head stays, so the next sync (a push, a write or the resync) is not skipped as unchanged.
+      const side = { ...(lessons.deferred ? {} : { lessons: lessons.value }), ...(config.deferred ? {} : { config: config.value }) };
+      await db.setRepoSync(installationId, repo.id, { headSha: later.length ? (current?.headSha ?? null) : head, error: errors.length ? errors.join('; ') : null, ...side });
       const fresh = (await db.repos(installationId)).find((x) => x.id === repo.id);
       if (onChange && changes.length) onChange(installationId, fresh ?? repo, changes);
       const retried = await retrail(installationId, fresh, out.updated);
@@ -181,12 +216,13 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
   }
 
   // { value, error }: never throws, whatever the file holds.
-  async function readSide(token, repo, entries, path, max, kind) {
+  async function readSide(installationId, token, repo, entries, path, max, kind) {
     const e = entries.find((x) => x.path === path && x.type === 'blob');
     if (!e) return { value: null };
     if (e.size > max) return { value: null, error: `${path}: larger than ${max} bytes` };
     let r;
-    try { r = await reader.readJson(kind, await gh.blob(token, repo.fullName, e.sha)); } catch (err) { r = { error: why(err, 200) }; }
+    try { r = await reader.readJson(kind, await gh.blob(token, repo.fullName, e.sha), installationId); } catch (err) { r = { error: why(err, 200) }; }
+    if (r.deferred) return { value: null, deferred: true };
     return r.error ? { value: null, error: `${path}: ${r.error}` } : { value: r.value ?? null };
   }
 
