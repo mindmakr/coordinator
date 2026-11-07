@@ -57,6 +57,12 @@
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run;
 //                  warns when files the run mentions are not adopted yet
+//   run.mjs report <run> [--draft | --file notes.md]   the run's report (report.html, /report): --draft reads PRs, merges,
+//                  migrations, env vars, scripts and jobs from the state and git into a draft; --file stores the
+//                  lead's release notes (Markdown) in the run; with neither, says what is stored
+//   run.mjs quality <run> | --project [--json]   code quality and compliance signals (duplication, structure, naming,
+//                  redundancy, security, privacy) on the run's changed files and the whole project; with a run,
+//                  stored as quality.json for the report (references/quality.md)
 //   run.mjs adopt <run> [--dry-run]  copy files the run mentions by path (screenshots, PDFs, logs, json and md reports in
 //                  worktrees or scratch folders) into the run folder as evidence, so deleting a worktree loses nothing
 //   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--fresh | --reset-stage] [--force] [--pit-stop [--dest dir]]
@@ -97,6 +103,8 @@ import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
 import { mapsPage } from './lib/mapspage.mjs';
+import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
+import { hasRetro, retroCommand } from './lib/retro.mjs';
 import { answer, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
@@ -115,7 +123,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], adopt: ['dry-run'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -157,6 +165,7 @@ function derived(s) {
   writeAtomic(hudFile(s.id), hud(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
   writeAtomic(join(runDir(s.id), 'maps.html'), mapsPage(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
   for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), staticCtx(runDir(s.id), 1, theme)));
+  for (const [name, html] of reportPages(s, v, runDir(s.id), staticCtx(runDir(s.id), 0, theme))) writeAtomic(join(runDir(s.id), name), html);
 }
 
 // --issue and --pr values (owner/repo#n, #n or a URL) as unit links.
@@ -446,7 +455,7 @@ const commands = {
         const theme = themeFor(load(run));
         if (path === '/coordinator') return selfPage(selfModel({ ...loadSelf(), current: run }), Date.now(), liveCtx(live, run, theme));
         // /run/<other>[/unit/<u>|/maps|/map]: another run of this folder, read-only; /run/<served> is the served run.
-        const m = /^\/run\/([^/]+)(\/unit\/.+|\/maps|\/map)?$/.exec(path);
+        const m = /^\/run\/([^/]+)(\/unit\/.+|\/maps|\/map|\/report|\/retro)?$/.exec(path);
         const id = m ? m[1] : run;
         if (m && !isSafeId(id)) return null;
         if (m && !exists(id)) return null;
@@ -458,6 +467,7 @@ const commands = {
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
         if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx, id) }) : null;
         if (rest === '/maps') return mapsPage(v, Date.now(), ctx);
+        if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDir(id), ctx, rest.slice(1))[0][1];
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
       },
       version: selfVersion,
@@ -548,7 +558,11 @@ const commands = {
       s.closed = { outcome, decision: d, at: now() };
     });
     const loose = adopt(load(run), runDir(run), { project: projectDir(), home: homedir() }).filter((r) => ['adoptable', 'repairable', 'unclear'].includes(r.status));
-    return loose.length ? Object.assign(closed, { warning: `${loose.length} file(s) the run mentions are not safely stored in its folder (outside it, damaged, or an unclear path); run: run.mjs adopt ${run} --dry-run` }) : closed;
+    const warnings = [
+      ...(hasRetro(closed) ? [] : [`no retro note: ask the person to run ${retroCommand(closed)} (references/learning.md)`]),
+      ...(loose.length ? [`${loose.length} file(s) the run mentions are not safely stored in its folder (outside it, damaged, or an unclear path); run: run.mjs adopt ${run} --dry-run`] : []),
+    ];
+    return warnings.length ? Object.assign(closed, { warning: warnings.join('; ') }) : closed;
   },
   adopt([run], o) {
     const dry = o['dry-run'] !== undefined;
@@ -558,6 +572,23 @@ const commands = {
     const count = (k) => rows.filter((r) => r.status === k).length;
     console.log(rows.length ? table(rows) : 'no file paths mentioned');
     console.log(`${dry ? 'adoptable' : 'adopted'} ${count(dry ? 'adoptable' : 'adopted')}, ${dry ? 'repairable' : 'repaired'} ${count(dry ? 'repairable' : 'repaired')}, already ${count('already')}, inside ${count('inside')}, tracked ${count('tracked')}, missing ${count('missing')}, unclear ${count('unclear')}, refused ${count('refused')}`);
+    return null;
+  },
+  // The report's release notes (lib/report/cli.mjs): a draft from the state and git, or the lead's notes stored in the run.
+  report([run], o) {
+    load(run);
+    if (o.draft !== undefined && o.file !== undefined) throw new Error('--draft or --file, not both');
+    if (o.file !== undefined) { change(run, 'report', (s) => storeReport(s, o.file), { closedOk: true }); return reportFor(load(run), runDir(run)); }
+    const out = reportFor(load(run), runDir(run), { draft: o.draft !== undefined, root: projectDir() });
+    if (o.draft !== undefined) { commands.hud([run]); process.stdout.write(out.markdown); return null; }
+    return out;
+  },
+  quality([run], o) {
+    if ((o.project === true) === (run !== undefined)) throw new Error('usage: run.mjs quality <run> | --project [--json]');
+    const out = reportFor(run === undefined ? null : load(run), run === undefined ? null : runDir(run), { quality: true, root: projectDir() });
+    if (run !== undefined) commands.hud([run]);
+    if (o.json === true) return out.quality;
+    process.stdout.write(out.text);
     return null;
   },
   list() {
@@ -617,9 +648,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches', 'report', 'quality'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

@@ -44,6 +44,8 @@ export const KINDS = {
   evidence: { unit: 'optional', payload: changes },
   note: { unit: 'optional', payload: changes },
   study: { unit: 'none', payload: changes },
+  // The release notes the lead stored for the run's report (run.mjs report --file).
+  report: { unit: 'none', payload: changes },
   question: { unit: 'optional', payload: changes },
   answer: { unit: 'optional', payload: changes },
   'answer.used': { unit: 'optional', payload: changes },

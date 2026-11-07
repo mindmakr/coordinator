@@ -5,6 +5,7 @@ import { attention, attentionLabel, clip, dotState, sentence, situation, timeLef
 import { answerText, questions } from './questions.mjs';
 import { bySetup, escapes, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
+import { retroPending } from './retro.mjs';
 
 const MINUTE = 60_000;
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale'];
@@ -43,6 +44,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
     }, bar: run.bar, fence: run.fence,
     phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
+    retroPending: retroPending(run, plan.decision), // every unit decided and no retro note yet (lib/retro.mjs)
     open: !run.closed, started: run.createdAt, closedAt: run.closed?.at ?? null,
     situation: situation(run),
     needsYou: run.closed ? [] : qs.filter((q) => q.open),

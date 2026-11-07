@@ -109,6 +109,8 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 - **A page per unit:** behaviours, evidence, every round (builder's report, critic's verdict, score, cause), notes and questions, issue and PR links, and its own timeline.
 - **Timelines** with colour-coded, labelled badges, search, kind and unit filters, time ranges and sort.
 - **Links:** URLs, `owner/repo#12`, `#12`, commit shas and branch names open on GitHub in a new tab.
+- **A report per run** (`/report`, `report.html`): release notes for devops and testers that the lead stores with `run.mjs report <run> --file`, started from a draft read from the run and git (`--draft`: PRs, merges, migrations, env vars, scripts, jobs), and code quality and compliance signals from `run.mjs quality <run|--project>`: duplication, file and function length, nesting, naming, unused files, security (secrets, eval, SQL by concatenation, TLS off, open CORS, unguarded routes) and privacy for PDPL and GDPR (personal data in logs and URLs, unencrypted sensitive columns, no deletion path or consent text). Each signal carries file:line evidence for a person to review; it is not a compliance certification.
+- **A retro page** (`/retro`, `retro.html`): the run's retro notes, lessons added, budgets, upstream proposals and escapes. Once every unit is decided the dashboard shows **Retro pending** with `/coordinator:retro <run>`, and `close` warns while no retro exists.
 - **The coordinator's own page** (`/coordinator`, linked from the header; `run.mjs self` in text): across every run in the project, its age, lessons with their sources, memory (`COORDINATOR.md` and your past answers), pass rate, rounds to pass and time per unit with the trend, history, what each open run waits on, its proposals, and the side studies it ran while waiting (`init --study-budget`). Other runs open read-only at `/run/<run>`.
 - **Looks like your project:** `init --theme app/globals.css` (or `Theme:` in `COORDINATOR.md`) maps your design system's colours, fonts and radius onto it. Light, dark or system.
 
@@ -139,6 +141,7 @@ skills/coordinator/
 │   ├── durability.md           the event log and snapshot, pit-stop push/pull, heartbeats, resume
 │   ├── hud.md                  the text view, the live dashboard and the snapshot
 │   ├── map.md                  the project map: commands, storage, view, limits
+│   ├── quality.md              the run's report: release notes and quality and compliance signals
 │   ├── learning.md             retro, lessons, budget tuning
 │   ├── upstream.md             contributing improvements back
 │   └── domains/                code · content (writing, design, research, data, prompts)

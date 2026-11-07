@@ -32,4 +32,6 @@ Pairs with <other repo> <tag>. Deploy order: <…>.
 
 ## Output
 
+Start from `S/run.mjs report <run> --draft` (PRs, merges, migrations, env vars, scripts and jobs read from the run and git) and confirm each line. Store the notes in the run with `S/run.mjs report <run> --file <notes.md>`: they show on the run's report page for devops and testers (`quality.md`).
+
 The integrator reply from `briefs.md`, with the notes' path in EVIDENCE and any PR you could not classify in GAP or OUT-OF-FENCE. Writing follows `craft.md`.
