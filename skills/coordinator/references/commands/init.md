@@ -12,6 +12,7 @@ Learn the project once, so that every later run starts informed and asks only ab
    - Risk areas the critic must always check, such as money, auth, migrations, time zones, or a simulated clock.
    - The review skill or reviewer to use, if any.
    - How the person wants to be told: only at the end, or also when a unit stops.
+   - Whether to route models (recommended: on): mechanical builder work such as docs, copy and translations on a cheaper model, critics always on the strongest (`references/routing.md`). Write the answer with `S/run.mjs init --models on|off` (key `models` in `.coordinator/coordinator.json`).
 3. **Write `COORDINATOR.md` at the project root** with the headings below. Keep it short, with one line per fact and its source. It is shared with the team, so commit it if they agree. It holds no secrets.
 
 ```
