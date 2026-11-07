@@ -4,6 +4,7 @@
 // Without `ctx.live` it is the static hud.html: no scripts, no network, a
 // read-only snapshot. With it (lib/serve.mjs) it is the live dashboard: forms,
 // and one script, allowed by a per-response nonce, that patches blocks in place.
+import { modelLine } from './models.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
@@ -215,7 +216,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),
     '<h2 data-a="h-Budget">Budget</h2>',
-    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes), 'div', ' class="budget"'),
+    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes) + modelCard(v.models), 'div', ' class="budget"'),
     '<h2 data-a="h-Units">Units</h2>',
     '<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <b>Needs you</b> = waiting on you; <b>Retrying</b> = the lead is on it; <b>Quiet</b> = the lead is checking on a silent agent. Score dots: red = failed try, green = passed try.</p>',
     blk('units', v.units.length ? [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)].map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
@@ -230,6 +231,12 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
 }
 
+
+// Builder models: rounds and pass rate each, so a cheaper builder that fails more shows up.
+function modelCard(m) {
+  if (!m?.length) return '';
+  return `<div class="card" data-a="budget-models" title="Rounds built on each model, and the share the critic passed"><div class="row" style="margin:0"><span>builder models</span><b>${esc(modelLine(m))}</b></div></div>`;
+}
 
 // Escapes: defects found after a unit passed, from note --kind escape. Shown once there is a pass.
 function escapeCard(e) {

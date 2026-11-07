@@ -16,7 +16,8 @@
 //   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL] [--url U --label L]   GitHub issues, PRs and merges for the unit
 //   run.mjs freeze <run>
 //   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
-//                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only)
+//                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
+//                  after a try failed on a model below strong, a model below strong needs [--force-model "reason"]
 //   run.mjs beat <run> <unit> [--text T]     builder or critic still working (T: the milestone, e.g. "pushed")
 //   run.mjs built <run> <unit> [--report R]  builder finished (R: its report in short): the unit waits for a critic
 //   run.mjs reset <run> <unit> --reason R     in-progress unit with no artifact goes back to build (after a crash)
@@ -29,7 +30,7 @@
 //                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
 //                  the unit stays judging, and its pass is refused until every required specialist passed
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
-//   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …]
+//   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …] [--model M]
 //                  only when next says integrate; a pass needs every goal behaviour passing
 //   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person|escape --text T
 //                  escape: --unit U, a passed unit where a defect turned up later (a later review, verify, test, a person); counted by stats
@@ -61,7 +62,7 @@
 //                  map history (a map.reset event push and pull accept); --force records a build cut short by the cap;
 //                  --pit-stop stages the log and summary in the run's pit-stop/map (push carries them), or copies them to --dest
 //   run.mjs touches <run> <path> [--json]   what that file touches, from the map, for a builder's brief
-//   run.mjs models [--role builder|critic|… --class docs]   the routing table, or the model for one role and task class
+//   run.mjs models [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
 //                  recorded, the run closed): the run's events, snapshot and README, project lessons and
@@ -82,7 +83,7 @@ import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
 import { remoteWatch } from './lib/remote.mjs';
-import { byModel, judgeAllowed, modelName, route, routing, setRouting } from './lib/models.mjs';
+import { atLeast, byModel, escalation, judgeAllowed, modelName, route, routing, setRouting } from './lib/models.mjs';
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
@@ -102,10 +103,10 @@ import { build as buildMap, defaultDest, hasMap, mapAttach, mapHtml, mapNav, map
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models'],
-  start: ['model', 'why'], models: ['role', 'class'],
+  start: ['model', 'why', 'force-model'], models: ['role', 'class'],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
-  integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
+  integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
   ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], stats: ['tag'], reset: ['reason'],
@@ -192,9 +193,8 @@ function judged(evidence, v, gapText, causeText) {
 
 const commands = {
   init([run], o) {
-    let models;
-    if (o.models !== undefined) models = setRouting(baseDir('project'), oneOf(o.models, ['on', 'off'], '--models') === 'on');
-    if (run === undefined && models !== undefined) return { models, file: join(baseDir('project'), 'coordinator.json') };
+    const routeOn = o.models === undefined ? undefined : oneOf(o.models, ['on', 'off'], '--models') === 'on';
+    if (run === undefined && routeOn !== undefined) return { models: setRouting(baseDir('project'), routeOn), file: join(baseDir('project'), 'coordinator.json') };
     safeId(run, 'run');
     const fresh = {
       id: run, tag: safeId(o.tag ?? 'general', 'tag'),
@@ -212,7 +212,9 @@ const commands = {
       if (!f || extname(f).toLowerCase() !== '.css' || !existsSync(f) || !statSync(f).isFile()) throw new Error('--theme must be an existing .css file');
       fresh.theme = f;
     }
-    return updateRun(runDir(run), { kind: 'run.init' }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    const made = updateRun(runDir(run), { kind: 'run.init' }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
+    return made;
   },
   add([run, unit], o) {
     return change(run, 'unit.add', (s) => {
@@ -240,8 +242,16 @@ const commands = {
   start([run, unit], o) {
     const model = modelName(o.model, 'model'); const why = optText(o.why, 80);
     if (why && !model) throw new Error('--why goes with --model');
+    const force = o['force-model'] === undefined ? null : text(o['force-model'] === true ? undefined : o['force-model'], 'reason for --force-model', 300);
+    if (force && !model) throw new Error('--force-model goes with --model');
+    const cfg = routing(baseDir('project'));
     return change(run, 'unit.start', (s) => {
-      const u = unitOf(s, unit); expect(s, u, 'start'); u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours);
+      const u = unitOf(s, unit); expect(s, u, 'start');
+      const esc = escalation(cfg, u);
+      if (esc && model && !atLeast(model, cfg.strong)) {
+        if (!force) throw new Error(`start refused: the last try failed on ${u.rounds.at(-1).builtBy}; use ${esc.model} (or --force-model "reason")`);
+        s.notes.push({ kind: 'decision', text: `${u.id}: built on ${model} again after ${u.rounds.at(-1).builtBy} failed: ${force}`, at: now() });
+      } u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours);
       delete u.builtBy; delete u.builtWhy;
       if (model) { u.builtBy = model; if (why) u.builtWhy = why; }
       log(u, 'start', `try ${u.rounds.length + 1}${model ? ` on ${model}${why ? ` (${why})` : ''}` : ''}`);
@@ -313,7 +323,7 @@ const commands = {
       const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const critic = optText(o.critic, 120);
       const judge = modelName(o.model, 'model');
-      if (judge && !judgeAllowed(routing(baseDir('project')), judge)) throw new Error(`verdict refused: critics are never routed down; ${judge} is below the strong model (references/routing.md)`);
+      if (judge && !judgeAllowed(routing(baseDir('project')), judge)) throw new Error(`verdict refused: critics are never routed down; ${judge} is below the strong model or not it (references/routing.md)`);
       const judgedBy = judge ? { judgedBy: judge } : {};
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
@@ -359,9 +369,11 @@ const commands = {
       if (d !== 'integrate') throw new Error(`integrate refused: the run is at "${d}"`);
       oneOf(v, ['pass', 'fail'], 'verdict');
       const evidence = optText(o.evidence);
+      const judge = modelName(o.model, 'model');
+      if (judge && !judgeAllowed(routing(baseDir('project')), judge)) throw new Error(`integrate refused: the integrator is never routed down; ${judge} is below the strong model (references/routing.md)`);
       const j = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const marks = mark(s.goalBehaviours ?? [], o.behaviour, j.verdict);
-      s.integration.rounds.push({ ...j, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}) });
+      s.integration.rounds.push({ ...j, evidence, at: now(), ...(judge ? { judgedBy: judge } : {}), ...(marks.length ? { behaviours: marks } : {}) });
     });
   },
   note([run], o) {
@@ -474,7 +486,9 @@ const commands = {
     let stopped;
     const s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
     const plan = decide(s);
-    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? u) };
+    const cfg = routing(baseDir('project'));
+    const suggest = (u) => { const e = u.action === 'build' ? escalation(cfg, unitOf(s, u.id)) : null; return e ? { ...u, model: e.model, modelWhy: e.why } : u; };
+    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? suggest(u)) };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];

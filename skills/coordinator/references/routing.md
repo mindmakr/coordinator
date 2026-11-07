@@ -6,20 +6,21 @@ Mechanical builder work goes to a cheaper model. Judgement stays on the strong o
 
 | Role or task class | Model | Why |
 |---|---|---|
-| Critic, specialist critic, visual critic, integrator | strong (`opus`) | Review depth is not where to save. Never routed down. |
+| Critic, specialist critic, visual critic, integrator | `strong` (`opus`) | Review depth is not where to save. Never below `strong`, whatever the table says. |
+| Builder: security, money, migrations, auth | `strong` | Pinned: the table cannot route them down |
 | Builder, `mechanical` work: docs, copy, translations, renames, test fixtures, small mirror changes | cheap (`sonnet`) | The bar and the critic catch a slip; the work needs care, not judgement |
-| Builder, anything else | the harness's default | Logic, data, security, money and UI need the full model |
+| Builder, anything else | the harness's default | Logic, data and UI need the full model |
 | Researcher | the harness's default | |
+
+A rename or mirror change that touches security, money, migrations or auth counts as that class too: give both (`--class renames,auth`). A unit in several classes gets the strongest of their choices.
 
 Ask the script instead of working it out: `S/run.mjs models --role builder --class docs` prints `{ model, why }`. `model: null` means "pass no model, use the default".
 
-When a unit fits two classes, use the stronger choice. A unit that failed once on the cheap model gets the default model for its next try, and the start says so (`--why "retry after cheap fail"`).
-
 ## Naming models per harness
 
-- **Claude Code:** the Agent tool's `model` parameter: `opus`, `sonnet` or `haiku`.
-- **Codex:** the model name Codex takes with `-m` / `--model` (or `model` in its config). Put the names in the table (below); Codex names are recorded as given and never ranked.
-- **Other harnesses:** whatever name the harness takes; the table maps to it.
+- **Claude Code:** the Agent tool's `model` parameter: `opus`, `sonnet` or `haiku`. Full ids (`claude-sonnet-4-5`) count as their family; case does not matter.
+- **Codex:** the model name Codex takes with `-m` / `--model` (or `model` in its config). Codex names have no built-in ranking, so declare the strong one: `"models": { "strong": "<your strongest Codex model>", "mechanical": "<a cheaper one>" }`. A critic may then use only that `strong` name.
+- **Other harnesses:** the same: name `strong`, then the cheaper entries.
 
 ## Turning it on or off
 
@@ -27,15 +28,19 @@ When a unit fits two classes, use the stronger choice. A unit that failed once o
 
 - absent: on, with the table above;
 - `false`: off. Every agent gets the harness's default, and nothing is refused;
-- an object mapping a role or task class to a model name, over the defaults, e.g. `{ "critic": "opus", "builder": "opus", "mechanical": "sonnet" }`. A key for a single class (`"translations": "haiku"`) beats `mechanical`.
+- an object mapping a role or task class to a model name, over the defaults, e.g. `{ "strong": "opus", "critic": "opus", "builder": "opus", "mechanical": "sonnet" }`. `strong` (default `opus`) is the floor for judges and pinned classes. A key for a single class (`"translations": "haiku"`) beats `mechanical`.
 
-A critic entry below the strongest model in the table is ignored with a warning: critics are never routed down. `S/run.mjs init --models on|off` writes the switch and keeps the rest of the file; `/coordinator:init` asks the person once (`commands/init.md`).
+A judge or pinned-class entry below `strong` is ignored with a warning. `S/run.mjs init --models on|off` writes the switch and keeps the rest of the file (a malformed file is refused, never overwritten); `/coordinator:init` asks the person once (`commands/init.md`).
+
+## Escalation
+
+After a try fails on a model below `strong`, the next try builds on `strong`: `next` suggests it (`model`, `modelWhy`), and `start --model <cheaper>` is refused unless `--force-model "reason"` is given, which logs a decision.
 
 ## Recording
 
 Record every choice, routed or not, so the retro and `stats` can tell whether cheaper builders fail more:
 
 - `S/run.mjs start <run> <unit> --model sonnet --why docs-only`: the model building this try, and the class that chose it.
-- `S/run.mjs verdict <run> <unit> pass|fail … --model opus`: the model that judged. While routing is on, a judging model ranked below the strongest is refused.
+- `S/run.mjs verdict … --model opus` and `S/run.mjs integrate … --model opus`: the model that judged. While routing is on, a judge below `strong` (or an unranked name other than `strong`) is refused.
 
-The unit card and page then read "built by sonnet (docs-only) · judged by opus". `S/run.mjs stats` adds `roundsByBuilderModel` (rounds, passes, pass rate per builder model) and `roundsByJudgeModel`. In the retro, a cheap model whose pass rate sits clearly below the default's on the same kind of unit is a lesson: narrow its classes.
+The unit card and page then read "built by sonnet (docs-only) · judged by opus", and the dashboard's budget block shows rounds and pass rate per builder model. `S/run.mjs stats` adds `roundsByBuilderModel` and `roundsByJudgeModel`. In the retro, a cheap model whose pass rate sits clearly below the default's on the same kind of unit is a lesson: narrow its classes.

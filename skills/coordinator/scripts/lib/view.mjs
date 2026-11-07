@@ -1,6 +1,6 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
-import { whoUnit } from './models.mjs';
+import { byModel, modelLine, whoUnit } from './models.mjs';
 import { attention, attentionLabel, clip, dotState, sentence, situation, timeLeft } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
 import { bySetup, escapes, unmet } from './rules.mjs';
@@ -55,6 +55,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       { name: 'added after freeze', used: run.addedAfterFreeze ?? 0, max: run.budget.maxAdded, unit: '' },
       { name: 'integration rounds', used: integ.length, max: run.budget.maxRounds, unit: '' },
     ],
+    // Rounds and pass rate per builder model, once any round recorded one (lib/models.mjs).
+    models: byModel([run]).roundsByBuilderModel.filter((m) => m.model !== '(not recorded)'),
     escapes: { ...escapes(run), bySetup: bySetup([run]), list: notes.filter((n) => n.kind === 'escape').map((n) => ({ unit: n.unit, round: n.round ?? null, text: n.text, at: n.at })) },
     units: run.units.map((u) => {
       const last = u.rounds.at(-1);
@@ -124,6 +126,7 @@ export function text(v) {
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);
+  if (v.models?.length) lines.push(`models   ${modelLine(v.models)}`);
   if (v.escapes?.escapes) lines.push(`escapes  ${escapeLine(v.escapes)}`);
   const setups = (v.escapes?.bySetup ?? []).filter((g) => g.setup !== '(not recorded)' || g.escapes);
   if (setups.length) lines.push(`critics  ${setups.map((g) => `${clip(g.setup, 50)}: ${g.escapes} escape${g.escapes === 1 ? '' : 's'} in ${g.passed} passed (rate ${g.rate})`).join(' · ')}`);
