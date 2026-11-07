@@ -59,6 +59,12 @@ Repeat `S/run.mjs next <run>` and act on each unit:
   - **The lead may not** use `--confirm` without the person's own words, paraphrase them into a yes, answer or note for them otherwise (a plain `answer` or `note --kind person` from the CLI never approves), or approve an extension itself. Editing state.json never approves: an answer, note or question last written by a hand edit (`state.edited` in the log) is refused. This guards against mistakes and casual edits, not a determined lead: a forged events.jsonl line cannot be fully prevented on this machine, because the lead holds the files and the dashboard's token too. An approval that matters is best given on the web (the service writes it with the person's own GitHub login) and checked there.
 - **A follow-on run:** `S/run.mjs init <new-run> … --continues <run>:<unit>` and add the unit under the same id, or under a new id with `add <new-run> <new-id> --continues <run>:<unit>`. Both runs record the link; the dashboard, unit page, maps and coordinator page show the chain with both ids, and `stats` counts it as one unit (rounds added up, outcome from the last run; a chain whose last unit was left open in a closed run counts as unfinished, neither passed nor stopped). A unit is continued once: a second follow-on of the same unit is refused, so continue the latest link instead. For a follow-on run made without the flag: `S/run.mjs link <new-run> <unit> --continues <run>:<unit>`.
 
+**Status in the chat.** The person plans their next runs around this one, so say where it stands without being asked. Post `S/run.mjs status-line <run>` as one line, unchanged:
+- at each milestone: a unit built, judged or merged, a question asked;
+- at least every 30–45 minutes while agents run, even when nothing changed.
+
+It reads "payday-x · Running: 2 of 4 units done (50%), building u3 round 2, about 1 h left (~21:40). Nothing needs you." When the run concludes (after `close`), post its closing line the same way: "payday-x concluded: done. Delivered: … Follow-ups: N in Gaps. Ready for the next run." (`references/hud.md`, Status word).
+
 **Pit stops.** After a unit merges, a decision is recorded, or the run closes (after `close`), run `S/run.mjs push <run>` so the run is in the repo for another machine (`references/durability.md`). Never after every step.
 
 Briefs for agents outside a git worktree of this repo carry `COORDINATOR_DIR` from `S/run.mjs where`.

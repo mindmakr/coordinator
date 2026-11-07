@@ -86,7 +86,10 @@
 //                  --remote also pulls the run from its state branch every S seconds (10-60, default 30), and at once
 //                  when the service's doorbell rings (COORDINATOR_SERVICE); lines starting "remote:" are about that link
 //   run.mjs next <run>     prints what to do and records any stops
-//   run.mjs show <run>     prints the compact text HUD (situation, needs you, time left, units, budget, next step)
+//   run.mjs show <run>     prints the compact text HUD (status, progress, ETA, situation, needs you, units, budget, next step)
+//   run.mjs status-line [<run>] [--json]   the one line the lead posts at each milestone ("payday-x · Running: 2 of 4 units
+//                          done (50%), building u3 round 2, about 1 h left (~21:40). Nothing needs you."), the closing
+//                          line once the run concluded; with no run, one line per run, active first (lib/progress.mjs)
 //   run.mjs hud <run>      rewrites hud.html, maps.html and units/<unit>.html beside state.json now and prints its path
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run;
@@ -112,7 +115,8 @@
 //                  on the unit page and the maps page's Calls view; map --unit U computes it for U too
 //   run.mjs sync <run> <unit> [--text T]   the target branch was merged into the unit's branch (after `next` asked)
 //   run.mjs models [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class
-//   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
+//   run.mjs list | stats [--tag T] | where      list: every run with its status word, progress, ETA and status line;
+//                  where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
 //                  recorded, the run closed): the run's events, snapshot and README, project lessons and
 //                  stats, masked, to the coordinator-state branch (never main; a public repo needs a
@@ -137,6 +141,7 @@ import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mj
 import { answerRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
 import { clip } from './lib/plain.mjs';
+import { ordered, runStatus } from './lib/progress.mjs';
 import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
@@ -175,7 +180,7 @@ const FLAGS = {
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
-  brief: ['role', 'quote', 'source', 'where', 'playbook'],
+  brief: ['role', 'quote', 'source', 'where', 'playbook'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'],
 };
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
@@ -902,6 +907,20 @@ const commands = {
     process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: optText(o.where, 500), playbook: optText(o.playbook, 300), env })}\n`);
     return null;
   },
+  // The one-line status a lead posts in the chat (references/commands/run.md); with no run, one line per run:
+  // active runs first, then the recently concluded ones.
+  'status-line'([run], o) {
+    const statuses = run ? [load(run)] : commands.list().filter((r) => !r.error).map((r) => load(r.run));
+    const all = statuses.map((s) => runStatus(s, decide(s), { runs: [...linkedOf(s).values()].filter((r) => r && Array.isArray(r.units)) }));
+    if (o.json === true) return all;
+    if (run) { console.log(all[0].line); return null; }
+    const { active, concluded, older } = ordered(all, statuses);
+    const lines = [...active.map((x) => x.line), ...concluded.map((x) => x.line)];
+    if (!lines.length) lines.push('No runs yet.');
+    if (older) lines.push(`(${older} older concluded ${older === 1 ? 'run' : 'runs'}: run.mjs list)`);
+    for (const l of lines) console.log(l);
+    return null;
+  },
   show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s) }))); return null; },
   // Reads under the lock so it never renders a half-applied change; also refreshes the elapsed time.
   hud([run]) {
@@ -961,7 +980,14 @@ const commands = {
     return readdirSync(runsDir()).filter((d) => isSafeId(d) && exists(d)).map((d) => {
       try {
         const s = loadRun(runDir(d));
-        return { run: s.id, tag: s.tag, createdAt: s.createdAt, closed: s.closed?.outcome ?? null, decision: decide(s).decision };
+        const plan = decide(s);
+        const st = runStatus(s, plan, { runs: [...linkedOf(s).values()].filter((r) => r && Array.isArray(r.units)) });
+        return {
+          run: s.id, tag: s.tag, createdAt: s.createdAt, closed: s.closed?.outcome ?? null, decision: plan.decision,
+          // The plain status (lib/progress.mjs): the same word, progress and ETA as show, the HUD and the coordinator page.
+          status: st.word, progress: { done: st.done, total: st.total, pct: st.pct, stopped: st.stopped }, doing: st.concluded ? null : st.doing,
+          eta: st.eta.text, readyAt: st.eta.readyAt, needsYou: st.needsYou.map((q) => q.id), line: st.line,
+        };
       } catch (e) { return { run: d, createdAt: '', error: `unreadable: ${e.message}` }; }
     }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
@@ -1039,7 +1065,7 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);

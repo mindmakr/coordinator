@@ -8,6 +8,7 @@ import { chainUnits } from './chain.mjs';
 import { decide, stats } from './rules.mjs';
 import { clip, dotState, stateBadge } from './plain.mjs';
 import { gapsModel, KIND_LABEL } from './gaps.mjs';
+import { clock, freeAt, ordered, runStatus } from './progress.mjs';
 
 const MINUTE = 60_000;
 export const STUDY_AREAS = ['security', 'design', 'stack', 'other'];
@@ -73,13 +74,13 @@ function waitsOn(d, u, openQs) {
   }
 }
 
-function plan(run, nowMs) {
+function plan(run, nowMs, status) {
   const p = decide(run, nowMs);
   const qs = questions(run).filter((q) => q.open);
   const left = run.units.filter((u) => !['pass', 'stopped'].includes(u.status));
   const byId = new Map(p.units.map((d) => [d.id, d]));
   return {
-    run: run.id, tag: run.tag, decision: p.decision, goal: clip(run.goal, 200),
+    run: run.id, tag: run.tag, decision: p.decision, goal: clip(run.goal, 200), status,
     done: run.units.length - left.length, total: run.units.length,
     next: p.units.filter((d) => ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'].includes(d.action)).map((d) => `${d.action} ${d.id}`),
     left: left.map((u) => { const d = byId.get(u.id) ?? {}; const dot = dotState(u, d, qs); return { id: u.id, title: u.title ?? null, status: u.status, dot, badge: stateBadge(dot, u, d), waitsOn: waitsOn(d, u, qs) }; }),
@@ -160,7 +161,12 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
   const finishedUnits = work.filter((u) => ['pass', 'stopped'].includes(u.status));
   const mins = sorted.flatMap((r) => r.units.map((u) => unitMinutes(r, u))).filter((m) => m !== null).sort((a, b) => a - b);
   const ids = new Set(sorted.map((r) => r.id));
+  // Each run's status word, progress and ETA (lib/progress.mjs), as show and the HUD say it.
+  const status = new Map(sorted.map((r) => [r.id, runStatus(r, r.closed ? null : decide(r, nowMs), { nowMs, runs: sorted })]));
+  const order = ordered([...status.values()], sorted);
   return {
+    // Capacity: what is still running and when the machine frees up.
+    active: { runs: order.active, concluded: order.concluded, older: order.older, free: freeAt(order.active) },
     current,
     runIds: [...ids],
     age: {
@@ -187,10 +193,10 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
     // Work that ran across runs, oldest run first, with its rounds added up.
     chains: work.filter((c) => c.links.length > 1).map((c) => ({ unit: c.id, status: c.outcome, rounds: c.rounds, links: c.links })),
     history: sorted.filter((r) => r.closed).reverse().map((r) => ({
-      run: r.id, tag: r.tag, outcome: r.closed.outcome, started: r.createdAt, closed: r.closed.at, goal: clip(r.goal, 160),
+      run: r.id, tag: r.tag, outcome: r.closed.outcome, status: status.get(r.id), started: r.createdAt, closed: r.closed.at, goal: clip(r.goal, 160),
       passed: r.units.filter((u) => u.status === 'pass').length, stopped: r.units.filter((u) => u.status === 'stopped').length, units: r.units.length,
     })),
-    plans: sorted.filter((r) => !r.closed).reverse().map((r) => plan(r, nowMs)),
+    plans: sorted.filter((r) => !r.closed).reverse().map((r) => plan(r, nowMs, status.get(r.id))),
     proposals: proposals(sorted, all),
     // Everything left undone across runs (lib/gaps.mjs), open and resolved.
     gaps: { ...gapsModel(sorted), lastCheck: gapsCheck && typeof gapsCheck.at === 'string' ? { at: gapsCheck.at, asked: Number(gapsCheck.asked) || 0, closed: Number(gapsCheck.closed) || 0 } : null },
@@ -210,6 +216,9 @@ export function selfText(m) {
   const L = [];
   const a = m.age;
   L.push(`coordinator · ${count(a.runs, 'run')} (${a.open} open) · ${count(a.units, 'unit')} · ${a.hours} h · first run ${day(a.firstRun)}${a.firstRunId ? ` (${a.firstRunId})` : ''}`);
+  const act = m.active;
+  L.push('', `active    ${act.runs.length ? `${count(act.runs.length, 'run')} running${act.free.at ? ` · machine free around ${clock(Date.parse(act.free.at), Date.now())} local time${act.free.unknown ? ` (${act.free.unknown} with no estimate yet)` : ''}` : ' · no estimate yet'}` : 'no active run: the machine is free'}`);
+  for (const x of [...act.runs, ...act.concluded]) L.push(`  ${x.line}`);
   const st = m.stats;
   L.push('', `stats     pass rate ${n(st.passRate, '%')} · rounds to pass median ${n(st.medianRoundsToPass)}, p80 ${n(st.p80RoundsToPass)} · stopped ${n(st.stoppedShare, '%')} · ${n(st.minutesPerUnit, ' min')} per unit (median) · ${count(st.units, 'finished unit')} (${st.basis})`);
   const c = st.closed;
