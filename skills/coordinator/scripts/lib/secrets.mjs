@@ -72,11 +72,13 @@ function facts(t) {
   return { brk, sym, letter, slash, trig, stop };
 }
 
-// The end of a credential-like value starting at p, or -1.
-function valueEnd(t, p, f) {
+// The end of a credential-like value starting at p, or -1. far(quote, length): where a quote
+// left open at the end of a window closes, in t's coordinates (past its end), or -1.
+function valueEnd(t, p, f, far) {
   const c = t.charCodeAt(p);
   if (isQuote(c)) {
-    const j = t.indexOf(t[p], p + 1);
+    let j = t.indexOf(t[p], p + 1);
+    if (j < 0 && far) j = far(t[p], t.length);
     return j >= 0 && j - p - 1 >= 6 ? j + 1 : -1;
   }
   const F = f();
@@ -113,7 +115,7 @@ function nameStart(t, a, b, from, quoted) {
 }
 
 // [start, end] pairs of every "<name> : value" (form 'assign') or "<name> is value" (form 'is'), left to right.
-function* named(t, form) {
+function* named(t, form, far) {
   let F = null;
   const f = () => (F ??= facts(t));
   const RUN = /[A-Za-z0-9_-]+/g;
@@ -139,7 +141,7 @@ function* named(t, form) {
     if (p >= t.length) continue;
     const start = nameStart(t, a, b, from, form === 'assign');
     if (start < 0) continue;
-    const end = valueEnd(t, p, f);
+    const end = valueEnd(t, p, f, far);
     if (end < 0) continue;
     yield [start, end];
     from = end;
@@ -191,44 +193,75 @@ function regexMatches(t, re, keep) {
 }
 
 // The [a, b) spans of t that masking replaces, sorted and disjoint.
-function maskMarks(t) {
+function maskMarks(t, far) {
   let marks = [];
   let out = t;
   const pass = (matches) => { if (matches.length) { marks = apply(marks, matches); out = rebuild(t, marks); } };
   for (const re of PATTERNS) pass(regexMatches(out, re));
-  for (const form of ['assign', 'is']) pass([...named(out, form)]);
+  for (const form of ['assign', 'is']) pass([...named(out, form, far)]);
   pass(regexMatches(out, ENTROPIC, looksRandom));
   return marks;
 }
 
 // ---- Windows. Text longer than WINDOW is read in overlapping windows: a window covers
-// [pos - CONTEXT, pos + WINDOW + OVERLAP) and keeps the spans that start in [pos, pos + WINDOW).
-// A kept span that runs past pos + WINDOW moves the next window's start to its end. Every
-// pattern spans at most ~550 characters (the URL rule) except unbounded runs of key characters;
-// OVERLAP covers the bounded ones with margin, and a run that reaches the window's end is
-// followed to its real end. CONTEXT gives the next window the characters before its start,
-// so "mytoken=" cut after "my" is still read as "mytoken".
+// [pos - CONTEXT, hi) and keeps the spans that start in [pos, pos + WINDOW). A kept span that runs
+// past pos + WINDOW moves the next window's start to its end.
+// - hi is pos + WINDOW + OVERLAP moved on to just past the next whitespace or quote (up to SNAP
+//   further), so no token is cut: every rule decides on whole tokens, as on the whole text.
+//   OVERLAP covers the rules that cross whitespace (all bounded, at most ~550 characters).
+// - A quoted named value still open at hi is followed to its closing quote, however far.
+// - With no break within SNAP, a run of key characters that reaches hi is followed to its end.
+// - CONTEXT gives a window the characters before its start, so "mytoken=" cut after "my" is
+//   still read as "mytoken".
+// Every look past hi resumes where the last one stopped, so the text is read a bounded number
+// of times. cost.steps, when given, counts the characters read (tests check it grows linearly).
 const OVERLAP = 2048;
-const CONTEXT = 512;
+const CONTEXT = 2048;
+const SNAP = 16384;
 const RUN_CHAR = /[A-Za-z0-9_.~+/=-]/;
 
-function marksOf(t) {
-  if (t.length <= WINDOW) return maskMarks(t);
+// The first index at or after x (non-decreasing between calls) where re matches, or t.length.
+function seeker(t, re, cost) {
+  let at = -1;
+  return (x) => {
+    if (at < x) { re.lastIndex = x; at = re.exec(t)?.index ?? t.length; cost.steps += at - x; }
+    return at;
+  };
+}
+
+function marksOf(t, cost = { steps: 0 }) {
+  if (t.length <= WINDOW) { cost.steps += t.length; return maskMarks(t); }
   const n = t.length; const all = [];
+  const brk = seeker(t, /[\s"']/g, cost);
+  const quote = { '"': seeker(t, /"/g, cost), "'": seeker(t, /'/g, cost) };
   for (let pos = 0; pos < n;) {
-    const lo = Math.max(0, pos - CONTEXT); const hi = Math.min(n, pos + WINDOW + OVERLAP);
+    const lo = Math.max(0, pos - CONTEXT);
+    let hi = Math.min(n, pos + WINDOW + OVERLAP);
+    let open = hi < n; // a run of key characters may go on past hi
+    if (open) { const b = brk(hi); if (b < n && b - hi <= SNAP) { hi = b + 1; open = false; } }
+    const far = hi < n ? (q, len) => { const j = quote[q](hi); return j < n ? len + j - hi : -1; } : null;
     let cut = hi === n ? n : pos + WINDOW;
-    for (let [a, b] of maskMarks(t.slice(lo, hi))) {
+    cost.steps += hi - lo;
+    for (let [a, b] of maskMarks(t.slice(lo, hi), far)) {
       a += lo; b += lo;
       if (b <= pos || a >= cut) continue; // the last window's, or the next one's
       if (a < pos) a = pos; // runs over the last cut: mask the rest of it
-      if (b === hi && hi < n) while (b < n && RUN_CHAR.test(t[b])) b++; // longer than the overlap
+      if (b === hi && open) { const b0 = b; while (b < n && RUN_CHAR.test(t[b])) b++; cost.steps += b - b0; }
       all.push([a, b]);
       if (b > cut) cut = b;
     }
     pos = cut;
   }
   return all;
+}
+
+// The characters the masker reads for text (whole-text key scan, windows, looks past a window).
+export function readCost(text) {
+  const cost = { steps: 0 };
+  const s = String(text ?? '');
+  cost.steps += s.length;
+  marksOf(s.replace(PEM, PLACE), cost);
+  return cost.steps;
 }
 
 export function findSecret(text) {

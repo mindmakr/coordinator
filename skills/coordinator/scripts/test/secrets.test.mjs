@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { WINDOW, findSecret, maskSecrets } from '../lib/secrets.mjs';
+import { WINDOW, findSecret, maskSecrets, readCost } from '../lib/secrets.mjs';
 
 test('common credential shapes are found and masked', () => {
   for (const s of [
@@ -30,8 +31,8 @@ test('paths, file:line evidence and plain prose are left alone', () => {
 });
 
 // A regex with ambiguous repeats took 173 s on 'token_' x 2000 and froze the hosted service.
-// Wall-clock limits flake under load, so this checks growth instead: 4x the text may take
-// about 4x the time (the bound allows 8x plus 25 ms of noise); quadratic work would take 16x.
+// Wall-clock comparisons flake under load, so this counts the characters the masker reads
+// (readCost) at two sizes, 8x apart.
 test('masking is linear: adversarial inputs scale with their length', () => {
   const inputs = [
     (n) => 'token_'.repeat(n), (n) => 'token='.repeat(n), (n) => 'token=x,'.repeat(n), (n) => 'token=/:1'.repeat(n), (n) => 'token: '.repeat(n),
@@ -40,41 +41,73 @@ test('masking is linear: adversarial inputs scale with their length', () => {
     (n) => 'glpat-'.repeat(n), (n) => 'xoxb-'.repeat(n), (n) => 'sk-'.repeat(n), (n) => 'ghp_'.repeat(n), (n) => 'bearer '.repeat(n),
     (n) => 'authorization:'.repeat(n), (n) => '-----BEGIN '.repeat(n), (n) => `-----BEGIN RSA PRIVATE KEY-----${'-----END '.repeat(n)}`,
     (n) => `token${' '.repeat(6 * n)}`, (n) => `${'aB3'.repeat(2 * n)}/`, (n) => 'DB_PASSWORD_token-api_key='.repeat(n / 4),
+    (n) => `password="${'a'.repeat(6 * n)}`, (n) => 'password="a '.repeat(n), (n) => `${'a'.repeat(6 * n)} `, (n) => `key="${'a '.repeat(3 * n)}`,
+    (n) => `${'x'.repeat(5000)} `.repeat(n / 800), (n) => `${'x'.repeat(30000)} `.repeat(n / 4000), (n) => `"${'y'.repeat(20000)}`.repeat(n / 3000),
   ];
-  const time = (s) => {
-    let best = Infinity;
-    for (let r = 0; r < 3; r++) { const a = performance.now(); maskSecrets(s); findSecret(s); best = Math.min(best, performance.now() - a); }
-    return best;
-  };
-  const N = 2500;
+  const N = 1250;
   for (const make of inputs) {
-    const small = make(N); const large = make(4 * N);
-    maskSecrets(small.slice(0, 64)); // warm up
-    const t1 = time(small); const t4 = time(large);
-    const label = `${JSON.stringify(small.slice(0, 24))}…: ${small.length} chars ${t1.toFixed(1)} ms, ${large.length} chars ${t4.toFixed(1)} ms`;
-    assert.ok(t4 < 8 * t1 + 25, `grows faster than its length: ${label}`);
-    assert.ok(t4 < 5000, `too slow: ${label}`);
+    const large = make(4 * N); const huge = make(32 * N);
+    const c4 = readCost(large); const c32 = readCost(huge);
+    const label = `${JSON.stringify(large.slice(0, 24))}…: ${large.length} chars ${c4}, ${huge.length} chars ${c32}`;
+    // At most 5 reads per character plus one window's worth: quadratic work would read ~8x more per character.
+    assert.ok(c4 <= 5 * large.length + 4 * WINDOW && c32 <= 5 * huge.length + 4 * WINDOW, `reads too much: ${label}`);
   }
 });
 
-// Each kind of secret, placed so it starts or ends at every offset around a window's edge,
-// in a line with no whitespace (minified JSON): masked exactly as it is on its own.
+// Each kind of secret, quoted and not, short and 1-8 KB long, placed so it starts or ends at each
+// offset around a window's cut and the edges of what that window reads (2048 either side), in
+// minified JSON (no whitespace) and in prose: masked exactly as it is on its own, and found.
 test('a secret across a window edge is masked and found', () => {
-  const secrets = [
-    'AKIAIOSFODNN7EXAMPLE', 'DB_PASSWORD=Sup3rS3cret!x', 'xoxb-1234567890-abcdefghij', 'ghp_A1b2C3d4E5f6G7h8I9j0',
-    'postgres://admin:Pa55word@db.internal', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcdefghijklmnop',
-    'sk_live_abcdefghijklmnop1234', 'aB3cD4eF5gH6iJ7kL8mN9oP0qR1sT2uV3wX', `ghp_${'A1b2C3d4'.repeat(400)}`,
+  const b64 = (len, url) => {
+    let s = '';
+    for (let i = 0; s.length < len; i++) s += createHash('sha512').update(String(i)).digest(url ? 'base64url' : 'base64').replace(/=/g, '');
+    return s.slice(0, len);
+  };
+  const short = [
+    'AKIAIOSFODNN7EXAMPLE', 'ghp_A1b2C3d4E5f6G7h8I9j0', 'github_pat_11ABCDEFG0123456789abcdef', 'glpat-abcdefghijklmnop1234',
+    'npm_abcdefghijklmnopqrstuvwxyz0123456789', 'sk_live_abcdefghijklmnop1234', 'xoxb-1234567890-abcdefghij',
+    'https://hooks.slack.com/services/T000/B000/XXXXXXXX', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcdefghijklmnop',
+    'Authorization: Bearer abcdefghijklmnop1234', 'bearer abcdefghijklmnop1234', 'postgres://admin:Pa55word@db.internal',
+    'aB3cD4eF5gH6iJ7kL8mN9oP0qR1sT2uV3wX', 'DB_PASSWORD=Sup3rS3cret!x', 'password is hunter22x',
   ];
-  for (const edge of [WINDOW, 2 * WINDOW]) {
-    for (const sec of secrets) {
-      const want = maskSecrets(sec);
-      assert.notEqual(want, sec, sec);
-      for (let start = edge - Math.min(sec.length, 64) - 3; start <= edge + 3; start++) {
-        const pre = `{"log":"${'x'.repeat(start - 9)},`;
-        const post = `,${'y'.repeat(3 * WINDOW)}"}`;
+  const secrets = [
+    ...short, ...short.map((s) => `"${s}"`), 'api_key="abc def 123"', '"password": "p@ss w0rd"', "'secret'='abcdefgh'", `ghp_${'A1b2C3d4'.repeat(400)}`,
+  ];
+  for (const len of [1024, 4096, 8192]) {
+    const key = b64(len);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${key.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`;
+    secrets.push(`private_key="${key}"`, `private_key=${key}`, `"client_secret": '${key}'`, `TOKEN is ${key}`, pem, b64(len, true));
+  }
+  // Where a secret is placed around the cut at WINDOW: starting or ending within 3 of it, crossing
+  // it at every offset (every `step`-th, or 9 places for a long one), and ending near the edges of
+  // what a window reads (2048 either side of the cut). `step` 0: only starting or ending at the cut.
+  const offsets = (L, step) => {
+    const at = new Set();
+    for (let k = -3; k <= 3; k++) at.add(WINDOW + k).add(WINDOW + k - L);
+    if (step) {
+      for (let s = WINDOW - L - 3; s <= WINDOW + 3; s += L < 80 ? step : Math.ceil(L / 8)) at.add(s);
+      for (const d of [-2048, 2048]) for (let k = -1; k <= 1; k++) at.add(WINDOW + d + k).add(WINDOW + d + k - L);
+    }
+    return [...at].filter((s) => s >= 16);
+  };
+  // Minified JSON (quotes every few characters), a log line of words, and one long run with no
+  // whitespace or quote past the window's end (so the window cannot end on a break).
+  const json = (n) => '"note":"ordinary-wording-in-a-log-line",'.repeat(n / 40 + 1).slice(0, n);
+  const words = (n) => 'ordinary-wording-in-a-long-log-line '.repeat(n / 36 + 1).slice(0, n);
+  const fillers = [
+    [1, (start) => [`{${json(start - 2)},`, `,${json(4096)}}`]],
+    [6, (start) => [`${words(start - 1)} `, ` ${words(4096)}`]],
+    [0, (start) => [`{"log":"${'x'.repeat(start - 9)},`, `,${'y'.repeat(3 * WINDOW)}"}`]],
+  ];
+  for (const sec of secrets) {
+    const want = maskSecrets(sec);
+    assert.notEqual(want, sec, sec);
+    for (const [step, fill] of fillers) {
+      for (const start of offsets(sec.length, step)) {
+        const [pre, post] = fill(start);
         const s = pre + sec + post;
-        assert.equal(maskSecrets(s), pre + want + post, `${sec.slice(0, 12)} at ${start}`);
-        assert.equal(findSecret(s), true, `${sec.slice(0, 12)} at ${start}`);
+        assert.equal(maskSecrets(s), pre + want + post, `${sec.slice(0, 16)} (${sec.length}) at ${start}`);
+        assert.equal(findSecret(s), true, `${sec.slice(0, 16)} (${sec.length}) at ${start}`);
       }
     }
   }
