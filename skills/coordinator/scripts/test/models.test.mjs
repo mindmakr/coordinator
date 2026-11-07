@@ -252,3 +252,34 @@ test('the dashboard shows rounds and pass rate per builder model while the run i
   assert.match(html, /data-a="budget-models"[\s\S]*sonnet 0\/1 passed<\/b>/); // no "(0)" after it
   assert.match(cli(dir, 'show', 'h').out, /models {3}sonnet 0\/1 passed$/m);
 });
+
+const OPUS_IDS = ['us.anthropic.claude-opus-4-1-20250805-v1:0', 'anthropic.claude-opus-4-5-20251101-v1:0', 'claude-opus-4-1@20250805', 'EU.Anthropic.Claude-Opus-4-1-20250805-V1:0'];
+const CHEAP_IDS = ['us.anthropic.claude-haiku-4-5', 'anthropic.claude-haiku-4-5-20251001-v1:0', 'claude-haiku-4-5@20251001', 'haiku-4-5', 'claude_haiku', 'opus-haiku', 'Claude-Sonnet', 'my-sonnet-model', 'anthropic-fast'];
+
+test('a custom strong that mentions Claude in any spelling must parse to opus', () => {
+  for (const s of CHEAP_IDS) assert.throws(() => normalize({ strong: s }), /below opus or not a recognised opus id/, s);
+  for (const s of OPUS_IDS) assert.equal(normalize({ strong: s }).strong, s, s);
+  assert.equal(normalize({ strong: 'gpt-x' }).strong, 'gpt-x');
+  for (const s of OPUS_IDS) assert.equal(family(s), 'opus', s);
+});
+
+test('judges and escalation use the same parsing: provider ids of cheaper models never pass', () => {
+  const dir = folder(); const ok = okIn(dir);
+  ok('init', 'p', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'p', 'a', '--bar', 'b'); ok('freeze', 'p');
+  ok('start', 'p', 'a', '--model', 'claude_haiku'); ok('built', 'p', 'a');
+  for (const m of CHEAP_IDS) assert.equal(cli(dir, 'verdict', 'p', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '3', '--model', m).code, 1, m);
+  ok('verdict', 'p', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '3', '--model', 'us.anthropic.claude-opus-4-1-20250805-v1:0');
+  // The fail on claude_haiku escalates; a Bedrock haiku id is still cheaper, a Vertex opus id is strong.
+  assert.match(cli(dir, 'start', 'p', 'a', '--model', 'anthropic.claude-haiku-4-5-20251001-v1:0').err, /force-model/);
+  assert.match(cli(dir, 'start', 'p', 'a', '--model', 'opus-haiku').err, /force-model/);
+  ok('start', 'p', 'a', '--model', 'claude-opus-4-1@20250805'); ok('built', 'p', 'a');
+  assert.equal(cli(dir, 'integrate', 'p', 'pass', '--evidence', 'e', '--model', 'us.anthropic.claude-haiku-4-5').code, 1);
+});
+
+test('pinning matches word stems as well as whole words', () => {
+  const cfg = normalize({ mechanical: 'haiku' });
+  for (const c of ['migrate-users', 'db-migration', 'oauth2-callback', 'payroll-export', 'salary-slip', 'ledger', 'refunds', 'wallet-topup', 'fee-table', 'disbursement', 'kyc-check', 'session-timeout', 'csrf', 'rbac-matrix', 'role-picker', 'permission-copy', 'iban-validation', 'schema-docs', 'renames.security']) {
+    assert.equal(route(cfg, 'builder', c).model, 'opus', c);
+  }
+  for (const c of ['docs', 'feedback-copy', 'payday-copy', 'translations']) assert.notEqual(route(cfg, 'builder', c).why, `${c} (always strong)`, c);
+});

@@ -12,31 +12,43 @@ import { writeAtomic } from './store.mjs';
 const RANK = { haiku: 1, sonnet: 2, opus: 3 };
 // Task classes the "mechanical" entry covers, and the ones pinned to strong.
 export const MECHANICAL = ['docs', 'copy', 'translations', 'renames', 'fixtures', 'mirror'];
-// A class is pinned when it, or any word of it (split on - and _), is one of these.
+// A class is pinned when any word of it (split on anything but letters and digits)
+// is one of PIN_WORDS or starts with one of PIN_STEMS, or it names personal data.
 export const PINNED = ['security', 'money', 'migrations', 'auth', 'payments', 'billing', 'invoicing', 'authentication', 'authorization', 'permissions', 'secrets', 'crypto', 'pii', 'personal-data'];
-const PIN_WORDS = new Set([...PINNED, 'migration', 'payment', 'pay', 'invoice', 'invoices', 'permission', 'secret', 'authn', 'authz', 'oauth', 'login', 'password', 'passwords', 'token', 'tokens', 'encryption']);
+const PIN_WORDS = new Set(['auth', 'authn', 'authz', 'money', 'pay', 'fee', 'fees', 'role', 'roles', 'pii', 'token', 'tokens', 'login', 'bill', 'bills', 'kyc']);
+export const PIN_STEMS = ['secur', 'migrat', 'oauth', 'payment', 'payout', 'payroll', 'salar', 'ledger', 'refund', 'wallet', 'disburs', 'kyc', 'session', 'csrf', 'rbac', 'role', 'permission', 'iban', 'schema', 'authent', 'authori', 'billing', 'invoic', 'secret', 'crypt', 'encrypt', 'password', 'credential'];
 export function pinned(cls) {
   const c = String(cls).toLowerCase();
-  return PIN_WORDS.has(c) || /personal[-_]data/.test(c) || c.split(/[-_]/).some((w) => PIN_WORDS.has(w));
+  if (/personal[^a-z0-9]*data/.test(c)) return true;
+  // "role" as a stem would catch "roleplay"; keep it a stem anyway: pinning too much costs money, not safety.
+  return c.split(/[^a-z0-9]+/).filter(Boolean).some((w) => PIN_WORDS.has(w) || PIN_STEMS.some((s) => w.startsWith(s)));
 }
 export const UNSPECIFIED = 'unspecified';
 const ROLES = ['builder', 'critic', 'specialist', 'visual-critic', 'integrator', 'researcher'];
 export const JUDGES = ['critic', 'specialist', 'visual-critic', 'integrator'];
 export const DEFAULT = Object.freeze({ strong: 'opus', mechanical: 'sonnet' });
-const NAME = /^[A-Za-z0-9][\w.:/-]{0,79}$/;
+const NAME = /^[A-Za-z0-9][\w.:/@-]{0,79}$/;
 const KEY = /^[a-z][a-z0-9-]{0,39}$/;
 const own = (o, k) => Object.hasOwn(o, k);
 
+// Any name that mentions Claude in any spelling must parse to a family, or it is refused as a judge or strong.
+export const claudeish = (name) => /claude|anthropic|haiku|sonnet|opus/i.test(String(name ?? ''));
+// Provider wrappers around a Claude id: Bedrock (us./eu./apac./global. and anthropic. prefixes, -v1:0
+// suffix) and Vertex (@20250805 suffix). Stripped before parsing, so real opus ids still rank.
+const unwrap = (n) => n.replace(/^(?:us|eu|apac|global)\./, '').replace(/^anthropic\./, '').replace(/@\d{8}$/, '').replace(/-v\d+:\d+$/, '');
+
 export function family(name) {
-  const n = String(name ?? '').toLowerCase();
+  const n = unwrap(String(name ?? '').toLowerCase());
   if (own(RANK, n)) return n;
   // Strict: exactly one family word, with only version or date parts (digits, "latest") around it.
   const m = /^claude-(?:\d+(?:\.\d+)?-){0,3}(haiku|sonnet|opus)(?:-(?:\d+(?:\.\d+)?|latest))*$/.exec(n);
   return m ? m[1] : null;
 }
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
-// Is `model` at least as strong as `strong`? Ranked families compare; an unranked name only by equality.
+// Is `model` at least as strong as `strong`? Ranked families compare; an unranked name only by equality,
+// and a Claude-looking name that does not parse never counts.
 export function atLeast(model, strong) {
+  if (claudeish(model) && !family(model)) return false;
   if (same(model, strong)) return true;
   const f = family(model); const s = family(strong);
   return Boolean(f && s && RANK[f] >= RANK[s]);
@@ -65,7 +77,7 @@ export function normalize(raw) {
     table[k] = v;
   }
   const strong = table.strong;
-  if (family(strong) && family(strong) !== 'opus') throw new Error(`"models".strong = ${strong} is below opus: judges and pinned work would run on it. Leave strong out (opus), or name an unranked model for another harness`);
+  if (claudeish(strong) && family(strong) !== 'opus') throw new Error(`"models".strong = ${strong} is below opus or not a recognised opus id: judges and pinned work would run on it. Leave strong out (opus), or name an unranked model for another harness`);
   for (const k of Object.keys(table).filter((k) => JUDGES.includes(k) || pinned(k))) {
     if (own(table, k) && !atLeast(table[k], strong)) {
       warnings.push(`"models".${k} = ${table[k]} ignored: ${JUDGES.includes(k) ? 'critics are never routed' : `${k} work is never routed`} below the strong model (${strong})`);
