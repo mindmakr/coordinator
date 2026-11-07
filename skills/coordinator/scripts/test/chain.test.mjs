@@ -243,10 +243,31 @@ test('extend: a hand edit of state.json never approves', () => {
   assert.equal(state('h').units[0].status, 'stopped');
 });
 
+test('the --confirm words pass the same yes check as a note', () => {
+  run('init', 'cf', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
+  run('add', 'cf', 'm1', '--bar', 'b'); run('freeze', 'cf');
+  run('start', 'cf', 'm1'); run('built', 'cf', 'm1'); run('verdict', 'cf', 'm1', 'fail', '--score', '5', '--gap', 'g'); run('next', 'cf');
+  run('ask', 'cf', '--question', 'One more for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Yes');
+  for (const words of ['No, stop it', 'yes once PR 1234 lands', 'yes but later', 'yes?']) {
+    run('answer', 'cf', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', words);
+    assert.match(run('extend', 'cf', 'm1', '--reason', 'r', '--answer', 'q1').err, /confirmed words do not clearly say yes/, words);
+  }
+  run('answer', 'cf', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'approved once PR 1234 lands');
+  assert.match(run('extend', 'cf', 'm1', '--rounds', '4', '--reason', 'r', '--answer', 'q1').err, /confirmed words do not clearly say yes/);
+  run('answer', 'cf', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, go ahead with PR 1234');
+  assert.match(run('extend', 'cf', 'm1', '--rounds', '4', '--reason', 'r', '--answer', 'q1').err, /--rounds 4, but the approval names 1/, 'PR 1234 is no round count');
+  assert.equal(run('extend', 'cf', 'm1', '--reason', 'r', '--answer', 'q1').code, 0);
+});
+
 test('the rounds an approval names', () => {
   assert.equal(namedRounds('Yes, one more round'), 1);
   assert.equal(namedRounds('two more rounds'), 2);
-  assert.equal(namedRounds('give it 3'), 3);
+  assert.equal(namedRounds('give it 3 rounds'), 3);
+  assert.equal(namedRounds('give it 3'), null, 'a bare number is not a round count');
+  assert.equal(namedRounds('approved once PR 1234 lands'), null, 'nor is a PR number');
+  assert.equal(namedRounds('5 more rounds'), null, 'only 1-4');
+  assert.equal(namedRounds('fix #2 and 1 more'), 1);
+  for (const t of ['approved once PR 1234 lands', 'approved after the demo', 'approved when CI is green', 'approved until Friday']) assert.equal(noteApproves(t), false, t);
   assert.equal(namedRounds('Approved'), null);
 });
 
