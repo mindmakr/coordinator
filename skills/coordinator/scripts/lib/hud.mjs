@@ -13,6 +13,7 @@ import { answerText, OTHER } from './questions.mjs';
 import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
 import { viewer, viewerEntries } from './evview.mjs';
+import { storedPath } from './evidence.mjs';
 import { escapeLine } from './view.mjs';
 import { pendingBanner } from './retro.mjs';
 
@@ -30,13 +31,15 @@ export function staticCtx(runDir, depth = 0, theme = null) {
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
-    has: (file) => !runDir || existsSync(join(runDir, 'artifacts', ...file.split('/'))),
+    // Every read goes through storedPath: the state's file names are checked, links never followed.
+    has: (file) => !runDir || storedPath(runDir, file) !== null,
     // A stored text file's words, for the viewer (lib/evview.mjs caps them).
-    readText: (file) => { if (!runDir) return null; try { return readFileSync(join(runDir, 'artifacts', ...file.split('/')), 'utf8'); } catch { return null; } },
+    readText: (file) => { const p = storedPath(runDir, file); if (!p) return null; try { return readFileSync(p, 'utf8'); } catch { return null; } },
     // Small screenshots go inline, so the snapshot shows them without loading anything.
     embed: (file) => {
       if (!runDir) return null;
-      try { const b = readFileSync(join(runDir, 'artifacts', file)); return b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null; } catch { return null; }
+      const p = storedPath(runDir, file); if (!p) return null;
+      try { const b = readFileSync(p); return b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null; } catch { return null; }
     },
   };
 }

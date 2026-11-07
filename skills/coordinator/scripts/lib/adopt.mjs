@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from 'node:path';
-import { DOC, GOAL_DIR, IMAGE, LIMITS, TEXT, addEvidence, copyIn, sha256 } from './evidence.mjs';
+import { DOC, GOAL_DIR, IMAGE, LIMITS, TEXT, addEvidence, copyIn, sha256, storedPath } from './evidence.mjs';
 
 export const RUN_CAP = 50 * 1024 * 1024; // all adopted files of one run together
 const EXT = [...Object.keys(IMAGE), ...Object.keys(TEXT), ...Object.keys(DOC)].map((e) => e.slice(1)).join('|');
@@ -146,7 +146,7 @@ export function trackedFiles(project) {
 
 const damage = (e, runDir) => {
   let buf;
-  try { buf = readFileSync(join(runDir, 'artifacts', ...e.file.split('/'))); } catch { return 'missing'; }
+  try { buf = readFileSync(storedPath(runDir, e.file)); } catch { return 'missing'; } // a refused path reads as missing
   return e.sha256 && sha256(buf) !== e.sha256 ? 'changed (sha256 mismatch)' : null;
 };
 const kindOf = (ext) => (IMAGE[ext] ? 'screenshot' : DOC[ext] ? 'pdf' : 'log');

@@ -3,8 +3,9 @@
 // masked for secrets and capped; a file must be a real image or a small text
 // file; nothing outside the run's artifacts folder is ever served.
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
+import { STORED_FILE } from './eventschema.mjs';
 import { oneOf, optText, text } from './args.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { webUrl } from './links.mjs';
@@ -93,6 +94,22 @@ export function addEvidence(s, unit, o, runDir) {
   }
   list.push(item);
   return eid;
+}
+
+// The stored copy of `file` (<target>/<name>) on disk, or null. Every read under artifacts/ goes
+// through here: the name must be one `evidence` writes, nothing on the way may be a link, and the
+// real path must sit directly in artifacts/<target>/.
+export function storedPath(runDir, file) {
+  if (!runDir || typeof file !== 'string' || !STORED_FILE.test(file) || file.includes('..')) return null;
+  const [target, name] = file.split('/');
+  const root = join(runDir, 'artifacts'); const dir = join(root, target); const p = join(dir, name);
+  try {
+    if (lstatSync(root).isSymbolicLink() || lstatSync(dir).isSymbolicLink()) return null;
+    const st = lstatSync(p);
+    if (st.isSymbolicLink() || !st.isFile()) return null;
+    if (dirname(realpathSync(p)) !== realpathSync(dir) || dirname(realpathSync(dir)) !== realpathSync(root)) return null;
+  } catch { return null; }
+  return p;
 }
 
 // The served artifact for a request path's two parts, only when the state names it.

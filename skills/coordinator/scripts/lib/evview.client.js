@@ -6,8 +6,21 @@
 // a stored log's text. Listeners sit on the document, so a live patch keeps them.
 (() => {
   const ITEM = '[data-evv-item]';
-  const FOCUSABLE = 'a[href], input, button, select, textarea, [tabindex="0"]';
+  // The shade (aria-hidden, tabindex -1) closes on a click only; it is never in the Tab order.
+  const FOCUSABLE = 'a[href]:not([tabindex="-1"]):not([aria-hidden="true"]), input, button, select, textarea, [tabindex="0"]';
   let shown = null; let from = null; let list = null; // the open overlay, what opened it, and its list
+  // Which list it was opened from, by its block key, so a reload counts the same way.
+  const LIST = `coordinator:${document.body.dataset.run}:evlist:${document.body.dataset.path}`;
+  const listKey = (l) => { const b = l && l.closest('[data-k]'); return b ? b.dataset.k : ''; };
+  const remember = (id, l) => { try { sessionStorage.setItem(LIST, JSON.stringify({ id, k: listKey(l) })); } catch { /* storage blocked */ } };
+  function recall(id) {
+    try {
+      const m = JSON.parse(sessionStorage.getItem(LIST) || 'null');
+      const block = m && m.k && document.querySelector(`[data-k="${CSS.escape(m.k)}"]`);
+      const l = block && (block.matches('[data-ev-list]') ? block : block.querySelector('[data-ev-list]'));
+      return m && m.id === id ? l : null;
+    } catch { return null; }
+  }
   const idOf = (a) => { try { return decodeURIComponent(a.hash.slice(1)); } catch { return ''; } };
   function current() {
     let id = '';
@@ -21,8 +34,11 @@
   // The ids in the order the reader sees them: the list it was opened from, else the timeline, else the page.
   function order(id) {
     const has = (root) => [...root.querySelectorAll('a[data-ev-open]')].some((a) => idOf(a) === id);
+    if (!(list && list.isConnected)) list = recall(id);
     let scope = list && list.isConnected && has(list) ? list : null;
-    if (!scope) scope = [...document.querySelectorAll('[data-ev-list]')].find((l) => has(l) && [...l.querySelectorAll('a[data-ev-open]')].some((a) => idOf(a) === id && seen(a))) || null;
+    // Opened from the hash alone: the timeline first (where most links are), then the first list that shows it.
+    const lists = [...document.querySelectorAll('[data-ev-list]')].sort((a, b) => b.matches('[data-tl-list]') - a.matches('[data-tl-list]'));
+    if (!scope) scope = lists.find((l) => has(l) && [...l.querySelectorAll('a[data-ev-open]')].some((a) => idOf(a) === id && seen(a))) || null;
     const links = [...(scope || document).querySelectorAll('a[data-ev-open]')].filter(seen);
     if (scope && scope.matches('[data-tl-list]') && document.body.dataset.sort === 'oldest') links.reverse(); // CSS reverses that list
     const ids = [];
@@ -35,6 +51,7 @@
   }
   function setup(el) {
     const ids = order(el.id); const i = ids.indexOf(el.id);
+    if (i >= 0) remember(el.id, list);
     if (i >= 0) { // otherwise the page's own order stays
       point(el.querySelector('[data-evv="prev"]'), ids[i - 1]); point(el.querySelector('[data-evv="next"]'), ids[i + 1]);
       const n = el.querySelector('.evv-n'); if (n) n.textContent = `${i + 1} of ${ids.length}`;
@@ -72,7 +89,7 @@
   document.addEventListener('click', (e) => {
     const a = e.target.closest && e.target.closest('a');
     if (!a) return;
-    if (a.matches('[data-ev-open]')) { from = a; list = a.closest('[data-ev-list]'); return; } // the hash change opens it
+    if (a.matches('[data-ev-open]')) { from = a; list = a.closest('[data-ev-list]'); remember(idOf(a), list); return; } // the hash change opens it
     if (!a.closest(ITEM)) return;
     const rel = a.dataset.evv;
     if (rel === 'prev' || rel === 'next') { e.preventDefault(); step(rel); } else if (rel === 'close' || a.classList.contains('evv-shade')) { e.preventDefault(); close(); }
@@ -104,4 +121,9 @@
   addEventListener('hashchange', sync);
   document.addEventListener('coordinator:patched', () => { if (shown && !shown.isConnected) shown = null; sync(); });
   sync();
+  // A reload that reopens the viewer: Close keeps focus once the page has settled (the live script restores scroll on load).
+  addEventListener('load', () => requestAnimationFrame(() => {
+    const close = shown && shown.querySelector('[data-evv="close"]');
+    if (close && !shown.contains(document.activeElement)) close.focus({ preventScroll: true });
+  }), { once: true });
 })();
