@@ -18,6 +18,30 @@ import { escapeLine } from './view.mjs';
 import { pendingBanner } from './retro.mjs';
 
 export { esc };
+
+// The run's status word as a chip, coloured by kind (lib/progress.mjs runStatus).
+const STATUS_CLS = { running: 's-working', waiting: 's-needs-you', finishing: 's-finishing' };
+export const statusChip = (st) => chip(st.word, st.concluded ? cls(st.outcome) : STATUS_CLS[st.kind]);
+// Units done out of total as a compact bar with its words; a screen reader hears the words.
+export function progressBar(st, small = false) {
+  return `<div class="bar progress${small ? ' small' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${st.pct}" aria-label="${esc(st.progress)}"><i class="${st.concluded ? 'calm' : ''}" style="width:${st.pct}%"></i></div>`;
+}
+// Where the Gaps list is: the coordinator page when served (static snapshots name it).
+const gapsHref = (ctx) => { const c = ctx?.pages?.find((p) => p.path === '/coordinator'); return c ? `${c.href}#self-gaps` : null; };
+
+// The header's status: running runs say how far and how long; a concluded run says it is finished and what it delivered.
+export function statusBlock(st, ctx = null) {
+  if (st.concluded) {
+    const g = gapsHref(ctx);
+    const gaps = `${st.followUps} ${st.followUps === 1 ? 'follow-up' : 'follow-ups'} in ${g ? `<a href="${esc(g)}">Gaps</a>` : 'Gaps'}`;
+    return `<section class="status concluded out-${esc(st.outcome)}" aria-label="Run status"><p class="status-head"><b>This run is finished.</b> ${esc(st.reason[0].toUpperCase() + st.reason.slice(1))}.</p>`
+      + `<p><b>Delivered:</b> ${st.delivered.length ? st.delivered.map(esc).join('; ') : 'nothing'}</p>`
+      + `<p class="meta">${esc(st.progress)} · ${gaps} · closed ${stamp(st.closedAt)}</p>${progressBar(st)}</section>`;
+  }
+  const needs = st.needsYou.length ? ` · <b>needs you:</b> ${st.needsYou.map((q) => esc(q.id)).join(', ')}` : '';
+  return `<section class="status s-kind-${esc(st.kind)}" aria-label="Run status"><p class="status-head"><b>${esc(st.progress)}</b> · ${esc(st.doing)}${needs}</p>`
+    + `${progressBar(st)}<p class="meta">${esc(st.eta.text[0].toUpperCase() + st.eta.text.slice(1))}.</p></section>`;
+}
 const pct = (used, max) => (max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0);
 const TIMELINE_MAX = 300;
 const EMBED_MAX = 150 * 1024;
@@ -229,7 +253,8 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const form = live && v.open && !ctx.readOnly ? live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
+    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${v.status ? statusChip(v.status) : chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · ${v.status ? `phase ${esc(v.phase)} · ` : ''}started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
+    v.status ? blk('status', statusBlock(v.status, ctx)) : '',
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open)) : '',
     blk('goal', goalBlock(v, ctx)),

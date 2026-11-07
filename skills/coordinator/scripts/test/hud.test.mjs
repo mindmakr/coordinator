@@ -28,7 +28,7 @@ const state = (extra = {}) => ({
 test('the text view shows units, score trend, budget with time, and the next step', () => {
   const s = state();
   const out = text(view(s, decide(s, T0 + 30 * 60_000), T0 + 30 * 60_000));
-  assert.match(out, /^r1 \[code\] · continue/);
+  assert.match(out, /^r1 \[code\] · Waiting on you/); assert.match(out, /^phase {6}continue$/m);
   assert.match(out, /time 30\/240 min/);
   assert.match(out, /units 2\/6/);
   assert.match(out, /api\s+open\s+2\/4\s+3 → 5\.5\s+build/);

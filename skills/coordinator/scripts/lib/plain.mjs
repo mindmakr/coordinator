@@ -52,22 +52,35 @@ export function tryMinutes(run) {
   return out.sort((a, b) => a - b);
 }
 
-export function timeLeft(run, plan, nowMs) {
-  if (run.closed) return 'None: the run is closed.';
-  const left = run.budget.maxMinutes - (nowMs - Date.parse(run.createdAt)) / MINUTE;
-  if (left <= 0) return 'None: the time budget is spent.';
-  const budget = `the time budget has ${duration(left)} left`;
+// The rough estimate behind every "time left": minutes still to run (null before any try
+// finished), the time budget left, and the tries counted. lib/progress.mjs words it too.
+export function estimate(run, plan, nowMs) {
+  if (run.closed) return { state: 'closed' };
+  // A state with no time budget (hand-made or trimmed) has no end: the estimate alone counts.
+  const max = run.budget?.maxMinutes;
+  const left = typeof max === 'number' ? max - (nowMs - Date.parse(run.createdAt)) / MINUTE : Infinity;
+  if (left <= 0) return { state: 'spent' };
   const ds = tryMinutes(run);
-  if (!ds.length) return `No estimate yet: no try has finished. The time budget has ${duration(left)} left.`;
+  if (!ds.length) return { state: 'none', budgetLeft: left };
   const median = ds[Math.floor((ds.length - 1) / 2)];
   // Tries still ahead on the longest chain of unfinished units (units run side by side).
   const open = new Set(plan.units.filter((u) => !['done', 'stopped', 'stop'].includes(u.action)).map((u) => u.id));
   const depth = (id, seen = new Set()) => (seen.has(id) ? 0 : 1 + Math.max(0, ...run.units.filter((u) => u.after === id && open.has(u.id)).map((u) => depth(u.id, new Set([...seen, id])))));
   const roots = run.units.filter((u) => open.has(u.id) && !(u.after && open.has(u.after)));
   const tries = Math.max(0, ...roots.map((u) => depth(u.id))) + (plan.decision === 'integrate' || open.size ? 1 : 0); // + the integration check
-  if (!tries) return 'None: nothing is left to run.';
-  const est = duration(tries * median);
-  return `${est.startsWith('under') ? 'Under a minute' : `About ${est}`} (rough: ${tries} more ${tries === 1 ? 'try' : 'tries'} at a median ${duration(median)} each); ${budget}.`;
+  if (!tries) return { state: 'nothing', budgetLeft: left };
+  return { state: 'estimate', minutes: tries * median, tries, median, budgetLeft: left };
+}
+
+export function timeLeft(run, plan, nowMs) {
+  const e = estimate(run, plan, nowMs);
+  if (e.state === 'closed') return 'None: the run is closed.';
+  if (e.state === 'spent') return 'None: the time budget is spent.';
+  const budget = Number.isFinite(e.budgetLeft) ? `the time budget has ${duration(e.budgetLeft)} left` : 'no time budget';
+  if (e.state === 'none') return `No estimate yet: no try has finished. ${budget[0].toUpperCase()}${budget.slice(1)}.`;
+  if (e.state === 'nothing') return 'None: nothing is left to run.';
+  const est = duration(e.minutes);
+  return `${est.startsWith('under') ? 'Under a minute' : `About ${est}`} (rough: ${e.tries} more ${e.tries === 1 ? 'try' : 'tries'} at a median ${duration(e.median)} each); ${budget}.`;
 }
 
 const failStreak = (rounds) => { let k = 0; for (let i = rounds.length - 1; i >= 0 && rounds[i].verdict === 'fail'; i--) k++; return k; };

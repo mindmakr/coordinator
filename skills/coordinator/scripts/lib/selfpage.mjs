@@ -7,6 +7,8 @@ import { count } from './self.mjs';
 import { KIND_LABEL, gapHaystack } from './gaps.mjs';
 import { clip } from './plain.mjs';
 import { badge, blk, chip, esc, hash, keyed, page, stamp, stateChip, toggle, unitDot } from './parts.mjs';
+import { progressBar, statusChip } from './hud.mjs';
+import { clock } from './progress.mjs';
 
 const LESSONS_SHOWN = 12;
 const pct = (v) => (v === null || v === undefined ? '–' : `${v}%`);
@@ -26,6 +28,26 @@ const unitHrefIn = (ctx, run) => (id) => {
 const runLink = (id, ctx, m) => (m.runIds.includes(id) ? `<a href="${esc(ctx.runHref(id))}">${esc(id)}</a>` : esc(id));
 const stat = (label, value, help = '') => `<div class="card stat"${help ? ` title="${esc(help)}"` : ''}><span>${esc(label)}</span><b>${value}</b></div>`;
 const meter = (p) => `<div class="bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, p ?? 0))}%"></i></div>`;
+
+// Active runs: what is still running, how far along, and when the machine frees up (lib/progress.mjs).
+function runRow(st, ctx, m) {
+  const needs = st.needsYou.length ? `<p class="from"><b>Needs you:</b> ${st.needsYou.map((q) => `${esc(q.id)} ${esc(q.text)}`).join(' · ')}</p>` : '';
+  const body = st.concluded
+    ? `<p class="say">${esc(st.reason)}.</p><p class="cause">Delivered: ${st.delivered.length ? st.delivered.map(esc).join('; ') : 'nothing'} · ${st.followUps} ${st.followUps === 1 ? 'follow-up' : 'follow-ups'} in <a href="#self-gaps">Gaps</a> · closed ${stamp(st.closedAt)}</p>`
+    : `<p class="say"><b>${esc(st.progress)}</b> · ${esc(st.doing)}</p>${progressBar(st, true)}<p class="cause">${esc(st.eta.text[0].toUpperCase() + st.eta.text.slice(1))}</p>${needs}`;
+  return `<li class="card run-row${st.concluded ? ' fin' : ''}" data-a="run-${esc(st.run)}"><h3><span>${runLink(st.run, ctx, m)}${st.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${statusChip(st)}</h3>${body}</li>`;
+}
+function activeRuns(m, ctx) {
+  const a = m.active;
+  if (!a) return '';
+  const free = a.runs.length
+    ? (a.free.at ? `the machine frees up around <b>${esc(clock(Date.parse(a.free.at), Date.now()))}</b> local time${a.free.unknown ? ` (${a.free.unknown} with no estimate yet)` : ''}` : 'no estimate yet of when the machine frees up')
+    : 'the machine is free for the next run';
+  const head = `<p class="meta"><b>${a.runs.length ? `${count(a.runs.length, 'run')} active` : 'No active run'}</b> · ${free}.</p>`;
+  const act = a.runs.length ? `<ul class="plain run-rows">${a.runs.map((st) => runRow(st, ctx, m)).join('')}</ul>` : '';
+  const ended = a.concluded.length ? `<h3 class="sub">Recently concluded</h3><ul class="plain run-rows">${a.concluded.map((st) => runRow(st, ctx, m)).join('')}</ul>${a.older ? `<p class="cause">${count(a.older, 'older concluded run')} in <a href="#self-history">History</a>.</p>` : ''}` : '';
+  return head + act + ended;
+}
 
 function age(m, ctx) {
   const a = m.age;
@@ -87,7 +109,7 @@ function chains(m, ctx) {
 
 function history(m, ctx) {
   if (!m.history.length) return m.chains?.length ? chains(m, ctx) : empty('No closed run yet.');
-  const rows = m.history.map((h) => `<tr data-a="h-${esc(h.run)}"><th scope="row">${runLink(h.run, ctx, m)}<div class="cause">${esc(h.goal)}</div></th><td>${chip(h.outcome, h.outcome)}</td>`
+  const rows = m.history.map((h) => `<tr data-a="h-${esc(h.run)}"><th scope="row">${runLink(h.run, ctx, m)}<div class="cause">${esc(h.goal)}</div></th><td>${h.status ? statusChip(h.status) : chip(h.outcome, h.outcome)}</td>`
     + `<td>${h.passed}/${h.units}${h.stopped ? ` <span class="cause">${h.stopped} stopped</span>` : ''}</td><td>${stamp(h.started)}</td><td>${stamp(h.closed)}</td></tr>`).join('');
   return `<div class="scroll"><table><thead><tr><th scope="col">Run</th><th scope="col">Outcome</th><th scope="col">Units passed</th><th scope="col">Started</th><th scope="col">Closed</th></tr></thead><tbody>${rows}</tbody></table></div>${chains(m, ctx)}`;
 }
@@ -97,8 +119,8 @@ function plans(m, ctx) {
   return `<div class="grid">${m.plans.map((p) => {
     const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}">${u.dot ? `${unitDot(u)} ` : ''}<b>${esc(u.id)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${stateChip(u, m.runIds.includes(p.run) ? { unitHref: unitHrefIn(ctx, p.run) } : null)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
     const needs = p.needsYou.length ? `<p class="from"><b>Needs you:</b> ${p.needsYou.map((q) => `${esc(q.id)} ${esc(q.text)}`).join(' · ')}</p>` : '';
-    return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${chip(p.decision, p.decision)}</h3>`
-      + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.done} of ${count(p.total, 'unit')} finished</span></div>${meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
+    return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${p.status ? statusChip(p.status) : chip(p.decision, p.decision)}</h3>`
+      + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.status ? esc(p.status.progress) : `${p.done} of ${count(p.total, 'unit')} finished`}</span><span>phase ${esc(p.decision)}</span></div>${p.status ? progressBar(p.status, true) : meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
       + `<div class="unit-next"><b>Next:</b> ${p.next.length ? esc(p.next.join(' · ')) : 'wait for the running agents'}</div>${needs}${left}</section>`;
   }).join('')}</div>`;
 }
@@ -163,6 +185,7 @@ function study(m, ctx) {
 }
 
 export const SECTIONS = [
+  { id: 'active', title: 'Active runs', render: activeRuns },
   { id: 'age', title: 'Age', render: age },
   { id: 'plans', title: 'Plans', render: plans },
   { id: 'gaps', title: 'Gaps', render: gapsSection },

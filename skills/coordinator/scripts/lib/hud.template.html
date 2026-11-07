@@ -53,6 +53,19 @@ h1 { font-size: 22px; margin: 0; overflow-wrap: anywhere; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 10px; }
 .back { display: inline-block; margin-top: 14px; font-size: 14px; }
 .meta { color: var(--muted); font-size: 13px; }
+.status { margin-top: 14px; padding: 12px 14px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--run); overflow-wrap: anywhere; }
+.status p { margin: 0; }
+.status p + p, .status .meta { margin-top: 6px; }
+.status .bar { margin-top: 8px; }
+.status.s-kind-waiting { border-left-color: var(--wait); }
+.status.s-kind-finishing { border-left-color: var(--note); }
+.status.concluded { border-left-color: var(--muted); background: color-mix(in oklab, var(--card) 70%, var(--bg)); }
+.status.concluded.out-done { border-left-color: var(--pass); background: color-mix(in oklab, var(--pass-bg) 45%, var(--card)); }
+.status.concluded.out-partial { border-left-color: var(--wait); }
+.status.concluded.out-stopped { border-left-color: var(--fail); }
+.status-head { font-size: 16px; line-height: 1.5; }
+.s-finishing { background: var(--note-bg); color: var(--note); }
+.bar.small { height: 6px; }
 .situation { margin-top: 16px; font-size: 18px; line-height: 1.4; overflow-wrap: anywhere; }
 .situation p { margin: 0; }
 .situation .meta { margin-top: 4px; }
@@ -182,6 +195,8 @@ td .bar { max-width: 120px; }
 code { font: 12px var(--mono); background: var(--none-bg); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
 ul.plain { list-style: none; padding: 0; margin: 6px 0 0; font-size: 14px; display: grid; gap: 10px; }
 ul.plain li { overflow-wrap: anywhere; }
+ul.run-rows { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--gap); }
+.run-row p { margin: 6px 0 0; } .run-row .bar { margin-top: 8px; }
 ul.plain .cause { margin-top: 2px; }
 section.self .card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
 section.self .card li { margin: 4px 0; overflow-wrap: anywhere; }

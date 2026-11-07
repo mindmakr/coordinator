@@ -9,6 +9,7 @@ import { bySetup, escapes, roundCap, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
 import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
+import { runStatus } from './progress.mjs';
 
 const MINUTE = 60_000;
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'];
@@ -53,6 +54,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
       met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
     }, bar: run.bar, fence: run.fence,
     phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
+    // The plain status word, progress and ETA (lib/progress.mjs), the same everywhere.
+    status: runStatus(run, plan, { nowMs, runs: linked ? [...linked.values()].filter((r) => r && Array.isArray(r.units)) : [run] }),
     retroPending: retroPending(run, plan.decision), // every unit decided and no retro note yet (lib/retro.mjs)
     open: !run.closed, started: run.createdAt, closedAt: run.closed?.at ?? null,
     situation: situation(run, plan, run.closed ? [] : qs),
@@ -131,7 +134,9 @@ export function text(v) {
     : ['needs you  nothing'];
   const answered = v.answered.map((q) => `answered   ${q.id}: ${clip(answerText(q.answer), 100)} (by ${q.answer.by}; the lead has not used it yet)`);
   const lines = [
-    `${v.id} [${v.tag}] · ${v.phase} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
+    `${v.id} [${v.tag}] · ${v.status.word} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
+    ...statusLines(v.status),
+    `phase      ${v.phase}`,
     `situation  ${clip(v.situation.text, 240)}`,
     ...needs,
     ...answered,
@@ -162,6 +167,22 @@ export function text(v) {
   lines.push(`goal    ${v.goalCheck.met ? 'met' : 'not yet'}${gb.length ? ` (${gb.filter((b) => b.status === 'pass').length}/${gb.length} behaviours pass)` : ''}`);
   lines.push('', `next    ${v.next}`, `open    ${v.needsYou.length} questions · ${v.followUps.length} follow-ups · ${v.decisions.length} decisions`);
   return `${lines.join('\n')}\n`;
+}
+
+// The status block of `show`: the word, progress and ETA; a concluded run says it is finished.
+export function statusLines(st) {
+  if (st.concluded) {
+    return [
+      `status     ${st.word}. This run is finished: ${st.reason}.`,
+      `delivered  ${st.delivered.length ? st.delivered.join('; ') : 'nothing'}`,
+      `progress   ${st.progress} · follow-ups ${st.followUps} in Gaps`,
+    ];
+  }
+  return [
+    `status     ${st.word}${st.needsYou.length ? ` (${st.needsYou.map((q) => q.id).join(', ')})` : ''}`,
+    `progress   ${st.progress} · ${st.doing}`,
+    `eta        ${st.eta.text}`,
+  ];
 }
 
 // "2 of 5 passed units (rate 0.4)": defects found after a pass.
