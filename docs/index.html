@@ -3,453 +3,337 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Coordinator · Coordinator by mindmakr</title>
-<meta name="description" content="Coordinator is an open-source agent skill: it asks every question up front, then runs builders and blind critics unattended until a bar you can check is met. Author: Asif Raja, by mindmakr.">
-<meta name="author" content="Asif Raja, by mindmakr">
+<title>Coordinator: Lucid Coding for your agents</title>
+<meta name="description" content="Coordinator is an open-source agent skill. You see how each agent read the problem, what it built, how a blind critic judged it and why, and what is running now. Author: Asif Raja, by Mindmakr.">
+<meta name="author" content="Asif Raja, by Mindmakr">
 <meta name="color-scheme" content="light dark">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231b1915'/%3E%3Ctext x='16' y='24' font-family='Georgia,serif' font-size='22' font-weight='700' fill='%23f7f2e8' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E">
+<meta property="og:title" content="Coordinator: Lucid Coding for your agents">
+<meta property="og:description" content="See how each agent read the problem, what it built, how a blind critic judged it and why, and what is running now.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://mindmakr.github.io/coordinator/">
+<meta property="og:image" content="https://mindmakr.github.io/coordinator/img/og-card.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20style%3D%22color%3A%236b6b66%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M10%2010%204.5%204.5M10%2010l5.5-5.5M10%2010v6%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22currentColor%22%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2210%22%20r%3D%222.8%22%2F%3E%3Ccircle%20cx%3D%224.5%22%20cy%3D%224.5%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%2215.5%22%20cy%3D%224.5%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2216.5%22%20r%3D%222%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
-<style>
-:root {
-  --paper: #f7f2e8;
-  --paper-2: #efe8d9;
-  --ink: #1b1915;
-  --ink-2: #4a453c;
-  --rule: #2a2620;
-  --rule-soft: #cfc6b4;
-  --accent: #8a1c1c;
-  --accent-ink: #ffffff;
-  --planned: #6b4f00;
-  --planned-bg: #f3e6bf;
-  --link: #7a1a1a;
-  --code-bg: #ebe3d2;
-  --display: "Playfair Display", "Times New Roman", Georgia, serif;
-  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
-  --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #15130f;
-    --paper-2: #1e1b16;
-    --ink: #ece6d8;
-    --ink-2: #bdb4a2;
-    --rule: #d9d1c0;
-    --rule-soft: #4a443a;
-    --accent: #e0806f;
-    --accent-ink: #15130f;
-    --planned: #f1cf72;
-    --planned-bg: #3a3017;
-    --link: #f0a090;
-    --code-bg: #26221b;
-  }
-}
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--body);
-  font-size: 1.0625rem;
-  line-height: 1.55;
-}
-a { color: var(--link); text-underline-offset: 2px; }
-a:hover { text-decoration-thickness: 2px; }
-a:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-code, pre { font-family: var(--mono); font-size: .88em; }
-code { background: var(--code-bg); padding: .05em .3em; border-radius: 3px; overflow-wrap: anywhere; }
-pre { background: var(--code-bg); padding: .7rem .8rem; overflow-x: auto; margin: .6rem 0 1rem; border-left: 3px solid var(--rule); }
-pre code { background: none; padding: 0; }
-.skip { position: absolute; left: -999px; top: 0; background: var(--ink); color: var(--paper); padding: .5rem 1rem; }
-.skip:focus { left: 1rem; }
-
-.page { max-width: 1200px; margin: 0 auto; padding: 0 16px 3rem; }
-
-/* Masthead */
-.masthead { text-align: center; padding-top: 1.25rem; }
-.ears { display: flex; justify-content: space-between; gap: 1rem; font-size: .8rem; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }
-.ears p { margin: 0; max-width: 24rem; }
-.ears p:last-child { text-align: right; }
-.title {
-  font-weight: 900; font-family: var(--display); font-weight: 900; letter-spacing: -.01em;
-  font-size: clamp(2.6rem, 9vw, 6.2rem); line-height: 1; margin: .35rem 0 .3rem;
-}
-.motto { font-style: italic; color: var(--ink-2); margin: 0 0 .6rem; }
-.dateline {
-  display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem 1rem;
-  border-top: 3px double var(--rule); border-bottom: 1px solid var(--rule);
-  padding: .4rem 0; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em;
-}
-.dateline span { white-space: nowrap; }
-nav.sections ul { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: .2rem 1.2rem; padding: .5rem 0; margin: 0; border-bottom: 1px solid var(--rule); font-size: .9rem; }
-nav.sections a { color: var(--ink); text-decoration: none; }
-nav.sections a:hover { text-decoration: underline; }
-
-/* Front page grid */
-.front { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 0 2rem; padding-top: 1.25rem; }
-.front > .lead { border-right: 1px solid var(--rule-soft); padding-right: 2rem; }
-.kicker { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 0 0 .3rem; }
-h1, h2, h3 { font-family: var(--display); line-height: 1.1; margin: 0 0 .5rem; }
-h2.headline { font-size: clamp(2rem, 4.6vw, 3.4rem); font-weight: 900; }
-h2 { font-size: clamp(1.6rem, 3.2vw, 2.3rem); font-weight: 900; }
-h3 { font-size: 1.3rem; font-weight: 700; }
-.standfirst { font-size: 1.22rem; line-height: 1.45; color: var(--ink-2); margin: .2rem 0 .8rem; }
-.byline { font-size: .9rem; text-transform: uppercase; letter-spacing: .05em; border-top: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft); padding: .35rem 0; margin: 0 0 1rem; }
-.cols { column-count: 2; column-gap: 1.8rem; column-rule: 1px solid var(--rule-soft); }
-.cols p { margin: 0 0 .85rem; }
-.cols h3 { break-after: avoid; margin-top: .4rem; }
-.cols > *:first-child { margin-top: 0; }
-.dropcap::first-letter { font-family: var(--display); font-weight: 900; float: left; font-size: 3.6em; line-height: .82; padding: .06em .08em 0 0; color: var(--accent); }
-p { margin: 0 0 .85rem; }
-figure { margin: 1.2rem 0; }
-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); }
-figcaption { font-size: .85rem; color: var(--ink-2); padding-top: .4rem; border-bottom: 1px solid var(--rule-soft); padding-bottom: .5rem; }
-
-aside.rail > section { border-top: 3px solid var(--rule); padding: .6rem 0 1rem; }
-aside.rail > section + section { margin-top: .5rem; }
-aside.rail h2 { font-size: 1.35rem; }
-aside.rail ol, aside.rail ul { padding-left: 1.2rem; margin: .3rem 0 .6rem; }
-aside.rail li { margin-bottom: .35rem; }
-.box { background: var(--paper-2); padding: .8rem .9rem; border: 1px solid var(--rule-soft); }
-
-/* Inside pages */
-.band { border-top: 3px double var(--rule); margin-top: 2rem; padding-top: 1.2rem; }
-.band > header { max-width: 52rem; }
-.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 1.8rem; margin-top: 1rem; }
-.grid3 > article { border-top: 1px solid var(--rule); padding-top: .6rem; }
-.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2rem; margin-top: 1rem; }
-.grid2 > * { border-top: 1px solid var(--rule); padding-top: .6rem; }
-.tag { display: inline-block; font-family: var(--body); font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: .08rem .4rem; border-radius: 2px; vertical-align: .15em; margin-right: .3rem; }
-.tag.now { background: var(--ink); color: var(--paper); }
-.tag.next { background: var(--accent); color: var(--accent-ink); }
-.tag.planned { background: var(--planned-bg); color: var(--planned); border: 1px solid currentColor; }
-.note { font-size: .9rem; color: var(--ink-2); }
-
-.letter { background: var(--paper-2); border: 1px solid var(--rule); padding: 1.2rem 1.4rem; margin-top: 1rem; }
-.letter .salute { font-family: var(--display); font-style: italic; font-size: 1.3rem; margin-bottom: .6rem; }
-.letter .cols { column-count: 2; }
-.asks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem 1.8rem; margin-top: 1rem; }
-.asks > div { border-top: 1px solid var(--rule); padding-top: .5rem; }
-.button { display: inline-block; background: var(--ink); color: var(--paper); text-decoration: none; padding: .5rem .9rem; font-weight: 600; margin-top: .3rem; }
-.button:hover { background: var(--accent); color: var(--accent-ink); }
-.button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); padding: calc(.5rem - 1px) calc(.9rem - 1px); }
-.button.ghost:hover { background: var(--ink); color: var(--paper); }
-.cta { background: var(--paper-2); border: 1px solid var(--rule); padding: .8rem .9rem 1rem; }
-.cta .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 .7rem; }
-.cta .actions .button { margin-top: 0; }
-.cta p:last-child { margin-bottom: 0; }
-.beta-strip { display: none; margin: 0; padding: .5rem 0; border-bottom: 1px solid var(--rule); font-size: .92rem; text-align: center; }
-
-footer.colophon { border-top: 3px double var(--rule); margin-top: 2.5rem; padding-top: .8rem; font-size: .88rem; color: var(--ink-2); display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1.5rem; }
-footer.colophon p { margin: 0; }
-
-@media (max-width: 960px) {
-  .beta-strip { display: block; }
-  .front { grid-template-columns: minmax(0, 1fr); }
-  .front > .lead { border-right: 0; padding-right: 0; }
-  .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .asks { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 640px) {
-  body { font-size: 1rem; }
-  .cols, .letter .cols { column-count: 1; }
-  .grid3, .grid2 { grid-template-columns: minmax(0, 1fr); }
-  .ears { justify-content: center; }
-  .ears p:last-child { display: none; }
-  .ears p { text-align: center; }
-  .dateline { justify-content: center; }
-  .letter { padding: 1rem; }
-}
-@media print {
-  nav.sections, .skip { display: none; }
-  body { background: #fff; color: #000; }
-}
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400;0,500;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="term.js"></script>
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
-<a class="skip" href="#lead">Skip to the lead story</a>
-<div class="page">
+<a class="skip" href="#main">Skip to the content</a>
 
-<header class="masthead">
-  <div class="ears">
-    <p>An open-source agent skill. MIT licence.</p>
-    <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a></p>
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="./" aria-label="Coordinator home">
+      <svg class="mark" width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 10 4.5 4.5M10 10l5.5-5.5M10 10v6"/></g><g fill="currentColor"><circle cx="10" cy="10" r="2.8"/><circle cx="4.5" cy="4.5" r="2"/><circle cx="15.5" cy="4.5" r="2"/><circle cx="10" cy="16.5" r="2"/></g></svg>
+      Coordinator
+    </a>
+    <nav aria-label="Sections">
+      <ul>
+        <li><a href="#loop">How it works</a></li>
+        <li><a href="#views">Views</a></li>
+        <li><a href="#maps">Maps</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="lucid-coding.html">Manifesto</a></li>
+      </ul>
+    </nav>
+    <a class="btn small" href="#install">Install</a>
   </div>
-  <h1 class="title">The Coordinator</h1>
-  <p class="motto">What your agents did, what they are doing next, and the evidence for it.</p>
-  <div class="dateline">
-    <span><time datetime="2026-11-07">Saturday, 7 November 2026</time></span>
-    <span>Version 1.0 edition</span>
-    <span>Free to install</span>
-  </div>
-  <nav class="sections" aria-label="Sections">
-    <ul>
-      <li><a href="#lead">Front page</a></li>
-      <li><a href="#hosted">Hosted beta</a></li>
-      <li><a href="#works-with">Works with</a></li>
-      <li><a href="#team">One person to a team</a></li>
-      <li><a href="#inspired">Inspired by</a></li>
-      <li><a href="#coming">Coming soon</a></li>
-      <li><a href="#wanted">Wanted</a></li>
-      <li><a href="#install">Install</a></li>
-    </ul>
-  </nav>
-  <p class="beta-strip"><span class="tag next">Hosted beta</span> Follow your runs from a phone: <a href="#hosted">opens with 1.0.1, or host it yourself</a></p>
 </header>
 
-<main>
-<div class="front">
-  <article class="lead" id="lead" aria-labelledby="lead-h">
-    <p class="kicker">Lead story</p>
-    <h2 class="headline" id="lead-h">One person, a team of agents, and nobody marking their own homework</h2>
-    <p class="standfirst">Coordinator asks every question before the work starts. Then it runs builders and blind critics, unattended, until the work meets a bar you can check. It stops when its rules say stop, writes everything down, and carries what it learned into the next run.</p>
-    <p class="byline">Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a></p>
+<main id="main">
 
-    <div class="cols">
-      <p class="dropcap">A single coding agent grades its own work. It decides the job is "fine", stops early, drifts into side quests, and asks you a question halfway through, usually while you are away. Coordinator gives that agent a lead to answer to.</p>
-      <p>The lead does not build and does not grade. At the start of a run it reads the project and the task, researches references, picks agents for each role from the ones your harness already has, and asks you every open question in one batch, with its recommendation first. Your answers, including standing permissions such as "merge into dev when the review says ready", go on the record.</p>
-      <h3>Then you can leave</h3>
-      <p>Builders work in parallel where the pieces are independent, each in its own git worktree. A fresh critic, who never sees the builder's reasoning, checks the real result against a bar written before anyone started: a failing test that must pass, a reference to match, an acceptance list. A pass without evidence counts as a fail.</p>
-      <p>A small script, <code>run.mjs next</code>, decides what happens to each piece: build again, change strategy, or stop. It refuses steps taken out of order. A second script, <code>detect.mjs</code>, reads the diff for the usual ways to fake a green run: skipped or deleted tests, removed assertions, rewritten snapshots, suppressed checks.</p>
-      <h3>Hard stops, in code</h3>
-      <p>Rounds and time have budgets. A run also stops when it makes no progress, when the same root cause comes back after a change of strategy, when a stacked piece is blocked, or when new scope passes its cap. A stopped piece is reported as stopped, with its last gap. Merging, deploying, deleting, spending or posting needs your approval, given up front.</p>
-      <h3>Nothing lives only in memory</h3>
-      <p>Every run is a JSON file, written atomically behind a lock, with a readable <code>workbench.md</code> beside it. A crash or a context reset resumes from the file. When the run ends, a retro turns repeated gaps into lessons, tunes the budgets from past runs, and, with your approval, sends gaps in the skill itself back to this project as issues.</p>
-      <h3>The dashboard is a web page</h3>
-      <p>You don't need a purpose-built GUI app to watch a team of agents. Each run has its own dashboard in any browser: the situation in plain words, a <em>Needs you</em> box with the lead's recommendation, a rough time left, then every piece of work, its scores, budgets and a timeline. <code>run.mjs serve</code> serves it live on your own machine, updating in place as the run moves, with answer forms so you can reply to the lead while it works. <code>hud.html</code> beside the state is a static snapshot you can open from disk.</p>
+<section class="hero" aria-labelledby="hero-h">
+  <div class="wrap hero-in">
+    <h1 id="hero-h"><span class="prod">Coordinator</span><span class="tag-line"><a href="lucid-coding.html" data-term>Lucid Coding</a> for your agents</span></h1>
+    <div class="hero-side">
+      <p class="lede">See how each agent read the problem, what it built, how a blind critic judged it and why, and what is running now.</p>
+      <div class="ctas">
+        <a class="btn" href="#install">Install the skill</a>
+        <a class="btn ghost" href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Self-host the service</a>
+      </div>
     </div>
+  </div>
+</section>
 
-    <figure>
-      <img src="dashboard.png" width="1280" height="900" loading="lazy" alt="The Coordinator dashboard for a demo run. At the top: the situation, 'Totals endpoint: one gap left on partial refunds; the second try is building'. Below it the goal with its one behaviour, unchecked. A highlighted Needs you box asks whether to count partial refunds as negative lines or net them per order, with 'Net per order' marked Recommended, an Other box and a Submit button. Then a note box for the lead and a rough time left.">
-      <figcaption>The live dashboard in 0.5, showing a made-up demo run. The lead has parked one question, with its recommendation first; everything else carries on without you.</figcaption>
-    </figure>
-  </article>
-
-  <aside class="rail" aria-label="At a glance">
-    <section aria-labelledby="hosted-h" id="hosted">
-      <div class="cta">
-        <p class="kicker"><span class="tag next">Hosted beta</span> Opens with 1.0.1</p>
-        <h2 id="hosted-h">Follow your runs from a phone</h2>
-        <p>Install the Coordinator GitHub App on a repo, and every run pushed to it shows on the web to the people who can read that repo. Answer the lead from there, and get an alert when it needs you. Builders and critics still run on your machine.</p>
-        <div class="actions">
-          <a class="button" href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Host it yourself today</a>
-          <a class="button ghost" href="https://github.com/mindmakr/coordinator/issues/42">Follow the hosted beta</a>
+<section class="scan" aria-label="A run under the scan">
+  <div class="scan-pin wrap">
+    <figure class="xray">
+      <div class="lightbox">
+        <div class="frame">
+          <picture>
+            <source srcset="img/hero-dark.webp" media="(prefers-color-scheme: dark)">
+            <img class="surface" src="img/hero-light.webp" width="1400" height="2259" alt="The live dashboard of a real run: the situation line, the goal, a Needs you box with one question and the lead's recommended answer, and four units, one Working, one that Needs you and two Waiting for h1.">
+          </picture>
+          <div class="inside" aria-hidden="true">
+            <picture>
+              <source srcset="img/flow-dark.webp" media="(prefers-color-scheme: dark)">
+              <img src="img/flow-light.webp" width="1400" height="995" alt="">
+            </picture>
+          </div>
+          <span class="beam" aria-hidden="true"></span>
         </div>
-        <p class="note">The hosted app at app.coordinator.mindmakr.com opens with 1.0.1, free while in beta. What the App can do: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/permissions.md">permissions</a>. What it keeps: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">privacy</a>. Or <a href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">host it yourself</a>.</p>
       </div>
-    </section>
-    <section aria-labelledby="steps-h">
-      <h2 id="steps-h">A run, in five steps</h2>
-      <ol>
-        <li><strong>Intake.</strong> Read the project, research, staff the team, ask everything once.</li>
-        <li><strong>Split.</strong> Into pieces a critic can judge on their own.</li>
-        <li><strong>Build.</strong> One fresh builder per piece, in its own worktree.</li>
-        <li><strong>Judge.</strong> One blind critic per round, on the real artifact.</li>
-        <li><strong>Next.</strong> Build again, change strategy, or stop. Then integrate, report and learn.</li>
+      <figcaption>
+        <ol class="caps">
+          <li class="cap" data-cap="1"><b>Situation and goal.</b> Where the run stands, in one line, counted from its log.</li>
+          <li class="cap" data-cap="2"><b>Needs you.</b> The one question only you can answer, asked once, with the lead's pick marked Recommended.</li>
+          <li class="cap" data-cap="3"><b>Units.</b> Working, Needs you, and Waiting for h1, each linked to the unit it waits on, with its behaviours and evidence.</li>
+          <li class="cap" data-cap="4"><b>Under the scan: the flow map.</b> What waits on what across a release run, the critical path, and the issues and PRs each unit links.</li>
+        </ol>
+      </figcaption>
+    </figure>
+  </div>
+  <span class="probe" data-step="1" aria-hidden="true"></span><span class="probe" data-step="2" aria-hidden="true"></span><span class="probe" data-step="3" aria-hidden="true"></span><span class="probe" data-step="4" aria-hidden="true"></span>
+</section>
+
+<section class="stance" id="lucid" aria-labelledby="stance-h">
+  <div class="wrap narrow">
+    <h2 id="stance-h" class="quote"><span class="fill">Vibe coding is a feeling. <span data-term>Lucid Coding</span> is knowing.</span></h2>
+    <div class="stance-body">
+      <p>Agentic engineering is how a lot of software gets built now: agents write the code and people direct them. <span data-term>Lucid Coding</span> is the practice of doing that with your eyes open. You know your system, your agents' thinking, and how each piece was built and judged.</p>
+      <p>Coordinator is built for that. It does not pick your stack or your screens. It brings the process: a bar agreed before the build, a critic who never grades its own work, hard stops in code, and a record of every step you can open in a browser.</p>
+      <p class="firm">Get the work done first. Speed and cost improve with time and experience, and each run's record is where that experience comes from.</p>
+      <p><a class="more" href="lucid-coding.html">Read the <span data-term>Lucid Coding</span> manifesto</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="loop" id="loop" aria-labelledby="loop-h">
+  <div class="wrap">
+    <h2 id="loop-h" class="sec-h">One loop, written down at every step</h2>
+    <p class="sec-sub">Every run follows the same six steps. Each one leaves an event in the run's log, so the dashboard can show it and a crash cannot lose it.</p>
+    <div class="loop-grid">
+      <figure class="ring" aria-hidden="true" data-step="1">
+        <svg viewBox="0 0 400 400">
+          <circle class="track" cx="200" cy="200" r="150"/>
+          <circle class="prog" cx="200" cy="200" r="150" pathLength="6"/>
+          <g class="nodes">
+            <g class="n" data-n="1" transform="translate(200 50)"><circle r="22"/><text dy="6">1</text></g>
+            <g class="n" data-n="2" transform="translate(330 125)"><circle r="22"/><text dy="6">2</text></g>
+            <g class="n" data-n="3" transform="translate(330 275)"><circle r="22"/><text dy="6">3</text></g>
+            <g class="n" data-n="4" transform="translate(200 350)"><circle r="22"/><text dy="6">4</text></g>
+            <g class="n" data-n="5" transform="translate(70 275)"><circle r="22"/><text dy="6">5</text></g>
+            <g class="n" data-n="6" transform="translate(70 125)"><circle r="22"/><text dy="6">6</text></g>
+          </g>
+          <text class="ring-label" x="200" y="194">builder</text>
+          <text class="ring-label" x="200" y="216">≠ critic</text>
+        </svg>
+      </figure>
+      <ol class="steps">
+        <li data-step="1"><h3>Ask once</h3><p>The lead reads the project and the task, researches, staffs builders and critics from your harness's own agents, and asks every open question in one batch, its recommendation first. Then it runs without you.</p></li>
+        <li data-step="2"><h3>Agree the bar</h3><p>Each unit of work gets a bar a critic can check: behaviours written as <em>given, when, then</em>, a failing test that must pass, or a reference to match. Bar changes stay on the record.</p></li>
+        <li data-step="3"><h3>Build</h3><p>One fresh builder per unit, each in its own git worktree, in parallel where units are independent. Mechanical work can go to a cheaper model; critics and work on security, money, migrations and auth stay on the strong one. Each round records which model built it.</p></li>
+        <li data-step="4"><h3>Judge blind</h3><p>A separate critic, who never sees the builder's reasoning, checks the real result against the bar and marks each behaviour with evidence. A detector reads the diff for skipped tests, removed assertions and rewritten snapshots.</p></li>
+        <li data-step="5"><h3>Decide in code</h3><p><code>run.mjs next</code> decides what happens to each unit: build again, change strategy, or stop. Round and time budgets, no-progress and same-cause detection are enforced by the script, and steps taken out of order are refused.</p></li>
+        <li data-step="6"><h3>Learn</h3><p>The retro turns repeated gaps into lessons quoted into the next run's briefs, tunes the budgets from past runs, and proposes changes to the skill for a person to review.</p></li>
       </ol>
-    </section>
-    <section aria-labelledby="stops-h">
-      <h2 id="stops-h">Stop rules, enforced in code</h2>
-      <ul>
-        <li>Round and time budgets</li>
-        <li>No progress between rounds</li>
-        <li>The same root cause after a change of strategy</li>
-        <li>A blocked stacked piece</li>
-        <li>A cap on scope added after the split</li>
-        <li>Steps out of order are refused</li>
-      </ul>
-    </section>
-    <section aria-labelledby="install-h" id="install">
-      <h2 id="install-h">Install</h2>
-      <p>As a Claude Code plugin:</p>
-<pre><code>/plugin marketplace add mindmakr/coordinator
-/plugin install coordinator@coordinator</code></pre>
-      <p>Then, in a project:</p>
-<pre><code>/coordinator:init
-/coordinator:run Fix issue #142</code></pre>
-      <p>In OpenAI Codex CLI: copy the skill folders into <code>.agents/skills/</code> and ask for the coordinator skill by name.</p>
-      <p class="note">Needs Node 18+ and git. No other dependencies. Add <code>.coordinator/</code> to your <code>.gitignore</code>. Full instructions in the <a href="https://github.com/mindmakr/coordinator/blob/main/docs/install.md">install guide</a>.</p>
-    </section>
-    <section aria-labelledby="facts-h">
-      <h2 id="facts-h">The small print</h2>
-      <div class="box">
-        <p>Scripts: Node 18+, zero dependencies, tested with <code>node:test</code>.</p>
-        <p>Secrets are refused in lessons and masked in run state.</p>
-        <p style="margin:0">The answer page binds to 127.0.0.1 only, behind a token made at each start.</p>
+    </div>
+  </div>
+</section>
+
+<section class="views" id="views" aria-labelledby="views-h">
+  <div class="wrap">
+    <h2 id="views-h" class="sec-h">What you can see, at any moment</h2>
+    <p class="sec-sub">Real screenshots from real runs. Coordinator builds itself with Coordinator, so most of them are its own release runs.</p>
+  </div>
+  <div class="wrap stack">
+    <article class="card-view">
+      <div class="cv-text">
+        <h3>What needs you, and what doesn't</h3>
+        <p>A question comes once, with the lead's pick marked Recommended. Answer it here, from a phone, or in an issue comment. A unit waiting on another one says <b>Waiting for A</b> and links to it; only a real question for you turns amber and says <b>Needs you</b>.</p>
       </div>
-    </section>
-  </aside>
-</div>
-
-<section class="band" id="works-with" aria-labelledby="works-h">
-  <header>
-    <p class="kicker">Compatibility</p>
-    <h2 id="works-h">Works with any agent that can coordinate</h2>
-    <p class="standfirst">The coordinator brings no team of its own. It staffs builders, critics and researchers from whatever your harness offers.</p>
-  </header>
-  <div class="grid3">
-    <article>
-      <h3><span class="tag now">Today</span> Claude Code</h3>
-      <p>Coordinator is built and run on Claude Code, as a plugin or as a copied skill folder. It uses Claude Code's sub-agents, background tasks and question tool, and can publish the dashboard as a private Artifact.</p>
+      <picture>
+        <source srcset="img/needs-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="img/needs-light.webp" width="1400" height="782" loading="lazy" alt="A Needs you box on the dashboard of this site's own run: the question asks where the Install the skill button should lead, with This page marked Recommended, an Other field and a Submit button.">
+      </picture>
     </article>
-    <article>
-      <h3><span class="tag now">By design</span> Any harness with sub-agents</h3>
-      <p>The skill is plain Markdown and Node scripts. It asks for three things from a harness: agents it can delegate to, a way to run a script, and a way to ask you a question. Where there is no question tool it falls back to a numbered list; where there are no Artifacts it gives you the file path.</p>
+    <article class="card-view">
+      <div class="cv-text">
+        <h3>How it read the problem</h3>
+        <p>The bar, as behaviours a critic can check one by one. Screenshots, test output and logs attach to the behaviour they prove, and <code>run.mjs adopt</code> copies them into the run before a worktree is deleted.</p>
+      </div>
+      <picture>
+        <source srcset="img/behaviours-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="img/behaviours-light.webp" width="1400" height="1028" loading="lazy" alt="A unit's bar written as four behaviours, such as: given a 390 pixel phone, when the page loads, then the headline, the two buttons and the first visual fit with no sideways scroll. Two behaviours carry screenshots of this homepage as evidence.">
+      </picture>
     </article>
-    <article>
-      <h3><span class="tag next">1.0</span> OpenAI Codex CLI</h3>
-      <p>The second harness in 1.0. Copy the skill folders into <code>.agents/skills/</code>, add a short block to <code>AGENTS.md</code>, and ask for the coordinator skill by name. With no question tool, questions go to the dashboard (<a href="https://github.com/mindmakr/coordinator/blob/main/skills/coordinator/references/codex.md">what differs</a>). Other harnesses are welcome as community adapters. None of these projects is affiliated with Coordinator.</p>
-    </article>
-  </div>
-</section>
-
-<section class="band" id="team" aria-labelledby="team-h">
-  <header>
-    <p class="kicker">Features</p>
-    <h2 id="team-h">From one person to a team</h2>
-    <p class="standfirst">The parts that let one person hand off a day's work and come back to evidence instead of a status update.</p>
-  </header>
-  <div class="grid3">
-    <article>
-      <h3><span class="tag now">Today</span> The loop</h3>
-      <p>Build, judge, decide, repeat. Builders and critics are always different agents. An integrator checks that the parts fit once every piece has passed.</p>
-    </article>
-    <article>
-      <h3><span class="tag now">Today</span> The bar</h3>
-      <p>Written before building, in terms a critic can check: a red test that must go green, a screen to match, an acceptance list. A craft bar covers the writing and the UI as well: no filler copy, UI started from references, never from a blank page.</p>
-    </article>
-    <article>
-      <h3><span class="tag now">Today</span> Behaviours and evidence</h3>
-      <p>Since 0.5 the bar is a list of behaviours ("given … when … then …"), the critic marks each one with evidence attached (test output, screenshots, logs, links), and a pass is refused while any behaviour is failing or unchecked.</p>
-    </article>
-    <article>
-      <h3><span class="tag now">Today</span> The dashboard</h3>
-      <p>A page in your browser, rewritten on every change, with a text twin in the terminal (<code>run.mjs show</code>). Since 0.5 it is live over Server-Sent Events, with a page per piece of work and a searchable timeline.</p>
-    </article>
-    <article>
-      <h3><span class="tag next">1.0 beta</span> Answer from anywhere</h3>
-      <p>The <a href="#hosted">hosted beta</a> puts the dashboard on the web. Answer the lead and add notes from a phone, or with a <code>/coordinator</code> comment on the issue, and get a push, an email or a GitHub mention when something needs you (<a href="https://github.com/mindmakr/coordinator/issues/11">#11</a>, <a href="https://github.com/mindmakr/coordinator/issues/12">#12</a>). Builders and critics keep running on your machine.</p>
-    </article>
-    <article>
-      <h3><span class="tag now">Today</span> Memory and lessons</h3>
-      <p>Lessons are stored per person or per project, merged, ranked by use and pruned, and quoted into the next run's briefs. Past runs set the budgets. A lesson seen three times is proposed as a change to the skill, for a person to review.</p>
-    </article>
-    <article>
-      <h3><span class="tag now">Today</span> Maps</h3>
-      <p>Since 0.6: mind, flow and heat maps of a run, with a status mark and a stats panel on every unit (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>), a map of the project's code and settings (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>), and a page about the coordinator itself: its lessons, stats and history (<a href="https://github.com/mindmakr/coordinator/issues/19">#19</a>).</p>
-    </article>
-    <article>
-      <h3><span class="tag now">Today</span> Durable state</h3>
-      <p>Locked, atomic JSON shared across git worktrees, with heartbeats for every builder and critic. <code>/coordinator:status</code> picks a run up after a break or a crash.</p>
-    </article>
-    <article>
-      <h3><span class="tag now">Today</span> Safe by default</h3>
-      <p>No network calls unless you ask: pushing run state to your repo at pit stops, and, when you follow a run from elsewhere, pulling it back. No shell strings, ids checked against path traversal. Text from issues, web pages and other agents is treated as data, never as instructions.</p>
+    <article class="card-view">
+      <div class="cv-text">
+        <h3>How the critic judged it, and why</h3>
+        <p>Every round keeps the builder's report, the critic's gap, its root cause and a score. Here a critic failed the model-routing unit three times, on three different gaps, and the script stopped it when its round budget ran out.</p>
+      </div>
+      <picture>
+        <source srcset="img/rounds-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="img/rounds-light.webp" width="1400" height="1142" loading="lazy" alt="Three rounds of one unit. Each shows fail, a score of 4, 6 and 7, a cause tag, the builder's report with commit links, the gap and the critic's evidence. It ends with Stopped: budget: rounds.">
+      </picture>
     </article>
   </div>
 </section>
 
-<section class="band" id="inspired" aria-labelledby="inspired-h">
-  <header>
-    <p class="kicker">Credits</p>
-    <h2 id="inspired-h">Inspired by</h2>
-    <p class="standfirst">Coordinator is an independent adaptation of other people's ideas. Credit where it is due.</p>
-  </header>
-  <div class="grid3">
-    <article>
-      <h3>The Gauntlet Loop</h3>
-      <p>The build, blind-critic and repeat loop at the centre comes from Matt Shumer's <a href="https://somethingbig.ai/gauntlet-loop">write-up of the Gauntlet Loop</a> and his example repository, <a href="https://github.com/mshumer/Claude-of-Duty">Claude-of-Duty</a>: a bar the agent cannot argue its way around, the goal rather than the implementation, and a builder that never grades itself.</p>
-    </article>
-    <article>
-      <h3>Impeccable</h3>
-      <p>From Paul Bakaus's <a href="https://github.com/pbakaus/impeccable">Impeccable</a>: one skill made of narrow commands, an <code>init</code> that asks only what it cannot infer and writes a shared context file, and a deterministic detector that needs no model.</p>
-    </article>
-    <article>
-      <h3>Memory and graph flows</h3>
-      <p>The wider work on giving agents long-term memory, and on running work as a graph of steps with explicit hand-offs, shaped the lessons store and the planned maps. These are shared ideas in the field; Coordinator claims none of them.</p>
-    </article>
+<section class="maps" id="maps" aria-labelledby="maps-h">
+  <div class="wrap">
+    <h2 id="maps-h" class="sec-h">Maps of the run, drawn from its log</h2>
+    <p class="sec-sub">Each map is drawn from the run's events, with no extra input. Every box carries a status mark, its id and title, so nothing depends on colour alone.</p>
+    <div class="bento">
+      <figure class="b-flow">
+        <picture><source srcset="img/flow-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/flow-light.webp" width="1400" height="995" loading="lazy" alt="Flow map of a release run: eight units stacked left to right with waits-on arrows, the critical path in blue, and on the right the issues, pull requests and follow-on runs they link."></picture>
+        <figcaption><b>Flow.</b> What waits on what, the critical path, the issues and PRs each unit links, and the runs that carried work on.</figcaption>
+      </figure>
+      <figure class="b-walk">
+        <picture><source srcset="img/walk-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/walk-light.webp" width="1400" height="1160" loading="lazy" alt="The flow map with unit c11 selected: its links are lit, the rest dimmed, and a panel shows a breadcrumb, Open unit, Up to parent and its three children."></picture>
+        <figcaption><b>Select and walk.</b> Click or press Enter on a box to light its links, then walk the map with the arrow keys, one level at a time.</figcaption>
+      </figure>
+      <figure class="b-mind">
+        <picture><source srcset="img/mind-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/mind-light.webp" width="1400" height="708" loading="lazy" alt="Mind map: the goal in the centre and eight units around it, passed units in green, stopped ones in grey."></picture>
+        <figcaption><b>Mind.</b> The goal in the centre, then units, behaviours and evidence.</figcaption>
+      </figure>
+      <figure class="b-heat">
+        <picture><source srcset="img/heat-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/heat-light.webp" width="1400" height="473" loading="lazy" alt="Activity by hour: one row per unit, one column per hour, darker cells for more activity and red cells for failed tries."></picture>
+        <figcaption><b>Heat.</b> Where effort and churn went, per unit and hour. Red holds a failed try.</figcaption>
+      </figure>
+      <figure class="b-rel">
+        <picture><source srcset="img/relevance-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/relevance-light.webp" width="1400" height="440" loading="lazy" alt="Goal relevance: the goal on the left, four units that serve it on the right, and one unit marked off goal with a dashed border."></picture>
+        <figcaption><b>Goal relevance.</b> Which units serve the goal, so work off the goal stands out.</figcaption>
+      </figure>
+      <figure class="b-calls">
+        <picture><source srcset="img/calls-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/calls-light.webp" width="1400" height="950" loading="lazy" alt="Function calls for the unit that added the run report: 121 functions touched in 24 files, a graph of who calls the first eight and what they call, and a table with file and line links."></picture>
+        <figcaption><b>Function calls.</b> The functions a unit's diff touched, what calls them and what they call, with file and line links, read from the code at the unit's head commit. The project map beside it covers modules, shared helpers, settings keys, routes and screens.</figcaption>
+      </figure>
+    </div>
   </div>
-  <p class="note">What Coordinator adds: the intake that asks everything up front, stop rules in code, durable run state, a bar-gaming detector for diffs, and learning across runs. Details in <a href="https://github.com/mindmakr/coordinator/blob/main/CREDITS.md">CREDITS.md</a>.</p>
 </section>
 
-<section class="band" id="coming" aria-labelledby="coming-h">
-  <header>
-    <p class="kicker">Coming soon</p>
-    <h2 id="coming-h">On the drawing board: add-ons for the questions a lead gets asked</h2>
-    <p class="standfirst">Some of these shipped in 0.6; the rest are proposed and open for discussion. Each is marked with where it stands.</p>
-  </header>
-  <div class="grid2">
-    <div>
-      <h3><span class="tag now">Since 0.6</span> Security review in every run</h3>
-      <p>A security pass as a second critic on every code change: secret, dependency and static scans on what the change adds, and authorisation checks read from the diff. Risk areas named in a project's <code>COORDINATOR.md</code> add a specialist critic that must also pass (<a href="https://github.com/mindmakr/coordinator/issues/13">#13</a>).</p>
+<section class="features" id="features" aria-labelledby="feat-h">
+  <div class="wrap">
+    <h2 id="feat-h" class="sec-h">While it runs, and after it ends</h2>
+    <div class="groups">
+      <div class="group">
+        <h3>While it runs</h3>
+        <dl>
+          <dt>Live dashboard</dt><dd><code>run.mjs serve</code> serves it on 127.0.0.1 behind a token, updating in place as the run moves. A page per unit, timelines with search and filters, and Export PDF on every page.</dd>
+          <dt>Answer from anywhere</dt><dd>Answer the lead and add notes on the web dashboard, or with <code>/coordinator answer q3 b</code> in an issue or PR comment. Only people with push access can answer.</dd>
+          <dt>Alerts</dt><dd>Web push, email or a GitHub mention when a run needs you, a unit stops, a run finishes, a PR merges or checks go red. Quiet hours and digests per person.</dd>
+        </dl>
+      </div>
+      <div class="group">
+        <h3>Proof</h3>
+        <dl>
+          <dt>Evidence and screenshots</dt><dd>Test output, screenshots, PDFs and links attach to the behaviour they prove, stored in the run with a checksum that doctor verifies.</dd>
+          <dt>Quality and compliance signals</dt><dd>The bar-gaming detector on every diff, a security pass in every code review, a specialist critic for risk areas, and <code>run.mjs quality</code>: duplication, long functions, nesting, naming, security and PDPL/GDPR privacy signals, each with the file and line to review. Signals for a person, not a certification.</dd>
+          <dt>A report for testers and operators</dt><dd>Each run gets a report page: what changed, with its PRs; for testers, steps and expected results; for whoever deploys, migrations, environment variables, scripts and jobs read from git; and the quality signals.</dd>
+        </dl>
+      </div>
+      <div class="group">
+        <h3>Memory</h3>
+        <dl>
+          <dt>Follow-on runs</dt><dd>A unit stopped in one run and finished in the next keeps its history: <code>--continues run:unit</code> links them, and the stats count the chain as one unit.</dd>
+          <dt>Retro and lessons</dt><dd>A retro page per run lists its notes, the lessons it added, budgets and proposals. Repeated gaps become lessons quoted into the next briefs, past runs set the budgets, and a lesson seen three times is proposed as a change to the skill.</dd>
+          <dt>Which model did what</dt><dd>Each round records the model that built it and the one that judged it, and the stats give a pass rate per builder model.</dd>
+        </dl>
+      </div>
+      <div class="group">
+        <h3>Setup</h3>
+        <dl>
+          <dt>Init and doctor</dt><dd><code>/coordinator:init</code> learns the project once and asks where state goes, the theme, budgets, the merge rule and the hosted app. <code>/coordinator:doctor</code> checks the setup, one line per item with a fix.</dd>
+          <dt>Claude Code and Codex CLI</dt><dd>A plugin for Claude Code. In OpenAI Codex CLI, the skill folders plus a short <code>AGENTS.md</code> block; with no question tool there, questions go to the dashboard.</dd>
+          <dt>Self-host, or hosted</dt><dd>The web service is one container and Postgres with your own GitHub App. The hosted app is opening soon. Builders and critics always run on your machine.</dd>
+        </dl>
+      </div>
     </div>
-    <div>
-      <h3><span class="tag planned">Proposed</span> Compliance and auditing</h3>
-      <p>An audit trail a reviewer can follow from a requirement to the behaviour that tests it and the evidence that it passed, and compliance checklists as bars. The hosted service keeps an audit log of its own; compliance packs have no issue yet. <a href="#wanted">Tell us what you need.</a></p>
+
+    <div class="memory-shots">
+      <figure>
+        <picture><source srcset="img/report-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/report-light.webp" width="1400" height="730" loading="lazy" alt="The report page's change list: five units with their status (stopped, pass, building) and the pull requests that merged them."></picture>
+        <figcaption>A run's report: what changed, unit by unit, with the PRs that carried it.</figcaption>
+      </figure>
+      <figure>
+        <picture><source srcset="img/quality-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/quality-light.webp" width="1400" height="1038" loading="lazy" alt="Code quality and compliance signals for the whole project: 0.3 percent duplication, one long file, 18 long functions, 23 deeply nested blocks, and security signals to review with their locations."></picture>
+        <figcaption>Quality and compliance signals for this repository, measured by <code>run.mjs quality</code>, each one for a person to check.</figcaption>
+      </figure>
+      <figure>
+        <picture><source srcset="img/self-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/self-light.webp" width="1400" height="804" loading="lazy" alt="The coordinator's own page: pass rate 86 percent, rounds to pass 1, stopped 14 percent, 69 minutes per unit, a suggested max-rounds of 3, and a trend table over six runs."></picture>
+        <figcaption>The coordinator's own page: how it is doing across every run in the project, and what budget to set next.</figcaption>
+      </figure>
+      <figure>
+        <picture><source srcset="img/chains-dark.webp" media="(prefers-color-scheme: dark)"><img src="img/chains-light.webp" width="1400" height="883" loading="lazy" alt="Work across runs: units carried from one run to the next with tries and outcomes, then proposals from retro notes and follow-ups."></picture>
+        <figcaption>Work carried across runs, and the proposals each retro left for the next one.</figcaption>
+      </figure>
     </div>
-    <div>
-      <h3><span class="tag now">Since 0.6</span> Code and implementation maps</h3>
-      <p>A map of the code the coordinator works on: modules and imports, shared helpers and who reuses them, near-duplicates worth merging, so builders and critics see what a change touches before they touch it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>). Run maps: mind, flow and heat (<a href="https://github.com/mindmakr/coordinator/issues/20">#20</a>).</p>
-    </div>
-    <div>
-      <h3><span class="tag now">Since 0.6</span> Settings and surfaces</h3>
-      <p>Each settings key mapped to where it is read and written, and each route, screen and message tied to the services behind it (<a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>).</p>
-    </div>
-    <div>
-      <h3><span class="tag planned">Proposed</span> API flows and call graphs</h3>
-      <p>Request flows through an API, caller and callee graphs, and dependencies between functions, built on the project map. No issue yet beyond <a href="https://github.com/mindmakr/coordinator/issues/21">#21</a>.</p>
-    </div>
-    <div>
-      <h3><span class="tag planned">Proposed</span> External dependency maps</h3>
-      <p>Third-party packages and services a project calls, where it calls them, and which run touched them. No issue yet.</p>
+
+    <div class="next-up" aria-labelledby="next-h">
+      <h3 id="next-h">Also in 1.1</h3>
+      <ul>
+        <li><b>Evidence viewer.</b> Open any screenshot or log from the timeline in a scrollable viewer, step through them, open in a new tab.</li>
+        <li><b>Gaps view.</b> Every open gap across runs on the coordinator's page, searchable, so nothing is forgotten.</li>
+        <li><b>Runs that end eagerly.</b> Only real defects fail a round; small fixes get a quick check; you are asked once when one unit is left.</li>
+        <li><b>Local demo of the hosted app.</b> <code>npm run demo</code> runs the web dashboard on your machine with your own runs.</li>
+      </ul>
     </div>
   </div>
-  <p class="note" style="margin-top:1rem">The road to 1.0. <strong>0.5:</strong> the live dashboard with behaviours and evidence. <strong>0.6:</strong> <a href="https://github.com/mindmakr/coordinator/issues/9">an event log</a>, <a href="https://github.com/mindmakr/coordinator/issues/10">run state kept in your own repository</a>, <a href="https://github.com/mindmakr/coordinator/issues/13">built-in sub-skills with a security pass</a>, and maps. <strong>1.0:</strong> <a href="https://github.com/mindmakr/coordinator/issues/11">a GitHub App and a web dashboard</a> with <a href="https://github.com/mindmakr/coordinator/issues/12">answers, notes and alerts from anywhere</a>, as a hosted beta, and OpenAI Codex CLI as a second harness (<a href="https://github.com/mindmakr/coordinator/issues/14">#14</a>).</p>
 </section>
 
-<section class="band" id="wanted" aria-labelledby="wanted-h">
-  <header>
-    <p class="kicker">Notices</p>
-    <h2 id="wanted-h">Wanted: contributors, evangelists, sponsors</h2>
-  </header>
-  <div class="letter">
-    <p class="salute">An open letter to the people who build models, coding tools and open-source agents</p>
-    <div class="cols">
-      <p>If you build a model, a coding tool or an open-source agent, your users are already running teams of agents. What they lack is a lead: someone to ask the questions up front, keep the builder and the critic apart, and stop the run when it stops making sense.</p>
-      <p>Coordinator is that lead, written as an open skill under the MIT licence. It runs on Claude Code today and is designed for any harness that can delegate to sub-agents. Each harness that supports it widens what it can do for your users and theirs.</p>
-      <p>It is maintained by one author. Support would go to the work that one person cannot do alone: testing runs across models and harnesses, building and maintaining adapters for more harnesses, and the hosted dashboard.</p>
-      <p>We are not asking for endorsement. We are asking for help, and we will say plainly, on this page and in the repository, who is helping and how.</p>
-      <p><em>Asif Raja, by mindmakr</em></p>
+<section class="resume" id="resume" aria-labelledby="resume-h">
+  <div class="wrap resume-in">
+    <div>
+      <h2 id="resume-h" class="sec-h">Picking up a run</h2>
+      <p>After a crash, a closed session or a week away, the run is still there. Every step is an append-only event log in <code>.coordinator/runs/&lt;run&gt;/</code>, with the questions you answered, the bar, every round and its evidence.</p>
+      <p>Work in flight is checked against its branch or output; a unit with nothing to show goes back to build. Start a new run for new work, and use <code>--continues</code> when it finishes a unit an earlier run left open, so that unit's history comes along.</p>
     </div>
+    <ol class="term" aria-label="Commands to pick up a run">
+      <li><code>/coordinator:doctor</code><span>checks the setup first: Node, <code>gh</code>, settings, stale locks and dashboards</span></li>
+      <li><code>/coordinator:status</code><span>where each run stands; the lead carries on with <code>run.mjs next</code> and does not ask your answers again</span></li>
+      <li><code>run.mjs pull &lt;run&gt;</code><span>on another machine: restores the run from the <code>coordinator-state</code> branch the lead pushed at its last pit stop; a public repo keeps it in a private <code>stateRepo</code> instead</span></li>
+    </ol>
   </div>
-  <div class="asks">
-    <div>
-      <h3>Contribute</h3>
-      <p>Every run is a test of the skill. Report a run that went wrong, a lesson that keeps recurring, or send a fix. An adapter for your harness is especially welcome.</p>
-      <a class="button" href="https://github.com/mindmakr/coordinator/blob/main/CONTRIBUTING.md">Read CONTRIBUTING.md</a>
-    </div>
-    <div>
-      <h3>Spread the word</h3>
-      <p>Write up a run, show it at a meetup, star the repository, or point a team that is drowning in agent output at it. Say what went wrong as well as what worked.</p>
-      <a class="button" href="https://github.com/mindmakr/coordinator">Visit the repository</a>
-    </div>
-    <div>
-      <h3>Sponsor or partner</h3>
-      <p>Credits for test runs, an adapter built together, sponsorship of the work. Open the form; it is a public issue, so leave out private email addresses and payment details, and we will agree a private channel there.</p>
-      <a class="button" href="https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml">Sponsor or partner</a>
+</section>
+
+<section class="install" id="install" aria-labelledby="install-h">
+  <div class="wrap">
+    <h2 id="install-h" class="sec-h">Start a run today</h2>
+    <div class="install-grid">
+      <div class="inst main-inst">
+        <h3>Install the skill in Claude Code</h3>
+        <div class="cmd"><pre><code>/plugin marketplace add mindmakr/coordinator
+/plugin install coordinator@coordinator</code></pre><button type="button" class="copy" data-copy="/plugin marketplace add mindmakr/coordinator&#10;/plugin install coordinator@coordinator">Copy</button></div>
+        <p>Then, in a project: <code>/coordinator:init</code>, then <code>/coordinator:run Fix issue #142</code>. Needs Node 18+ and git, nothing else. Add <code>.coordinator/</code> to your <code>.gitignore</code>.</p>
+        <p class="aside">In OpenAI Codex CLI: copy the skill folders into <code>.agents/skills/</code> and add the <a href="https://github.com/mindmakr/coordinator/blob/main/skills/coordinator/references/codex.md#agentsmd-block">AGENTS.md block</a>. <a href="https://github.com/mindmakr/coordinator/blob/main/docs/install.md">Install guide</a></p>
+      </div>
+      <div class="inst">
+        <h3>Self-host the service</h3>
+        <p>Follow runs on the web, answer from a phone, and get alerts. One container and Postgres, with your own GitHub App.</p>
+        <a class="btn ghost" href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Self-host guide</a>
+      </div>
+      <div class="inst">
+        <h3>Hosted app: opening soon</h3>
+        <p>The same service, run by us, free during the beta. What it reads and keeps: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/permissions.md">permissions</a> and <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">privacy</a>.</p>
+        <a class="btn ghost" href="https://github.com/mindmakr/coordinator/issues/42">Follow the hosted beta</a>
+      </div>
     </div>
   </div>
 </section>
+
 </main>
 
-<footer class="colophon">
-  <p>Coordinator by mindmakr · Version 1.0.0 · <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT licence</a></p>
-  <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by mindmakr</a> · <a href="https://github.com/mindmakr/coordinator">github.com/mindmakr/coordinator</a></p>
-  <p>Docs: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/install.md">Install</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/connect.md">Connect</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Self-host</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/permissions.md">Permissions</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">Privacy</a> · The hosted service: <a href="https://github.com/mindmakr/coordinator/blob/main/service/LICENSE">AGPL-3.0</a></p>
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div>
+      <p class="foot-brand">Coordinator</p>
+      <p>Author: <a href="https://github.com/mindmakr">Asif Raja, by Mindmakr</a></p>
+      <p>The skill is <a href="https://github.com/mindmakr/coordinator/blob/main/LICENSE">MIT</a>; the service is <a href="https://github.com/mindmakr/coordinator/blob/main/service/LICENSE">AGPL-3.0</a>.</p>
+    </div>
+    <div>
+      <p class="foot-h">Built on</p>
+      <p>The build, blind-critic and repeat loop from Matt Shumer's <a href="https://somethingbig.ai/gauntlet-loop">Gauntlet Loop</a>; the command structure and detector idea from Paul Bakaus's <a href="https://github.com/pbakaus/impeccable">Impeccable</a>. <a href="https://github.com/mindmakr/coordinator/blob/main/CREDITS.md">Credits</a></p>
+    </div>
+    <div>
+      <p class="foot-h">Help it grow</p>
+      <p><a href="https://github.com/mindmakr/coordinator/blob/main/CONTRIBUTING.md">Contribute</a>, report a run that went wrong, or <a href="https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml">sponsor or partner</a>. <a href="lucid-coding.html">The manifesto</a> · <a href="https://github.com/mindmakr/coordinator">GitHub</a></p>
+    </div>
+  </div>
 </footer>
 
-</div>
+<script src="site.js" defer></script>
 </body>
 </html>
