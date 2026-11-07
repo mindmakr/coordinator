@@ -5,6 +5,7 @@
 // outside the fence. Exit 0 = clean, 1 = hits (a FAIL), 2 = usage.
 //
 //   detect.mjs --base <ref> [--head <ref>] [--run <run> [--unit <unit>]] [--fence a,b] [--allow rule[:path],…]
+// --allow may be given more than once (--allow a:x --allow b:y), or as one comma list.
 //   detect.mjs --diff-file <file> [same options]
 // --run adds the fence paths recorded on the run (run.mjs init --paths).
 // --unit records the result on that unit; on a run with --paths, a PASS verdict needs it clean.
@@ -18,7 +19,8 @@ import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { baseDir, safeId } from './lib/store.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
 
-const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+// A comma list, or several of them (a repeated --allow).
+const list = (v) => [v].flat().filter((x) => typeof x === 'string').flatMap((x) => x.split(',')).map((s) => s.trim()).filter(Boolean);
 const PATHS_MAX = 300;
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 });
 
@@ -29,7 +31,7 @@ function commit(ref, name) {
 }
 
 try {
-  const { opt } = parse(process.argv.slice(2), ['base', 'head', 'run', 'unit', 'fence', 'allow', 'diff-file']);
+  const { opt } = parse(process.argv.slice(2), ['base', 'head', 'run', 'unit', 'fence', 'allow', 'diff-file'], ['allow']);
   if (opt.unit && !opt.run) throw new Error('--unit needs --run');
   const dir = opt.run ? join(baseDir('project'), 'runs', safeId(opt.run, 'run')) : null;
   if (dir && !existsSync(join(dir, 'state.json')) && !existsSync(join(dir, EVENTS))) throw new Error(`no run: ${opt.run}`);

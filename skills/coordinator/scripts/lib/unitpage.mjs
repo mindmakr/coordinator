@@ -47,7 +47,8 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   const r = v.repo;
   const loose = u.evidenceItems.filter((e) => !e.behaviour);
   const calls = ctx.calls?.get(u.id) ?? null; // lib/map/calls.mjs, map/calls/<unit>.json
-  const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
+  const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('')
+    + keyed(u.unitNotes ?? [], (n) => `ln-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}"><b>${esc(n.kind)}:</b> ${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
     blk('head', `<header class="run"><h1>${unitDot(u)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${stateChip(u, ctx)}`

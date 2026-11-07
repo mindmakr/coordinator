@@ -36,6 +36,10 @@ export function sameGap(a, b) {
 // The run's round budget plus any extra rounds the person approved for this unit (`run.mjs extend`).
 export const roundCap = (unit, run) => run.budget.maxRounds + (Number.isInteger(unit.extraRounds) ? unit.extraRounds : 0);
 
+// The specialists required on round n (1-based). One added later (`run.mjs add-specialist`) is
+// required from the next build on, never on a round that closed before it was added (#45).
+export const requiredOn = (unit, n) => (unit.specialists ?? []).filter((name) => (unit.specialistFrom?.[name] ?? 1) <= n);
+
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
 
@@ -98,7 +102,7 @@ function finishLine(unit, run) {
   if (last?.verdict !== 'fail') return null;
   if (unit.rounds.length < 2 && !(typeof last.score === 'number' && last.score >= 8)) return null;
   // Every required specialist must have marked this round first: a mark still to come may be a high.
-  if ((unit.specialists ?? []).some((n) => !last.specialists?.[n])) return null;
+  if (requiredOn(unit, unit.rounds.length).some((n) => !last.specialists?.[n])) return null;
   const open = openFindings(last);
   if (!open.some((f) => f.severity === 'medium') || open.some((f) => f.severity === 'high')) return null;
   if (!run.units.every((x) => x.id === unit.id || ['pass', 'stopped'].includes(x.status))) return null;
@@ -149,7 +153,7 @@ export function decideUnit(unit, run, nowMs) {
   // After a general fail, wait for every required specialist to mark that round: a new build would
   // close it, and a finding still to come would be lost. Only rounds with a severity (this version
   // on), so older runs never wait on marks that could not be recorded then. `start --force-start` skips it.
-  const unmarked = last.verdict === 'fail' && last.severity ? (unit.specialists ?? []).filter((n) => !last.specialists?.[n]) : [];
+  const unmarked = last.verdict === 'fail' && last.severity ? requiredOn(unit, rounds.length).filter((n) => !last.specialists?.[n]) : [];
   if (unmarked.length) return { action: 'wait', reason: `waiting for specialist marks: ${unmarked.join(', ')}`, specialists: unmarked };
   // The finish line never asks about a unit the rules would stop as stuck or making no
   // progress, and "one more round" does not lift those rules; otherwise the order is as before.
@@ -186,6 +190,16 @@ export function noProgress(unit) {
   return `no progress: only ${id}${quoted} kept failing while the rest passed; state it as a closed list or a fixed inventory, or move it to its own unit (references/bar.md)`;
 }
 
+// The time budget stops new builds and critics, not work already under way (#45). When a critic
+// started inside the budget passed a unit after it ran out, the integration check of that work may
+// still be logged: once, so a failed one ends the run as before.
+function lateIntegration(run) {
+  const end = Date.parse(run.createdAt) + run.budget.maxMinutes * 60_000;
+  const after = (r) => Date.parse(r?.at) > end;
+  const latePass = run.units.some((u) => u.status === 'pass' && after(u.rounds.at(-1)));
+  return latePass && !(run.integration?.rounds ?? []).some(after);
+}
+
 export function decide(run, nowMs = Date.now()) {
   const units = run.units.map((u) => ({ id: u.id, ...decideUnit(u, run, nowMs) }));
   if (!run.frozen) return { decision: 'split', units };
@@ -195,7 +209,7 @@ export function decide(run, nowMs = Date.now()) {
   const integ = run.integration?.rounds ?? [];
   if (integ.at(-1)?.verdict === 'pass') return { decision: 'done', units };
   const repeated = integ.length >= 2 && sameGap(integ.at(-1), integ.at(-2));
-  if (integ.length >= run.budget.maxRounds || repeated || minutes(run.createdAt, nowMs) > run.budget.maxMinutes) {
+  if (integ.length >= run.budget.maxRounds || repeated || (minutes(run.createdAt, nowMs) > run.budget.maxMinutes && !lateIntegration(run))) {
     return { decision: 'done-with-gaps', units };
   }
   return { decision: 'integrate', units };
