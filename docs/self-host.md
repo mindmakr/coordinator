@@ -51,7 +51,7 @@ The service and Postgres together, both bound to `127.0.0.1`. From the repositor
 3. Check it: `curl http://127.0.0.1:3000/healthz` answers `ok`. The service applied its migrations (`service/sql/001` to `007`) before it began listening; `docker compose -f service/docker-compose.yml logs service` shows a `listening` line, or `could not start` with the cause.
 4. Stop it with `docker compose -f service/docker-compose.yml down` (add `-v` to delete the database too).
 
-To reach it from the internet, put it behind a reverse proxy with HTTPS on your domain, set `BASE_URL` to that domain and `TRUST_PROXY=1`, and change the `ports` line in `docker-compose.yml` if the proxy runs elsewhere.
+To reach it from the internet, put it behind a reverse proxy with HTTPS on your domain, set `BASE_URL` to that domain and `TRUST_PROXY=1`, and change the `ports` line in `docker-compose.yml` if the proxy runs elsewhere. See [Behind a proxy](#behind-a-proxy) first: with `TRUST_PROXY=1` the service's port must be reachable from the proxy alone.
 
 ### Docker, with your own Postgres
 
@@ -67,7 +67,7 @@ Here `DATABASE_URL` in `service/.env` must name a host the container can reach. 
 1. Create a Postgres database in the Dokploy project and copy its internal connection string.
 2. Create an application from this repository: build type Dockerfile, Dockerfile path `service/Dockerfile`, build context `.`.
 3. Set the environment (below), with `DATABASE_URL` from step 1, `BASE_URL` set to your domain and `TRUST_PROXY=1`. Mount the App key as a file and set `GITHUB_APP_PRIVATE_KEY_FILE`, or paste it into `GITHUB_APP_PRIVATE_KEY`.
-4. Add the domain with HTTPS, container port 3000.
+4. Add the domain with HTTPS, container port 3000. Don't publish the port on the host: Traefik reaches the container over Dokploy's network, and nothing else should (see [Behind a proxy](#behind-a-proxy)).
 5. Deploy. Point the App's webhook at `https://<domain>/webhook`.
 
 ### Repos installed before the service was up
@@ -90,7 +90,8 @@ The installation id is the number at the end of the installation's settings page
 | `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE` | yes | The App's PEM: one line with `\n`, or a mounted file |
 | `DATABASE_URL` | for real use | Postgres. Unset, everything is kept in memory and lost on restart |
 | `GITHUB_APP_SLUG` | no | Shows an "install the App" link |
-| `TRUST_PROXY` | behind a proxy | `1` to read the client address from the last `X-Forwarded-For` entry. Every per-address limit (below) uses it: behind a proxy without it, all clients share the proxy's address, and one busy or hostile client uses up everyone's allowance |
+| `TRUST_PROXY` | behind a proxy | `1` to read the client address from the last `X-Forwarded-For` entry. Every per-address limit (below) uses it: behind a proxy without it, all clients share the proxy's address, and one busy or hostile client uses up everyone's allowance. The port must then be reachable from the proxy alone ([Behind a proxy](#behind-a-proxy)) |
+| `TRUSTED_PROXY_HOPS` | behind a CDN | How many proxies in front each add an `X-Forwarded-For` entry: the client is that many from the end. Default 1; 2 for a CDN in front of the proxy (1–5). Only with `TRUST_PROXY=1` |
 | `PORT` | no | Default 3000 |
 | `STATE_BRANCH` | no | Default `coordinator-state` |
 | `ACCESS_TTL_SECONDS` | no | How long a "may read this repo" answer is reused, per person. Default and maximum 60 |
@@ -108,14 +109,28 @@ The installation id is the number at the end of the installation's settings page
 | `SYNC_MAX_MB` | no | Log bytes one sync of one repo reads; the rest follow at the next sync, and a forced sync carries on where the last stopped. Default 64 (8–4096) |
 | `GITHUB_API_URL`, `GITHUB_WEB_URL` | no | Another GitHub host. Defaults `https://api.github.com` and `https://github.com`; other hosts are untested |
 
+## Behind a proxy
+
+With `TRUST_PROXY=1` the service believes `X-Forwarded-For`. Anyone who can reach its port directly can write that header and pose as any address: they get a fresh allowance of every per-address limit with each request, and can pose as GitHub's hook addresses. So the service's port must be reachable from the proxy alone:
+
+- **Docker Compose:** keep the `127.0.0.1:` binding in `ports`, or drop `ports` and put the proxy on the Compose network.
+- **Dokploy:** don't publish port 3000 on the host; Traefik reaches the container over its own network.
+- **A firewall** in front of the host should allow 80 and 443 only.
+
+**A CDN in front of the proxy** (Cloudflare, CloudFront, Fastly): each of the two adds an entry, so set `TRUSTED_PROXY_HOPS=2`. Otherwise every client is the CDN's address, all share one allowance, and GitHub's deliveries arrive from the CDN rather than from GitHub's addresses, so they lose the webhook reserve kept for GitHub (`WEBHOOK_SOURCES` in [`service/README.md`](../service/README.md#webhook-sources)). Three more things then hold:
+
+- The CDN must add to `X-Forwarded-For`, not replace it (the usual default), and the proxy must keep the CDN's entry: in Traefik, list the CDN's ranges in the entry point's `forwardedHeaders.trustedIPs`, or it drops the header and adds only the CDN's address.
+- The proxy must accept connections from the CDN's ranges alone. A client that reaches the proxy directly adds its own entry, and with 2 hops its forged one before it is read as the client.
+- Don't let the CDN cache or retry `/webhook`.
+
 ## Limits per client address
 
-The service counts these in memory, per client address (see `TRUST_PROXY`), and a restart resets them:
+The service counts these in memory, per client address (see `TRUST_PROXY`), and a restart resets them. All IPv6 addresses of one /64 count as one address, since one host is usually given a whole /64:
 
 | What | Limit |
 |---|---|
-| Webhook deliveries that fail the signature check, are too large, too slow or cut short | 30 a minute; past that, unsigned-looking deliveries are answered 429 before their body is read. A delivery addressed to this App is always read |
-| Webhook bodies being read at once | 5 MB per address, of which 1 MB for bodies of 64 KB or less; 32 MB in all, with 4 MB kept for small bodies. A body must arrive within 10 seconds |
+| Webhook deliveries that fail the signature check, are too large, too slow or cut short | 30 a minute; past that, deliveries are answered 429 before their body is read. One from GitHub's hook addresses naming this App is always read |
+| Webhook bodies being read at once | 512 KB per address group (IPv4 /24, IPv6 /64) outside GitHub's hook addresses, so filling the budget takes 52 groups; a larger body from there is refused (413). 32 MB in all, of which the last 6 MB only GitHub's addresses may use ([Webhook sources](#webhook-sources)). A body must arrive within 10 seconds |
 | Page views | 600 a minute |
 | Sign-in attempts | 30 per 10 minutes |
 | Doorbell tokens | 30 per 10 minutes |

@@ -26,7 +26,7 @@ const EMAIL = /^[^\s@<>"',;]{1,64}@[^\s@<>"',;]{1,190}\.(?:[A-Za-z]{2,24}|xn--[A
 // c14: an address as the SMTP envelope will see it, or null. NFKC folds fullwidth and other
 // compatibility forms; the domain goes through IDNA (UTS 46, as nodemailer does) to lower-case
 // ASCII, punycode for an international name. The local part must then be printable ASCII.
-// → { address (stored and mailed), key (the per-address limiter's key: the address in lower case) }
+// → { address (stored and mailed), key (the per-address limiter's key: mailboxKey below) }
 export function normalEmail(raw) {
   const s = String(raw ?? '').normalize('NFKC').trim();
   const at = s.lastIndexOf('@');
@@ -35,7 +35,16 @@ export function normalEmail(raw) {
   const domain = domainToASCII(s.slice(at + 1).toLowerCase());
   if (!domain || !/^[\x21-\x7e]+$/.test(local)) return null;
   const address = `${local}@${domain}`;
-  return EMAIL.test(address) && address.length <= 254 ? { address, key: address.toLowerCase() } : null;
+  return EMAIL.test(address) && address.length <= 254 ? { address, key: mailboxKey(local, domain) } : null;
+}
+// c14: the mailbox most providers deliver an address to, for the per-address limiter only: lower case,
+// "+tag" dropped (ann+1@ and ann+2@ reach ann@), and for Gmail dots dropped too and googlemail.com
+// read as gmail.com. Folding more than a provider does only makes the limit stricter, never looser.
+const DOTLESS = new Set(['gmail.com', 'googlemail.com']);
+function mailboxKey(local, domain) {
+  let box = local.toLowerCase().replace(/\+.*$/, '') || local.toLowerCase();
+  if (DOTLESS.has(domain)) { box = box.replace(/\./g, '') || box; domain = 'gmail.com'; }
+  return `${box}@${domain}`;
 }
 const hash = (s) => createHash('sha256').update(s).digest('hex');
 const META_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'";

@@ -14,10 +14,12 @@ try {
   const app = createApp({ config, db, gh: github(config.github), log });
   app.server.listen(config.port, () => log.info('listening', { port: app.server.address().port, base: config.baseUrl, db: db.kind }));
   if (config.resyncMs) app.startResync(config.resyncMs);
+  app.startHookSources();
   app.startAlerts(config.alerts.sweepMs);
   const stop = async () => {
     log.info('stopping');
     app.stopResync();
+    app.stopHookSources();
     app.stopAlerts();
     app.server.close();
     await app.idle();
