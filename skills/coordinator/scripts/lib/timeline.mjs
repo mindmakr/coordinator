@@ -20,7 +20,13 @@ const LOG_BADGE = { start: 'build', beat: 'build', built: 'build', reset: 'build
 
 const ev = (at, badge, label, unit, rest = {}) => ({ at, badge, label, unit: unit ?? null, who: '', score: null, cause: null, text: '', ...rest });
 const roundEv = (r, unit, who) => ev(r.at, r.verdict, `verdict ${r.verdict}`, unit, { who, score: r.score ?? null, cause: r.cause ?? null, text: r.verdict === 'pass' ? (r.evidence ?? '') : (r.gap ?? '') });
-const logEv = (e, unit) => ev(e.at, e.kind === 'link' ? (e.link === 'merge' ? 'merge' : 'link') : (LOG_BADGE[e.kind] ?? 'info'), e.kind === 'link' ? (e.link ?? 'link') : e.kind, unit, { who: unit, text: e.text ?? '' });
+// An evidence entry names its item first ("E41 screenshot: …"); `ev` points at the stored item so the page can open it.
+function evRef(e, u) {
+  const id = e.kind === 'evidence' ? /^E\d+(?![\w-])/.exec(e.text ?? '')?.[0] : null;
+  const it = id && (u.evidence ?? []).find((x) => x.id === id);
+  return it ? { ev: { target: u.id, id, kind: it.kind ?? null, label: it.label ?? null, file: it.file ?? null, type: it.type ?? null, inline: typeof it.text === 'string' } } : {};
+}
+const logEv = (e, u) => ev(e.at, e.kind === 'link' ? (e.link === 'merge' ? 'merge' : 'link') : (LOG_BADGE[e.kind] ?? 'info'), e.kind === 'link' ? (e.link ?? 'link') : e.kind, u.id, { who: u.id, text: e.text ?? '', ...evRef(e, u) });
 const byTime = (a, b) => a.at.localeCompare(b.at);
 
 function noteEvents(run, keep) {
@@ -38,7 +44,7 @@ export function unitTimeline(run, id) {
   const u = run.units.find((x) => x.id === id);
   if (!u) return [];
   return [
-    ...(u.log ?? []).map((e) => logEv(e, id)),
+    ...(u.log ?? []).map((e) => logEv(e, u)),
     ...u.rounds.map((r) => roundEv(r, id, `r${r.n}`)),
     ...noteEvents(run, (n) => n.unit === id),
   ].filter((e) => e.at).sort(byTime);
@@ -48,7 +54,7 @@ export function unitTimeline(run, id) {
 export function runTimeline(run) {
   const integ = run.integration?.rounds ?? [];
   return [
-    ...run.units.flatMap((u) => (u.log ?? []).filter((e) => e.kind !== 'strategy').map((e) => logEv(e, u.id))),
+    ...run.units.flatMap((u) => (u.log ?? []).filter((e) => e.kind !== 'strategy').map((e) => logEv(e, u))),
     ...run.units.flatMap((u) => u.rounds.map((r) => roundEv(r, u.id, `${u.id} r${r.n}`))),
     ...integ.map((r, i) => roundEv(r, null, `integration r${i + 1}`)),
     ...noteEvents(run, () => true),
