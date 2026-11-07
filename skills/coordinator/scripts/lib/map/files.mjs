@@ -12,6 +12,8 @@ export const JS = /\.(?:[cm]?[jt]sx?)$/;
 export const OTHER = /\.(?:py|go|rs|java|kt|kts|rb|php|c|cc|cpp|cxx|h|hpp|cs|dart|swift|scala|ex|exs)$/;
 // Env files hold secrets: only the documented templates are ever listed (and read for key names).
 const ignoredFile = (f) => /\.d\.[cm]?ts$|\.min\.js$/.test(f) || (/(^|\/)\.env(\.|$)/.test(f) && !ENV_TEMPLATE.test(f));
+// What the map counts as a project file: not in build output, dependencies or hidden folders; no .d.ts, minified or env file.
+export const keepFile = (f) => !skipped(f) && !ignoredFile(f);
 export const ENV_TEMPLATE = /(^|\/)\.env\.(example|sample|template|dist)$/;
 
 // The walk asks the caller's clock once per folder, so a test clock decides

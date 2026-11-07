@@ -132,7 +132,7 @@ Each change also writes `hud.html` and a page per unit beside the state: a stati
 
 ## Project map
 
-`run.mjs map <run>` maps the code the run works on, with Node built-ins only: modules and imports (tsconfig paths and workspace packages resolved), shared helpers and who uses them, env vars and settings keys with where they are read and written, routes, screens and message keys tied to the services behind them, and functions with the same shape that could be shared. Other languages get an import scan. The dashboard links to it as a filterable graph. `run.mjs touches <run> <path>` prints what one file touches, for a builder's brief. It stays in the run's folder; `run.mjs map <run> --pit-stop` stages its log and summary for the state branch. Details and limits: [`references/map.md`](skills/coordinator/references/map.md).
+`run.mjs map <run>` maps the code the run works on, with Node built-ins only: modules and imports (tsconfig paths and workspace packages resolved), shared helpers and who uses them, env vars and settings keys with where they are read and written, routes, screens and message keys tied to the services behind them, and functions with the same shape that could be shared. Other languages get an import scan. The dashboard links to it as a filterable graph. `run.mjs touches <run> <path>` prints what one file touches, for a builder's brief. `run.mjs calls <run> <unit>` lists the JS/TS functions a unit's diff touched, what they call and what calls them, on the unit page and in the maps page's Calls view. It stays in the run's folder; `run.mjs map <run> --pit-stop` stages its log and summary for the state branch. Details and limits: [`references/map.md`](skills/coordinator/references/map.md).
 
 ## What's inside
 
@@ -164,7 +164,7 @@ skills/coordinator/
     │                           workbench, view, plain, questions, hud, unitpage, parts, links, theme, timeline,
     │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study,
     │                           maps, heat, mapsvg, mapspage, tracker
-    │   └── map/                the project map: scan, resolve, build, event log, page, touches
+    │   └── map/                the project map: scan, resolve, build, event log, page, touches, function calls
     └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
 docs/                           the homepage, and install · connect · self-host · permissions · privacy
 tools/                          codex-e2e.mjs (a headless run in Codex CLI) and make-old-runs.mjs (the migration fixtures)
