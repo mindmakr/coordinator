@@ -34,7 +34,10 @@ a { color: var(--run); }
 .live[data-state="finished"]::before { background: var(--ink); }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: 1px; flex: none; background: var(--muted); }
 .dot-working { background: var(--pass); animation: pulse 2s ease-in-out infinite; }
-.dot-waiting, .dot-retrying { background: var(--wait); }
+.dot-retrying { background: var(--note); }
+.dot-queued { background: var(--run); }
+.dot-blocked { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
+.dot-needs-you { background: var(--wait); box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px var(--wait); margin: 0 4px; }
 .dot-stale { background: var(--fail); }
 .dot-passed { background: var(--ink); }
 .dot-stopped { background: color-mix(in oklab, var(--muted) 70%, var(--card)); }
@@ -71,10 +74,15 @@ details { margin-top: 10px; background: var(--card); border: 1px solid var(--lin
 summary { cursor: pointer; font-weight: 600; }
 dl { margin: 8px 0 0; } dt { font-weight: 600; margin-top: 8px; } dd { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--none-bg); color: var(--ink); white-space: nowrap; }
-.s-pass, .s-done, .s-met { background: var(--pass-bg); color: var(--pass); }
+.s-pass, .s-passed, .s-done, .s-met { background: var(--pass-bg); color: var(--pass); }
 .s-fail, .s-stopped, .s-stop { background: var(--fail-bg); color: var(--fail); }
-.s-building, .s-continue, .s-integrate { background: var(--run-bg); color: var(--run); }
-.s-judging, .s-split, .s-done-with-gaps, .s-partial, .s-not-yet { background: var(--wait-bg); color: var(--wait); }
+.s-building, .s-judging, .s-working, .s-continue, .s-integrate, .s-queued { background: var(--run-bg); color: var(--run); }
+.s-blocked { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.s-needs-you { background: var(--wait); color: var(--card); }
+.chip a.ulink { color: inherit; text-decoration: underline; }
+.deps { list-style: none; margin: 4px 0 0; padding: 0; } .deps li { margin: 6px 0; }
+.legend .key { white-space: nowrap; }
+.s-split, .s-done-with-gaps, .s-partial, .s-not-yet { background: var(--wait-bg); color: var(--wait); }
 .badge { --k: var(--muted); display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
   background: color-mix(in oklab, var(--k) 15%, var(--card)); color: color-mix(in oklab, var(--k) 72%, var(--ink)); border: 1px solid color-mix(in oklab, var(--k) 40%, var(--card)); }
 .k-decision { --k: #2563eb; } .k-question { --k: #b45309; } .k-answer { --k: #0d9488; } .k-note { --k: #7c3aed; }
@@ -87,7 +95,7 @@ dl { margin: 8px 0 0; } dt { font-weight: 600; margin-top: 8px; } dd { margin: 2
 .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
 .cause { font-size: 12px; color: var(--muted); }
 .say { margin: 10px 0 0; font-size: 14px; overflow-wrap: anywhere; }
-.flag { background: var(--wait-bg); color: var(--wait); }
+.flag { background: var(--note-bg); color: var(--note); }
 .legend { margin: -4px 0 10px; font-size: 12px; color: var(--muted); }
 .links { font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; }
 .links > span { min-width: 0; overflow-wrap: anywhere; }
@@ -216,7 +224,12 @@ svg.map .nd.off { stroke: var(--wait); stroke-width: 3; stroke-dasharray: 6 3; }
 .st-passed, .st-pass, .st-met { --c: var(--pass); --cb: var(--pass-bg); }
 .st-fail, .st-stale { --c: var(--fail); --cb: var(--fail-bg); }
 .st-working { --c: var(--run); --cb: var(--run-bg); }
-.st-waiting, .st-retrying, .st-not-yet { --c: var(--wait); --cb: var(--wait-bg); }
+.st-needs-you, .st-not-yet { --c: var(--wait); --cb: var(--wait-bg); }
+.st-queued { --c: var(--run); --cb: var(--run-bg); }
+svg.map .nd.st-queued { stroke-dasharray: 5 3; } .sw.st-queued { border-style: dashed; }
+.st-retrying { --c: var(--note); --cb: var(--note-bg); }
+.st-blocked { --c: var(--muted); --cb: var(--card); }
+.st-waiting { --c: var(--muted); --cb: var(--card); }
 .st-stopped, .st-unchecked { --c: var(--muted); --cb: var(--none-bg); }
 svg.map .nd[class*="st-"] { fill: var(--cb); stroke: var(--c); }
 svg.map a { cursor: pointer; outline: none; }

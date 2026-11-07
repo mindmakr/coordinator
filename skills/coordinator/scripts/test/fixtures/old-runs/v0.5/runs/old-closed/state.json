@@ -1,0 +1,79 @@
+{
+  "id": "old-closed",
+  "tag": "fixture",
+  "goal": "Fix the export header",
+  "bar": "Header test passes",
+  "fence": "src/export",
+  "paths": [],
+  "budget": {
+    "maxRounds": 4,
+    "maxMinutes": 240,
+    "maxUnits": 6,
+    "maxAdded": 2,
+    "staleMinutes": 45
+  },
+  "createdAt": "2026-11-06T21:24:28.033Z",
+  "frozen": true,
+  "addedAfterFreeze": 0,
+  "units": [
+    {
+      "id": "u1",
+      "bar": "Header has the date",
+      "title": null,
+      "link": null,
+      "after": null,
+      "status": "pass",
+      "rounds": [
+        {
+          "n": 1,
+          "verdict": "pass",
+          "score": 10,
+          "gap": null,
+          "cause": null,
+          "evidence": "header test passed",
+          "at": "2026-11-06T21:24:29.043Z"
+        }
+      ],
+      "strategyChanges": 0,
+      "strategyAt": -1,
+      "heartbeatAt": "2026-11-06T21:24:28.909Z",
+      "stopReason": null,
+      "log": [
+        {
+          "kind": "start",
+          "text": "try 1",
+          "at": "2026-11-06T21:24:28.774Z"
+        },
+        {
+          "kind": "built",
+          "text": "",
+          "at": "2026-11-06T21:24:28.909Z"
+        }
+      ],
+      "report": null
+    }
+  ],
+  "notes": [
+    {
+      "kind": "follow-up",
+      "text": "Export CSV has the same header",
+      "at": "2026-11-06T21:24:29.503Z"
+    }
+  ],
+  "integration": {
+    "rounds": [
+      {
+        "verdict": "pass",
+        "gap": null,
+        "cause": null,
+        "evidence": "all checks green",
+        "at": "2026-11-06T21:24:29.348Z"
+      }
+    ]
+  },
+  "closed": {
+    "outcome": "done",
+    "decision": "done",
+    "at": "2026-11-06T21:24:29.644Z"
+  }
+}

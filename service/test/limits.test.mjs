@@ -11,9 +11,9 @@ const PR = 'https://github.com/acme/web/pull/12';
 const MOBILE_PR = 'https://github.com/acme/mobile/pull/5';
 const OPTED_IN = { 'coordinator.json': { primary: 'acme/web' } };
 
-async function world({ runs = { r1: makeRun('r1', { prs: [PR, MOBILE_PR] }) }, gh, db } = {}) {
+async function world({ runs = { r1: makeRun('r1', { prs: [PR, MOBILE_PR] }) }, gh, db, over = {} } = {}) {
   let clock = Date.parse('2026-11-06T12:00:00Z');
-  const t = await startApp({ now: () => clock, ...(gh && { gh }), ...(db && { db }) });
+  const t = await startApp({ now: () => clock, over, ...(gh && { gh }), ...(db && { db }) });
   t.tick = (ms) => { clock += ms; };
   t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles(runs, { repos: ['acme/mobile'] }) });
   t.gh.addRepo('acme/mobile', { id: 71, installationId: 7, defaultFiles: OPTED_IN });
@@ -24,14 +24,17 @@ const note = (buf, text) => appendEvent(buf, 'note', { ops: [{ op: 'push', path:
 const bump = (buf) => appendEvent(buf, 'unit.reset', { ops: [{ op: 'set', path: ['units', { id: 'u1' }, 'status'], value: 'stopped' }] }, 'u1');
 
 test('a flood of wrongly signed deliveries from a shared address never blocks a correctly signed one', async () => {
-  const t = await world();
-  const post = (body, sig) => fetch(`${t.base}/webhook`, { method: 'POST', body, headers: { 'X-GitHub-Event': 'ping', 'X-Hub-Signature-256': sig } });
+  const t = await world({ over: { webhookSources: ['127.0.0.0/8'] } }); // c14: the header counts only from GitHub's addresses; here, this one
+  // GitHub names the App a delivery is for; someone else's App delivering from the same addresses names its own.
+  const post = (body, sig, app = '999') => fetch(`${t.base}/webhook`, { method: 'POST', body, headers: { 'X-GitHub-Event': 'ping', 'X-Hub-Signature-256': sig, 'X-GitHub-Hook-Installation-Target-Type': 'integration', 'X-GitHub-Hook-Installation-Target-ID': app } });
   try {
     let last;
     for (let i = 0; i < 40; i++) last = await post('{"zen":"x"}', `sha256=${'0'.repeat(64)}`);
     assert.equal(last.status, 429, 'the refused ones are limited');
     const good = '{"zen":"ours"}';
-    const r = await post(good, `sha256=${createHmac('sha256', t.cfg.github.webhookSecret).update(good).digest('hex')}`);
+    const sig = `sha256=${createHmac('sha256', t.cfg.github.webhookSecret).update(good).digest('hex')}`;
+    assert.equal((await post(good, sig)).status, 429, 'over the limit, a delivery for another App is turned away before its body is read');
+    const r = await post(good, sig, t.cfg.github.appId);
     assert.equal(r.status, 200, 'ours still gets through');
   } finally { await t.close(); }
 });

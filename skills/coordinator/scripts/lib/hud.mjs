@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
-import { badge, behaviourList, blk, chip, cls, dot, esc, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
+import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
 import { escapeLine } from './view.mjs';
 import { pendingBanner } from './retro.mjs';
@@ -143,19 +143,20 @@ export function triesRow(u) {
 }
 
 function unitCard(u, ctx, form, repo) {
-  const flag = u.attention ? `<span class="chip flag" title="${esc(`The lead is on it: ${u.attention}`)}">${esc(u.attentionLabel)}</span> ` : '';
   const raw = [u.gap && `<dt>Last gap</dt><dd>${linkify(u.gap, repo)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${linkify(u.evidence, repo)}</dd>`].filter(Boolean).join('');
   const passing = u.behaviours.filter((b) => b.status === 'pass').length;
-  const html = `<h3><span>${dot(u.dot)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${flag}${chip(u.status, u.status)}</span></h3>`
+  const waits = u.dependsOn.map((x) => x.id);
+  const html = `<h3><span>${unitDot(u)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${stateChip(u, ctx)}</span></h3>`
     + unitLinks(u, repo)
-    + `<p class="say" data-a="say-${esc(u.id)}">${esc(u.sentence)}</p>`
+    + `<p class="say" data-a="say-${esc(u.id)}">${linkWaits(u.sentence, waits, ctx)}</p>`
+    + blocksLine(u, ctx)
     + triesRow(u)
     + (u.who ? `<p class="cause" data-a="who-${esc(u.id)}">${esc(u.who)}</p>` : '')
     + scoreChart(u.roundList)
     + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo, [], null, `u-${u.id}`)) : '')
     + (u.evidenceItems.length ? toggle(`u-${u.id}-ev`, `Evidence · ${u.evidenceItems.length}`, evidenceList(u.evidenceItems, repo, ctx, `u-${u.id}-ev`)) : '')
     + (raw ? toggle(`u-${u.id}-raw`, 'Gap and evidence', `<dl>${raw}</dl>`) : '')
-    + `<div class="unit-next" data-a="next-${esc(u.id)}"><b>Next:</b> ${esc(u.next)}</div>`
+    + `<div class="unit-next" data-a="next-${esc(u.id)}"><b>Next:</b> ${linkWaits(u.next, waits, ctx)}</div>`
     + u.personNotes.slice(-2).map((n) => `<p class="from" data-a="from-${esc(u.id)}-${esc(n.at)}"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('')
     + (form ? toggle(`u-${u.id}-note`, 'Add a note on this unit', noteForm(form, u.id)) : '')
     + `<div class="row" data-a="open-${esc(u.id)}"><a class="open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
@@ -221,7 +222,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     '<h2 data-a="h-Budget">Budget</h2>',
     blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes) + modelCard(v.models, v.modelsUnrecorded), 'div', ' class="budget"'),
     '<h2 data-a="h-Units">Units</h2>',
-    '<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <b>Needs you</b> = waiting on you; <b>Retrying</b> = the lead is on it; <b>Quiet</b> = the lead is checking on a silent agent. Score dots: red = failed try, green = passed try.</p>',
+    `<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <span class="key">${dot('needs-you')} <b>Needs you</b> = only you can unblock it;</span> <span class="key">${dot('blocked')} <b>Waiting for A</b> = blocked on another unit (A);</span> <span class="key">${dot('queued')} <b>Up next</b> = ready, not started;</span> <span class="key">${dot('working')} working;</span> <span class="key">${dot('retrying')} <b>Retrying</b> = the lead is on it;</span> <span class="key">${dot('stale')} <b>Quiet</b> = the lead is checking on a silent agent;</span> <span class="key">${dot('passed')} passed;</span> <span class="key">${dot('stopped')} stopped.</span> Score dots: red = failed try, green = passed try.</p>`,
     blk('units', v.units.length ? [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)].map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
     blk('integration', v.integration.length ? `<h2>Integration</h2><p>${v.integration.map((x) => chip(x, x)).join(' → ')}</p>` : ''),
     '<h2 data-a="h-Decisions">Decisions, questions and follow-ups</h2>',

@@ -10,7 +10,7 @@
   "callback_urls": [
     "https://coordinator.example.com/auth/callback"
   ],
-  "public": false,
+  "public": true,
   "request_oauth_on_install": false,
   "setup_on_update": false,
   "default_permissions": {

@@ -19,6 +19,13 @@ import { limiter } from './ratelimit.mjs';
 import { WriteError } from './writes.mjs';
 
 const MAX_TEXT = 1000;
+// Commands handled per installation an hour. Each costs the App several API calls, so a flood of
+// command comments on one installation's public issues cannot use up the App's quota for the rest.
+// c14: counted only once the commenter has passed the push-access check, so strangers cannot use it up.
+export const COMMANDS_PER_HOUR = 60;
+// c14: commands read from one commenter on one installation an hour, writer or not. Each one read
+// costs a reaction and a permission check, so this bounds what one stranger's comments can cost.
+export const COMMANDS_PER_COMMENTER_PER_HOUR = 10;
 const USAGE = 'Commands: `/coordinator answer q3 <option>`, `/coordinator answer q3 "your own answer"`, or `/coordinator note <text>`.';
 
 // The command in a comment body, or null when there is none.
@@ -81,6 +88,8 @@ function refusal(e, cmd) {
 
 export function commands({ db, gh, writes, log, now = Date.now }) {
   const replies = limiter({ max: 20, windowMs: 3_600_000, now }); // refusal replies per installation
+  const handled = limiter({ max: COMMANDS_PER_HOUR, windowMs: 3_600_000, now });
+  const commenters = limiter({ max: COMMANDS_PER_COMMENTER_PER_HOUR, windowMs: 3_600_000, now });
 
   async function reply(token, inst, full, n, text) {
     if (replies.hit(String(inst))) return; // over the cap: the 😕 reaction alone says it
@@ -110,6 +119,10 @@ export function commands({ db, gh, writes, log, now = Date.now }) {
     if (!perm.push) {
       await db.audit('command.refused', { installationId: inst, login, detail: { repo: repo.fullName, run: runId, reason: 'no push access' } });
       return { refuse: 'Only people with push access to the run\'s state repo can answer or add notes.' };
+    }
+    if (handled.hit(String(inst))) {
+      log.warn('comment commands over the hourly cap', { installation: inst });
+      return { refuse: 'This installation has had too many commands this hour; try again later, or use the web dashboard.' };
     }
     try {
       await writes.fromCommand({ installationId: inst, repo, runId, login, userId, cmd, unit: units.length === 1 ? units[0] : null, source: String(p.comment.html_url ?? '').slice(0, 300) });
@@ -151,6 +164,8 @@ export function commands({ db, gh, writes, log, now = Date.now }) {
       if (!cmd) return { status: 202, body: 'ignored: no command' };
       const inst = Number(p.installation.id);
       if (!(await db.installation(inst))) return { status: 202, body: 'ignored: unknown installation' };
+      const who = Number.isSafeInteger(Number(c.user?.id)) ? `id:${Number(c.user.id)}` : `login:${String(c.user?.login ?? '').toLowerCase()}`;
+      if (commenters.hit(`${inst}:${who}`)) return { status: 202, body: 'ignored: too many commands from this person this hour' };
       return { status: 202, body: `command ${cmd.verb ?? 'refused'}`, work: () => work(inst, p, cmd) };
     },
   };

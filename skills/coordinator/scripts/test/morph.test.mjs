@@ -87,19 +87,25 @@ test('a form being filled in is left alone, and the page hears so', () => {
   assert.equal(app.childNodes[0].childNodes[0], f); assert.equal(f.text, ''); assert.equal(skipped, 1);
 });
 
-test('unit status dots: working, waiting, retrying, stale, passed, stopped', () => {
+test('unit status dots: each state says who it waits on', () => {
   const u = (status, rounds = []) => ({ status, rounds });
   const fail = { verdict: 'fail' };
   const cases = [
     [u('building'), { action: 'wait' }, 'working'], [u('judging'), { action: 'judge' }, 'working'],
-    [u('open'), { action: 'wait', reason: 'after a' }, 'waiting'], [u('open'), { action: 'build' }, 'waiting'],
+    [u('open'), { action: 'wait', reason: 'after a' }, 'blocked'], [u('open'), { action: 'build' }, 'queued'], [u('open'), undefined, 'queued'],
     [u('open', [fail, fail]), { action: 'build' }, 'retrying'], [u('building', [fail, fail]), { action: 'wait' }, 'retrying'],
     [u('building'), { action: 'check-stale', phase: 'building' }, 'stale'],
     [u('pass', [{ verdict: 'pass' }]), { action: 'done' }, 'passed'],
     [u('stopped'), { action: 'stopped' }, 'stopped'], [u('open', [fail]), { action: 'stop', reason: 'budget: time' }, 'stopped'],
   ];
-  for (const [unit, d, want] of cases) assert.equal(dotState(unit, d), want, `${unit.status} ${d.action}`);
-  assert.deepEqual(Object.keys(DOTS).sort(), ['passed', 'retrying', 'stale', 'stopped', 'waiting', 'working']);
+  for (const [unit, d, want] of cases) assert.equal(dotState(unit, d), want, `${unit.status} ${d?.action}`);
+  assert.deepEqual(Object.keys(DOTS).sort(), ['blocked', 'needs-you', 'passed', 'queued', 'retrying', 'stale', 'stopped', 'working']);
+  // An open question on the unit: the person, before every state but passed.
+  const asks = [{ id: 'q1', unit: 'd', open: true }, { id: 'q2', unit: 'x', open: true }, { id: 'q3', unit: 'e', open: false }];
+  assert.equal(dotState({ id: 'd', status: 'open', rounds: [] }, { action: 'wait', reason: 'after a' }, asks), 'needs-you');
+  assert.equal(dotState({ id: 'd', status: 'stopped', rounds: [] }, { action: 'stopped' }, asks), 'needs-you');
+  assert.equal(dotState({ id: 'd', status: 'pass', rounds: [] }, { action: 'done' }, asks), 'passed');
+  assert.equal(dotState({ id: 'e', status: 'open', rounds: [] }, { action: 'build' }, asks), 'queued', 'an answered question is not the person');
 });
 
 test('each score dot says its try, result and score; one try reads as words', () => {

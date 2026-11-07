@@ -9,21 +9,43 @@
 //   repo. The reply is a doorbell token for that one repo, valid TOKEN_MS. The
 //   GitHub token is used for those two calls and never kept.
 // - GET /doorbell?run=r1 with the doorbell token as a Bearer: the stream. It
-//   ends when the token expires, so access is checked again at least that often.
-import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
+//   ends when the token expires. Meanwhile the service asks GitHub, as the App,
+//   whether the person can still read the repo when the stream opens and every
+//   RECHECK_MS (answers cached that long): someone who lost access hears nothing more.
+import { createHmac, hkdfSync } from 'node:crypto';
 import { REPO, isSafeId } from './core.mjs';
+import { SCOPES } from './github.mjs';
+import { same } from './session.mjs';
 import { limiter } from './ratelimit.mjs';
 
 export const TOKEN_MS = 15 * 60_000;
 export const KEEPALIVE_MS = 25_000;
 export const MAX_STREAMS_PER_USER = 10;
+export const RECHECK_MS = 60_000;
+const EXPIRED = 'event: expired\ndata: {}\n\n';
 
-export function doorbell({ config, db, gh, log, now = Date.now }) {
+export function doorbell({ config, db, gh, log, now = Date.now, recheckMs = RECHECK_MS }) {
   const key = Buffer.from(hkdfSync('sha256', config.sessionSecret, 'coordinator-service', 'doorbell', 32));
   const mac = (s) => createHmac('sha256', key).update(s).digest('base64url');
   const maxStreams = config.alerts?.doorbellStreams ?? 500;
   const mints = limiter({ max: 30, windowMs: 10 * 60_000, now });
   const streams = new Set(); // { res, inst, repo, run, user, timer, end }
+  const access = new Map(); // `${user}:${inst}:${repo}` → { ok, at }
+
+  // Whether the token's holder may still read its repo: true, false, or null (GitHub did not say).
+  async function stillReads(c) {
+    const k = `${c.u}:${c.i}:${c.r}`;
+    const hit = access.get(k);
+    if (hit && now() - hit.at < recheckMs) return hit.ok;
+    let ok = false;
+    try {
+      const repo = (await db.repos(c.i)).find((x) => x.id === c.r);
+      if (repo) ok = (await gh.userPermission(await gh.installationToken(c.i, SCOPES.read), repo.fullName, c.l)) !== 'none';
+    } catch (e) { log?.warn('doorbell: access check failed', { login: c.l, error: e }); return null; }
+    access.set(k, { ok, at: now() });
+    if (access.size > 10_000) access.delete(access.keys().next().value);
+    return ok;
+  }
 
   function sign(claims) {
     const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
@@ -32,9 +54,7 @@ export function doorbell({ config, db, gh, log, now = Date.now }) {
   // The claims of a valid, unexpired token, else null.
   function verify(token) {
     const [body, sig] = String(token ?? '').split('.');
-    if (!body || !sig || sig.length !== 43) return null;
-    const want = Buffer.from(mac(body));
-    if (!timingSafeEqual(want, Buffer.from(sig))) return null;
+    if (!body || !sig || !same(mac(body), sig)) return null;
     try {
       const c = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
       return Number.isFinite(c.exp) && c.exp > now() ? c : null;
@@ -67,11 +87,18 @@ export function doorbell({ config, db, gh, log, now = Date.now }) {
     return reply(res, 200, { token: sign({ u: Number(user.id), l: String(user.login), i: repo.installationId, r: repo.id, exp }), expiresAt: new Date(exp).toISOString(), repo: repo.fullName });
   }
 
-  function listen(req, res, url) {
+  async function listen(req, res, url) {
     const c = verify(bearer(req));
     if (!c) return reply(res, 401, { error: 'missing, wrong or expired doorbell token' });
     const run = url.searchParams.get('run');
     if (run !== null && !isSafeId(run)) return reply(res, 400, { error: 'bad run id' });
+    const may = await stillReads(c);
+    if (may === null) return reply(res, 503, { error: 'could not check your access; poll instead' }, { 'Retry-After': '60' });
+    if (!may) {
+      await db.audit('doorbell.refused', { installationId: c.i, login: c.l, detail: { reason: 'no read access' } });
+      return reply(res, 401, { error: 'you can no longer read this repo' });
+    }
+    if (req.socket.destroyed) return; // gone while we asked GitHub
     const mine = [...streams].filter((s) => s.user === c.u);
     if (mine.length >= MAX_STREAMS_PER_USER) mine[0].end(); // the oldest gives way: a restarted watch is not locked out
     if (streams.size >= maxStreams) return reply(res, 503, { error: 'too many listeners; poll instead' }, { 'Retry-After': '60' });
@@ -79,9 +106,12 @@ export function doorbell({ config, db, gh, log, now = Date.now }) {
     res.write(`retry: 5000\nevent: ready\ndata: {}\n\n`);
     const s = { res, inst: c.i, repo: c.r, run, user: c.u };
     const keep = setInterval(() => res.write(': keepalive\n\n'), KEEPALIVE_MS);
-    const expire = setTimeout(() => { res.write('event: expired\ndata: {}\n\n'); s.end(); }, Math.max(0, c.exp - now()));
-    s.end = () => { clearInterval(keep); clearTimeout(expire); streams.delete(s); res.end(); };
-    req.on('close', () => { clearInterval(keep); clearTimeout(expire); streams.delete(s); });
+    const expire = setTimeout(() => { res.write(EXPIRED); s.end(); }, Math.max(0, c.exp - now()));
+    // Lost access, or GitHub cannot say: the stream ends as if expired, and the client mints a new token.
+    const recheck = setInterval(() => { stillReads(c).then((ok) => { if (ok !== true && streams.has(s)) { res.write(EXPIRED); s.end(); } }); }, recheckMs);
+    const stop = () => { clearInterval(keep); clearInterval(recheck); clearTimeout(expire); streams.delete(s); };
+    s.end = () => { stop(); res.end(); };
+    req.on('close', stop);
     streams.add(s);
     log?.info('doorbell open', { login: c.l, run: run ?? '*' });
   }
@@ -91,7 +121,7 @@ export function doorbell({ config, db, gh, log, now = Date.now }) {
     // Handles /doorbell routes; false for any other path.
     async route(req, res, url, ip) {
       if (url.pathname === '/doorbell/token' && req.method === 'POST') { await mint(req, res, url, ip); return true; }
-      if (url.pathname === '/doorbell' && req.method === 'GET') { listen(req, res, url); return true; }
+      if (url.pathname === '/doorbell' && req.method === 'GET') { await listen(req, res, url); return true; }
       return false;
     },
     // "Run X changed" to every listener on that repo (and that run, when they named one).
@@ -104,6 +134,11 @@ export function doorbell({ config, db, gh, log, now = Date.now }) {
       return n;
     },
     size: () => streams.size,
+    // The installation was removed: its listeners hear nothing more, and nothing is remembered about it.
+    forgetInstallation(installationId) {
+      for (const s of [...streams]) if (s.inst === installationId) s.end();
+      for (const k of [...access.keys()]) if (k.split(':')[1] === String(installationId)) access.delete(k);
+    },
     close() { for (const s of [...streams]) s.end(); },
   };
 }

@@ -2,6 +2,7 @@
 // are never logged and never written to the database.
 import { readFileSync } from 'node:fs';
 import { alertConfig } from './alerts/config.mjs';
+import { parseCidr } from './hooksource.mjs';
 
 const need = (env, k) => {
   const v = env[k];
@@ -17,6 +18,16 @@ const int = (v, d, min, max) => {
   return n;
 };
 
+const webhookSources = (v) => {
+  const s = String(v ?? '').trim();
+  if (!s || s === 'github') return 'github';
+  if (s === 'any') return 'any';
+  const list = s.split(',').map((x) => x.trim()).filter(Boolean);
+  const bad = list.find((x) => !parseCidr(x));
+  if (bad || !list.length) throw new Error(`WEBHOOK_SOURCES: github, any, or CIDRs like 192.0.2.0/24 (not ${bad ?? s})`);
+  return list;
+};
+
 export function loadConfig(env = process.env) {
   const baseUrl = new URL(need(env, 'BASE_URL'));
   if (!['http:', 'https:'].includes(baseUrl.protocol)) throw new Error('BASE_URL must be http(s)');
@@ -29,6 +40,11 @@ export function loadConfig(env = process.env) {
     baseUrl: baseUrl.origin,
     secure,
     trustProxy: env.TRUST_PROXY === '1',
+    // c14: proxies in front that each append to X-Forwarded-For (2: a CDN, then Traefik).
+    trustedProxyHops: int(env.TRUSTED_PROXY_HOPS, 1, 1, 5),
+    // c14: who may use the webhook reserve and the App header: github (GitHub's hook ranges,
+    // fetched daily), any, or a comma-separated list of CIDRs.
+    webhookSources: webhookSources(env.WEBHOOK_SOURCES),
     databaseUrl: env.DATABASE_URL || null,
     stateBranch: env.STATE_BRANCH || 'coordinator-state',
     // Every installation is re-read this often, so a missed webhook heals (0 turns it off).

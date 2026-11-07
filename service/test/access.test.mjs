@@ -34,7 +34,8 @@ test('a reader sees the runs of a repo they can read; an outsider gets 404 every
     const missing = await (await t.get('/r/acme/nothing-here', outsider)).text();
     const hidden = await (await t.get('/r/acme/secret', outsider)).text();
     assert.equal(hidden, missing, 'a private repo and a missing one look the same');
-    assert.equal(hidden.includes('s1'), false);
+    // The run id as the page would show it (a link or a cell), not two letters a random token may hold.
+    assert.doesNotMatch(hidden, /\/run\/s1\b|>s1</);
   } finally { await t.close(); }
 });
 

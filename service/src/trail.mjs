@@ -17,6 +17,7 @@ import { limiter } from './ratelimit.mjs';
 import { repoBase } from './pages.mjs';
 import { projectFence } from './project.mjs';
 import { MAX_REFS_PER_UNIT } from './ingest.mjs';
+import { syncSettings } from './syncqueue.mjs';
 
 const enc = encodeURIComponent;
 
@@ -33,12 +34,21 @@ export function githubLines(events) {
 
 // Caps on what one run log can make the App write: a hostile log is pusher-controlled.
 export const CAPS = { units: 50, refsPerUnit: MAX_REFS_PER_UNIT, commentWritesPerInstallation: 200, windowMs: 10 * 60_000 };
+// c14 round 5: GitHub reads the trail makes (comment pages, board queries, a linked repo's
+// coordinator.json) are budgeted per installation too, TRAIL_READS per window; past it the run is left
+// owed (out.deferred) and the next sync carries on, so one log cannot spend the installation's GitHub
+// rate limit, or hours of a trail slot, in one refresh.
+export class ReadsSpent extends Error { constructor() { super('the installation\'s trail read budget is spent for now'); } }
 
 export function trail({ db, gh, config, log, now = Date.now }) {
+  const readMax = config.trailReads ?? syncSettings().trailReads;
   const on = { trackers: config.trail?.trackers !== false, board: config.trail?.board !== false };
   const fence = projectFence({ gh, now });
   // Comment writes (create or edit) per installation per window; the rest wait for the next sync.
   const writes = limiter({ max: CAPS.commentWritesPerInstallation, windowMs: CAPS.windowMs, now });
+  const reads = limiter({ max: readMax, windowMs: CAPS.windowMs, now });
+  // One GitHub read for this installation, or ReadsSpent.
+  const reader = (installationId) => () => { if (reads.hit(String(installationId))) throw new ReadsSpent(); };
 
   async function findOurs(token, ref, runId, unitId) {
     for await (const c of gh.issueComments(token, ref.repo, ref.n)) {
@@ -47,7 +57,7 @@ export function trail({ db, gh, config, log, now = Date.now }) {
     return null;
   }
 
-  async function comment(installationId, token, ref, runId, unitId, body) {
+  async function comment(installationId, token, ref, runId, unitId, body, spend) {
     const t = await db.tracker(installationId, ref.key, runId, unitId);
     const hash = sha256(body);
     if (t?.bodySha === hash) return 'unchanged';
@@ -57,6 +67,7 @@ export function trail({ db, gh, config, log, now = Date.now }) {
       return 'updated';
     }
     // No comment known, or someone deleted it: adopt this App's own comment if there is one, else post.
+    spend();
     let id = await findOurs(token, ref, runId, unitId);
     if (id) await gh.updateComment(token, ref.repo, id, body);
     else id = await gh.createComment(token, ref.repo, ref.n, body);
@@ -76,31 +87,36 @@ export function trail({ db, gh, config, log, now = Date.now }) {
       if (!board && !trackersOn) return out;
       let commentToken; let session; let readToken;
       const token = async () => (readToken ??= await gh.installationToken(installationId, SCOPES.read));
+      const spend = reader(installationId);
       for (const u of state.units.slice(0, CAPS.units)) {
         for (const ref of unitRefs(u).slice(0, CAPS.refsPerUnit)) {
           const target = await db.repoByName(installationId, ref.repo); // this installation's row only
-          if (!(await fence.allows(repo, target, token))) { out.skipped = [...(out.skipped ?? []), ref.key]; continue; } // outside the project: read-only
+          if (!(await fence.allows(repo, target, token, spend))) { out.skipped = [...(out.skipped ?? []), ref.key]; continue; } // outside the project: read-only
           const events = await db.ghEvents(installationId, [ref.key]);
           if (trackersOn) {
             const detail = target.id === repo.id && target.private === true;
             const url = `${config.baseUrl}${repoBase(repo.fullName)}/run/${enc(state.id)}/unit/${enc(u.id)}`;
             const body = trackerBody(state, u.id, { url, detail, github: githubLines(events) });
             commentToken ??= await gh.installationToken(installationId, SCOPES.comments);
-            out.comments.push([ref.key, u.id, await comment(installationId, commentToken, ref, state.id, u.id, body)]);
+            out.comments.push([ref.key, u.id, await comment(installationId, commentToken, ref, state.id, u.id, body, spend)]);
           }
           if (board) {
             const st = unitState(state, u);
             const hash = sha256(`${board.owner}/${board.number}|${state.id}|${st}`);
             const t = await db.tracker(installationId, ref.key, state.id, u.id);
             if (t?.boardSha === hash) { out.board.push([ref.key, u.id, 'unchanged']); continue; }
-            session ??= boardSession({ gh, token: await gh.installationToken(installationId, SCOPES.board), board });
+            // c14 round 5: a card found not on the board is remembered against the same hash, so it is
+            // asked about again only when the unit's state (or the board) changes, not at every refresh.
+            if (t?.boardSha === `off:${hash}`) { out.board.push([ref.key, u.id, 'not on board']); continue; }
+            session ??= boardSession({ gh, token: await gh.installationToken(installationId, SCOPES.board), board, spend });
             const r = await session.update(ref, { runId: state.id, state: st });
-            if (r === 'set') await db.putTracker(installationId, { refKey: ref.key, runId: state.id, unitId: u.id, boardSha: hash });
+            if (r === 'set' || r === 'not on board') await db.putTracker(installationId, { refKey: ref.key, runId: state.id, unitId: u.id, boardSha: r === 'set' ? hash : `off:${hash}` });
             out.board.push([ref.key, u.id, r]);
           }
         }
       }
     } catch (e) {
+      if (e instanceof ReadsSpent) { out.deferred = true; return out; } // left owed: the next sync carries on
       log?.warn('github trail not updated', { repo: repo.fullName, run: runId, error: e });
       out.error = e.message;
     }
