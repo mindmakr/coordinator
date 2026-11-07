@@ -191,9 +191,11 @@ export function noProgress(unit) {
 }
 
 // The time budget stops new builds and critics, not work already under way (#45). When a critic
-// started inside the budget passed a unit after it ran out, the integration check of that work may
-// still be logged: once, so a failed one ends the run as before.
-function lateIntegration(run) {
+// started inside the budget passed the run's last open unit after it ran out, the integration check
+// of that work may still be logged: once, so a failed one ends the run as before. A run whose budget
+// stopped any other unit ends with gaps: the late pass was not the last of its work.
+function lateIntegration(run, units) {
+  if (units.some((u) => u.reason === 'budget: time')) return false;
   const end = Date.parse(run.createdAt) + run.budget.maxMinutes * 60_000;
   const after = (r) => Date.parse(r?.at) > end;
   const latePass = run.units.some((u) => u.status === 'pass' && after(u.rounds.at(-1)));
@@ -209,7 +211,7 @@ export function decide(run, nowMs = Date.now()) {
   const integ = run.integration?.rounds ?? [];
   if (integ.at(-1)?.verdict === 'pass') return { decision: 'done', units };
   const repeated = integ.length >= 2 && sameGap(integ.at(-1), integ.at(-2));
-  if (integ.length >= run.budget.maxRounds || repeated || (minutes(run.createdAt, nowMs) > run.budget.maxMinutes && !lateIntegration(run))) {
+  if (integ.length >= run.budget.maxRounds || repeated || (minutes(run.createdAt, nowMs) > run.budget.maxMinutes && !lateIntegration(run, units))) {
     return { decision: 'done-with-gaps', units };
   }
   return { decision: 'integrate', units };

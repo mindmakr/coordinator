@@ -505,6 +505,7 @@ const commands = {
     return change(run, 'unit.specialist', (s) => {
       const u = unitOf(s, unit);
       if (['pass', 'stopped'].includes(u.status)) throw new Error(`add-specialist refused: ${u.id} is ${u.status}; a specialist joins before the unit's verdict`);
+      if ((Date.now() - Date.parse(s.createdAt)) / 60_000 > s.budget.maxMinutes) throw new Error('add-specialist refused: the time budget is spent; it stops new critics');
       if ((u.specialists ?? []).includes(who)) throw new Error(`${u.id} already has specialist ${who}`);
       u.specialists = [...(u.specialists ?? []), who];
       (u.specialistFrom ??= {})[who] = u.rounds.length + 1;
@@ -834,7 +835,7 @@ const commands = {
         note.answers = o.answers;
       }
       s.notes.push(note);
-    }, { closedOk: ['follow-up', 'retro'].includes(kind), unit: typeof o.unit === 'string' ? o.unit : null });
+    }, { closedOk: ['follow-up', 'retro'].includes(kind), unit: typeof o.unit === 'string' ? safeId(o.unit, 'unit') : null });
   },
   study([run], o) { let id; const s = change(run, 'study', (st) => { id = addStudy(st, o); }); return { ...s, study: id }; },
   self(_, o) {

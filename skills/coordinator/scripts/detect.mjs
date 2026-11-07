@@ -49,6 +49,7 @@ try {
   const files = changed.length;
   const allow = list(opt.allow);
   const hits = detect(diff, { fence }).filter((h) => !allowed(h, allow));
+  let result = { allow, hits };
   if (opt.unit) {
     // An empty diff proves nothing: it would let a PASS through unchecked.
     if (!files) throw new Error('empty diff: nothing was checked (is --head the builder\'s commit?)');
@@ -62,9 +63,15 @@ try {
       if (u.status !== 'judging' && !fold) throw new Error(`unit ${opt.unit} is ${u.status}; detect is recorded while judging, or on a pass waiting for its fold-in check`);
       // The paths it changed (renames by both names): `next` compares them across units (lib/overlap.mjs).
       const paths = [...new Set(changed.flatMap((f) => [f.path, f.renamedFrom].filter(Boolean)))].sort().slice(0, PATHS_MAX);
-      u.detect = { round: fold ? u.rounds.length : u.rounds.length + 1, clean: hits.length === 0, base, head, files, paths, allow, hits: hits.length, at: new Date().toISOString(), ...(fold ? { fold: true } : {}) };
+      const round = fold ? u.rounds.length : u.rounds.length + 1;
+      // A rerun without --allow on the same round, base and head (the critic's) keeps the lead's allowances (#45).
+      const same = u.detect && u.detect.round === round && u.detect.base === base && u.detect.head === head && !!u.detect.fold === fold;
+      const kept = opt.allow === undefined && same ? (u.detect.allow ?? []) : allow;
+      const left = kept === allow ? hits : detect(diff, { fence }).filter((h) => !allowed(h, kept));
+      result = { allow: kept, hits: left };
+      u.detect = { round, clean: left.length === 0, base, head, files, paths, allow: kept, hits: left.length, at: new Date().toISOString(), ...(fold ? { fold: true } : {}) };
     });
   }
-  console.log(JSON.stringify({ clean: hits.length === 0, base, head, files, fence, allowed: allow, hits }, null, 2));
-  process.exit(hits.length ? 1 : 0);
+  console.log(JSON.stringify({ clean: result.hits.length === 0, base, head, files, fence, allowed: result.allow, hits: result.hits }, null, 2));
+  process.exit(result.hits.length ? 1 : 0);
 } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }

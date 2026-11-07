@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- **The time budget stops new work, not finished work (#45):** a critic started inside the time budget that passes a run's last unit after it ran out no longer leaves the run at `done-with-gaps`. The integration check of that work may be logged once after the budget, and its pass lets `close --outcome done` through; a failed one ends the run as before.
+- **The time budget stops new work, not finished work (#45):** a critic started inside the time budget that passes a run's last open unit after it ran out no longer leaves the run at `done-with-gaps` (a run where the budget stopped any other unit still does). The integration check of that work may be logged once after the budget, and its pass lets `close --outcome done` through; a failed one ends the run as before.
 - **`note --unit` on decisions, follow-ups and info (#45):** `note --kind decision|follow-up|info --unit U` scopes the note to U; it shows under Notes and in the timeline on U's page.
-- **`detect.mjs --allow` may be repeated (#45):** `--allow a:x --allow b:y` applies both, as the comma form does.
-- **`run.mjs add-specialist <run> <unit> <name> --reason R` (#45):** a unit added without a specialist gets one before its verdict. It is required from the build being judged (or the next one) and its pass is then needed; a round that closed before it was added never waits on its mark. Refused once the unit passed or stopped; logged as a decision on the unit (event kind `unit.specialist`).
+- **`detect.mjs --allow` may be repeated (#45):** `--allow a:x --allow b:y` applies both, as the comma form does. A rerun without `--allow` on the same round, base and head (the critic's) keeps the allowances recorded before it, and `brief --role critic` lists them.
+- **`run.mjs add-specialist <run> <unit> <name> --reason R` (#45):** a unit added without a specialist gets one before its verdict. It is required from the build being judged (or the next one) and its pass is then needed; a round that closed before it was added never waits on its mark. Refused once the unit passed or stopped, or the time budget is spent; logged as a decision on the unit (event kind `unit.specialist`).
 
 ## 1.1.1 (2026-11-07)
 
