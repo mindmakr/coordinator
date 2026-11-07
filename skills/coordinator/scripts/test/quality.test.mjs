@@ -192,3 +192,14 @@ test('evidence never carries a secret: the secrets signal shows file, line and k
   assert.equal(pick(s, 'secret').evidence[0].text, 'credential assigned a literal');
   assert.match(pick(s, 'eval').evidence[0].text, /\[redacted\]/);
 });
+
+test('round 3: a credential on a line over 400 characters is found, and that line never reaches evidence', () => {
+  const planted = 'Zq9!synthLong-Pw-4410';
+  const long = `const pad = [${'"c", '.repeat(90)}]; const q = \`SELECT * FROM t WHERE id = \${id}\`; const dbPassword = '${planted}';`;
+  assert.ok(long.length > 400);
+  const s = security([src('src/long.ts', long)]);
+  assert.deepEqual(lines(pick(s, 'secret')), ['src/long.ts:1']);
+  assert.deepEqual(lines(pick(s, 'sql')), ['src/long.ts:1']);
+  assert.doesNotMatch(JSON.stringify(s), /synthLong/);
+  assert.equal(pick(s, 'sql').evidence[0].text, '[line withheld: it holds a credential]');
+});

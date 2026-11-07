@@ -27,6 +27,16 @@ const PATTERNS = [
   /\bauthorization\s*:\s*[A-Za-z]+\s+[A-Za-z0-9._~+/=-]{12,}/gi,
   /\b(bearer|basic)\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{16,}/gi,
   /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^/\s:@]{1,256}:[^@\s]{1,256}@/gi,
+  // Prose and Markdown (release notes, notes): the value is credential-like (8-128 characters with
+  // a letter and a digit or symbol), and the match is bounded, so a window always holds it whole.
+  // A value on the line after "password:", "token:", "secret:" or "key:" (an optional list marker first).
+  /\b(?:pass(?:word|wd)?|pwd|token|secret|(?:api[_-]?)?key)\s{0,4}:[ \t]{0,8}\r?\n[ \t]{0,8}(?:[-*>][ \t]{0,4})?(?=[^\s|]{0,128}[0-9!@#$%^&*+=])(?=[^\s|]{0,128}[A-Za-z])[^\s|]{8,128}/gi,
+  // A Markdown table row whose name cell holds TOKEN, KEY, SECRET, PASSWORD or PASS, then the value cell.
+  /\|[ \t]{0,8}`?[A-Za-z0-9_. -]{0,40}(?:TOKEN|KEY|SECRET|PASSWORD|PASS|PWD)[A-Za-z0-9_. -]{0,40}`?[ \t]{0,8}\|[ \t]{0,8}`?(?=[^\s|`]{0,128}[0-9!@#$%^&*+=])(?=[^\s|`]{0,128}[A-Za-z])[^\s|`]{8,128}/gi,
+  // A login in prose: "login: user / password", "credentials: user / password".
+  // A user and a password side by side ("user: qa password: letmein"): the value is masked whatever its shape.
+  /\b(?:user(?:name)?|login|e-?mail|account)[ \t]{0,4}[:=][ \t]{0,8}[^\s]{1,64}[ \t,;]{1,8}(?:password|passwd|pass|pwd)[ \t]{0,4}[:=][ \t]{0,8}[^\s]{3,128}/gi,
+  /\b(?:login|log-in|sign-?in|credentials?|creds)[ \t]{0,4}:[ \t]{0,8}[^\s/]{1,64}[ \t]{0,4}\/[ \t]{0,4}[^\s]{6,128}/gi,
 ];
 
 // Long random-looking runs are likely keys. No '/' or '.', so paths survive.

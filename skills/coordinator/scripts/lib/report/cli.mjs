@@ -7,6 +7,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { readJson, writeAtomic, writeJson } from '../store.mjs';
 import { maskLine } from '../quality/secretline.mjs';
+import { maskSecrets } from '../secrets.mjs';
 import { loadRuns, loadSelf } from '../selfdata.mjs';
 import { quality, qualityText } from '../quality/index.mjs';
 import { loadMap } from '../quality/redundancy.mjs';
@@ -18,14 +19,38 @@ export const NOTES_MAX = 200 * 1024;
 const files = (dir) => ({ draft: join(dir, 'report', 'draft.json'), draftMd: join(dir, 'report', 'draft.md'), quality: join(dir, 'quality.json') });
 const tryJson = (f) => { try { return existsSync(f) ? readJson(f, null) : null; } catch { return null; } };
 
-// --file: the lead's release notes (Markdown or text), masked, into the state.
-export function storeReport(s, file) {
+// After masking, a line that still pairs a credential word with a password-like value: prose is
+// open-ended, so storing it is refused until the lead looks (--i-checked). Values are never echoed.
+const CRED = /\b(?:pass(?:word|wd|phrase|code)?|pwd|token|secret|api[_ -]?key|private[_ -]?key|credentials?|login|otp)\b/gi;
+const AFTER_PASS = /^\s*(?:[:=]|is\b)\s*["'`]?([^\s"'`|,;]{6,})/i;
+const plainWord = (v) => /^[a-z]+[.,;:!?)]*$/.test(v) || /^[A-Z][A-Z0-9_]*$/.test(v) || /^[A-Z][a-z]+$/.test(v);
+const pathLike = (v) => /[/\\]|\.[a-z]{1,5}$|^https?:|^#\d+$|^\[redacted\]/i.test(v);
+const strong = (v) => v.length >= 8 && /[A-Za-z]/.test(v) && /[0-9!@#$%^&*+=?~]/.test(v);
+export function credentialLines(text) {
+  const out = [];
+  text.split('\n').forEach((l, i) => {
+    for (const m of l.matchAll(CRED)) {
+      const rest = l.slice(m.index + m[0].length, m.index + m[0].length + 80);
+      const direct = AFTER_PASS.exec(rest)?.[1]?.replace(/[.,;:!?)]+$/, '');
+      const near = rest.split(/[\s|`"']+/).filter(Boolean).slice(0, 6);
+      if ((direct && !pathLike(direct) && !plainWord(direct)) || near.some((v) => !pathLike(v) && strong(v))) { out.push(i + 1); break; }
+    }
+  });
+  return out;
+}
+
+// --file: the lead's release notes (Markdown or text), masked as a whole (values on the next line)
+// and line by line, into the state. Refused while a line still looks like it holds a credential.
+export function storeReport(s, file, { checked = false } = {}) {
   if (typeof file !== 'string' || !existsSync(file) || !statSync(file).isFile()) throw new Error(`--file: no file ${file}`);
   if (!['.md', '.markdown', '.txt'].includes(extname(file).toLowerCase())) throw new Error('--file must be a .md or .txt file');
   if (statSync(file).size > NOTES_MAX) throw new Error(`--file is larger than ${NOTES_MAX / 1024} KB`);
-  const text = readFileSync(file, 'utf8').trim();
+  const text = readFileSync(file, 'utf8').replace(/\r\n?/g, '\n').trim();
   if (!text) throw new Error('--file is empty');
-  s.report = { text: text.split('\n').map((l) => maskLine(l)).join('\n'), source: basename(file), at: new Date().toISOString() };
+  const masked = maskSecrets(text).split('\n').map((l) => maskLine(l)).join('\n');
+  const left = checked ? [] : credentialLines(masked);
+  if (left.length) throw new Error(`report refused: ${left.map((n) => `${basename(file)}:${n}`).join(', ')} still looks like a credential next to a password-like value. Remove it, or pass --i-checked once you have checked it is not one.`);
+  s.report = { text: masked, source: basename(file), at: new Date().toISOString() };
 }
 
 // draft: read git and keep the draft; quality: measure (run may be null for --project); neither: what is stored.

@@ -18,10 +18,19 @@ const skip = (v) => PLACEHOLDER.test(v) || CODE.test(v) || WEAK.test(v) || v.inc
 // dbPassword → db_Password, so lib/secrets.mjs sees the credential word in a camelCase name.
 const snaked = (name) => name.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
 
-// 'private key', 'key or token', 'named credential', or null.
-export function secretKind(line) {
-  if (line.length > 400) return null;
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY/.test(line)) return 'private key';
+// Lines are read in windows of SPAN characters that overlap by half, so a long line (a SQL
+// string, a minified bundle) is scanned in bounded pieces and a literal shorter than half a window
+// is always seen whole by one of them.
+export const SPAN = 400;
+const windows = (line) => {
+  if (line.length <= SPAN) return [line];
+  const out = [];
+  for (let i = 0; i < line.length; i += SPAN / 2) { out.push(line.slice(i, i + SPAN)); if (i + SPAN >= line.length) break; }
+  return out;
+};
+
+function kindIn(line) {
+  if (/-----BEGIN [A-Z ]{0,40}PRIVATE KEY/.test(line)) return 'private key';
   for (const m of line.matchAll(LITERAL)) {
     const v = m[2];
     if (v.length < 8 || skip(v)) continue;
@@ -34,8 +43,16 @@ export function secretKind(line) {
   return null;
 }
 
-// The line safe to show: known shapes masked, and every literal masked when the line holds a credential.
+// 'private key', 'key or token literal', 'credential assigned a literal', or null.
+export function secretKind(line) {
+  for (const w of windows(line)) { const k = kindIn(w); if (k) return k; }
+  return null;
+}
+
+// The line safe to show: known shapes masked (lib/secrets.mjs, linear on any length), and every
+// literal masked when the line holds a credential. A long line that holds one is withheld whole.
 export function maskLine(line) {
   const out = maskSecrets(line);
-  return secretKind(line) ? out.replace(LITERAL, (_, q) => `${q}[redacted]${q}`) : out;
+  if (!secretKind(line)) return out;
+  return line.length > SPAN ? '[line withheld: it holds a credential]' : out.replace(LITERAL, (_, q) => `${q}[redacted]${q}`);
 }

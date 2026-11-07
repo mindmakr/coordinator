@@ -185,3 +185,25 @@ test('round 2: bold never touches an href; copy notes need the copy store; retro
   const m = retroModel(s);
   assert.equal(m.budget.usedRounds, 1); assert.equal(m.budget.builds, 3); assert.equal(m.budget.resets, 2);
 });
+
+test('round 3: notes with a value on the next line, a credential table row or a login are masked; what is left is refused, never echoed', () => {
+  const V = ['Zq9xSynthNext!71', 'tkSynthRow8842QQ', 'SynthLogin!4471', 'synthletmein'];
+  const notes = join(root, 'r3.md');
+  writeFileSync(notes, ['## Ops', 'Admin password:', `  ${V[0]}`, '', '| Name | Value |', '| --- | --- |', `| API_TOKEN | ${V[1]} |`, '', `login: admin / ${V[2]}`, `user: qa password: ${V[3]}`].join('\n'));
+  run('report', 'r2', '--file', notes);
+  const leaks = () => ['events.jsonl', 'state.json', 'report.html'].map((f) => readFileSync(join(runDir('r2'), f), 'utf8')).join('\n');
+  for (const v of V) assert.ok(!leaks().includes(v), `leaked ${v.slice(0, 5)}…`);
+  assert.match(readFileSync(join(runDir('r2'), 'report.html'), 'utf8'), /\[redacted\]/);
+  // Open-ended prose the masks miss: refused with file:line, the value never printed; --i-checked stores it.
+  const odd = 'Q7vSynthOdd!x2';
+  writeFileSync(notes, `## Ops\nThe staging otp is ${odd} for now.\n`);
+  const r = cli('report', 'r2', '--file', notes);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /report refused: r3\.md:2 still looks like a credential/);
+  assert.ok(!(r.stdout + r.stderr).includes(odd));
+  assert.ok(!leaks().includes(odd));
+  writeFileSync(notes, '## Ops\nThe token now expires after 15 minutes (docs/RELEASE.md).\n');
+  run('report', 'r2', '--file', notes); // prose about a token is not refused
+  writeFileSync(notes, '## Ops\nThe otp is Q7vSynthOdd!x2-changed in the sandbox only.\n');
+  run('report', 'r2', '--file', notes, '--i-checked');
+});

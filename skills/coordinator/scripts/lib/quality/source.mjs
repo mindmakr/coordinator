@@ -51,7 +51,7 @@ export function sourceFile(path, text) {
 // The project's code files, read once. `only`: a set of relative paths to keep.
 export function readSources(root, { only = null } = {}) {
   const out = []; let skipped = 0;
-  for (const f of listFiles(root)) {
+  for (const f of listFiles(root).files) {
     if (!langOf(f) || (only && !only.has(f))) continue;
     if (out.length >= MAX_FILES) { skipped++; continue; }
     const abs = join(root, f);

@@ -139,3 +139,30 @@ test('named values: the same names and values as before the tokenizer', () => {
   ];
   for (const [s, want] of cases) assert.equal(maskSecrets(s), want, s);
 });
+
+// Release notes and other prose (m4 round 3): a value on the next line, a Markdown table row, a login.
+// Synthetic values only.
+test('prose shapes: value on the next line, a table row named like a credential, a login with a slash', () => {
+  for (const s of [
+    'Admin password:\n  Zq9xSynth!77', 'token:\n- tkSynth8842QQ', 'API key:\n> kSynth-9911-ab',
+    '| API_TOKEN | tkSynth8842QQzz |', '| `DB_PASSWORD` | `Zq9xSynth!77` |', '| stripe secret key | whSynth_1234abcd |',
+    'login: admin / Zq9xSynth!77', 'Credentials: qa-user / synthPass42', 'sign-in: hr@example.test / Hunter2Synth', 'user: qa password: synthletmein',
+  ]) {
+    assert.equal(findSecret(s), true, s);
+    const m = maskSecrets(`x ${s} y`);
+    assert.match(m, /\[redacted\]/, s);
+    assert.doesNotMatch(m, /Synth|synthPass/, s);
+  }
+  for (const s of [
+    'Rollback:\n  none needed', 'Primary key:\n- the unit id', '| PAYOUT_WEBHOOK_SECRET | added in .env.example |', '| JWT_SECRET | 64 random chars |',
+    '| SESSION_TOKEN_TTL | 3600s |', 'login: see docs/RELEASE.md', 'Sign-in: HR admin / Employees screen',
+  ]) assert.equal(maskSecrets(s), s, s);
+});
+
+test('prose shapes stay linear', () => {
+  const inputs = [(n) => 'password:\n'.repeat(n), (n) => '| API_TOKEN |'.repeat(n), (n) => 'login: a /'.repeat(n), (n) => `| KEY | ${'a1'.repeat(3 * n)}`, (n) => `token:\n${'x'.repeat(6 * n)}`];
+  for (const make of inputs) {
+    const large = make(5000); const huge = make(40000);
+    assert.ok(readCost(large) <= 5 * large.length + 4 * WINDOW && readCost(huge) <= 5 * huge.length + 4 * WINDOW, JSON.stringify(large.slice(0, 20)));
+  }
+});

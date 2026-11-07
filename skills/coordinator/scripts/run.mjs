@@ -57,7 +57,7 @@
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run;
 //                  warns when files the run mentions are not adopted yet
-//   run.mjs report <run> [--draft | --file notes.md]   the run's report (report.html, /report): --draft reads PRs, merges,
+//   run.mjs report <run> [--draft | --file notes.md [--i-checked]]   the run's report (report.html, /report): --draft reads PRs, merges,
 //                  migrations, env vars, scripts and jobs from the state and git into a draft; --file stores the
 //                  lead's release notes (Markdown) in the run; with neither, says what is stored
 //   run.mjs quality <run> | --project [--json]   code quality and compliance signals (duplication, structure, naming,
@@ -123,7 +123,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -578,7 +578,7 @@ const commands = {
   report([run], o) {
     load(run);
     if (o.draft !== undefined && o.file !== undefined) throw new Error('--draft or --file, not both');
-    if (o.file !== undefined) { change(run, 'report', (s) => storeReport(s, o.file), { closedOk: true }); return reportFor(load(run), runDir(run)); }
+    if (o.file !== undefined) { change(run, 'report', (s) => storeReport(s, o.file, { checked: o['i-checked'] === true }), { closedOk: true }); return reportFor(load(run), runDir(run)); }
     const out = reportFor(load(run), runDir(run), { draft: o.draft !== undefined, root: projectDir() });
     if (o.draft !== undefined) { commands.hud([run]); process.stdout.write(out.markdown); return null; }
     return out;
