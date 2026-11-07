@@ -131,7 +131,9 @@ const block = (t) => Object.entries(t).filter(([k]) => k !== 'source').map(([k, 
 export function css(theme = { light: LIGHT, dark: DARK }) {
   const L = block(theme.light); const D = block(theme.dark);
   return `:root{${L}}@media (prefers-color-scheme: dark){:root{${D}}}`
-    + `:root:has(#theme-light:checked),:root[data-theme="light"]{${L}}:root:has(#theme-dark:checked),:root[data-theme="dark"]{${D}}`;
+    + `:root:has(#theme-light:checked),:root[data-theme="light"]{${L}}:root:has(#theme-dark:checked),:root[data-theme="dark"]{${D}}`
+    // Print (Export PDF) is always light, whatever the screen shows.
+    + `@media print{:root,:root:has(#theme-dark:checked),:root[data-theme="dark"]{${L}}}`;
 }
 
 // The run's theme file: --theme at init, else a `Theme:` line in COORDINATOR.md.
