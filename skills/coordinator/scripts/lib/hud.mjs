@@ -13,6 +13,7 @@ import { answerText, OTHER } from './questions.mjs';
 import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
 import { escapeLine } from './view.mjs';
+import { pendingBanner } from './retro.mjs';
 
 export { esc };
 const pct = (used, max) => (max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0);
@@ -23,7 +24,7 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, pages: [],
+    live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
@@ -44,13 +45,13 @@ export function liveCtx({ token, nonce }, run, theme = null, other = null) {
   const base = other ? `/run/${encodeURIComponent(other)}` : '';
   return {
     live: { token, nonce }, theme, run, store: other ?? run, base, home: base ? `${base}?${t}` : `/?${t}`, embed: null, readOnly: !!other,
-    maps: `${base}/maps?${t}`,
+    maps: `${base}/maps?${t}`, report: `${base}/report?${t}`, retro: `${base}/retro?${t}`,
     unitHref: (id) => `${base}/unit/${encodeURIComponent(id)}?${t}`,
     artHref: (file) => `${base}/artifacts/${file.split('/').map(encodeURIComponent).join('/')}?${t}`,
     runHref: (id) => (id === run ? `/?${t}` : `/run/${encodeURIComponent(id)}?${t}`),
     // The header's page links; a new page adds itself here and to lib/serve.mjs PAGE.
     // On another run's pages they name and link that run, not the served one.
-    pages: [{ path: base || '/', label: other ?? run ?? 'Run', href: base ? `${base}?${t}` : `/?${t}` }, { path: `${base}/maps`, label: 'Maps', href: `${base}/maps?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
+    pages: [{ path: base || '/', label: other ?? run ?? 'Run', href: base ? `${base}?${t}` : `/?${t}` }, { path: `${base}/maps`, label: 'Maps', href: `${base}/maps?${t}` }, { path: `${base}/report`, label: 'Report', href: `${base}/report?${t}` }, { path: `${base}/retro`, label: 'Retro', href: `${base}/retro?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
   };
 }
 
@@ -222,8 +223,9 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const form = live && v.open && !ctx.readOnly ? live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}</header>`),
+    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
+    v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open)) : '',
     blk('goal', goalBlock(v, ctx)),
     blk('needs', needsYou(v, form, ctx)),
     form ? blk('note', noteForm(form)) : '',

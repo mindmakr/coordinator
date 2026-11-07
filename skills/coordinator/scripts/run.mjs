@@ -68,6 +68,12 @@
 //                          (every change rewrites it too, with workbench.md)
 //   run.mjs close <run> --outcome done|partial|stopped [--reason R]   reason required when closing before the rules end the run;
 //                  warns when files the run mentions are not adopted yet
+//   run.mjs report <run> [--draft | --file notes.md [--i-checked]]   the run's report (report.html, /report): --draft reads PRs, merges,
+//                  migrations, env vars, scripts and jobs from the state and git into a draft; --file stores the
+//                  lead's release notes (Markdown) in the run; with neither, says what is stored
+//   run.mjs quality <run> | --project [--json]   code quality and compliance signals (duplication, structure, naming,
+//                  redundancy, security, privacy) on the run's changed files and the whole project; with a run,
+//                  stored as quality.json for the report (references/quality.md)
 //   run.mjs adopt <run> [--dry-run]  copy files the run mentions by path (screenshots, PDFs, logs, json and md reports in
 //                  worktrees or scratch folders) into the run folder as evidence, so deleting a worktree loses nothing
 //   run.mjs map <run> [--root dir] [--max-seconds 60] [--unit U] [--fresh | --reset-stage] [--force] [--pit-stop [--dest dir]]
@@ -78,6 +84,9 @@
 //   run.mjs touches <run> <path> [--json] [--unit U]   what that file touches, from the map, for a builder's brief;
 //                  --unit records the path as one the unit will change (no map needed for that), so `next` can
 //                  say when a unit that changes the same file merged first
+//   run.mjs calls <run> <unit> [--base ref --head ref | --files a,b] [--root dir] [--json]   the JS/TS functions the unit's
+//                  diff touched (default: its recorded detect base and head), what they call and what calls them; shown
+//                  on the unit page and the maps page's Calls view; map --unit U computes it for U too
 //   run.mjs sync <run> <unit> [--text T]   the target branch was merged into the unit's branch (after `next` asked)
 //   run.mjs models [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
@@ -116,6 +125,8 @@ import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
 import { mapsPage } from './lib/mapspage.mjs';
+import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
+import { hasRetro, retroCommand } from './lib/retro.mjs';
 import { answer, answerText, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
@@ -124,7 +135,7 @@ import { selfPage } from './lib/selfpage.mjs';
 import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
-import { build as buildMap, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, touchesOf } from './lib/map/index.mjs';
+import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues'],
@@ -135,7 +146,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
-  ask: ['question', 'header', 'option', 'multi', 'unit', 'approves'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit', 'approves'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -175,8 +186,10 @@ function derived(s) {
   const v = view(s, plan, Date.now(), { repo: repoFor(s), linked: linkedOf(s) });
   const theme = themeFor(s);
   writeAtomic(hudFile(s.id), hud(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
-  writeAtomic(join(runDir(s.id), 'maps.html'), mapsPage(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
-  for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), staticCtx(runDir(s.id), 1, theme)));
+  const calls = readCalls(runDir(s.id)); // per-unit function calls (map/calls/), when computed
+  writeAtomic(join(runDir(s.id), 'maps.html'), mapsPage(v, Date.now(), { ...staticCtx(runDir(s.id), 0, theme), calls }));
+  for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), { ...staticCtx(runDir(s.id), 1, theme), calls }));
+  for (const [name, html] of reportPages(s, v, runDir(s.id), staticCtx(runDir(s.id), 0, theme))) writeAtomic(join(runDir(s.id), name), html);
 }
 
 // --issue and --pr values (owner/repo#n, #n or a URL) as unit links.
@@ -259,6 +272,19 @@ function judged(evidence, v, gapText, causeText) {
   const verdict = v === 'pass' && !evidence ? 'fail' : v;
   const gap = verdict === 'fail' ? (gapText ?? (evidence ? 'unspecified' : 'PASS claimed without evidence')) : null;
   return { verdict, gap, cause: verdict === 'fail' && gapText ? causeText : null };
+}
+
+// A unit's calls: --base/--head, else the base and head its detect run recorded, else the files
+// a map build tagged with it changed (or --files). Refs must be commits, never options.
+function unitCallsFor(run, s, unit, { root, base, head, files = [], deadline }) {
+  const u = unitOf(s, unit);
+  const ref = (r, name) => { if (r === undefined || r === null) return null; if (typeof r !== 'string' || !r || r.startsWith('-') || /\s/.test(r)) throw new Error(`bad --${name}: ${r}`); return r; };
+  let b = ref(base, 'base'); let h = ref(head, 'head');
+  if (!b !== !h) throw new Error('--base and --head go together');
+  if (!b && !files.length && u.detect?.base && u.detect?.head) { b = u.detect.base; h = u.detect.head; }
+  const fromMap = files.length ? [] : unitFiles(runDir(run), u.id); // also the fallback when the diff's commits are gone
+  if (!b && !files.length && !fromMap.length) return null; // nothing recorded to say what the unit changed
+  return computeCalls(runDir(run), { root, unit: u.id, base: b, head: h, files: files.length || b ? files : fromMap, fallbackFiles: fromMap, source: files.length ? 'files' : 'map build', deadline });
 }
 
 const commands = {
@@ -591,7 +617,7 @@ const commands = {
         const theme = themeFor(load(run));
         if (path === '/coordinator') return selfPage(selfModel({ ...loadSelf(), current: run }), Date.now(), liveCtx(live, run, theme));
         // /run/<other>[/unit/<u>|/maps|/map]: another run of this folder, read-only; /run/<served> is the served run.
-        const m = /^\/run\/([^/]+)(\/unit\/.+|\/maps|\/map)?$/.exec(path);
+        const m = /^\/run\/([^/]+)(\/unit\/.+|\/maps|\/map|\/report|\/retro)?$/.exec(path);
         const id = m ? m[1] : run;
         if (m && !isSafeId(id)) return null;
         if (m && !exists(id)) return null;
@@ -599,10 +625,12 @@ const commands = {
         const v = view(s, decide(s), Date.now(), { repo: repoFor(s), linked: linkedOf(s) });
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
         ctx.has = (file) => existsSync(join(runDir(id), 'artifacts', ...file.split('/')));
+        ctx.calls = readCalls(runDir(id));
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
         if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx, id) }) : null;
         if (rest === '/maps') return mapsPage(v, Date.now(), ctx);
+        if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDir(id), ctx, rest.slice(1))[0][1];
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
       },
       version: selfVersion,
@@ -696,7 +724,11 @@ const commands = {
       s.closed = { outcome, decision: d, at: now() };
     });
     const loose = adopt(load(run), runDir(run), { project: projectDir(), home: homedir() }).filter((r) => ['adoptable', 'repairable', 'unclear'].includes(r.status));
-    return loose.length ? Object.assign(closed, { warning: `${loose.length} file(s) the run mentions are not safely stored in its folder (outside it, damaged, or an unclear path); run: run.mjs adopt ${run} --dry-run` }) : closed;
+    const warnings = [
+      ...(hasRetro(closed) ? [] : [`no retro note: ask the person to run ${retroCommand(closed)} (references/learning.md)`]),
+      ...(loose.length ? [`${loose.length} file(s) the run mentions are not safely stored in its folder (outside it, damaged, or an unclear path); run: run.mjs adopt ${run} --dry-run`] : []),
+    ];
+    return warnings.length ? Object.assign(closed, { warning: warnings.join('; ') }) : closed;
   },
   adopt([run], o) {
     const dry = o['dry-run'] !== undefined;
@@ -706,6 +738,23 @@ const commands = {
     const count = (k) => rows.filter((r) => r.status === k).length;
     console.log(rows.length ? table(rows) : 'no file paths mentioned');
     console.log(`${dry ? 'adoptable' : 'adopted'} ${count(dry ? 'adoptable' : 'adopted')}, ${dry ? 'repairable' : 'repaired'} ${count(dry ? 'repairable' : 'repaired')}, already ${count('already')}, inside ${count('inside')}, tracked ${count('tracked')}, missing ${count('missing')}, unclear ${count('unclear')}, refused ${count('refused')}`);
+    return null;
+  },
+  // The report's release notes (lib/report/cli.mjs): a draft from the state and git, or the lead's notes stored in the run.
+  report([run], o) {
+    load(run);
+    if (o.draft !== undefined && o.file !== undefined) throw new Error('--draft or --file, not both');
+    if (o.file !== undefined) { change(run, 'report', (s) => storeReport(s, o.file, { checked: o['i-checked'] === true }), { closedOk: true }); return reportFor(load(run), runDir(run)); }
+    const out = reportFor(load(run), runDir(run), { draft: o.draft !== undefined, root: projectDir() });
+    if (o.draft !== undefined) { commands.hud([run]); process.stdout.write(out.markdown); return null; }
+    return out;
+  },
+  quality([run], o) {
+    if ((o.project === true) === (run !== undefined)) throw new Error('usage: run.mjs quality <run> | --project [--json]');
+    const out = reportFor(run === undefined ? null : load(run), run === undefined ? null : runDir(run), { quality: true, root: projectDir() });
+    if (run !== undefined) commands.hud([run]);
+    if (o.json === true) return out.quality;
+    process.stdout.write(out.text);
     return null;
   },
   list() {
@@ -719,15 +768,19 @@ const commands = {
   },
   // The project map (references/map.md): from the code into the run's folder; never into the project's tree unless --dest says so.
   map([run], o) {
+    const t0 = Date.now();
     const s = load(run);
     const root = resolve(typeof o.root === 'string' ? o.root : projectDir());
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
     if (o.unit !== undefined) unitOf(s, o.unit);
     if (o.dest !== undefined && o['pit-stop'] !== true) throw new Error('--dest goes with --pit-stop');
     const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)), fresh: o.fresh === true, force: o.force === true, resetStage: o['reset-stage'] === true });
+    // A build after a unit merged also finds the functions that unit touched (map/calls/<unit>.json), in what is left of the cap.
+    const calls = o.unit !== undefined ? unitCallsFor(run, s, o.unit, { root, deadline: t0 + num(o['max-seconds'], 60, 1, 3600) * 1000 }) : null;
     commands.hud([run]); // the dashboard links to the map
     const b = snap.build;
     return {
+      ...(calls ? { calls: { touched: calls.touchedTotal, source: calls.source, partial: calls.partial } } : {}),
       build: b.n, files: b.scanned, seconds: Math.round(b.ms.total / 100) / 10, partial: b.partial, stats: b.stats, page: mapHtml(runDir(run)),
       ...(o['reset-stage'] === true ? { reset: 'a new map history, staged: the next push replaces the copy, and pull on other machines takes it' } : {}),
       ...(o['pit-stop'] === true ? { pitStop: pitStop(runDir(run), typeof o.dest === 'string' ? o.dest : defaultDest(runDir(run))) } : {}),
@@ -748,6 +801,19 @@ const commands = {
     const out = touchesOf(run, runDir(run), path, o.json === true);
     if (o.json === true) return out;
     process.stdout.write(out);
+    return null;
+  },
+  // Function calls (references/map.md): the functions a unit's diff touched, what they call and what calls them.
+  calls([run, unit], o) {
+    const s = load(run);
+    if (!unit) throw new Error('usage: run.mjs calls <run> <unit> [--base ref --head ref | --files a,b] [--root dir] [--json]');
+    const root = resolve(typeof o.root === 'string' ? o.root : projectDir());
+    if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
+    const data = unitCallsFor(run, s, unit, { root, base: o.base, head: o.head, files: list(o.files), deadline: Date.now() + num(o['max-seconds'], 60, 1, 3600) * 1000 });
+    if (!data) throw new Error(`nothing recorded says what ${unit} changed: pass --base and --head (its branch's merge base and head), or --files a,b`);
+    commands.hud([run]); // the unit page and the maps page show it
+    if (o.json === true) return data;
+    process.stdout.write(callsText(data));
     return null;
   },
   // Forward slashes and single quotes ($ and ` stay literal), so it pastes safely into a shell brief.
@@ -774,9 +840,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches', 'report', 'quality'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
