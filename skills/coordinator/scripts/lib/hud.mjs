@@ -11,6 +11,7 @@ import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
 import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
+import { viewer, viewerEntries } from './evview.mjs';
 import { escapeLine } from './view.mjs';
 
 export { esc };
@@ -28,6 +29,8 @@ export function staticCtx(runDir, depth = 0, theme = null) {
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
     has: (file) => !runDir || existsSync(join(runDir, 'artifacts', ...file.split('/'))),
+    // A stored text file's words, for the viewer (lib/evview.mjs caps them).
+    readText: (file) => { if (!runDir) return null; try { return readFileSync(join(runDir, 'artifacts', ...file.split('/')), 'utf8'); } catch { return null; } },
     // Small screenshots go inline, so the snapshot shows them without loading anything.
     embed: (file) => {
       if (!runDir) return null;
@@ -198,9 +201,9 @@ function questionsCard(v, repo) {
     + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, `<ul class="answered">${done}</ul>`) : '') + '</section>';
 }
 
-export function timelineList(events, repo, finished = new Set()) {
+export function timelineList(events, repo, finished = new Set(), ctx = null) {
   // Each row's key holds its time, kind, who, a hash of its text, and a number if two still match.
-  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit))).join('') : '<li class="empty">Nothing yet.</li>';
+  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit), ctx)).join('') : '<li class="empty">Nothing yet.</li>';
 }
 
 export function hud(v, nowMs = Date.now(), ctx = null) {
@@ -228,7 +231,8 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
       list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
     '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
-    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id))), 'ol', ' class="timeline" data-tl-list'),
+    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id)), ctx), 'ol', ' class="timeline" data-tl-list data-ev-list'),
+    blk('evv', viewer(viewerEntries(v), ctx, r)),
   ].join('\n');
   return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
 }

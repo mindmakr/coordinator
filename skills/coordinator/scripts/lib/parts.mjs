@@ -8,13 +8,14 @@ import { css, DARK, LIGHT } from './theme.mjs';
 import { findMatches, highlight, unhighlight } from './highlight.mjs';
 import { morph } from './morph.mjs';
 import { DOTS, dotWords } from './plain.mjs';
+import { eventEvidence, itemBody } from './evview.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
 
 export { esc };
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
-// The live page's script: updates, then the map panels (lib/maptips.mjs), then walking a map (lib/mapnav.mjs).
-const CLIENT = ['./live.client.js', './maptips.client.js', './mapnav.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
+// The live page's script: updates, then the map panels (lib/maptips.mjs), walking a map (lib/mapnav.mjs) and the evidence viewer (lib/evview.mjs).
+const CLIENT = ['./live.client.js', './maptips.client.js', './mapnav.client.js', './evview.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
 const SERVED = [matches, morph, findMatches, highlight, unhighlight];
 
@@ -52,7 +53,7 @@ const THEME_TOGGLE = '<fieldset class="themes"><legend class="sr">Colour theme</
 export function csp(live) {
   return live
     ? `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'nonce-${live.nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'`
-    : "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+    : "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:"; // 'self': the snapshot's own artifacts folder (relative paths)
 }
 
 // The whole page. `body` goes inside <main id="app">, which the live page patches.
@@ -137,26 +138,21 @@ function evidenceItem(e, repo, ctx, key) {
     body = LONG(e.text) ? toggle(`${key}-${e.id}`, `${esc(e.label ?? e.kind)} · ${e.text.split('\n').length} lines`, pre, 'raw pre') : pre;
   } else if (e.url) body = `<p>${linkify(e.url, repo)}</p>`;
   // ctx.artHref returning null: the file exists only on the person's machine (the web copy).
-  // ctx.has returning false: the stored copy is gone; say so instead of drawing a broken image.
-  else if (e.file && ctx.has && !ctx.has(e.file)) body = `<p class="cause">${esc(e.file.split('/').pop())}: missing (the stored copy is gone)</p>`;
-  else if (e.file && !ctx.artHref(e.file)) body = `<p class="cause">${esc(e.file.split('/').pop())}: file kept locally</p>`;
-  else if (e.file && e.type === 'image') {
-    const src = ctx.embed ? ctx.embed(e.file) : ctx.artHref(e.file);
-    const full = ctx.artHref(e.file);
-    body = src ? `<a href="${esc(full)}" target="_blank" rel="noopener noreferrer"><img class="thumb" src="${esc(src)}" alt="${esc(e.label ?? 'screenshot')}" loading="lazy"></a>`
-      : `<p><a href="${esc(full)}" target="_blank" rel="noopener noreferrer">Open the screenshot</a></p>`;
-  } else if (e.file) body = `<p><a href="${esc(ctx.artHref(e.file))}" target="_blank" rel="noopener noreferrer">Open ${esc(e.file.split('/').pop())}</a></p>`;
+  // A missing stored copy says so; screenshots and text files open in the viewer (lib/evview.mjs).
+  else if (e.file && (ctx.has && !ctx.has(e.file) || ctx.artHref(e.file))) body = itemBody(e, e.file.split('/')[0], ctx) ?? '';
+  else if (e.file) body = `<p class="cause">${esc(e.file.split('/').pop())}: file kept locally</p>`;
   return `<li class="evidence" data-a="${esc(`${key}-${e.id}`)}"><div>${head} ${stamp(e.at, 'cause')}</div>${body}</li>`;
 }
 
-export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class="evlist">${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>` : '');
+export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class="evlist" data-ev-list>${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>` : '');
 
-export function eventRow(e, repo, key, fin = false) {
+// ctx (optional): an evidence event links to the viewer, with a thumbnail for a screenshot.
+export function eventRow(e, repo, key, fin = false, ctx = null) {
   const score = e.score === null || e.score === undefined ? '' : ` · ${e.score}`;
   const cause = e.cause ? ` <span class="cause">cause: ${esc(e.cause)}</span>` : '';
   return `<li${fin ? ' class="fin"' : ''} data-a="${esc(key)}" data-at="${esc(e.at)}" data-badge="${esc(e.badge)}" data-unit="${esc(e.unit ?? '')}">${stamp(e.at)}`
     + `<span>${badge(e.badge, e.label)}</span>`
-    + `<span>${e.who ? `<b>${esc(e.who)}${esc(score)}</b> ` : ''}${linkify(e.text, repo)}${cause}</span></li>`;
+    + `<span>${e.who ? `<b>${esc(e.who)}${esc(score)}</b> ` : ''}${eventEvidence(e, ctx) ?? linkify(e.text, repo)}${cause}</span></li>`;
 }
 
 // Search, kind chips, unit chips, range and sort: live page only (they need its script).

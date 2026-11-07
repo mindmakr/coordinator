@@ -1,6 +1,7 @@
 // One unit's page (/unit/<id> when served, units/<id>.html on disk): its bar
 // and behaviours with their evidence, every round, notes and questions for it,
 // its links and its own timeline. Same shell, same rules as the dashboard.
+import { viewer, viewerEntries } from './evview.mjs';
 import { linkify } from './links.mjs';
 import { whoRound } from './models.mjs';
 import { liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
@@ -52,7 +53,8 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
       + (form ? noteForm(form, u.id) : '') + '</section>'),
     `<h2 id="timeline" data-a="h-timeline">Timeline of ${esc(u.id)}</h2>`,
     ctx.live ? timelineTools() : '',
-    blk('timeline', timelineList([...u.timeline].reverse(), r), 'ol', ' class="timeline" data-tl-list'),
+    blk('timeline', timelineList([...u.timeline].reverse(), r, undefined, ctx), 'ol', ' class="timeline" data-tl-list data-ev-list'),
+    blk('evv', viewer(viewerEntries(v, u.id), ctx, r)),
   ].join('\n');
   return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/unit/${u.id}`, closed: !v.open });
 }
