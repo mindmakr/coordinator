@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { hud, liveCtx, staticCtx } from '../lib/hud.mjs';
+import { csp } from '../lib/parts.mjs';
 import { decide } from '../lib/rules.mjs';
 import { runTimeline } from '../lib/timeline.mjs';
 import { unitPage } from '../lib/unitpage.mjs';
@@ -142,4 +143,15 @@ test('a copy without the files (the web service) shows no viewer', () => {
   assert.doesNotMatch(row(html, 'E1'), /data-ev-open/);
   assert.equal(overlay(html, 'E1'), '');
   assert.match(html, /E1-list-ar-360\.png: file kept locally/);
+});
+
+test('only a run snapshot may load its own artifacts; every other static page keeps the CSP the web service rewrites', () => {
+  const s = state();
+  const meta = (html) => /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)[1];
+  assert.equal(meta(render(s, staticCtx(runDir(s), 0))), "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:", 'the snapshot');
+  assert.equal(meta(render(s, staticCtx(runDir(s), 1), 'unit')), "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:", 'a unit page of the snapshot');
+  const plain = meta(render(s, { ...staticCtx(null, 0), artHref: () => null }));
+  assert.equal(plain, "default-src 'none'; style-src 'unsafe-inline'; img-src data:", 'pages without a run folder (the web service, the coordinator page)');
+  assert.equal(csp(null), "default-src 'none'; style-src 'unsafe-inline'; img-src data:", 'the string service/src/alerts/routes.mjs replaces');
+  assert.equal(csp({ nonce: 'n' }), "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'nonce-n'; connect-src 'self'; form-action 'self'; base-uri 'none'", 'the live page, unchanged');
 });

@@ -26,7 +26,7 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
+    live: null, theme, run: null, artifacts: !!runDir, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,

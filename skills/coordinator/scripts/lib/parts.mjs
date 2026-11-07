@@ -50,10 +50,12 @@ const THEME_TOGGLE = '<fieldset class="themes"><legend class="sr">Colour theme</
   + ['system', 'light', 'dark'].map((t) => `<input type="radio" name="theme" id="theme-${t}" value="${t}"${t === 'system' ? ' checked' : ''}><label for="theme-${t}">${t[0].toUpperCase()}${t.slice(1)}</label>`).join('')
   + '</fieldset>';
 
-export function csp(live) {
+// files: a run's snapshot (ctx.artifacts), which shows its own artifacts/ by relative path. Every
+// other static page keeps `img-src data:` exactly: the web service rewrites that string (service/src).
+export function csp(live, files = false) {
   return live
     ? `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'nonce-${live.nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'`
-    : "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:"; // 'self': the snapshot's own artifacts folder (relative paths)
+    : `default-src 'none'; style-src 'unsafe-inline'; img-src ${files ? "'self' " : ''}data:`;
 }
 
 // The whole page. `body` goes inside <main id="app">, which the live page patches.
@@ -109,7 +111,7 @@ export function page({ title, body, ctx, path, closed = false }) {
     : live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span><button id="live-retry" class="retry" type="button" hidden>Retry</button>'
       : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
-    csp: csp(live && { nonce: esc(live.nonce) }), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }) + pageRules(title),
+    csp: csp(live && { nonce: esc(live.nonce) }, !!ctx.artifacts), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }) + pageRules(title),
     top: `${printHead()}<div class="top">${brand()}${nav(ctx, path)}<div class="tools">${status}${printTool(live)}${THEME_TOGGLE}</div></div>`,
     body, footer: footer(),
     attrs: live ? ` data-run="${esc(ctx.store ?? ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
