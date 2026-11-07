@@ -17,7 +17,9 @@ export function isPersonal(name) {
   return PII.some((p) => w.some((_, i) => p.every((x, j) => w[i + j] === x)));
 }
 const idents = (code) => code.match(/[A-Za-z_$][\w$]*/g) ?? [];
-const SAFE = /mask|redact|hash|last4|lastFour|anonymi[sz]|truncat|\*\*\*/i;
+// A masked argument is safe: the call that masks it (maskPhone(user.phone)) is removed; the call's other arguments still count.
+const SAFE = /mask|redact|hash|last4|lastFour|anonymi[sz]|truncat/i;
+const MASKED = /(?:[\w$]+\s*:\s*)?[\w$.]*(?:mask|redact|hash|last4|lastFour|anonymi[sz]|truncat)[\w$]*\s*\([^()]*\)/gi;
 
 // A log call's arguments (the whole call for JS, the line otherwise), with string contents blanked.
 const LOG = /\b(?:console\s*\.\s*(?:log|info|warn|error|debug|trace)|(?:logger|log|fastify\.log|request\.log|req\.log|this\.logger|logging)\s*\.\s*(?:info|warn|warning|error|debug|trace|fatal|log|critical|exception)|print)\s*\(/g;
@@ -32,8 +34,7 @@ function piiInLogs(f) {
     const open = m.index + m[0].length - 1;
     const end = f.lang === 'js' ? match(f.bare, open) : f.bare.indexOf('\n', open);
     const args = f.bare.slice(open, end < 0 ? open + 400 : Math.min(end, open + 1500)).replace(ABOUT_DATA, ' ');
-    if (SAFE.test(args)) continue;
-    const hit = idents(args).find(isPersonal);
+    const hit = idents(args.replace(MASKED, ' ')).find((n) => isPersonal(n) && !SAFE.test(n));
     if (hit) out.push({ ...at(f, f.lineOf(m.index)), name: hit });
   }
   return out;

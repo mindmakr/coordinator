@@ -2,12 +2,12 @@
 // draft, storing notes, the pages in the snapshot, the retro banner and close's warning.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { draft, draftMarkdown, gitRunner } from '../lib/report/draft.mjs';
+import { copyNote, draft, draftMarkdown, gitRunner } from '../lib/report/draft.mjs';
 import { markdown } from '../lib/report/md.mjs';
 import { retroModel, retroPending } from '../lib/retro.mjs';
 
@@ -112,10 +112,20 @@ test('CLI: report and retro pages in the snapshot, notes stored and escaped, the
   assert.notEqual(cli('report', 'r1', '--file', join(root, 'missing.md')).status, 0);
 
   // Quality on the project only (the unit has no recorded diff), then on the run: stored and shown.
-  assert.match(run('quality', '--project'), /Project: \d+ files/);
-  assert.match(run('quality', 'r1'), /not a compliance certification/);
+  // Synthetic secrets planted in the project never reach stdout, quality.json, the report or any file in the state.
+  const PLANTED = ['Zq9!synthetic-Pw-7731', ['sk', 'live', '51SynthEt1cK3yZz9Qq8Ww7Ee6Rr'].join('_') /* built at run time, so no key-shaped string sits in the repo */, 'django-insecure-synth9x7f2k3m4n5b6v7c8'];
+  put('src/leak.ts', [`const dbPassword = '${PLANTED[0]}';`, `const STRIPE_KEY = '${PLANTED[1]}';`, `eval(code, '${PLANTED[1]}');`, `logger.info({ email: user.email, password: '${PLANTED[0]}' });`].join('\n'));
+  put('app/settings.py', `SECRET_KEY = "${PLANTED[2]}"\n`);
+  const outs = [run('quality', '--project'), run('quality', 'r1'), run('quality', 'r1', '--json')];
+  assert.match(outs[0], /Project: \d+ files/);
+  assert.match(outs[1], /not a compliance certification/);
+  assert.match(outs[1], /src\/leak\.ts:1 +credential assigned a literal/);
   assert.ok(existsSync(join(runDir('r1'), 'quality.json')));
   assert.match(report(), /Signals, not a verdict/);
+  assert.match(report(), /src\/leak\.ts:1/);
+  const filesIn = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesIn(join(dir, e.name)) : [readFileSync(join(dir, e.name), 'utf8')]));
+  for (const text of [...outs, ...filesIn(state)]) for (const p of PLANTED) assert.ok(!text.includes(p), `a planted secret leaked: ${p.slice(0, 6)}…`);
+  rmSync(join(project, 'src', 'leak.ts')); rmSync(join(project, 'app'), { recursive: true });
   assert.notEqual(cli('quality').status, 0);
 
   // Every unit decided: the banner and the retro page; a retro note clears it.
@@ -159,4 +169,19 @@ test('serve: /report and /retro behind the token, for the served run and another
   } finally {
     const gone = new Promise((ok) => child.once('exit', ok)); child.kill(); await gone;
   }
+});
+
+test('round 2: bold never touches an href; copy notes need the copy store; retro counts builds a reset ended', () => {
+  const html = markdown('see https://x.example/**y" onmouseover="alert(1)** and **bold**');
+  assert.match(markdown('a **bold** word'), /<b>bold<\/b>/);
+  assert.doesNotMatch(html, /href="[^"]*<b>/);
+  assert.doesNotMatch(html, /onmouseover="alert/);
+  for (const a of html.matchAll(/<a [^>]*>/g)) assert.doesNotMatch(a[0], /<b>|<\/b>/);
+  assert.equal(copyNote('The payout SMS is awaiting approval in Copy Studio'), true);
+  assert.equal(copyNote('copy store: two keys not yet approved'), true);
+  assert.equal(copyNote('merge each PR when READY; new SMS wording marked awaiting approval'), false);
+  assert.equal(copyNote('Copy Studio moved to Postgres'), false);
+  const s = { id: 'r', tag: 't', budget: { maxRounds: 4, maxMinutes: 60, maxUnits: 6 }, notes: [], units: [{ id: 'u1', status: 'pass', rounds: [{}], log: [{ kind: 'start' }, { kind: 'reset' }, { kind: 'start' }, { kind: 'start' }, { kind: 'reset' }] }] };
+  const m = retroModel(s);
+  assert.equal(m.budget.usedRounds, 1); assert.equal(m.budget.builds, 3); assert.equal(m.budget.resets, 2);
 });

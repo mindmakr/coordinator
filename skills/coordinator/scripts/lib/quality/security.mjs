@@ -2,36 +2,13 @@
 // line. Tests, fixtures and generated files are skipped. Each detector is a
 // pattern with the checks that keep false positives low; references/quality.md
 // lists what each one catches and misses.
-import { findSecret } from '../secrets.mjs';
+import { secretKind } from './secretline.mjs';
 import { at } from './source.mjs';
 
-// A quoted value that is a placeholder, a reference or an example, not a credential.
-const PLACEHOLDER = /^(?:x{3,}|\*{3,}|changeme|change[-_ ]me|example|sample|dummy|placeholder|redacted|your[-_ ]|<[^>]*>|\$\{|%s|test|secret|password|todo)|abcdefghij|0123456789/i;
-const SNAKE = /^[a-z][a-z0-9]*(?:[_.-][a-z0-9]+)+$/; // a storage key or event name: payday_session_token_v2
-const CODE = /^[A-Z][A-Z0-9]*(?:[_.-][A-Z0-9]+)+$/; // an enum value or error code: AUTH_004 (an AWS key has no separator)
-// A URL whose password is a stand-in (postgresql://user:password@localhost) is a local example.
-const WEAK = /:\/\/([^:/@\s]+):(?:unused|password|pass|postgres|secret|user|test|example|changeme|admin|root|\1)@/i;
-const ASSIGN = /([A-Za-z_$][\w$-]*)["']?\s*[:=]\s*(["'`])([^"'`\s]{6,})\2/g;
-
-// Only string literals are read: code such as `token = randomBytes(32)` or a long type name is never a credential.
-const LITERAL = /(["'`])((?:\\.|(?!\1).){8,}?)\1/g;
-const CAMEL = /^[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+[!?]?$/; // a type or identifier inside a query or a message
+// A credential is shown by its file, line and kind only: never its value or its line.
 function secrets(f) {
   const out = [];
-  f.lines.forEach((l, i) => {
-    if (l.length > 400) return;
-    let hit = false;
-    // A credential shape inside a literal: the whole literal when it is one token, else each long word of it.
-    for (const m of l.matchAll(LITERAL)) {
-      const v = m[2];
-      if (PLACEHOLDER.test(v) || CODE.test(v) || WEAK.test(v) || v.includes('${')) continue;
-      const pieces = /\s/.test(v) ? v.split(/\s+/).filter((p) => p.length >= 16) : [v];
-      if (/-----BEGIN [A-Z ]*PRIVATE KEY/.test(v) || pieces.some((p) => !CAMEL.test(p) && findSecret(p))) hit = true;
-    }
-    // A credential's name assigned a literal: password = "Sup3rS3cret!".
-    for (const m of l.matchAll(ASSIGN)) if (!PLACEHOLDER.test(m[3]) && !CODE.test(m[3]) && !SNAKE.test(m[3]) && !WEAK.test(m[3]) && !m[3].includes('${') && findSecret(`${m[1]}=${m[3]}`)) hit = true;
-    if (hit) out.push(at(f, i + 1));
-  });
+  f.lines.forEach((l, i) => { const kind = secretKind(l); if (kind) out.push({ file: f.path, line: i + 1, text: kind }); });
   return out;
 }
 
@@ -57,7 +34,7 @@ function sqlConcat(f) {
     const b = bare[i] ?? '';
     const tpl = /(?<![\w.$])`[^`]*\$\{/.test(l.replace(TABLE, 'T')) && !/\b(?:sql|Prisma\.sql|SQL|gql|css|html)(?:<[^`]*?>)?\s*`/.test(l);
     const plus = /["'`]\s*\+\s*[A-Za-z_$(]|[A-Za-z_$)\]]\s*\+\s*["'`]/.test(l) && /\+/.test(b);
-    const py = f.lang === 'python' && (/\bf["'][^"']*\{/.test(l) || /["']\s*%\s*[(\w]|\.format\s*\(/.test(l));
+    const py = f.lang === 'python' && (/\bf(["'])(?:(?!\1).)*\{/.test(l) || /["']\s*%\s*[(\w]|\.format\s*\(/.test(l));
     const raw = /\bsql\.raw\s*\(\s*`[^`]*\$\{|\.unsafe\s*\(\s*`[^`]*\$\{|\$queryRawUnsafe\s*\(/.test(l);
     if (tpl || plus || py || raw) out.push(at(f, i + 1));
   });

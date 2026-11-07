@@ -7,6 +7,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { listFiles } from '../map/files.mjs';
 import { lex, lines as lineIndex } from '../map/lex.mjs';
+import { maskLine } from './secretline.mjs';
 
 export const MAX_BYTES = 400 * 1024;
 export const MAX_FILES = 20_000;
@@ -64,5 +65,5 @@ export function readSources(root, { only = null } = {}) {
   return { files: out, skipped };
 }
 
-// One piece of evidence: where, and the line itself (trimmed, clipped).
-export const at = (f, line) => ({ file: f.path, line, text: (f.lines[line - 1] ?? '').trim().slice(0, 160) });
+// One piece of evidence: where, and the line itself, masked (lib/quality/secretline.mjs), trimmed and clipped.
+export const at = (f, line) => ({ file: f.path, line, text: maskLine((f.lines[line - 1] ?? '').trim()).slice(0, 160) });

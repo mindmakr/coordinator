@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { readJson, writeAtomic, writeJson } from '../store.mjs';
-import { maskSecrets } from '../secrets.mjs';
+import { maskLine } from '../quality/secretline.mjs';
 import { loadRuns, loadSelf } from '../selfdata.mjs';
 import { quality, qualityText } from '../quality/index.mjs';
 import { loadMap } from '../quality/redundancy.mjs';
@@ -25,7 +25,7 @@ export function storeReport(s, file) {
   if (statSync(file).size > NOTES_MAX) throw new Error(`--file is larger than ${NOTES_MAX / 1024} KB`);
   const text = readFileSync(file, 'utf8').trim();
   if (!text) throw new Error('--file is empty');
-  s.report = { text: maskSecrets(text), source: basename(file), at: new Date().toISOString() };
+  s.report = { text: text.split('\n').map((l) => maskLine(l)).join('\n'), source: basename(file), at: new Date().toISOString() };
 }
 
 // draft: read git and keep the draft; quality: measure (run may be null for --project); neither: what is stored.

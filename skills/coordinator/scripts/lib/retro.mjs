@@ -34,6 +34,9 @@ export function retroModel(run, { lessons = [], closed = [] } = {}) {
     budget: {
       rounds: run.budget.maxRounds, minutes: run.budget.maxMinutes, units: run.budget.maxUnits,
       usedRounds: Math.max(0, ...run.units.map((u) => u.rounds.length)),
+      // A reset (run.mjs reset, after a crash) ends a build with no verdict, so no round: count builds from the log.
+      builds: Math.max(0, ...run.units.map((u) => Math.max(u.rounds.length, (u.log ?? []).filter((e) => e.kind === 'start').length))),
+      resets: run.units.reduce((n, u) => n + (u.log ?? []).filter((e) => e.kind === 'reset').length, 0),
       stopped: run.units.filter((u) => u.status === 'stopped').map((u) => ({ id: u.id, reason: u.stopReason ?? '' })),
       // Same rule as learning.md: the 80th percentile of rounds to pass, plus 1, at most 8.
       suggested: s?.p80RoundsToPass ? Math.min(8, s.p80RoundsToPass + 1) : null, from: sameTag.length,
@@ -53,7 +56,7 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
   ctx ??= staticCtx('', 0);
   if (ctx.token) ctx = liveCtx(ctx, v.id);
   const r = v.repo; const b = m.budget;
-  const budget = `<div class="budget"><div class="card stat"><span>Rounds per unit</span><b>${b.usedRounds} <span class="cause">of ${b.rounds} used at most</span></b></div>`
+  const budget = `<div class="budget"><div class="card stat"><span>Rounds per unit</span><b>${b.usedRounds} <span class="cause">of ${b.rounds} used at most${b.builds > b.usedRounds || b.resets ? `; ${b.builds} builds started, ${b.resets} reset` : ''}</span></b></div>`
     + `<div class="card stat" title="From the closed runs with the same tag: the 80th percentile of rounds to pass, plus 1"><span>Suggested --max-rounds</span><b>${b.suggested ?? '–'} <span class="cause">${b.from ? `from ${b.from} closed ${esc(m.tag)} runs` : 'no closed run with this tag yet'}</span></b></div>`
     + `<div class="card stat"><span>Time budget</span><b>${b.minutes} <span class="cause">min</span></b></div><div class="card stat"><span>Units stopped</span><b>${b.stopped.length}</b></div></div>`
     + list(b.stopped, (s) => `<b>${esc(s.id)}</b> ${linkify(s.reason, r)}`, 'No unit stopped.');

@@ -4,9 +4,10 @@
 // become links; no raw HTML ever passes through.
 import { esc, linkify } from '../links.mjs';
 
-const inline = (t, repo) => linkify(t, repo)
-  .replace(/`([^`<]+)`/g, '<code>$1</code>')
-  .replace(/\*\*([^*<]+)\*\*/g, '<b>$1</b>');
+// `code` and **bold** only in the text between tags, never inside a tag or across one, so an href is never touched.
+const inline = (t, repo) => linkify(t, repo).split(/(<[^>]*>)/).map((part, i) => (i % 2 ? part : part
+  .replace(/`([^`]+)`/g, '<code>$1</code>')
+  .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>'))).join('');
 const cells = (l) => l.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
 
 export function markdown(src, repo = null) {

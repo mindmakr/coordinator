@@ -6,12 +6,17 @@
 // awaiting approval. Nothing here is a fact until the lead confirms it.
 import { execFileSync } from 'node:child_process';
 import { purpose } from '../plain.mjs';
+import { maskLine } from '../quality/secretline.mjs';
 
 export const MIGRATION = /(^|\/)(migrations?|drizzle|alembic\/versions|db\/migrate)\/[^/]+\.(sql|ts|js|mjs|py|rb)$|\.prisma$/i;
 export const SCRIPT = /(^|\/)(scripts?|bin)\/[^/]+$/;
 export const ENV_FILE = /(^|\/)\.env\.(example|sample|template)$/;
 export const JOB = /\b(?:boss\.(?:work|schedule|send)|cron\.schedule|schedule\s*\(\s*["'`][\d*/ ,-]+["'`]|(?:queue|Queue)\.(?:add|process)|new\s+(?:Worker|Queue|CronJob)\s*\(|@Cron\(|celery|@shared_task|setInterval\s*\()/;
-const COPY = /awaiting (?:copy )?approval|copy (?:studio|sign-?off)|awaiting sign-?off|copy awaiting/i;
+// A copy-store note: names the copy store (Copy Studio, a copy or string store) and says something waits there. A rule
+// such as "new wording is marked awaiting approval" names no store and is left out.
+const COPY_STORE = /\bcopy[ -]?(?:studio|store)\b|\bstring store\b/i;
+const AWAITING = /\bawaiting (?:approval|sign-?off|review)\b|\bpending (?:approval|sign-?off)\b|\bnot (?:yet )?approved\b/i;
+export const copyNote = (t) => COPY_STORE.test(t) && AWAITING.test(t);
 
 export const gitRunner = (root) => (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
 
@@ -57,12 +62,12 @@ export function draft(run, { git }) {
     file = null;
     for (const l of code.length ? added(git, d, code) : []) {
       if (l.startsWith('+++ ')) file = l.slice(6);
-      else if (l.startsWith('+') && JOB.test(l)) jobs.push({ unit: d.unit, file, text: l.slice(1).trim().slice(0, 160) });
+      else if (l.startsWith('+') && JOB.test(l)) jobs.push({ unit: d.unit, file, text: maskLine(l.slice(1).trim()).slice(0, 160) });
     }
   }
   // An env var both added and removed in one run (moved between files) is listed once, as added.
   const envOnce = [...new Map(env.map((e) => [`${e.name}|${e.change}`, e])).values()];
-  const copy = (run.notes ?? []).filter((n) => COPY.test(n.text)).map((n) => ({ kind: n.kind, text: n.text, at: n.at }));
+  const copy = (run.notes ?? []).filter((n) => copyNote(n.text)).map((n) => ({ kind: n.kind, text: n.text, at: n.at }));
   return { at: new Date().toISOString(), changes, diffs: diffs.map(({ files, ...d }) => ({ ...d, files: files.length })), files: changedPaths(diffs), migrations, scripts, env: envOnce, jobs: jobs.slice(0, 40), copy };
 }
 

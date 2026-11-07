@@ -14,6 +14,8 @@ Every run has a report page beside its dashboard: `report.html` in the snapshot,
 
 `S/run.mjs quality <run>` measures the files the run changed (the union of every unit's recorded diff) and the whole project, stores `quality.json` in the run folder and refreshes the report. `S/run.mjs quality --project` measures the project alone and stores nothing. `--json` prints the full result. Node built-ins only; it reads the project and never writes to it. Code files come from git's list (dependencies, build output and hidden folders never count); files over 400 KB or minified are skipped and counted.
 
+**No secret is ever copied.** The secrets signal shows only the file, the line number and the kind (key or token literal, credential assigned a literal, private key), never the value or the line. Every other evidence line is masked before it reaches stdout, `quality.json`, the report or its PDF (`lib/quality/secretline.mjs`), and stored release notes are masked the same way.
+
 **Signals, not a verdict.** Every signal names the file and line to check. They are found by patterns, so some are false positives, and none is a compliance certification, an audit or legal advice. Tests, fixtures, seeds and generated files are left out of the signals.
 
 | Area | What is measured | Threshold |

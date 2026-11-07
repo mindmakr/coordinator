@@ -10,7 +10,7 @@ import { markdown } from './md.mjs';
 
 const code = (t) => `<code>${esc(t)}</code>`;
 const SEV = { high: 'fail', medium: 'not-yet', low: '' };
-const STYLE = '<style>.md h2,.md h3,.md h4,.md h5{margin:16px 0 6px}.md ul,.md ol{padding-left:20px}.md table{margin:6px 0}.report-note{border-left:4px solid var(--wait)}.ev{font:12px var(--mono);overflow-wrap:anywhere}.ev li{margin:2px 0}</style>';
+const STYLE = '<style>.md{overflow-wrap:anywhere}.md h2,.md h3,.md h4,.md h5{margin:16px 0 6px}.md ul,.md ol{padding-left:20px}.md table{margin:6px 0}.report-note{border-left:4px solid var(--wait)}.ev{font:12px var(--mono);overflow-wrap:anywhere}.ev li{margin:2px 0}@media (max-width:560px){.changes table,.changes tbody,.changes tr,.changes th,.changes td{display:block}.changes thead{display:none}.changes tr{border-top:1px solid var(--line);padding:6px 0}.changes tr:first-child{border-top:0}.changes th,.changes td{border:0;padding:2px 12px;min-width:0}}</style>';
 
 function notes(v, report, run) {
   if (!report?.text) {
@@ -23,7 +23,7 @@ function notes(v, report, run) {
 function changes(v, ctx) {
   if (!v.units.length) return '<p class="empty">No units.</p>';
   const rows = v.units.map((u) => `<tr><th><a href="${esc(ctx.unitHref(u.id))}">${esc(u.id)}</a></th><td>${esc(u.title ?? u.sentence)}</td><td>${chip(u.status, u.status)}</td><td>${unitLinks(u, v.repo) || '<span class="cause">none</span>'}</td></tr>`).join('');
-  return `<div class="scroll"><table><thead><tr><th>Unit</th><th>What</th><th>Status</th><th>Issues, PRs and merges</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="scroll changes"><table><thead><tr><th>Unit</th><th>What</th><th>Status</th><th>Issues, PRs and merges</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function devops(d, run) {

@@ -173,3 +173,22 @@ test('quality(): project and changed scopes, evidence on every signal, the discl
   assert.match(t, /Changed by the run/);
   assert.equal(quality({ root }).changed, undefined);
 });
+
+test('round 2 misses: camelCase and Django-style names, f-string SQL, a log call that masks one argument but not another', () => {
+  const py = src('app/settings.py', ['SECRET_KEY = "django-insecure-9x7f2k3m4n5b6v7c8x9z0q1w2e3r4t5y"', 'cur.execute(f"SELECT * FROM t WHERE email = \'{email}\'")'].join('\n'));
+  const s = security([src('src/k.ts', "const dbPassword = 'Tr0ub4dor&3xK9';\nconst storageKey = \"app_session_token_v2\";"), py]);
+  assert.deepEqual(lines(pick(s, 'secret')), ['src/k.ts:1', 'app/settings.py:1']);
+  assert.deepEqual(lines(pick(s, 'sql')), ['app/settings.py:2']);
+  const p = privacy([src('src/l.ts', "logger.info({ to: maskRecipient(user.phone), email: user.email }, 'sent');\nlogger.info({ to: maskRecipient(user.phone) }, 'sent');")]);
+  assert.deepEqual(lines(pick(p.signals, 'pii-log')), ['src/l.ts:1']);
+});
+
+test('evidence never carries a secret: the secrets signal shows file, line and kind only; other evidence lines are masked', () => {
+  const planted = 'Zq9!synthetic-Pw-7731';
+  const f = src('src/p.ts', [`const adminPassword = '${planted}';`, `eval(input, { password: '${planted}' });`].join('\n'));
+  const s = security([f]);
+  const all = JSON.stringify(s);
+  assert.doesNotMatch(all, /synthetic-Pw/);
+  assert.equal(pick(s, 'secret').evidence[0].text, 'credential assigned a literal');
+  assert.match(pick(s, 'eval').evidence[0].text, /\[redacted\]/);
+});
