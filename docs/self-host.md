@@ -143,12 +143,14 @@ Other limits count per person or per installation instead: answers and notes (30
 
 ## Webhook sources
 
-GitHub sends webhooks from published address ranges (`hooks` in `GET /meta`). With `WEBHOOK_SOURCES=github`, the default, the service fetches them from `GITHUB_API_URL/meta` when it starts and every 24 hours, and uses a built-in copy until a fetch succeeds or when one fails. Only those addresses may use the last 6 MB of the webhook budget, and only from them does the App's own delivery header skip the limit on refused deliveries. Behind a proxy that hides the real address (see [Behind a proxy](#behind-a-proxy)), GitHub looks like everyone else and loses that reserve.
+GitHub sends webhooks from published address ranges (`hooks` in `GET /meta`). With `WEBHOOK_SOURCES=github`, the default, the service fetches them from `GITHUB_API_URL/meta` when it starts and every 24 hours, and uses a built-in copy until a fetch succeeds. A later failed fetch keeps the last fetched list. Only those addresses may use the last 6 MB of the webhook budget, and only from them does the App's own delivery header skip the limit on refused deliveries. Behind a proxy that hides the real address (see [Behind a proxy](#behind-a-proxy)), GitHub looks like everyone else and loses that reserve.
 
 - A list of CIDRs is used as given and never fetched: use it for GitHub Enterprise Server.
 - `any` trusts no address: every address group gets the same 512 KB, bodies of 64 KB or less may use the reserve, and the App header is believed from anyone. Use it only when you cannot see client addresses at all.
 
 The list lives in memory; nothing is stored.
+
+On a Docker host whose container network has no IPv6, IPv6 clients may reach Traefik through docker-proxy with the network gateway's address, so they all share one address group. If you serve IPv6, enable IPv6 in the Docker network.
 
 ## Backups
 

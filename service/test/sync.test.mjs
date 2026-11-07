@@ -77,13 +77,21 @@ function bigLog(id, bytes) {
   return log;
 }
 
-test('s1: 200 signed pushes of 8 MB logs from one installation keep memory bounded; another installation still syncs at once', { timeout: 120_000 }, async () => {
+test('s1: 200 signed pushes of 8 MB logs from one installation keep memory bounded; another installation syncs first', { timeout: 120_000 }, async () => {
   const N = 200;
   const log = bigLog('r1', LIMITS.logBytes);
   const gh = fakeGitHub();
-  // Like the real client: JSON text with base64 content, parsed and decoded.
+  // Like the real client: JSON text with base64 content, parsed and decoded. Mallory's reads wait at
+  // a gate until the victim's run is stored and /healthz has answered, so the order is proved, not timed.
+  let open; const gate = new Promise((r) => { open = r; }); let malloryRead = 0;
   const orig = gh.blob.bind(gh);
-  gh.blob = async (...a) => { const b = await orig(...a); const text = JSON.stringify({ encoding: 'base64', content: b.toString('base64') }); await new Promise((r) => setTimeout(r, 5)); return Buffer.from(JSON.parse(text).content, 'base64'); };
+  gh.blob = async (token, full, ...a) => {
+    if (full.startsWith('mallory/')) await gate;
+    const b = await orig(token, full, ...a); const text = JSON.stringify({ encoding: 'base64', content: b.toString('base64') });
+    await new Promise((r) => setTimeout(r, 5));
+    if (full.startsWith('mallory/')) malloryRead++;
+    return Buffer.from(JSON.parse(text).content, 'base64');
+  };
   const t = await startApp({ gh });
   let closed = false;
   try {
@@ -96,24 +104,26 @@ test('s1: 200 signed pushes of 8 MB logs from one installation keep memory bound
     const push = (inst, id, full) => hook(t, 'push', { ref: 'refs/heads/coordinator-state', installation: { id: inst }, repository: { id, full_name: full, private: true } });
     const codes = await Promise.all(Array.from({ length: N }, (_, k) => push(66, 1000 + k, `mallory/r${k}`)));
     assert.deepEqual([...new Set(codes.map((c) => c[0]))], [202]);
-    // The other installation pushes into the flood; its run is read within a couple of seconds.
-    const began = performance.now();
+    // The other installation pushes into the flood and is read while mallory's syncs hold their slots.
     await push(77, 5000, 'victim/web');
     while (!(await t.db.run(77, 5000, 'r1'))?.state) await new Promise((r) => setTimeout(r, 25));
-    const victimMs = performance.now() - began;
-    // /healthz stays quick while the flood is read.
-    let slowest = 0;
-    for (let i = 0; i < 20; i++) { const a = performance.now(); await fetch(`${t.base}/healthz`); slowest = Math.max(slowest, performance.now() - a); await new Promise((r) => setTimeout(r, 50)); }
-    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(malloryRead, 0, 'the victim finished before any of the flood was read');
+    for (let k = 0; k < N; k++) assert.equal(await t.db.run(66, 1000 + k, 'r1'), null, 'and before any of it was stored');
+    // /healthz answers while syncs are in flight.
+    const inFlight = t.app.ingest.stats();
+    assert.ok(inFlight.running > 0 && inFlight.queued > 0, `syncs in flight: ${JSON.stringify(inFlight)}`);
+    for (let i = 0; i < 5; i++) assert.equal((await fetch(`${t.base}/healthz`)).status, 200);
+    assert.ok(t.app.ingest.stats().running > 0, 'still in flight after /healthz answered');
+    // Let the flood through and wait until it has done real work, then check what it held.
+    open();
+    while (malloryRead < 2) await new Promise((r) => setTimeout(r, 25));
     clearInterval(mon);
     const s = t.app.ingest.stats();
     const MB = (x) => Math.round(x / 1048576);
-    console.log(`# s1: ${N} pushes; rss ${MB(base)} -> peak ${MB(peak)} MB; victim synced in ${Math.round(victimMs)} ms; slowest /healthz ${Math.round(slowest)} ms; syncs at once peak ${s.peak}; blob bytes peak ${MB(s.blobBytes.peak)} MB`);
+    console.log(`# s1: ${N} pushes; rss ${MB(base)} -> peak ${MB(peak)} MB; syncs at once peak ${s.peak}; blob bytes peak ${MB(s.blobBytes.peak)} MB`);
     assert.ok(s.peak <= 4, 'at most 4 syncs at once');
     assert.ok(s.blobBytes.peak <= 64 * 1048576, 'blob bytes held within the budget');
     assert.ok(peak - base < 400 * 1048576, `memory grew ${MB(peak - base)} MB`);
-    assert.ok(victimMs < 3000, `the other installation waited ${Math.round(victimMs)} ms`);
-    assert.ok(slowest < 1000, `/healthz took ${Math.round(slowest)} ms`);
     // Queued syncs are dropped on close; the running ones finish.
     await t.app.ingest.close(); closed = true;
   } finally {

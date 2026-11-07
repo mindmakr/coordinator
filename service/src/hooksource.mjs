@@ -1,7 +1,8 @@
 // c14: where webhook deliveries come from. Client addresses are grouped (IPv6 by /64, since one
 // host is usually given a whole /64; IPv4 by /24 for the webhook budget), and an address is
 // checked against GitHub's published hook ranges ("hooks" in GET /meta), fetched at start and
-// once a day. Until a fetch succeeds, or when one fails, the built-in list below is used.
+// once a day. Until a fetch succeeds the built-in list below is used; a later failed fetch keeps
+// the last fetched list.
 import { isIP } from 'node:net';
 
 // api.github.com/meta "hooks", 2026-11-07.
