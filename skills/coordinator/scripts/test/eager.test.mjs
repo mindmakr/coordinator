@@ -10,7 +10,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { costEntry, costLine, runCost } from '../lib/cost.mjs';
 import { openWords } from '../lib/openbar.mjs';
-import { decideUnit, openFindings } from '../lib/rules.mjs';
+import { bySetup, decideUnit, escapes, openFindings } from '../lib/rules.mjs';
 import { checkFold, parseFinding } from '../lib/findings.mjs';
 import { buildBrief } from '../lib/briefs.mjs';
 
@@ -318,4 +318,58 @@ test('old runs still load and decide: no severity, folds, costs or judgingAt', (
     assert.equal(st.status, 0, st.stderr);
     assert.ok(JSON.parse(st.stdout).costByRun.every((x) => x.line === 'not recorded'));
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('a specialist mark after the general fail closed the round is kept, and the finish line waits for it', () => {
+  ok('init', 'race', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'race', 'a', '--bar', 'b', '--specialist', 'security'); ok('freeze', 'race');
+  build('race', 'a');
+  // The general critic's medium fail lands first and closes round 1.
+  ok('verdict', 'race', 'a', 'fail', '--score', '8', '--gap', 'labels', '--evidence', 'e', '--severity', 'medium');
+  const before = nextOf('race', 'a');
+  assert.equal(before.action, 'build', 'no finish-line question while security has no mark on the round');
+  assert.match(cli('ask', 'race', '--finish', 'a').err, /ask --finish refused/);
+  // The specialist's high arrives late: recorded on round 1, and it keeps Ship off the table.
+  ok('verdict', 'race', 'a', 'fail', '--score', '3', '--gap', 'timing oracle', '--evidence', 'auth.ts:12', '--severity', 'high', '--specialist', 'security');
+  const r = unit('race', 'a').rounds[0];
+  assert.equal(r.specialists.security.severity, 'high'); assert.equal(r.specialists.security.late, true);
+  assert.deepEqual(openFindings(r).map((f) => [f.by, f.severity]), [['critic', 'medium'], ['security', 'high']]);
+  assert.equal(nextOf('race', 'a').action, 'build');
+  assert.match(cli('verdict', 'race', 'a', 'pass', '--evidence', 'e', '--specialist', 'security').err, /verdict refused: unit a is open/, 'one mark per specialist per round');
+  assert.match(cli('verdict', 'race', 'a', 'pass', '--score', '9', '--evidence', 'e').err, /verdict refused: unit a is open/, 'the general critic cannot judge a closed round again');
+  // Next round: a late specialist pass completes the marks, and only then is the person asked.
+  build('race', 'a');
+  ok('verdict', 'race', 'a', 'fail', '--score', '8', '--gap', 'labels still', '--evidence', 'e', '--severity', 'medium');
+  assert.equal(nextOf('race', 'a').action, 'build');
+  ok('verdict', 'race', 'a', 'pass', '--evidence', 'constant time now', '--specialist', 'security');
+  assert.equal(nextOf('race', 'a').action, 'ask-person');
+  // Once a new build starts, a late mark for the old round is refused.
+  ok('init', 'race2', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'race2', 'a', '--bar', 'b', '--specialist', 'security'); ok('freeze', 'race2');
+  build('race2', 'a'); ok('verdict', 'race2', 'a', 'fail', '--score', '5', '--gap', 'g', '--evidence', 'e', '--severity', 'high');
+  ok('start', 'race2', 'a');
+  assert.match(cli('verdict', 'race2', 'a', 'pass', '--evidence', 'e', '--specialist', 'security').err, /verdict refused: unit a is building/);
+});
+
+test('the reviewed head comes from built --head or verdict --head, not the lead\'s --reviewed', () => {
+  const base = commitFiles({ 'lib/r.js': '1\n' }, 'r base');
+  const built = commitFiles({ 'lib/r.js': '2\n' }, 'r built');
+  setup('rh'); ok('start', 'rh', 'a');
+  assert.match(cli('built', 'rh', 'a', '--head', 'nope').err, /--head takes the commit the builder reported/);
+  ok('built', 'rh', 'a', '--head', built);
+  ok('verdict', 'rh', 'a', 'pass', '--score', '9', '--evidence', 'e', '--fold', 'rename r');
+  assert.equal(unit('rh', 'a').rounds[0].reviewedHead, built);
+  const fold = commitFiles({ 'lib/r.js': '3\n' }, 'r fold');
+  assert.match(cli('foldin', 'rh', 'a', '--head', fold, '--reviewed', base, '--evidence', 'e').err, /--reviewed is recorded already/);
+  assert.equal(detect('--run', 'rh', '--unit', 'a', '--base', built, '--head', fold).status, 0);
+  ok('foldin', 'rh', 'a', '--head', fold, '--evidence', 'r.js only');
+  assert.equal(unit('rh', 'a').rounds[0].foldin.reviewed, built);
+  // The critic's own --head wins over the builder's.
+  setup('rh2'); ok('start', 'rh2', 'a'); ok('built', 'rh2', 'a', '--head', base);
+  ok('verdict', 'rh2', 'a', 'pass', '--score', '9', '--evidence', 'e', '--head', built, '--fold', 'rename r');
+  assert.equal(unit('rh2', 'a').rounds[0].reviewedHead, built);
+});
+
+test('escape rates leave shipped units out', () => {
+  const run = { id: 'x', units: [{ id: 'a', status: 'pass', shipped: { answer: 'q1' }, rounds: [{ verdict: 'fail' }] }, { id: 'b', status: 'pass', rounds: [{ verdict: 'pass', critic: 'c' }] }], notes: [] };
+  assert.deepEqual(escapes(run), { escapes: 0, passed: 1, rate: 0 });
+  assert.deepEqual(bySetup([run]), [{ setup: 'c', passed: 1, escapes: 0, rate: 0 }]);
 });

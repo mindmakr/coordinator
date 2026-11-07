@@ -33,6 +33,7 @@
 //                  after a try failed on a model below strong, a model below strong needs [--force-model "reason"]
 //   run.mjs beat <run> <unit> [--text T]     builder or critic still working (T: the milestone, e.g. "pushed")
 //   run.mjs built <run> <unit> [--report R]  builder finished (R: its report in short): the unit waits for a critic
+//                  [--head <sha>] the commit the builder reported (the reviewed head for fold-ins, unless verdict --head names one)
 //   run.mjs reset <run> <unit> --reason R     in-progress unit with no artifact goes back to build (after a crash)
 //   run.mjs verdict <run> <unit> pass|fail --evidence E [--gap G] [--cause C] --score 0-10   only after built;
 //                  score and gap required on fail; cause is the critic's root-cause tag (drives same-gap);
@@ -46,6 +47,7 @@
 //                  [--finding "<high|medium|low|nit>: …" …] each FINDINGS line; the fail's severity is the worst; a pass lists none high or medium
 //                  [--fold "…" …] on a pass: lows and nits ("nit: …") folded in before merge; never one in a pinned area; next then says fold-in
 //                  [--full-suite yes|no] whether the critic ran the full suite this round
+//                  [--head <sha>] the commit the critic judged; a specialist may mark a round the general fail just closed
 //   run.mjs foldin <run> <unit> --head <sha> --evidence E [--reviewed <sha>]   only when next says fold-in: the targeted check
 //                  of the folds (no new critic round). The head must build on the reviewed one, stay under init's
 //                  --fold-max-files (10) and --fold-max-lines (200), and have a clean detect.mjs run on it; next then says done, step merge
@@ -168,8 +170,8 @@ const FLAGS = {
   extend: ['rounds', 'reason', 'answer'],
   start: ['model', 'why', 'force-model', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', ...COST_FLAGS], strategy: ['text'],
-  integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', ...COST_FLAGS],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', 'head', ...COST_FLAGS], strategy: ['text'],
+  integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', ...COST_FLAGS],
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
@@ -454,7 +456,10 @@ const commands = {
   built([run, unit], o) {
     return change(run, 'unit.built', (s) => {
       const u = unitOf(s, unit); if (u.status !== 'building') throw new Error(`unit ${unit} is ${u.status}, not building`); expect(s, u, 'built');
+      // The commit the builder reported: the reviewed head a fold-in must build on, unless the critic or detect names one.
+      if (o.head !== undefined && (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head))) throw new Error('--head takes the commit the builder reported');
       u.status = 'judging'; u.heartbeatAt = now(); u.judgingAt = now(); u.report = optText(o.report, 2000); log(u, 'built', u.report ?? '');
+      if (o.head !== undefined) u.builtHead = o.head.toLowerCase(); else delete u.builtHead;
       addCost(u, costEntry(o, { step: 'built', role: 'builder', model: u.builtBy && u.builtBy !== UNSPECIFIED ? u.builtBy : null, at: now() }));
       delete u.specialistMarks; // a new build is judged again by every specialist
     }, { unit });
@@ -519,9 +524,14 @@ const commands = {
   verdict([run, unit, v], o) {
     return change(run, 'unit.verdict', (s) => {
       const u = unitOf(s, unit);
-      if (u.status !== 'judging') throw new Error(`verdict refused: unit ${unit} is ${u.status}; record built first`);
-      expect(s, u, 'verdict');
+      // A required specialist whose mark arrives after the general critic's fail closed the round:
+      // recorded on that round (its high must count), once, before a new build starts (#51 round 3).
+      const closed = u.rounds.at(-1);
+      const late = o.specialist !== undefined && ['open', 'stopped'].includes(u.status) && closed?.verdict === 'fail' && !closed.specialists?.[String(o.specialist)];
+      if (u.status !== 'judging' && !late) throw new Error(`verdict refused: unit ${unit} is ${u.status}; record built first`);
+      if (!late) expect(s, u, 'verdict');
       oneOf(v, ['pass', 'fail'], 'verdict');
+      if (o.head !== undefined && (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head))) throw new Error('--head takes the commit the critic judged');
       if (v === 'fail' && o.score === undefined) throw new Error('--score is required on a fail (it drives the no-progress stop)');
       if (v === 'fail' && !optText(o.gap)) throw new Error('--gap is required on a fail (it drives the same-gap stop)');
       // Only a high or medium finding fails a round; lows and nits ride on a pass as fold-ins (references/bar.md).
@@ -548,9 +558,14 @@ const commands = {
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
         if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
-        (u.specialistMarks ??= {})[name] = { verdict, score: score(o.score), gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
+        const mark = { verdict, score: score(o.score), gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
+        if (late) { (closed.specialists ??= {})[name] = { ...mark, late: true }; log(u, 'verdict', `${name}: ${verdict} on round ${closed.n ?? u.rounds.length}, after the round closed`); }
+        else (u.specialistMarks ??= {})[name] = mark;
         addCost(u, costEntry(o, { step: 'verdict', role: `critic:${name}`, model: judge, at: now() }));
         return;
+      }
+      if (late) throw new Error('unreachable');
+      {
       }
       const missing = (u.specialists ?? []).filter((n) => u.specialistMarks?.[n]?.verdict !== 'pass');
       if (verdict === 'pass' && missing.length) throw new Error(`pass refused: specialist ${missing.join(', ')} has not passed this build`);
@@ -563,9 +578,11 @@ const commands = {
       if (verdict === 'pass') for (const [n, m] of Object.entries(u.specialistMarks ?? {})) for (const f of m.folds ?? []) extra.folds = [...(extra.folds ?? []), `${f} (${n})`];
       addCost(u, costEntry(o, { step: 'verdict', role: 'critic', model: judge, at: now() }));
       // The head the critic reviewed, from the detect run of this round: a fold-in must build on it.
-      if (verdict === 'pass' && u.detect?.round === round && u.detect.head) extra.reviewedHead = u.detect.head;
+      // The head the critic judged (--head), else this round's detect head, else the builder's reported head.
+      const reviewedHead = typeof o.head === 'string' ? o.head.toLowerCase() : (u.detect?.round === round && u.detect.head) ? u.detect.head : (u.builtHead ?? null);
+      if (verdict === 'pass' && reviewedHead) extra.reviewedHead = reviewedHead;
       u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...extra, ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
-      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt;
+      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt; delete u.builtHead;
       u.status = verdict === 'pass' ? 'pass' : 'open';
     }, { unit });
   },
@@ -578,7 +595,7 @@ const commands = {
       const last = u.rounds.at(-1);
       // The fold must build on what the critic reviewed, stay small, and pass the fence and gaming check.
       const reviewed = last.reviewedHead ?? (typeof o.reviewed === 'string' ? o.reviewed : null);
-      if (!reviewed) throw new Error(`foldin refused: no reviewed head recorded for ${u.id}'s pass (no detect run that round); give --reviewed <the commit the critic judged>`);
+      if (!reviewed) throw new Error(`foldin refused: no reviewed head recorded for ${u.id}'s pass (no --head on built or verdict, no detect run that round); give --reviewed <the commit the critic judged>`);
       if (last.reviewedHead && o.reviewed !== undefined) throw new Error('--reviewed is recorded already (the round\'s detect head); leave it out');
       const d = foldDiff(reviewed, o.head);
       const caps = { files: s.budget.foldFiles ?? FOLD_DEFAULTS.files, lines: s.budget.foldLines ?? FOLD_DEFAULTS.lines };

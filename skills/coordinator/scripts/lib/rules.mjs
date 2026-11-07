@@ -97,6 +97,8 @@ function finishLine(unit, run) {
   const last = unit.rounds.at(-1);
   if (last?.verdict !== 'fail') return null;
   if (unit.rounds.length < 2 && !(typeof last.score === 'number' && last.score >= 8)) return null;
+  // Every required specialist must have marked this round first: a mark still to come may be a high.
+  if ((unit.specialists ?? []).some((n) => !last.specialists?.[n])) return null;
   const open = openFindings(last);
   if (!open.some((f) => f.severity === 'medium') || open.some((f) => f.severity === 'high')) return null;
   if (!run.units.every((x) => x.id === unit.id || ['pass', 'stopped'].includes(x.status))) return null;
@@ -207,7 +209,7 @@ export function allows(cmd, d) {
 // Escapes: defects found after a unit passed (`note --kind escape`). The rate is
 // escapes per passed unit, the evidence for how deep review has to go.
 export function escapes(run) {
-  const passed = run.units.filter((u) => u.status === 'pass').length;
+  const passed = run.units.filter((u) => u.status === 'pass' && !u.shipped).length; // shipped units are counted apart
   const count = (run.notes ?? []).filter((n) => n.kind === 'escape').length;
   return { escapes: count, passed, rate: passed ? Math.round((count / passed) * 100) / 100 : null };
 }
@@ -217,7 +219,7 @@ export function escapes(run) {
 export function bySetup(runs) {
   const groups = new Map();
   for (const run of runs) for (const u of run.units) {
-    if (u.status !== 'pass') continue;
+    if (u.status !== 'pass' || u.shipped) continue; // shipped units are counted apart
     const setup = u.rounds.findLast((r) => r.verdict === 'pass')?.critic ?? '(not recorded)';
     const g = groups.get(setup) ?? { setup, passed: 0, escapes: 0 };
     g.passed++;
