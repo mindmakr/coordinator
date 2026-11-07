@@ -281,6 +281,17 @@ export function closeGap(s, id, { reason, by = 'lead', confirm = null, reopen = 
   s.notes.push({ kind: 'decision', text: `${reopen ? 'reopened' : 'closed'} gap ${id}: ${reason}`, gap: id, reason, by, ...(by === 'person' ? { via: 'cli', confirm: confirm.trim() } : {}), ...(reopen ? { reopen: true } : {}), ...(checked ? { checked } : {}), at });
 }
 
+// What the live page's search reads for a gap: its words, run, unit, kind, source, id and
+// resolution, plus each GitHub ref spelled the ways a person types it (#12, repo#12,
+// owner/repo#12, PR #12, issue #12). The page folds case and accents (findMatches).
+export function gapHaystack(g) {
+  const all = [...new Set([g.text, g.run, g.unit, g.kind, KIND_LABEL[g.kind], String(g.id).split(':')[0], g.from, g.id, g.carried, ...(g.unverified ?? []), g.resolution?.reason].filter(Boolean))].join(' ');
+  const refs = new Set();
+  for (const [, owner, repo, type, n] of all.matchAll(/github\.com\/([\w.-]+)\/([\w.-]+)\/(issues|pull)\/(\d+)/g)) refs.add(`#${n} ${repo}#${n} ${owner}/${repo}#${n} ${type === 'pull' ? 'PR' : 'issue'} #${n}`);
+  for (const [, , repo, n] of all.matchAll(/\b([\w.-]+)\/([\w.-]+)#(\d+)/g)) refs.add(`${repo}#${n}`);
+  return [all, ...refs].join(' ');
+}
+
 // `run.mjs gaps`: one line per gap, then the count.
 export function gapsText(list) {
   const open = list.filter((g) => g.status === 'open');

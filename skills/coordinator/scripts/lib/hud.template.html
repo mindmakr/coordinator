@@ -186,6 +186,12 @@ ul.plain .cause { margin-top: 2px; }
 section.self .card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
 section.self .card li { margin: 4px 0; overflow-wrap: anywhere; }
 section.self .card ul.plain { padding-left: 0; } .gaps .card { min-width: 0; } .gaps code { font-size: 11px; }
+/* The Gaps filter bar: its own row, ruled off from the panels, with room for the focus ring. */
+.gap-tools { margin: 14px 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); gap: 10px 12px; }
+.gap-tools label { flex: 1 1 150px; min-width: 0; }
+.gap-tools label.grow { flex: 3 1 280px; }
+.gap-tools select, .gap-tools input[type=search] { height: 36px; margin-top: 6px; }
+.gap-tools .gap-count { flex-basis: 100%; margin: 0; }
 header.run a.open { margin-left: auto; font-size: 14px; font-weight: 600; }
 .map-scroll:focus-visible { outline: 3px solid var(--run); outline-offset: 2px; }
 .map-scroll { overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-top: 8px; }

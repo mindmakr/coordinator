@@ -4,7 +4,7 @@
 // render(model, ctx) }. Same shell, theme and escaping rules as the dashboard.
 import { anchor, linkify, webUrl } from './links.mjs';
 import { count } from './self.mjs';
-import { KIND_LABEL } from './gaps.mjs';
+import { KIND_LABEL, gapHaystack } from './gaps.mjs';
 import { clip } from './plain.mjs';
 import { badge, blk, chip, esc, hash, keyed, page, stamp, stateChip, toggle, unitDot } from './parts.mjs';
 
@@ -103,8 +103,8 @@ function plans(m, ctx) {
   }).join('')}</div>`;
 }
 
-// Gaps: everything left undone across runs, grouped by run. The filter needs the live page's script;
-// the snapshot lists them all. Resolved gaps stay listed, folded.
+// Gaps: everything left undone across runs, grouped by run. The filter and search need the live
+// page's script, so the snapshot has neither and lists them all. Resolved gaps stay listed, folded.
 const GAP_BADGE = { stopped: 'stop', unfinished: 'fail', run: 'stop', 'follow-up': 'link', 'out-of-fence': 'strategy', deferred: 'note', upstream: 'merge', question: 'question', escape: 'fail' };
 const GAP_CLIP = 220;
 const REASON_CLIP = 160;
@@ -118,7 +118,7 @@ function gapItem(g, ctx, m) {
   const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : r.checked ? `by ${esc(r.by)}, checked with gh` : `by ${esc(r.by)}${r.confirm ? `, their words: “${esc(clip(r.confirm, 120))}”` : ''}`}: ${why}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
   const unverified = g.unverified ? `<div class="cause"><b>tracked (unverified)</b>: ${g.unverified.map((u) => linkify(u, null)).join(', ')}, a repo the runs do not link; <code>run.mjs gaps --check</code> confirms it exists</div>` : '';
   const carried = g.carried ? `<div class="cause"><b>carried → ${esc(g.carried)}</b>: open until that unit passes or its gap is resolved</div>` : '';
-  return `<li data-a="gap-${esc(g.id)}" data-gap data-run="${esc(g.run)}" data-kind="${esc(g.kind)}">${badge(GAP_BADGE[g.kind] ?? 'info', KIND_LABEL[g.kind] ?? g.kind)} ${text}`
+  return `<li data-a="gap-${esc(g.id)}" data-gap data-run="${esc(g.run)}" data-kind="${esc(g.kind)}"${ctx.live ? ` data-q="${esc(gapHaystack(g))}"` : ''}>${badge(GAP_BADGE[g.kind] ?? 'info', KIND_LABEL[g.kind] ?? g.kind)} ${text}`
     + `${g.cause ? `<div class="cause">cause: ${esc(g.cause)}</div>` : ''}`
     + `<div class="cause">${runLink(g.run, ctx, m)}${unit}${g.at ? ` · ${stamp(g.at)}` : ''} · from ${esc(g.from)} · <code>${esc(g.id)}</code></div>${carried}${unverified}${res}</li>`;
 }
@@ -126,11 +126,12 @@ const gapGroups = (groups, ctx, m, status) => groups.map((grp) => `<section clas
   + `<ul class="plain">${grp.items.map((g) => gapItem(g, ctx, m)).join('')}</ul></section>`).join('');
 function gapTools(g) {
   const opts = (vals, label) => vals.map((v) => `<option value="${esc(v)}">${esc(label(v))}</option>`).join('');
-  return '<form class="tl-tools" data-gaps role="search">'
+  return '<form class="tl-tools gap-tools" data-gaps role="search">'
+    + '<label class="grow">Search gaps<input type="search" name="q" placeholder="text, run, unit, #123, PR…" autocomplete="off" spellcheck="false"></label>'
     + `<label>Run<select name="run"><option value="">All runs</option>${opts(g.runs, (v) => v)}</select></label>`
     + `<label>Kind<select name="kind"><option value="">All kinds</option>${opts(g.kinds, (v) => KIND_LABEL[v] ?? v)}</select></label>`
     + '<label>Status<select name="status"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></label>'
-    + '<p class="cause" data-gaps-count aria-live="polite"></p></form>';
+    + '<p class="cause gap-count" data-gaps-count aria-live="polite"></p></form>';
 }
 function gapsSection(m, ctx) {
   const g = m.gaps;
