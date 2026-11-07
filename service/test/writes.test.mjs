@@ -86,6 +86,8 @@ test('HUD: a writer answers and adds notes; each is the event run.mjs writes, co
     assert.match(t.gh.moves.at(-1).commit.message, /answer q1 on r1 \(web, @writer\)/);
     const state = JSON.parse(t.gh.repos.get('acme/web').files.get('runs/r1/state.json'));
     assert.equal(state.snapshot.seq, before + 1, 'the snapshot follows the log');
+    const entry = state.notes.find((x) => x.kind === 'question').history.at(-1);
+    assert.deepEqual([entry.by, entry.via], ['person', 'web'], 'a web answer says it came from the web (lib/approval.mjs)');
     assert.match(t.gh.repos.get('acme/web').files.get('runs/r1/README.md').toString(), /# Run r1/);
     // Changed until used: a second answer is a second event; the page shows it at once.
     r = await t.post('/r/acme/web/run/r1/answer', cookie, [['q', 'q1'], ['choice', '__other'], ['other', 'both, side by side']]);
@@ -99,6 +101,7 @@ test('HUD: a writer answers and adds notes; each is the event run.mjs writes, co
     assert.equal(note.kind, 'note');
     assert.equal(note.unit, 'u1');
     assert.equal(note.payload.ops[0].values[0].kind, 'person');
+    assert.equal(note.payload.ops[0].values[0].via, 'web', 'a web note says it came from the web');
     // A bad answer is refused with the reason, and nothing is written.
     const n = events(t.gh).length;
     r = await t.post('/r/acme/web/run/r1/answer', cookie, [['q', 'q1'], ['choice', 'nope']]);
@@ -193,6 +196,7 @@ test('comment commands: a pusher answers and notes; 👀 then 👍; authored as 
     assert.equal(ev.at(-1).kind, 'answer');
     const q = JSON.parse(t.gh.repos.get('acme/web').files.get('runs/r1/state.json')).notes.find((n) => n.kind === 'question');
     assert.deepEqual(q.history.at(-1).choices, ['server'], 'matched by label, any case');
+    assert.deepEqual([q.history.at(-1).by, q.history.at(-1).via], ['person', 'web'], 'an answer by comment command is from the web');
     const move = t.gh.moves.at(-1);
     assert.equal(move.token, 'inst-7');
     assert.deepEqual(move.commit.author, { name: 'writer', email: '2+writer@users.noreply.github.com' });
@@ -207,6 +211,7 @@ test('comment commands: a pusher answers and notes; 👀 then 👍; authored as 
     const note = events(t.gh).at(-1);
     assert.equal(note.kind, 'note');
     assert.equal(note.unit, 'u1');
+    assert.equal(note.payload.ops[0].values[0].via, 'web', 'and so is its note');
     // Free text in quotes.
     await comment(t, '/coordinator answer q1 "use the server total; drop the client sum"', { commentId: 603 });
     assert.equal(JSON.parse(t.gh.repos.get('acme/web').files.get('runs/r1/state.json')).notes.find((n) => n.kind === 'question').history.at(-1).other, 'use the server total; drop the client sum');

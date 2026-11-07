@@ -6,6 +6,7 @@ import { liveCtx, staticCtx } from './hud.mjs';
 import { blk, esc, page, stamp } from './parts.mjs';
 import { behaviourSvg, flowSvg, heatSvg, mindSvg, relevanceSvg } from './mapsvg.mjs';
 import { unitTips } from './maptips.mjs';
+import { callsView } from './map/callsview.mjs';
 
 export const MAPS = [
   { id: 'mind', title: 'Mind map', about: 'The goal at the centre, then units, their behaviours and evidence, coloured by status.', render: mindSvg },
@@ -13,6 +14,7 @@ export const MAPS = [
   { id: 'heat', title: 'Activity by hour', about: 'Where effort and churn went: tries, failures, heartbeats and waiting, per unit and hour.', render: heatSvg },
   { id: 'behaviours', title: 'Behaviours', about: 'Each unit’s behaviours, pass or fail.', render: behaviourSvg },
   { id: 'relevance', title: 'Goal relevance', about: 'Which goal behaviours each unit serves, so work off the goal stands out.', render: relevanceSvg },
+  { id: 'calls', title: 'Calls', about: 'For one unit: the JS/TS functions its diff touched, what calls them and what they call (run.mjs calls).', render: callsView },
 ];
 
 export function mapsPage(v, nowMs = Date.now(), ctx = null) {

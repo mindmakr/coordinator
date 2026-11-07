@@ -57,7 +57,7 @@ test('the model: age, stats, history, plans with who each unit waits on, proposa
   assert.deepEqual(m.study.runs, [{ run: 'r-b', used: 0, cap: 2, open: true }], 'old state: default study cap');
   assert.equal(m.learning.lessons[0].sources.length, 0, 'an old lesson without sources loads');
   assert.equal(m.stats.basis, 'all runs, open included');
-  assert.deepEqual(m.stats.closed, { runs: 1, units: 3, passRate: 67, medianRoundsToPass: 1, p80RoundsToPass: 3, stoppedShare: 33 });
+  assert.deepEqual(m.stats.closed, { runs: 1, units: 3, passRate: 67, medianRoundsToPass: 1, p80RoundsToPass: 3, stoppedShare: 33, unfinished: 0 });
   const t = selfText(m);
   for (const w of ['(all runs, open included)', 'stopped 33% · 3 units in 1 closed run (as run.mjs stats)', '2 runs (1 open)', 'pass rate 67%', 'median 1, p80 3', 'v2 open · waits on v1', 'r-a partial', '[upstream]', '0 studies']) assert.ok(t.includes(w), w);
 });

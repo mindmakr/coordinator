@@ -6,6 +6,14 @@ Each agent gets one brief and a fresh context. Fill in the `<…>` parts and sen
 
 Each brief names its **playbook**: the built-in sub-skill for the step, or the project's own skill when the harness has one (`sub-skills.md` has the table).
 
+## Hot spots: files every unit edits
+
+Locale files, shared registries, route or permission lists and the changelog are edited by most parallel units. Each unit passes on its own branch, and once the first one merges the rest conflict in those files and go round again. So:
+
+- **At planning,** record the files each unit will change: `S/run.mjs touches <run> <path> --unit <unit>` (no map needed). The critic's `detect.mjs --unit` adds the files the diff really changed.
+- **After any merge,** `next` names every open unit that changes a file the merged unit changed ("u3 overlaps u1 in content/en.json, merged already: merge the target into u3 before review"). Merge or rebase the target into that branch, check the hot-spot files first, then `S/run.mjs sync <run> <unit>`. Do it again before merging if another overlapping unit merged meanwhile.
+- **In the builder's brief,** name the hot-spot files and say they will be merged with other units' changes: add keys and entries in place, never reorder or reformat the whole file.
+
 ## Builder
 
 ```

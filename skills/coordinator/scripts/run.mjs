@@ -8,12 +8,21 @@
 //                      [--study-budget 2] (side studies allowed while waiting, 0-10)
 //                      [--models on|off] model routing for this project (.coordinator/coordinator.json "models");
 //                      `run.mjs init --models on|off` with no run only sets that
+//                      [--continues <run>:<unit> …] finishes that unit of an earlier run here (add it under the
+//                      same id, or add another id with add --continues): both runs record the link, a unit is
+//                      continued once (no forks), and stats count the chain as one unit
 //   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
+//                  [--continues <run>:<unit>] this unit, under its own id, continues that unit of an earlier run
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link [--label L]
 //   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL] [--url U --label L]   GitHub issues, PRs and merges for the unit
+//                  [--continues <run>:<unit>]  record afterwards that this unit continues that one (any id; closed runs too)
+//   run.mjs extend <run> <unit> [--rounds N] --reason R [--answer qN]   N (1-4, default 1; above 1 only when their words name it) more rounds for a unit
+//                  at or stopped by its round budget: qN asked with --approves and answered with that option by the
+//                  person (dashboard, web, or answer --by person --confirm "their words"), or else their note on
+//                  the unit since its last verdict saying "approved" (lib/approval.mjs); recorded as a decision
 //   run.mjs freeze <run>
 //   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
 //                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
@@ -35,11 +44,13 @@
 //   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person|escape --text T
 //                  escape: --unit U, a passed unit where a defect turned up later (a later review, verify, test, a person); counted by stats
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
-//                  [--unit U] (person: a note from the person about one unit)
+//                  [--unit U] (person: a note from the person about one unit) [--confirm] (person: their words, pasted)
 //   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P]
 //                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
+//                  [--approves <label>] the option that approves a step only the person may approve (extend)
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
+//                  [--confirm "their words"] with --by person only: the person said this; never without their words
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
 //   run.mjs questions <run>         every question with its options, answer, history and status
 //   run.mjs study <run> --topic T --area security|design|stack|other --text "what it learned" --source URL … [--lesson id …] [--by agent]
@@ -70,7 +81,13 @@
 //                  --fresh starts a new log (the old map/ is kept aside); --reset-stage also replaces the staged and pushed
 //                  map history (a map.reset event push and pull accept); --force records a build cut short by the cap;
 //                  --pit-stop stages the log and summary in the run's pit-stop/map (push carries them), or copies them to --dest
-//   run.mjs touches <run> <path> [--json]   what that file touches, from the map, for a builder's brief
+//   run.mjs touches <run> <path> [--json] [--unit U]   what that file touches, from the map, for a builder's brief;
+//                  --unit records the path as one the unit will change (no map needed for that), so `next` can
+//                  say when a unit that changes the same file merged first
+//   run.mjs calls <run> <unit> [--base ref --head ref | --files a,b] [--root dir] [--json]   the JS/TS functions the unit's
+//                  diff touched (default: its recorded detect base and head), what they call and what calls them; shown
+//                  on the unit page and the maps page's Calls view; map --unit U computes it for U too
+//   run.mjs sync <run> <unit> [--text T]   the target branch was merged into the unit's branch (after `next` asked)
 //   run.mjs models [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
@@ -89,8 +106,13 @@ import { addEvidence, artifact } from './lib/evidence.mjs';
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
-import { allows, decide, decideUnit, stats } from './lib/rules.mjs';
-import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
+import { allows, decide, decideUnit, roundCap, stats } from './lib/rules.mjs';
+import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
+import { answerRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
+import { lastWriter } from './lib/provenance.mjs';
+import { clip } from './lib/plain.mjs';
+import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
+import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
 import { remoteWatch } from './lib/remote.mjs';
@@ -105,7 +127,7 @@ import { unitPage } from './lib/unitpage.mjs';
 import { mapsPage } from './lib/mapspage.mjs';
 import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
 import { hasRetro, retroCommand } from './lib/retro.mjs';
-import { answer, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
+import { answer, answerText, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
 import { loadSelf, selfVersion } from './lib/selfdata.mjs';
@@ -113,21 +135,22 @@ import { selfPage } from './lib/selfpage.mjs';
 import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
-import { build as buildMap, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, touchesOf } from './lib/map/index.mjs';
+import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
 
 const FLAGS = {
-  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models'],
+  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues'],
+  extend: ['rounds', 'reason', 'answer'],
   start: ['model', 'why', 'force-model'], models: ['role', 'class'],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
-  link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
+  link: ['issue', 'pr', 'merge', 'url', 'label', 'continues'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
+  ask: ['question', 'header', 'option', 'multi', 'unit', 'approves'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
-const REPEAT = { study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
+const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -160,11 +183,12 @@ const themeFor = (s) => { const t = settings().theme; return loadTheme(themeFile
 function derived(s) {
   const plan = decide(s);
   writeAtomic(join(runsDir(), s.id, 'workbench.md'), render(s, plan));
-  const v = view(s, plan, Date.now(), { repo: repoFor(s) });
+  const v = view(s, plan, Date.now(), { repo: repoFor(s), linked: linkedOf(s) });
   const theme = themeFor(s);
   writeAtomic(hudFile(s.id), hud(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
-  writeAtomic(join(runDir(s.id), 'maps.html'), mapsPage(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
-  for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), staticCtx(runDir(s.id), 1, theme)));
+  const calls = readCalls(runDir(s.id)); // per-unit function calls (map/calls/), when computed
+  writeAtomic(join(runDir(s.id), 'maps.html'), mapsPage(v, Date.now(), { ...staticCtx(runDir(s.id), 0, theme), calls }));
+  for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), { ...staticCtx(runDir(s.id), 1, theme), calls }));
   for (const [name, html] of reportPages(s, v, runDir(s.id), staticCtx(runDir(s.id), 0, theme))) writeAtomic(join(runDir(s.id), name), html);
 }
 
@@ -179,6 +203,47 @@ function refLinks(s, kind, values = []) {
 const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim().replace(/\\/g, '/')).filter(Boolean) : []);
 
 const exists = (run) => existsSync(stateFile(run)) || existsSync(join(runDir(run), EVENTS));
+// The runs this one continues or was continued in (lib/chain.mjs), for the pages; a missing one shows as "not here".
+const linkedOf = (s) => linkedRuns(s, (id) => (isSafeId(id) && exists(id) ? loadRun(runDir(id)) : null));
+
+// Checks a --continues target: an earlier run of this folder, with that unit, not passed,
+// and not continued anywhere else (no forks: a chain is a line, so stats count it once).
+// child: this run; as: this run's unit id (null at init: the parent's id).
+function parentOf(raw, child, as = null) {
+  const c = parseContinues(raw);
+  if (c.run === child) throw new Error('--continues names this run itself');
+  if (!exists(c.run)) throw new Error(`--continues: no run ${c.run} here`);
+  const u = loadRun(runDir(c.run)).units.find((x) => x.id === c.unit);
+  if (!u) throw new Error(`--continues: no unit ${c.unit} in run ${c.run}`);
+  if (u.status === 'pass') throw new Error(`--continues: ${c.run}:${c.unit} already passed`);
+  const mine = (run, unit) => run === child && (as === null || unit === undefined || unit === as);
+  const other = (u.continuedIn ?? []).find((x) => !mine(x.run, x.unit));
+  const kid = commands.list().filter((r) => !r.error && r.run !== child).find((r) => continuesOf(load(r.run)).some((x) => x.run === c.run && x.unit === c.unit));
+  const taken = other ? `${other.run}${other.unit ? `:${other.unit}` : ''}` : kid?.run;
+  if (taken) throw new Error(`--continues: ${c.run}:${c.unit} is already continued in ${taken}; continue that run's unit instead (a unit is continued once)`);
+  return as && as !== c.unit ? { ...c, as } : c;
+}
+// The parent's side of the link; allowed on a closed run, like a merge link.
+function markParent(c, child) {
+  change(c.run, 'unit.link', (s) => {
+    const u = unitOf(s, c.unit);
+    const had = (u.continuedIn ?? []).find((x) => x.run === child);
+    if (had) { if (c.as && had.unit !== c.as) had.unit = c.as; return; }
+    (u.continuedIn ??= []).push({ run: child, ...(c.as ? { unit: c.as } : {}), at: now() });
+    log(u, 'link', `continued in ${child}${c.as ? `:${c.as}` : ''}`, { link: 'continued' });
+  }, { closedOk: true, unit: c.unit });
+}
+// Records on this run that unit u continues c (same parent again: a no-op; the id may differ).
+function addContinues(s, u, c) {
+  const list = (s.continues ??= []);
+  const same = list.find((x) => x.run === c.run && x.unit === c.unit);
+  if (same && childId(same) !== u.id && s.units.some((x) => x.id === childId(same))) throw new Error(`--continues: ${c.run}:${c.unit} is already continued here by ${childId(same)}`);
+  const mineElse = list.find((x) => childId(x) === u.id && !(x.run === c.run && x.unit === c.unit));
+  if (mineElse) throw new Error(`--continues: ${u.id} already continues ${mineElse.run}:${mineElse.unit}`);
+  if (same) { if (u.id === c.unit) delete same.as; else same.as = u.id; return; }
+  list.push(u.id === c.unit ? { run: c.run, unit: c.unit } : { run: c.run, unit: c.unit, as: u.id });
+  log(u, 'link', `continues ${c.run}${u.id === c.unit ? '' : `:${c.unit}`}`, { link: 'continues' });
+}
 function load(run) {
   if (!exists(run)) throw new Error(`no run: ${run}`);
   return loadRun(runDir(run));
@@ -209,6 +274,19 @@ function judged(evidence, v, gapText, causeText) {
   return { verdict, gap, cause: verdict === 'fail' && gapText ? causeText : null };
 }
 
+// A unit's calls: --base/--head, else the base and head its detect run recorded, else the files
+// a map build tagged with it changed (or --files). Refs must be commits, never options.
+function unitCallsFor(run, s, unit, { root, base, head, files = [], deadline }) {
+  const u = unitOf(s, unit);
+  const ref = (r, name) => { if (r === undefined || r === null) return null; if (typeof r !== 'string' || !r || r.startsWith('-') || /\s/.test(r)) throw new Error(`bad --${name}: ${r}`); return r; };
+  let b = ref(base, 'base'); let h = ref(head, 'head');
+  if (!b !== !h) throw new Error('--base and --head go together');
+  if (!b && !files.length && u.detect?.base && u.detect?.head) { b = u.detect.base; h = u.detect.head; }
+  const fromMap = files.length ? [] : unitFiles(runDir(run), u.id); // also the fallback when the diff's commits are gone
+  if (!b && !files.length && !fromMap.length) return null; // nothing recorded to say what the unit changed
+  return computeCalls(runDir(run), { root, unit: u.id, base: b, head: h, files: files.length || b ? files : fromMap, fallbackFiles: fromMap, source: files.length ? 'files' : 'map build', deadline });
+}
+
 const commands = {
   init([run], o) {
     const routeOn = o.models === undefined ? undefined : oneOf(o.models, ['on', 'off'], '--models') === 'on';
@@ -225,6 +303,9 @@ const commands = {
       },
       createdAt: now(), frozen: false, addedAfterFreeze: 0, units: [], notes: [], integration: { rounds: [] }, closed: null,
     };
+    const parents = (o.continues ?? []).map((raw) => parentOf(raw, run));
+    if (new Set(parents.map((c) => c.unit)).size < parents.length) throw new Error('--continues: one earlier run per unit id (continue a second one with add <run> <unit> --continues)');
+    if (parents.length) fresh.continues = parents;
     if (o.repo !== undefined) { if (typeof o.repo !== 'string' || !REPO.test(o.repo)) throw new Error('--repo must be owner/name'); fresh.repo = o.repo; }
     if (o.theme !== undefined) {
       const f = typeof o.theme === 'string' ? resolve(o.theme) : '';
@@ -233,10 +314,12 @@ const commands = {
     }
     const made = updateRun(runDir(run), { kind: 'run.init' }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
+    for (const c of parents) markParent(c, run);
     return made;
   },
   add([run, unit], o) {
-    return change(run, 'unit.add', (s) => {
+    const cont = o.continues === undefined ? null : parentOf(o.continues, run, safeId(unit, 'unit'));
+    const out = change(run, 'unit.add', (s) => {
       safeId(unit, 'unit');
       if (s.units.some((u) => u.id === unit)) throw new Error(`unit exists: ${unit}`);
       if (s.units.length >= s.budget.maxUnits) throw new Error(`unit cap reached (${s.budget.maxUnits}): log the extra work as a follow-up note`);
@@ -254,9 +337,19 @@ const commands = {
       const u = { id: unit, bar: text(o.bar, 'bar'), ...(specialists.length ? { specialists } : {}), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
       s.units.push(u);
       for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
+      if (cont) addContinues(s, u, cont);
     }, { unit });
+    if (cont) markParent(cont, run);
+    return out;
   },
-  freeze([run]) { return change(run, 'run.freeze', (s) => { if (!s.units.length) throw new Error('add units first'); s.frozen = true; }); },
+  freeze([run]) {
+    return change(run, 'run.freeze', (s) => {
+      if (!s.units.length) throw new Error('add units first');
+      const missing = (s.continues ?? []).filter((c) => !s.units.some((u) => u.id === childId(c)));
+      if (missing.length) throw new Error(`freeze refused: the run continues ${missing.map((c) => `${c.run}:${c.unit}`).join(', ')}; add ${missing.map(childId).join(', ')} (or add a unit with --continues <run>:<unit>)`);
+      s.frozen = true;
+    });
+  },
   // A new build: the critic marks every behaviour again.
   start([run, unit], o) {
     const model = modelName(o.model, 'model'); const why = optText(o.why, 80);
@@ -321,7 +414,8 @@ const commands = {
   },
   // Allowed on a closed run: a merge often lands after the report.
   link([run, unit], o) {
-    return change(run, 'unit.link', (s) => {
+    const cont = o.continues === undefined ? null : parentOf(o.continues, run, safeId(unit, 'unit'));
+    const out = change(run, 'unit.link', (s) => {
       const u = unitOf(s, unit);
       const add = [...refLinks(s, 'issue', o.issue), ...refLinks(s, 'pr', o.pr), ...refLinks(s, 'merge', o.merge)];
       if (o.url !== undefined) {
@@ -329,10 +423,13 @@ const commands = {
         if (!url || url.length > 500) throw new Error('--url must be an http(s) URL');
         add.push({ kind: 'other', url, label: optText(o.label, 120), at: now() });
       }
-      if (!add.length) throw new Error('give --issue, --pr, --merge or --url');
+      if (cont) addContinues(s, u, cont);
+      if (!add.length && !cont) throw new Error('give --issue, --pr, --merge, --url or --continues');
       (u.links ??= []).push(...add);
       for (const l of add) log(u, 'link', l.url, { link: l.kind });
     }, { closedOk: true, unit });
+    if (cont) markParent(cont, run);
+    return out;
   },
   verdict([run, unit, v], o) {
     return change(run, 'unit.verdict', (s) => {
@@ -365,6 +462,67 @@ const commands = {
       u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
       u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy;
       u.status = verdict === 'pass' ? 'pass' : 'open';
+    }, { unit });
+  },
+  // The target branch was merged into this unit's branch: `next` stops asking until another overlapping unit merges.
+  sync([run, unit], o) {
+    return change(run, 'unit.sync', (s) => {
+      const u = unitOf(s, unit);
+      u.syncedAt = now();
+      log(u, 'sync', optText(o.text, 200) ?? 'merged the target in');
+    }, { unit });
+  },
+  // A unit at, or stopped by, its round budget gets N more rounds once the person approved them (#36).
+  extend([run, unit], o) {
+    const rounds = num(o.rounds, 1, 1, 4); // one unless the approval's words name more
+    const reason = text(o.reason, 'reason', 300);
+    return change(run, 'unit.extend', (s) => {
+      const u = unitOf(s, unit);
+      const atCap = u.status === 'stopped' ? u.stopReason === 'budget: rounds' : u.status === 'open' && u.rounds.length >= roundCap(u, s);
+      if (!atCap) throw new Error(`extend refused: ${u.id} is ${u.status}${u.stopReason ? ` (${u.stopReason})` : ''}; extend only lifts a round budget the unit has used up`);
+      // Only the person's explicit yes (lib/approval.mjs), given since the unit's last verdict, used once,
+      // written by the answer or note command (never a hand edit: lib/provenance.mjs); the decision quotes it.
+      const since = u.rounds.at(-1)?.at ?? s.createdAt;
+      const events = readRun(runDir(run))?.log?.events ?? [];
+      const written = (locate, kinds, what) => {
+        const by = lastWriter(events, locate, s);
+        if (!kinds.includes(by)) throw new Error(`extend refused: ${what} was last written by ${by ?? 'nothing in the log'}, not by ${kinds.join(' or ')} (a hand edit of state.json never approves)`);
+      };
+      let source; let words;
+      if (o.answer !== undefined) {
+        const q = questions(s).find((x) => x.id === String(o.answer));
+        if (!q) throw new Error(`--answer: no question ${o.answer}`);
+        if (q.unit !== u.id) throw new Error(`--answer: ${q.id} ${q.unit ? `is about ${q.unit}` : 'names no unit'}; an approving question must name ${u.id} (ask … --unit ${u.id})`);
+        if (['used', 'decided'].includes(q.status)) throw new Error(`extend refused: ${q.id} is already ${q.status}; one approval is good for one extend: ask again`);
+        const why = answerRefusal(q);
+        if (why) throw new Error(`extend refused: ${why}`);
+        if (q.answer.at < since) throw new Error(`extend refused: ${q.id} was answered before ${u.id}'s last verdict; ask again`);
+        const qi = +q.id.slice(1) - 1; const hi = q.history.length - 1;
+        written((st) => st?.notes?.filter((n) => n.kind === 'question')[qi]?.history?.[hi], ['answer'], `${q.id}'s answer`);
+        written((st) => { const n = st?.notes?.filter((x) => x.kind === 'question')[qi]; return n && { approves: n.approves, unit: n.unit, options: n.options }; }, ['question'], `${q.id}`);
+        const opt = q.options.find((x) => x.label === q.answer.choices[0]);
+        words = [opt?.label, opt?.description, q.answer.confirm].filter(Boolean).join(' ');
+        source = `${q.id} "${q.header ? `${q.header}: ` : ''}${clip(q.text, 160)}" answered "${q.answer.choices[0]}${opt?.description ? ` (${clip(opt.description, 120)})` : ''}" via ${q.answer.via}${q.answer.confirm ? `, their words: "${clip(q.answer.confirm, 200)}"` : ''}`;
+      } else {
+        const n = (s.notes ?? []).findLast((x) => x.kind === 'person' && x.unit === u.id && x.at >= since);
+        if (!n) throw new Error(`extend refused: no approval from the person since ${u.id}'s last verdict; give --answer qN (a question on ${u.id} asked with --approves, answered by them), or they add a note on ${u.id} that says "approved"`);
+        if (n.usedBy) throw new Error(`extend refused: their latest note on ${u.id} was already used by an extend; one approval is good for one extend`);
+        const why = noteRefusal(n);
+        if (why) throw new Error(`extend refused: ${why}; their latest note on ${u.id}: "${clip(n.text, 120)}"`);
+        const ni = s.notes.indexOf(n);
+        written((st) => st?.notes?.[ni], ['note'], 'their note');
+        words = n.text;
+        source = `their note via ${n.via}: "${clip(n.text, 300)}"`;
+        n.usedBy = { unit: u.id, at: now() };
+      }
+      // One round unless their own words name more.
+      const named = namedRounds(words);
+      if (rounds > (named ?? 1)) throw new Error(`extend refused: --rounds ${rounds}, but the approval ${named ? `names ${named}` : 'names no number, so it is for one round'}`);
+      u.extraRounds = (u.extraRounds ?? 0) + rounds;
+      if (u.status === 'stopped') { u.status = 'open'; u.stopReason = null; }
+      const scope = named ? `their words name ${named}` : 'their words name no number: one round';
+      s.notes.push({ kind: 'decision', text: `${u.id}: ${rounds} more round${rounds === 1 ? '' : 's'} (now ${roundCap(u, s)}; ${scope}), approved by the person (${source}): ${reason}`, at: now(), ...(o.answer !== undefined ? { answers: String(o.answer) } : {}) });
+      log(u, 'extend', `+${rounds} round${rounds === 1 ? '' : 's'}: ${reason}`);
     }, { unit });
   },
   reset([run, unit], o) {
@@ -403,7 +561,8 @@ const commands = {
   },
   note([run], o) {
     const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'retro', 'question', 'bar', 'info', 'person', 'escape'], '--kind');
-    if (kind === 'person') return change(run, 'note', (s) => personNote(s, { text: o.text, unit: o.unit }), { unit: typeof o.unit === 'string' ? o.unit : null });
+    if (o.confirm !== undefined && (kind !== 'person' || o.confirm !== true)) throw new Error('--confirm takes no value and goes with --kind person');
+    if (kind === 'person') return change(run, 'note', (s) => personNote(s, { text: o.text, unit: o.unit, via: 'cli', confirm: o.confirm === true }), { unit: typeof o.unit === 'string' ? o.unit : null });
     if (kind === 'escape') {
       return change(run, 'note', (s) => {
         if (typeof o.unit !== 'string') throw new Error('--kind escape needs --unit: the unit that passed');
@@ -443,7 +602,10 @@ const commands = {
     return null;
   },
   ask([run], o) { let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id }; },
-  answer([run, id], o) { return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person' })); },
+  answer([run, id], o) {
+    if (o.confirm !== undefined && o.by !== 'person') throw new Error('--confirm needs an explicit --by person');
+    return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person', via: 'cli', confirm: o.confirm === true ? '' : o.confirm }));
+  },
   'use-answer'([run, id]) { return change(run, 'answer.used', (s) => useAnswer(s, id)); },
   questions([run]) { return questions(load(run)).map(({ open, ...q }) => q); },
   serve([run], o) {
@@ -460,9 +622,10 @@ const commands = {
         if (m && !isSafeId(id)) return null;
         if (m && !exists(id)) return null;
         const s = load(id);
-        const v = view(s, decide(s), Date.now(), { repo: repoFor(s) });
+        const v = view(s, decide(s), Date.now(), { repo: repoFor(s), linked: linkedOf(s) });
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
         ctx.has = (file) => existsSync(join(runDir(id), 'artifacts', ...file.split('/')));
+        ctx.calls = readCalls(runDir(id));
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
         if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx, id) }) : null;
@@ -478,8 +641,8 @@ const commands = {
         return a ? { file: join(runDir(id), 'artifacts', a.rel), type: a.type } : null;
       },
       post: {
-        '/answer': write('answer', (s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person' }); return id; }),
-        '/note': write('note', (s, f) => { personNote(s, { text: f.get('text'), unit: f.get('unit') || undefined }); return f.get('unit') ? `unit-${f.get('unit')}` : ''; }),
+        '/answer': write('answer', (s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person', via: 'dashboard' }); return id; }),
+        '/note': write('note', (s, f) => { personNote(s, { text: f.get('text'), unit: f.get('unit') || undefined, via: 'dashboard' }); return f.get('unit') ? `unit-${f.get('unit')}` : ''; }),
       },
     }).then(({ server, url }) => {
       // So `doctor` can tell a running dashboard from a stale one. No token: the URL stays in this output only.
@@ -524,7 +687,10 @@ const commands = {
     const plan = decide(s);
     const cfg = routing(baseDir('project'));
     const suggest = (u) => { const e = u.action === 'build' ? escalation(cfg, unitOf(s, u.id)) : null; return e ? { ...u, model: e.model, modelWhy: e.why } : u; };
-    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? suggest(u)) };
+    // A unit that changes files an already merged unit changed takes the target in first (#37).
+    const syncs = pendingSyncs(s);
+    const sync = (u) => (syncs.has(u.id) && ['build', 'judge', 'done'].includes(u.action) ? { ...u, sync: syncStep(s.id, u.id, syncs.get(u.id), u.action === 'done') } : u);
+    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? sync(suggest(u))) };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];
@@ -537,7 +703,7 @@ const commands = {
     process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: optText(o.where, 500), playbook: optText(o.playbook, 300), env })}\n`);
     return null;
   },
-  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s)))); return null; },
+  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s) }))); return null; },
   // Reads under the lock so it never renders a half-applied change; also refreshes the elapsed time.
   hud([run]) {
     if (!exists(run)) throw new Error(`no run: ${run}`);
@@ -602,15 +768,19 @@ const commands = {
   },
   // The project map (references/map.md): from the code into the run's folder; never into the project's tree unless --dest says so.
   map([run], o) {
+    const t0 = Date.now();
     const s = load(run);
     const root = resolve(typeof o.root === 'string' ? o.root : projectDir());
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
     if (o.unit !== undefined) unitOf(s, o.unit);
     if (o.dest !== undefined && o['pit-stop'] !== true) throw new Error('--dest goes with --pit-stop');
     const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)), fresh: o.fresh === true, force: o.force === true, resetStage: o['reset-stage'] === true });
+    // A build after a unit merged also finds the functions that unit touched (map/calls/<unit>.json), in what is left of the cap.
+    const calls = o.unit !== undefined ? unitCallsFor(run, s, o.unit, { root, deadline: t0 + num(o['max-seconds'], 60, 1, 3600) * 1000 }) : null;
     commands.hud([run]); // the dashboard links to the map
     const b = snap.build;
     return {
+      ...(calls ? { calls: { touched: calls.touchedTotal, source: calls.source, partial: calls.partial } } : {}),
       build: b.n, files: b.scanned, seconds: Math.round(b.ms.total / 100) / 10, partial: b.partial, stats: b.stats, page: mapHtml(runDir(run)),
       ...(o['reset-stage'] === true ? { reset: 'a new map history, staged: the next push replaces the copy, and pull on other machines takes it' } : {}),
       ...(o['pit-stop'] === true ? { pitStop: pitStop(runDir(run), typeof o.dest === 'string' ? o.dest : defaultDest(runDir(run))) } : {}),
@@ -618,10 +788,32 @@ const commands = {
   },
   touches([run, path], o) {
     load(run);
-    if (!path) throw new Error('usage: run.mjs touches <run> <path> [--json]');
+    if (!path) throw new Error('usage: run.mjs touches <run> <path> [--json] [--unit U]');
+    if (o.unit !== undefined) {
+      const p = normPath(path);
+      if (!p || p.length > 300 || p.split('/').includes('..') || /^[A-Za-z]:|^\//.test(p)) throw new Error('--unit records a path relative to the project root');
+      change(run, 'unit.touches', (s) => {
+        const u = unitOf(s, o.unit);
+        if (!(u.touches ?? []).includes(p)) { (u.touches ??= []).push(p); log(u, 'touches', p); }
+      }, { unit: String(o.unit) });
+      if (!hasMap(runDir(run))) { const note = { recorded: p, unit: String(o.unit), map: 'none yet: run map for what it touches' }; if (o.json === true) return note; console.log(JSON.stringify(note)); return null; }
+    }
     const out = touchesOf(run, runDir(run), path, o.json === true);
     if (o.json === true) return out;
     process.stdout.write(out);
+    return null;
+  },
+  // Function calls (references/map.md): the functions a unit's diff touched, what they call and what calls them.
+  calls([run, unit], o) {
+    const s = load(run);
+    if (!unit) throw new Error('usage: run.mjs calls <run> <unit> [--base ref --head ref | --files a,b] [--root dir] [--json]');
+    const root = resolve(typeof o.root === 'string' ? o.root : projectDir());
+    if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
+    const data = unitCallsFor(run, s, unit, { root, base: o.base, head: o.head, files: list(o.files), deadline: Date.now() + num(o['max-seconds'], 60, 1, 3600) * 1000 });
+    if (!data) throw new Error(`nothing recorded says what ${unit} changed: pass --base and --head (its branch's merge base and head), or --files a,b`);
+    commands.hud([run]); // the unit page and the maps page show it
+    if (o.json === true) return data;
+    process.stdout.write(callsText(data));
     return null;
   },
   // Forward slashes and single quotes ($ and ` stay literal), so it pastes safely into a shell brief.
@@ -648,7 +840,7 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);

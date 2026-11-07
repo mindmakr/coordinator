@@ -17,6 +17,7 @@ import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { baseDir, safeId } from './lib/store.mjs';
 
 const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+const PATHS_MAX = 300;
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 });
 
 // A ref must be a real commit; a leading '-' would be read as a git option.
@@ -40,7 +41,8 @@ try {
     head = commit(opt.head ?? 'HEAD', 'head');
     diff = git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--unified=0', '-M', `${base}...${head}`]);
   }
-  const files = parseDiff(diff).length;
+  const changed = parseDiff(diff);
+  const files = changed.length;
   const allow = list(opt.allow);
   const hits = detect(diff, { fence }).filter((h) => !allowed(h, allow));
   if (opt.unit) {
@@ -51,7 +53,9 @@ try {
       const u = s.units.find((x) => x.id === safeId(opt.unit, 'unit'));
       if (!u) throw new Error(`no unit ${opt.unit} in run ${opt.run}`);
       if (u.status !== 'judging') throw new Error(`unit ${opt.unit} is ${u.status}; detect is recorded while judging`);
-      u.detect = { round: u.rounds.length + 1, clean: hits.length === 0, base, head, files, allow, hits: hits.length, at: new Date().toISOString() };
+      // The paths it changed (renames by both names): `next` compares them across units (lib/overlap.mjs).
+      const paths = [...new Set(changed.flatMap((f) => [f.path, f.renamedFrom].filter(Boolean)))].sort().slice(0, PATHS_MAX);
+      u.detect = { round: u.rounds.length + 1, clean: hits.length === 0, base, head, files, paths, allow, hits: hits.length, at: new Date().toISOString() };
     });
   }
   console.log(JSON.stringify({ clean: hits.length === 0, base, head, files, fence, allowed: allow, hits }, null, 2));

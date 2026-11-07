@@ -120,6 +120,17 @@ export function flowGraph(v, nowMs = Date.now()) {
       if (!node.units.includes(u.id)) { node.units.push(u.id); edges.push({ from: `u:${u.id}`, to: `r:${r.key}`, kind: 'link', crit: false }); }
     }
   }
+  // Other runs that hold the same work (#36): the run a unit continues, and the run that continued it.
+  const others = new Map();
+  for (const u of v.units) for (const [dir, list] of [['before', u.chain?.before ?? []], ['after', u.chain?.after ?? []]]) for (const l of list) {
+    const id = `c:${l.run}`;
+    if (!others.has(id)) others.set(id, { id, kind: 'run', run: l.run, label: l.run, known: l.known, units: [], says: [] });
+    const node = others.get(id);
+    if (!node.units.includes(u.id)) node.units.push(u.id);
+    node.says.push(`${dir === 'before' ? `${u.id} continues ${l.unit === u.id ? 'it' : l.unit}` : `${u.id} continued in ${l.unit === u.id ? 'it' : l.unit}`}${l.known ? ` (${l.rounds.length} ${l.rounds.length === 1 ? 'try' : 'tries'}, ${l.outcome})` : ''}`);
+    edges.push({ from: `u:${u.id}`, to: id, kind: 'chain', dir, crit: false });
+  }
+  nodes.push(...others.values());
   const home = (v.repo ?? '').toLowerCase();
   for (const r of refs.values()) nodes.push({ id: `r:${r.key}`, kind: r.kind, label: r.repo.toLowerCase() === home ? `#${r.n}` : `${r.repo.split('/')[1]}#${r.n}`, repo: r.repo, url: r.url, cross: !!home && r.repo.toLowerCase() !== home, units: r.units });
   (v.followUpNotes ?? []).forEach((f, i) => {

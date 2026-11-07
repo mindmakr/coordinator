@@ -54,6 +54,7 @@ export function unitTip(u, i, ctx, nowMs) {
     + row('Time', esc(minutes ? duration(minutes) : 'not started'))
     + row('Last gap', gap)
     + row('Linked', refs)
+    + row('Other runs', u.chainText ? esc(clip(u.chainText, 220)) : '')
     + row('Files', esc(typeof u.files === 'number' ? count(u.files, 'file') + ' touched' : 'not checked yet'))
     + `</dl><a class="tip-open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
 }
