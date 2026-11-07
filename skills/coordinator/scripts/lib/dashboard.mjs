@@ -5,7 +5,8 @@
 // only by its key in the register, never by a folder.
 //   GET /                                       this PC: every registered run, grouped by project
 //   GET /p/<key>/run/<run>[/unit/<u>|/maps|/report|/retro]   one run's pages, read-only
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { loadRunsIn } from './selfdata.mjs';
 import { basename, join } from 'node:path';
 import { linkedRuns } from './chain.mjs';
 import { loadRun } from './events.mjs';
@@ -15,7 +16,7 @@ import { repoFromText } from './links.mjs';
 import { mapsPage } from './mapspage.mjs';
 import { blk, chip, esc, page, stamp } from './parts.mjs';
 import { runStatus } from './progress.mjs';
-import { byProject, findEntry, registryFile } from './registry.mjs';
+import { byProject, findEntry, registryFile, registryHome } from './registry.mjs';
 import { reportPages } from './report/cli.mjs';
 import { decide } from './rules.mjs';
 import { isSafeId } from './store.mjs';
@@ -100,6 +101,12 @@ function projectCtx(live, key, id, home) {
   };
 }
 
+// The runs and lessons a registered project's retro page reads: its own, never the served folder's.
+export function sourceOf(stateDir) {
+  const read = (f) => { try { const l = JSON.parse(readFileSync(f, 'utf8')); return Array.isArray(l) ? l : []; } catch { return []; } };
+  return { runs: () => loadRunsIn(stateDir), lessons: () => ({ global: read(join(registryHome(), 'lessons.json')), project: read(join(stateDir, 'lessons.json')) }) };
+}
+
 // The page at one /p/… path, or null. entries: the register, read now; home: the nav entry back to the run list.
 export function projectPage(path, live, entries, home, nowMs = Date.now()) {
   const m = PROJECT_PAGE.exec(path);
@@ -110,9 +117,9 @@ export function projectPage(path, live, entries, home, nowMs = Date.now()) {
   const s = loadRun(runDirOf(e));
   const sibling = (x) => { try { return isSafeId(x) && existsSync(runDirOf(e, x)) ? loadRun(runDirOf(e, x)) : null; } catch { return null; } };
   const v = view(s, decide(s, nowMs), nowMs, { repo: s.repo ?? repoFromText(JSON.stringify(s)), linked: linkedRuns(s, sibling) });
-  const ctx = projectCtx(live, key, id, home);
+  const ctx = { ...projectCtx(live, key, id, home), project: basename(e.project) };
   if (rest === '/maps') return mapsPage(v, nowMs, ctx);
-  if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDirOf(e), ctx, rest.slice(1))[0][1];
+  if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDirOf(e), ctx, rest.slice(1), sourceOf(e.stateDir))[0][1];
   return rest === '/' ? hud(v, nowMs, ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), nowMs, ctx);
 }
 

@@ -18,6 +18,15 @@ export function runIds() {
   return readdirSync(runsDir()).filter((d) => isSafeId(d) && (existsSync(stateOf(d)) || existsSync(join(runsDir(), d, EVENTS))));
 }
 
+// Every readable run of another state folder (a registered project, lib/dashboard.mjs).
+export function loadRunsIn(stateDir) {
+  const dir = join(stateDir, 'runs'); const out = [];
+  let ids = [];
+  try { ids = readdirSync(dir).filter(isSafeId); } catch { return out; }
+  for (const id of ids) { try { const s = loadRun(join(dir, id)); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ } }
+  return out;
+}
+
 export function loadRuns() {
   const out = [];
   for (const id of runIds()) {

@@ -52,7 +52,8 @@ export function withLock(file, fn) {
   const deadline = Date.now() + LOCK_STALE_MS + 5_000;
   for (let wait = 10; ; wait = Math.min(wait * 2, 250)) {
     try { const fd = openSync(lock, 'wx'); writeSync(fd, stamp); closeSync(fd); break; } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
+      // EPERM or EACCES: on Windows, a lock file pending deletion by its last holder; busy, like EEXIST.
+      if (!['EEXIST', 'EPERM', 'EACCES'].includes(e.code)) throw e;
       try {
         const seen = readFileSync(lock, 'utf8');
         if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS && readFileSync(lock, 'utf8') === seen) unlinkSync(lock);

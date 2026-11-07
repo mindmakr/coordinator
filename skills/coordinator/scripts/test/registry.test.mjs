@@ -2,10 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, harnessOf, origin, versionWarning } from '../lib/harness.mjs';
 import { entryFor, readRegistry, register, registryFile } from '../lib/registry.mjs';
@@ -14,6 +14,7 @@ import { decide } from '../lib/rules.mjs';
 import { view } from '../lib/view.mjs';
 import { hud } from '../lib/hud.mjs';
 import { VERSION } from '../lib/version.mjs';
+import { projectPage } from '../lib/dashboard.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(join(tmpdir(), 'coord-reg-'));
@@ -164,4 +165,64 @@ test('dashboard: serves every registered run, a second call reuses it, stop stop
     assert.equal(cli('p1', ['dashboard', 'stop']).out.stopped, false);
   } finally { if (child.exitCode === null) child.kill(); }
   assert.ok(!existsSync(join(home, 'dashboard.json')) || JSON.parse(readFileSync(join(home, 'dashboard.json'), 'utf8')).pid !== child.pid);
+});
+
+test('dashboard stop leaves a process alone that does not serve the recorded link, and drops the record', async () => {
+  const other = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)']);
+  try {
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'dashboard.json'), JSON.stringify({ pid: other.pid, port: 1, url: 'http://127.0.0.1:1/?t=x' }));
+    const r = cli('p1', ['dashboard', 'stop']);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.stopped, false);
+    assert.match(r.out.note, /does not serve the dashboard/);
+    assert.equal(other.exitCode, null);
+    assert.doesNotThrow(() => process.kill(other.pid, 0), 'the other process is still alive');
+    assert.ok(!existsSync(join(home, 'dashboard.json')));
+  } finally { other.kill(); }
+});
+
+test('coordinator.html is never older than the last change, however close the changes come', () => {
+  assert.equal(init('snap', 's1').code, 0);
+  assert.equal(cli('snap', ['add', 's1', 'first-unit', '--bar', 'b']).code, 0);
+  assert.equal(cli('snap', ['add', 's1', 'last-unit-in-burst', '--bar', 'b']).code, 0);
+  const html = readFileSync(join(state('snap'), 'coordinator.html'), 'utf8');
+  assert.match(html, /last-unit-in-burst/);
+  assert.match(html, /Snapshot written/);
+  assert.match(html, /\/coordinator:dashboard/);
+});
+
+test('a registered project\'s retro page reads that project\'s runs and lessons, not the served folder\'s', () => {
+  const lesson = (text) => [{ id: 'L1', tag: 'process', text, seen: 1, used: 0, from: ['b1'] }];
+  assert.equal(init('projA', 'b1').code, 0);
+  assert.equal(init('projB', 'b1').code, 0);
+  writeFileSync(join(state('projA'), 'lessons.json'), JSON.stringify(lesson('lesson-from-A')));
+  writeFileSync(join(state('projB'), 'lessons.json'), JSON.stringify(lesson('lesson-from-B')));
+  const entries = readRegistry({ home });
+  const b = entries.find((e) => e.run === 'b1' && e.stateDir.includes('projB'));
+  const before = process.env.COORDINATOR_DIR;
+  process.env.COORDINATOR_DIR = state('projA'); // the folder the dashboard was started from
+  try {
+    const html = projectPage(`/p/${b.key}/run/b1/retro`, { token: 't', nonce: 'n' }, entries, { path: '/', label: 'This PC', href: '/?t=t' });
+    assert.match(html, /lesson-from-B/);
+    assert.doesNotMatch(html, /lesson-from-A/);
+    assert.ok(html.includes(`/coordinator:retro b1</code> in ${basename(b.project)}`), 'the retro hint names the run’s own project');
+  } finally { if (before === undefined) delete process.env.COORDINATOR_DIR; else process.env.COORDINATOR_DIR = before; }
+});
+
+test('list --all registers the current folder\'s runs from before the register, once', () => {
+  const src = join(scripts, 'test', 'fixtures', 'old-runs', 'v0.2');
+  cpSync(src, state('pre'), { recursive: true });
+  const all = cli('pre', ['list', '--all']);
+  assert.equal(all.code, 0, all.err);
+  const mine = all.out.find((g) => g.here);
+  assert.deepEqual(mine.runs.map((r) => r.run).sort(), ['old-closed', 'old-open']);
+});
+
+test('the register ignores entries whose run id is not a safe id', () => {
+  const h = join(tmp, 'unsafe-home');
+  const sd = join(tmp, 'unsafe'); mkdirSync(join(sd, 'runs', 'ok'), { recursive: true });
+  mkdirSync(h, { recursive: true });
+  writeFileSync(registryFile(h), JSON.stringify({ v: 1, runs: [{ run: '../..', stateDir: sd }, { run: 'ok', stateDir: sd }] }));
+  assert.deepEqual(readRegistry({ home: h }).map((e) => e.run), ['ok']);
 });

@@ -263,26 +263,34 @@ function derived(s) {
   for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), { ...staticCtx(runDir(s.id), 1, theme), calls }));
   for (const [name, html] of reportPages(s, v, runDir(s.id), staticCtx(runDir(s.id), 0, theme))) writeAtomic(join(runDir(s.id), name), html);
   registerRun(s);
-  writeSnapshot(s);
+  writeSnapshot();
 }
 
-// coordinator.html in the state folder: the coordinator page as a file, rewritten when a run changes,
-// at most every SNAPSHOT_MS (a burst of events costs one rewrite), and always when a run opens or closes.
-// It reads every run of this folder (a few hundred ms on a big one), and lists the PC's runs from the
-// register alone. The live page is run.mjs dashboard.
-const SNAPSHOT_MS = 10_000;
+// coordinator.html in the state folder: the coordinator page as a file, rewritten after every change to a
+// run, so it is never older than the last change (about half a second on a 39 MB folder). It reads every
+// run of this folder under the snapshot's own lock, so of two writers at once the later one, which read
+// the later state, writes last. The PC's runs come from the register alone. The live page is run.mjs dashboard.
 const snapshotFile = () => join(baseDir('project'), 'coordinator.html');
-function writeSnapshot(s, force = false) {
+function writeSnapshot() {
   const file = snapshotFile();
-  const t = Date.now();
-  const recent = (iso) => iso && t - Date.parse(iso) < SNAPSHOT_MS;
   try {
-    if (!force && !recent(s.createdAt) && !recent(s.closed?.at) && existsSync(file) && t - statSync(file).mtimeMs < SNAPSHOT_MS) return null;
-    const m = { ...selfModel({ ...loadSelf(), current: null }), pc: pcModel(readRegistry(), { here: baseDir('project'), read: false }) };
-    const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html`, pcHref: staticPcHref };
-    writeAtomic(file, selfPage(m, t, ctx));
+    withLock(file, () => {
+      const t = Date.now();
+      const m = { ...selfModel({ ...loadSelf(), current: null }), pc: pcModel(readRegistry(), { here: baseDir('project'), read: false }) };
+      const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html`, pcHref: staticPcHref };
+      writeAtomic(file, selfPage(m, t, ctx));
+    });
     return file;
   } catch (e) { console.error(`warning: ${file} was not rewritten: ${e.message}`); return null; }
+}
+
+// The runs of this folder the register does not know yet (from before it): registered once, from their state as it is.
+function registerFolder() {
+  if (process.env.COORDINATOR_REGISTRY === 'off' || !existsSync(runsDir())) return;
+  const known = new Set(readRegistry().filter((e) => e.key === projectKey(baseDir('project'))).map((e) => e.run));
+  for (const id of readdirSync(runsDir()).filter((d) => isSafeId(d) && !known.has(d) && exists(d))) {
+    try { registerRun(loadRun(runDir(id))); } catch { /* unreadable: list says so */ }
+  }
 }
 // On disk, a registered run links to its own hud.html: beside this file, or a file: URL into its project.
 const staticPcHref = (key, run) => {
@@ -294,6 +302,7 @@ const staticPcHref = (key, run) => {
 // list --all: every run on this PC from the register (lib/registry.mjs), grouped by project, each read now.
 function listAll(flag) {
   if (flag !== true) throw new Error('--all takes no value');
+  registerFolder();
   const pc = pcModel(readRegistry({ prune: true }), { here: baseDir('project') });
   return pc.groups.map((g) => ({
     project: g.project, stateDir: g.stateDir, here: g.key === pc.here,
@@ -812,7 +821,7 @@ const commands = {
     if (o.json !== undefined && o.html !== undefined) throw new Error('--json or --html, not both');
     const m = selfModel({ ...loadSelf(), current: null });
     if (o.json) return m;
-    if (o.html) return { file: writeSnapshot({}, true) };
+    if (o.html) return { file: writeSnapshot() };
     process.stdout.write(selfText(m));
     return null;
   },
@@ -922,11 +931,18 @@ const commands = {
     const old = (() => { try { return JSON.parse(readFileSync(rec, 'utf8')); } catch { return null; } })();
     const running = old && Number.isInteger(old.pid) && pidAlive(old.pid);
     if (verb === 'stop') {
-      if (!running) { rmSync(rec, { force: true }); return { stopped: false, note: 'no dashboard was running' }; }
-      process.kill(old.pid); rmSync(rec, { force: true });
-      return { stopped: true, pid: old.pid };
+      if (!running) { rmSync(rec, { force: true }); console.log(JSON.stringify({ stopped: false, note: 'no dashboard was running' }, null, 2)); return null; }
+      // Kill only a process that still serves the recorded link (its token proves it is our dashboard):
+      // a pid reused by another program after a crash or a reboot is left alone, and the stale record goes.
+      answers(old.url ?? '').then((ok) => {
+        rmSync(rec, { force: true });
+        if (ok) process.kill(old.pid);
+        console.log(JSON.stringify(ok ? { stopped: true, pid: old.pid } : { stopped: false, note: `the record named pid ${old.pid}, which does not serve the dashboard; nothing stopped, the record removed` }, null, 2));
+      });
+      return null;
     }
     if (verb !== undefined) throw new Error('usage: run.mjs dashboard [--port P] [--open] | dashboard stop');
+    registerFolder();
     if (o.open !== undefined && o.open !== true) throw new Error('--open takes no value');
     const port = num(o.port, DASHBOARD_PORT, 1, 65_535);
     const start = (p) => serve({
@@ -1185,7 +1201,8 @@ const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e)
 // True when the recorded link still serves the page (a reused pid would not).
 function answers(url) {
   return new Promise((ok) => {
-    const req = httpGet(url, { timeout: 1500 }, (res) => { res.resume(); ok(res.statusCode === 200); });
+    let req;
+    try { req = httpGet(url, { timeout: 1500 }, (res) => { res.resume(); ok(res.statusCode === 200); }); } catch { ok(false); return; } // not a URL
     req.on('timeout', () => { req.destroy(); ok(false); });
     req.on('error', () => ok(false));
   });

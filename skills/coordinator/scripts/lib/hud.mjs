@@ -265,7 +265,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     v.status ? blk('status', statusBlock(v.status, ctx)) : '',
     v.origin ? blk('origin', originLine(v.origin)) : '',
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
-    v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open)) : '',
+    v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open, ctx.project)) : '',
     blk('goal', goalBlock(v, ctx)),
     blk('needs', needsYou(v, form, ctx)),
     form ? blk('note', noteForm(form)) : '',

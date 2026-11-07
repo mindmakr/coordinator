@@ -11,7 +11,7 @@ import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { maskSecrets } from './secrets.mjs';
-import { withLock, writeJson } from './store.mjs';
+import { isSafeId, withLock, writeJson } from './store.mjs';
 
 export const REGISTRY = 'registry.json';
 const NOTE = 'Every coordinator run on this machine (run.mjs list --all). Written by run.mjs; safe to delete.';
@@ -31,7 +31,7 @@ function readFile(file) {
   if (!existsSync(file)) return [];
   try {
     const d = JSON.parse(readFileSync(file, 'utf8'));
-    return Array.isArray(d?.runs) ? d.runs.filter((e) => e && typeof e.stateDir === 'string' && typeof e.run === 'string') : [];
+    return Array.isArray(d?.runs) ? d.runs.filter((e) => e && typeof e.stateDir === 'string' && isSafeId(e.run)) : [];
   } catch { return null; }
 }
 
