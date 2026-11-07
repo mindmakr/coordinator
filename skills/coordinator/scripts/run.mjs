@@ -110,7 +110,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs
 import { basename, extname, join, resolve } from 'node:path';
 import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
-import { addEvidence, artifact } from './lib/evidence.mjs';
+import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
@@ -668,7 +668,7 @@ const commands = {
         const s = load(id);
         const v = view(s, decide(s), Date.now(), { repo: repoFor(s), linked: linkedOf(s) });
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
-        ctx.has = (file) => existsSync(join(runDir(id), 'artifacts', ...file.split('/')));
+        ctx.has = (file) => storedPath(runDir(id), file) !== null;
         ctx.calls = readCalls(runDir(id));
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
@@ -682,7 +682,8 @@ const commands = {
         const id = other ?? run;
         if (!isSafeId(id) || !exists(id)) return null;
         const a = artifact(load(id), target, name);
-        return a ? { file: join(runDir(id), 'artifacts', a.rel), type: a.type } : null;
+        const fd = a ? openStored(runDir(id), a.rel) : null; // a checked name, no links, inside artifacts/<target>/, opened once
+        return fd === null ? null : { fd, type: a.type };
       },
       post: {
         '/answer': write('answer', (s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person', via: 'dashboard' }); return id; }),
