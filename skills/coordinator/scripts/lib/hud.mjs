@@ -19,6 +19,14 @@ import { pendingBanner } from './retro.mjs';
 
 export { esc };
 
+// Where the run came from (lib/harness.mjs): the tool and skill version that started it, the name
+// the person uses for it, and a warning when another version of the skill last wrote it.
+export function originLine(o) {
+  const alias = o.alias ? `<b>${esc(o.alias)}</b> · ` : '';
+  return `<p class="meta origin">${alias}${esc(o.line)}${o.later ? ` · ${esc(o.later)}` : ''}</p>`
+    + (o.warning ? `<p class="hint origin-warn" role="note">${badge('stop', 'version')} ${esc(o.warning)}</p>` : '');
+}
+
 // The run's status word as a chip, coloured by kind (lib/progress.mjs runStatus).
 const STATUS_CLS = { running: 's-working', waiting: 's-needs-you', finishing: 's-finishing' };
 export const statusChip = (st) => chip(st.word, st.concluded ? cls(st.outcome) : STATUS_CLS[st.kind]);
@@ -255,6 +263,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const body = [
     blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${v.status ? statusChip(v.status) : chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · ${v.status ? `phase ${esc(v.phase)} · ` : ''}started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
     v.status ? blk('status', statusBlock(v.status, ctx)) : '',
+    v.origin ? blk('origin', originLine(v.origin)) : '',
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open)) : '',
     blk('goal', goalBlock(v, ctx)),

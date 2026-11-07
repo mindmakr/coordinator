@@ -14,6 +14,7 @@ import { maskSecrets } from './secrets.mjs';
 import { withLock, writeJson } from './store.mjs';
 
 export const REGISTRY = 'registry.json';
+const NOTE = 'Every coordinator run on this machine (run.mjs list --all). Written by run.mjs; safe to delete.';
 const FRESH_MS = 60_000; // an unchanged entry seen this recently is not rewritten
 
 export const registryHome = (env = process.env) => resolve(env.COORDINATOR_HOME || join(homedir(), '.coordinator'));
@@ -61,7 +62,7 @@ export function register(entry, { home = registryHome(), now = Date.now() } = {}
     runs = runs.filter((e) => !same(e, entry) && alive(e));
     runs.push(entry);
     runs.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)));
-    writeJson(file, { v: 1, note: 'Every coordinator run on this machine (run.mjs list --all). Written by run.mjs; safe to delete.', runs });
+    writeJson(file, { v: 1, note: NOTE, runs });
   });
   return true;
 }
@@ -72,7 +73,7 @@ export function readRegistry({ home = registryHome(), prune = false } = {}) {
   const runs = readFile(file) ?? [];
   const live = runs.filter(alive);
   if (prune && live.length !== runs.length) {
-    withLock(file, () => { const now = (readFile(file) ?? []).filter(alive); writeJson(file, { v: 1, note: 'Every coordinator run on this machine (run.mjs list --all). Written by run.mjs; safe to delete.', runs: now }); });
+    withLock(file, () => { const kept = (readFile(file) ?? []).filter(alive); writeJson(file, { v: 1, note: NOTE, runs: kept }); });
   }
   return live.map((e) => ({ ...e, key: projectKey(e.stateDir) }));
 }

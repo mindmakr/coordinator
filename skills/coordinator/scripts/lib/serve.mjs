@@ -46,13 +46,14 @@ function readBody(req) {
 const errorPage = (msg, back) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Not saved</title>`
   + `<p>Not saved: ${esc(msg)}</p><p><a href="${esc(back)}">Back to the run</a></p>`;
 
-const pathOf = (p) => { const m = PAGE.exec(p ?? ''); return m ? p : null; };
+const pathOf = (p, extra = null) => (PAGE.test(p ?? '') || (extra && extra.test(p ?? '')) ? p : null);
 
 // page(path, { token, nonce }) returns the HTML or null; post[path](form) writes
 // and returns the anchor to show next; file(target, name, run) returns { fd | file, type }
 // for an artifact the state names (run: null for the served run, else the run
 // named in /run/<run>/…), or null; version() changes when any page's data does.
-export function serve({ port = 0, page, post, file = () => null, version = () => '' }) {
+// extra: a regex of more page paths (the global dashboard's /p/<key>/run/<run>/…, lib/dashboard.mjs).
+export function serve({ port = 0, page, post, file = () => null, version = () => '', extra = null }) {
   const token = randomBytes(24).toString('base64url');
   const live = hub({ version, render: (p) => page(p, { token, nonce: 'patch' }) });
   // No request can take the server down: every throw ends in a 400 or 500 for that request only.
@@ -68,7 +69,7 @@ export function serve({ port = 0, page, post, file = () => null, version = () =>
       if (req.method === 'GET') {
         if (!sameToken(url.searchParams.get('t'), token)) return send(res, 403, 'missing or wrong token: open the link serve printed');
         if (url.pathname === '/events') {
-          const at = pathOf(url.searchParams.get('p'));
+          const at = pathOf(url.searchParams.get('p'), extra);
           if (!at) return send(res, 400, 'bad page');
           return live.add(req, res, at);
         }
@@ -81,7 +82,7 @@ export function serve({ port = 0, page, post, file = () => null, version = () =>
           try { body = readFileSync(f.fd ?? f.file); } catch { return send(res, 404, 'not found: the stored copy is missing'); } finally { if (f.fd !== undefined) closeSync(f.fd); }
           return send(res, 200, body, { 'Content-Type': f.type, 'Content-Security-Policy': "default-src 'none'; img-src 'self'; sandbox", 'Cache-Control': 'private, max-age=60' });
         }
-        if (!pathOf(url.pathname)) return send(res, 404, 'not found');
+        if (!pathOf(url.pathname, extra)) return send(res, 404, 'not found');
         const nonce = randomBytes(16).toString('base64');
         const html = page(url.pathname, { token, nonce });
         if (html === null) return send(res, 404, 'not found');

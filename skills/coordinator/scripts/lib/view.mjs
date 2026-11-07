@@ -1,5 +1,6 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
+import { origin } from './harness.mjs';
 import { byModel, modelLine, unrecorded, UNSPECIFIED, whoUnit } from './models.mjs';
 import { attention, attentionLabel, clip, dotState, sentence, situation, stateBadge, timeLeft, waitIds } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
@@ -47,7 +48,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
   const dots = new Map(run.units.map((u) => [u.id, dotState(u, next.get(u.id), run.closed ? [] : qs)]));
   const brief = (id) => { const x = run.units.find((y) => y.id === id); const st = dots.get(id); return { id, title: x?.title ?? null, status: x?.status ?? null, dot: st ?? null, badge: x ? stateBadge(st, x, next.get(id)) : null }; };
   return {
-    id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo,
+    id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo, origin: origin(run),
     continues: Array.isArray(run.continues) ? run.continues : [],
     goalCheck: {
       behaviours: goalBehaviours, evidence: run.goalEvidence ?? [],

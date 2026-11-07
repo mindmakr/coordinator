@@ -59,7 +59,7 @@ export function versionWarning(skill, mine = VERSION) {
 export function origin(s, mine = VERSION) {
   const first = s.startedBy ?? null; const last = s.writer ?? first;
   const said = (b) => `${harnessName(b.harness)} · skill ${b.skill ?? 'unknown'}`;
-  const line = first ? `started in ${said(first)}` : 'tool and skill version not recorded (an older run)';
+  const line = first ? `started in ${said(first)}` : last ? `last written in ${said(last)}; started before runs recorded their tool` : 'tool and skill version not recorded (an older run)';
   const later = last && first && (last.harness !== first.harness || last.skill !== first.skill) ? `last written in ${said(last)}` : null;
   return { line, later, alias: typeof s.alias === 'string' && s.alias ? s.alias : null, warning: last ? versionWarning(last.skill, mine) : null, harness: last?.harness ?? null, skill: last?.skill ?? null };
 }

@@ -8,6 +8,7 @@ import { KIND_LABEL, gapHaystack } from './gaps.mjs';
 import { clip } from './plain.mjs';
 import { badge, blk, chip, esc, hash, keyed, page, stamp, stateChip, toggle, unitDot } from './parts.mjs';
 import { progressBar, statusChip } from './hud.mjs';
+import { pcSection } from './dashboard.mjs';
 import { clock } from './progress.mjs';
 
 const LESSONS_SHOWN = 12;
@@ -195,12 +196,15 @@ export const SECTIONS = [
   { id: 'history', title: 'History', render: history },
   { id: 'proposals', title: 'Proposals', render: proposals },
   { id: 'study', title: 'Side study', render: study },
+  // Every run on this PC, across projects and tools (lib/registry.mjs, lib/dashboard.mjs).
+  { id: 'pc', title: 'This PC', render: pcSection },
 ];
 
 export function selfPage(m, nowMs = Date.now(), ctx) {
   const toc = `<nav class="toc" aria-label="Sections">${SECTIONS.map((s) => `<a href="#self-${s.id}">${esc(s.title)}${s.id === 'gaps' && m.gaps?.openCount ? ` · ${m.gaps.openCount}` : ''}</a>`).join('')}</nav>`;
   const body = [
     blk('head', `<header class="run"><h1>Coordinator</h1><span class="meta">across ${count(m.age.runs, 'run')} in this project${m.gaps?.openCount ? ` · <a href="#self-gaps">${gapsLine(m.gaps)}</a>` : ''} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    ctx.live ? '' : blk('snapshot', `<p class="hint" role="note"><b>Snapshot written ${stamp(new Date(nowMs).toISOString())}.</b> It is rewritten when a run in this folder changes. For the live page, with every run on this PC, use <code>/coordinator:dashboard</code> (<code>run.mjs dashboard</code>).</p>`),
     toc,
     ...SECTIONS.map((s) => `<h2 id="self-${s.id}" data-a="h-${s.id}">${esc(s.title)}</h2>${blk(`self-${s.id}`, s.render(m, ctx), 'section', ` class="self" aria-labelledby="self-${s.id}"`)}`),
   ].join('\n');

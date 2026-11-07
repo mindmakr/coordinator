@@ -75,7 +75,14 @@ export function writeAtomic(file, content) {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, content);
-  renameSync(tmp, file);
+  // On Windows a rename over a file another process has open (a reader that takes no lock,
+  // such as the run register's fast path) fails for a moment with EPERM, EACCES or EBUSY: retry.
+  for (let wait = 5; ; wait *= 2) {
+    try { renameSync(tmp, file); return; } catch (e) {
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(e.code) || wait > 640) { try { unlinkSync(tmp); } catch { /* gone */ } throw e; }
+      pause(wait);
+    }
+  }
 }
 
 export const writeJson = (file, data) => writeAtomic(file, `${JSON.stringify(data, null, 2)}\n`);

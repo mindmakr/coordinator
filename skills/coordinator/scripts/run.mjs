@@ -2,7 +2,7 @@
 // The coordinator's run state: one JSON file per run, written only through here.
 // Each step is refused unless the loop asked for it (see allows() in lib/rules.mjs).
 //
-//   run.mjs init <run> --goal G --bar B --fence F [--paths a,b] [--tag T] [--max-rounds 4]
+//   run.mjs init <run> --goal G --bar B --fence F [--alias "the name you use"] [--paths a,b] [--tag T] [--max-rounds 4]
 //                      [--max-minutes 240] [--max-units 6] [--max-added 2] [--stale-minutes 45]
 //                      [--repo owner/name] (resolves #123 and shas; else the project's git remote) [--theme file.css]
 //                      [--study-budget 2] (side studies allowed while waiting, 0-10)
@@ -124,8 +124,15 @@
 //   run.mjs pull <run> [--from branch|./folder]   restores the run on another machine, or appends the
 //                  copy's newer events; never overwrites local events the copy lacks. After the lead's own
 //                  later events, it replays the copy's extra answers and person notes (nothing else) on top
+//   run.mjs list --all     every run on this PC from the register (~/.coordinator/registry.json), by project
+//   run.mjs dashboard [--port P] [--open] | dashboard stop   the live page of every run on this PC (default port 7480);
+//                  a running one prints its link instead of starting another (references/hud.md)
+//   --harness NAME (any command): the tool running it (claude-code, codex, antigravity, gemini …); else
+//                  COORDINATOR_HARNESS, else detected. Every write stamps the run with it and the skill version
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
-import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { spawn as spawnProcess } from 'node:child_process';
+import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
 import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
@@ -144,7 +151,9 @@ import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
 import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
-import { entryFor, register, registryFile } from './lib/registry.mjs';
+import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
+import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
+import { pathToFileURL } from 'node:url';
 import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
@@ -182,7 +191,7 @@ const FLAGS = {
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
-  brief: ['role', 'quote', 'source', 'where', 'playbook'], 'status-line': ['json'],
+  brief: ['role', 'quote', 'source', 'where', 'playbook'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'],
 };
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
@@ -254,6 +263,46 @@ function derived(s) {
   for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), { ...staticCtx(runDir(s.id), 1, theme), calls }));
   for (const [name, html] of reportPages(s, v, runDir(s.id), staticCtx(runDir(s.id), 0, theme))) writeAtomic(join(runDir(s.id), name), html);
   registerRun(s);
+  writeSnapshot(s);
+}
+
+// coordinator.html in the state folder: the coordinator page as a file, rewritten when a run changes,
+// at most every SNAPSHOT_MS (a burst of events costs one rewrite), and always when a run opens or closes.
+// It reads every run of this folder (a few hundred ms on a big one), and lists the PC's runs from the
+// register alone. The live page is run.mjs dashboard.
+const SNAPSHOT_MS = 10_000;
+const snapshotFile = () => join(baseDir('project'), 'coordinator.html');
+function writeSnapshot(s, force = false) {
+  const file = snapshotFile();
+  const t = Date.now();
+  const recent = (iso) => iso && t - Date.parse(iso) < SNAPSHOT_MS;
+  try {
+    if (!force && !recent(s.createdAt) && !recent(s.closed?.at) && existsSync(file) && t - statSync(file).mtimeMs < SNAPSHOT_MS) return null;
+    const m = { ...selfModel({ ...loadSelf(), current: null }), pc: pcModel(readRegistry(), { here: baseDir('project'), read: false }) };
+    const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html`, pcHref: staticPcHref };
+    writeAtomic(file, selfPage(m, t, ctx));
+    return file;
+  } catch (e) { console.error(`warning: ${file} was not rewritten: ${e.message}`); return null; }
+}
+// On disk, a registered run links to its own hud.html: beside this file, or a file: URL into its project.
+const staticPcHref = (key, run) => {
+  const e = readRegistry().find((x) => x.key === key && x.run === run);
+  if (!e) return null;
+  return projectKey(baseDir('project')) === key ? `runs/${encodeURIComponent(run)}/hud.html` : pathToFileURL(join(e.stateDir, 'runs', run, 'hud.html')).href;
+};
+
+// list --all: every run on this PC from the register (lib/registry.mjs), grouped by project, each read now.
+function listAll(flag) {
+  if (flag !== true) throw new Error('--all takes no value');
+  const pc = pcModel(readRegistry({ prune: true }), { here: baseDir('project') });
+  return pc.groups.map((g) => ({
+    project: g.project, stateDir: g.stateDir, here: g.key === pc.here,
+    runs: g.runs.map((r) => ({
+      run: r.run, ...(r.alias ? { alias: r.alias } : {}), title: r.title ?? null, harness: r.origin?.harness ?? r.harness ?? null, skill: r.origin?.skill ?? r.skill ?? null,
+      origin: r.origin?.line ?? null, ...(r.origin?.warning ? { warning: r.origin.warning } : {}), lastSeen: r.lastSeen,
+      ...(r.error ? { error: r.error } : { status: r.status.word, line: r.status.line }),
+    })),
+  }));
 }
 
 // The machine-wide register (lib/registry.mjs): every write keeps this run listed for list --all and
@@ -763,12 +812,7 @@ const commands = {
     if (o.json !== undefined && o.html !== undefined) throw new Error('--json or --html, not both');
     const m = selfModel({ ...loadSelf(), current: null });
     if (o.json) return m;
-    if (o.html) {
-      const file = join(baseDir('project'), 'coordinator.html');
-      const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html` };
-      writeAtomic(file, selfPage(m, Date.now(), ctx));
-      return { file };
-    }
+    if (o.html) return { file: writeSnapshot({}, true) };
     process.stdout.write(selfText(m));
     return null;
   },
@@ -823,7 +867,13 @@ const commands = {
       port: num(o.port, 0, 0, 65_535),
       page: (path, live) => {
         const theme = themeFor(load(run));
-        if (path === '/coordinator') return selfPage(selfModel({ ...loadSelf(), current: run }), Date.now(), liveCtx(live, run, theme));
+        if (path === '/coordinator') {
+          const ctx = liveCtx(live, run, theme);
+          ctx.pcHref = (key, id) => (key === projectKey(baseDir('project')) ? ctx.runHref(id) : `/p/${key}/run/${encodeURIComponent(id)}?t=${encodeURIComponent(live.token)}`);
+          return selfPage({ ...selfModel({ ...loadSelf(), current: run }), pc: pcModel(readRegistry(), { here: baseDir('project') }) }, Date.now(), ctx);
+        }
+        // /p/<key>/run/<run>/…: a run of another project on this PC, read-only (lib/dashboard.mjs).
+        if (PROJECT_PAGE.test(path)) return projectPage(path, live, readRegistry(), { path: '/coordinator', label: 'Coordinator', href: `/coordinator?t=${encodeURIComponent(live.token)}` });
         // /run/<other>[/unit/<u>|/maps|/map]: another run of this folder, read-only; /run/<served> is the served run.
         const m = /^\/run\/([^/]+)(\/unit\/.+|\/maps|\/map|\/report|\/retro)?$/.exec(path);
         const id = m ? m[1] : run;
@@ -841,7 +891,8 @@ const commands = {
         if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDir(id), ctx, rest.slice(1))[0][1];
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
       },
-      version: selfVersion,
+      version: () => selfVersion() + pcVersion(readRegistry()),
+      extra: PROJECT_PAGE,
       file: (target, name, other) => {
         const id = other ?? run;
         if (!isSafeId(id) || !exists(id)) return null;
@@ -863,6 +914,58 @@ const commands = {
       for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
       console.log(JSON.stringify({ url, note: 'local only; stop with Ctrl+C' }));
     }, (e) => { console.error(`error: ${e.message}`); process.exit(1); });
+    return null;
+  },
+  // The global dashboard: every run on this PC (lib/dashboard.mjs), no run argument, on a stable port.
+  dashboard([verb], o) {
+    const rec = join(registryHome(), 'dashboard.json');
+    const old = (() => { try { return JSON.parse(readFileSync(rec, 'utf8')); } catch { return null; } })();
+    const running = old && Number.isInteger(old.pid) && pidAlive(old.pid);
+    if (verb === 'stop') {
+      if (!running) { rmSync(rec, { force: true }); return { stopped: false, note: 'no dashboard was running' }; }
+      process.kill(old.pid); rmSync(rec, { force: true });
+      return { stopped: true, pid: old.pid };
+    }
+    if (verb !== undefined) throw new Error('usage: run.mjs dashboard [--port P] [--open] | dashboard stop');
+    if (o.open !== undefined && o.open !== true) throw new Error('--open takes no value');
+    const port = num(o.port, DASHBOARD_PORT, 1, 65_535);
+    const start = (p) => serve({
+      port: p, post: {}, extra: PROJECT_PAGE, version: () => pcVersion(readRegistry()),
+      page: (path, live) => {
+        const t = `t=${encodeURIComponent(live.token)}`;
+        const home = { path: '/', label: 'This PC', href: `/?${t}` };
+        if (path === '/') {
+          const ctx = { live, theme: null, run: null, store: null, base: '', home: `/?${t}`, embed: null, readOnly: true, pages: [home], runHref: () => null, pcHref: (key, id) => `/p/${key}/run/${encodeURIComponent(id)}?${t}` };
+          return pcPage(pcModel(readRegistry(), { here: null }), Date.now(), ctx);
+        }
+        return projectPage(path, live, readRegistry(), home);
+      },
+    });
+    const ready = ({ server, url }) => {
+      writeAtomic(rec, `${JSON.stringify({ pid: process.pid, port: server.address().port, url, at: now() })}
+`);
+      try { chmodSync(rec, 0o600); } catch { /* not on this file system */ }
+      const drop = () => { try { if (JSON.parse(readFileSync(rec, 'utf8')).pid === process.pid) rmSync(rec); } catch { /* gone */ } };
+      process.on('exit', drop);
+      for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
+      if (o.open) openBrowser(url);
+      console.log(JSON.stringify({ url, note: 'every run on this PC; local only; stop with run.mjs dashboard stop' }));
+    };
+    const fresh = () => start(port).catch((e) => {
+      if (e.code === 'EADDRINUSE' && o.port === undefined) { console.error(`port ${port} is taken; using a free one`); return start(0); }
+      throw e;
+    }).then(ready, (e) => { console.error(`error: ${e.message}`); process.exit(1); });
+    // A dashboard already running answers its own link: print it instead of starting another.
+    if (running && old.url) {
+      answers(old.url).then((ok) => {
+        if (!ok) return fresh();
+        if (o.open) openBrowser(old.url);
+        console.log(JSON.stringify({ url: old.url, pid: old.pid, reused: true, note: 'a dashboard is already running; stop it with run.mjs dashboard stop' }));
+        return null;
+      });
+      return null;
+    }
+    fresh();
     return null;
   },
   // Polls every 2 s (fs.watch misses renames on some systems); the state file is
@@ -986,7 +1089,8 @@ const commands = {
     process.stdout.write(out.text);
     return null;
   },
-  list() {
+  list(_, o = {}) {
+    if (o.all !== undefined) return listAll(o.all);
     if (!existsSync(runsDir())) return [];
     return readdirSync(runsDir()).filter((d) => isSafeId(d) && exists(d)).map((d) => {
       try {
@@ -994,7 +1098,8 @@ const commands = {
         const plan = decide(s);
         const st = runStatus(s, plan, { runs: [...linkedOf(s).values()].filter((r) => r && Array.isArray(r.units)) });
         return {
-          run: s.id, tag: s.tag, createdAt: s.createdAt, closed: s.closed?.outcome ?? null, decision: plan.decision,
+          run: s.id, ...(s.alias ? { alias: s.alias } : {}), tag: s.tag, createdAt: s.createdAt, closed: s.closed?.outcome ?? null, decision: plan.decision,
+          harness: s.writer?.harness ?? null, skill: s.writer?.skill ?? null,
           // The plain status (lib/progress.mjs): the same word, progress and ETA as show, the HUD and the coordinator page.
           status: st.word, progress: { done: st.done, total: st.total, pct: st.pct, stopped: st.stopped }, doing: st.concluded ? null : st.doing,
           eta: st.eta.text, readyAt: st.eta.readyAt, needsYou: st.needsYou.map((q) => q.id), line: st.line,
@@ -1074,6 +1179,21 @@ const commands = {
     return { role: o.role, class: o.class ?? null, ...route(cfg, String(o.role), typeof o.class === 'string' ? o.class : null) };
   },
 };
+
+const DASHBOARD_PORT = 7480; // stable, so the link stays the same; the owner's run dashboards use 7471-7473
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+// True when the recorded link still serves the page (a reused pid would not).
+function answers(url) {
+  return new Promise((ok) => {
+    const req = httpGet(url, { timeout: 1500 }, (res) => { res.resume(); ok(res.statusCode === 200); });
+    req.on('timeout', () => { req.destroy(); ok(false); });
+    req.on('error', () => ok(false));
+  });
+}
+function openBrowser(url) {
+  const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try { spawnProcess(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch (e) { console.error(`could not open a browser: ${e.message}`); }
+}
 
 // --harness works on every command: it names the tool that runs this one (lib/harness.mjs).
 const [cmd, ...argv] = process.argv.slice(2);
