@@ -40,6 +40,7 @@ export const KINDS = {
   'unit.strategy': { unit: 'required', payload: changes },
   'unit.detect': { unit: 'required', payload: changes },
   'unit.link': { unit: 'required', payload: changes },
+  'unit.extend': { unit: 'required', payload: changes },
   behaviour: { unit: 'optional', payload: changes },
   evidence: { unit: 'optional', payload: changes },
   note: { unit: 'optional', payload: changes },

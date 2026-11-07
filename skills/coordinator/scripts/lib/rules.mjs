@@ -1,6 +1,8 @@
 // The loop's decisions, as pure functions: what each unit should do next, and
 // when the loop must stop. No I/O here, so every rule is unit-tested.
 
+import { chainUnits } from './chain.mjs';
+
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
 
@@ -30,6 +32,9 @@ export function sameGap(a, b) {
   return sameWords(A.gap, B.gap);
 }
 
+// The run's round budget plus any extra rounds the person approved for this unit (`run.mjs extend`).
+export const roundCap = (unit, run) => run.budget.maxRounds + (Number.isInteger(unit.extraRounds) ? unit.extraRounds : 0);
+
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
 
@@ -51,7 +56,7 @@ export function decideUnit(unit, run, nowMs) {
   const rounds = unit.rounds;
   const last = rounds.at(-1);
   if (!last) return { action: 'build' };
-  if (rounds.length >= budget.maxRounds) return stop('budget: rounds');
+  if (rounds.length >= roundCap(unit, run)) return stop('budget: rounds');
 
   const prev = rounds.at(-2);
   if (prev && sameGap(prev, last)) {
@@ -131,12 +136,13 @@ export function bySetup(runs) {
   return [...groups.values()].map((g) => ({ ...g, rate: Math.round((g.escapes / g.passed) * 100) / 100 })).sort((a, b) => a.setup.localeCompare(b.setup));
 }
 
+// A unit finished in a follow-on run counts once, with its rounds added up (lib/chain.mjs).
 export function stats(runs) {
   const passRounds = [];
   let total = 0; let stopped = 0;
-  for (const run of runs) for (const u of run.units) {
+  for (const u of chainUnits(runs)) {
     total++;
-    if (u.status === 'pass') passRounds.push(u.rounds.length);
+    if (u.status === 'pass') passRounds.push(u.rounds);
     if (u.status === 'stopped') stopped++;
   }
   passRounds.sort((a, b) => a - b);

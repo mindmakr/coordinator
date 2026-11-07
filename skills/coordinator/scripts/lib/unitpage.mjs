@@ -2,8 +2,9 @@
 // and behaviours with their evidence, every round, notes and questions for it,
 // its links and its own timeline. Same shell, same rules as the dashboard.
 import { linkify } from './links.mjs';
+import { clip } from './plain.mjs';
 import { whoRound } from './models.mjs';
-import { liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
+import { chainRow, liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
 import { behaviourList, blk, chip, dot, esc, evidenceList, hash, keyed, page, stamp, timelineTools } from './parts.mjs';
 
 function round(r, repo) {
@@ -14,6 +15,15 @@ function round(r, repo) {
     + `<dl>${r.report ? `<dt>Builder's report</dt><dd>${linkify(r.report, repo)}</dd>` : ''}`
     + `${r.gap ? `<dt>Gap</dt><dd>${linkify(r.gap, repo)}</dd>` : ''}${r.evidence ? `<dt>Critic's evidence</dt><dd>${linkify(r.evidence, repo)}</dd>` : ''}</dl>`
     + (marks ? `<ul class="behaviours">${marks}</ul>` : '') + '</div>';
+}
+
+// The rounds this unit had in the runs it continues (#36), oldest first, one line each.
+function earlier(c, repo) {
+  const runs = (c?.before ?? []).filter((l) => l.known);
+  if (!runs.length) return '';
+  const line = (l, r) => `<li>${chip(r.verdict, r.verdict)} <b>${esc(l.run)}</b> round ${esc(r.n)}${typeof r.score === 'number' ? ` · score ${esc(r.score)}` : ''}${r.gap ? ` · ${linkify(clip(r.gap, 200), repo)}` : ''}${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''}</li>`;
+  const stops = runs.filter((l) => l.stopReason).map((l) => `<p><b>Stopped in ${esc(l.run)}:</b> ${esc(l.stopReason)}</p>`).join('');
+  return `<h3 data-a="h-earlier">Earlier runs</h3><ol class="earlier">${runs.flatMap((l) => l.rounds.map((r) => line(l, r))).join('') || '<li class="empty">No round there.</li>'}</ol>${stops}`;
 }
 
 export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
@@ -30,13 +40,13 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
     blk('head', `<header class="run"><h1>${dot(u.dot)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${chip(u.status, u.status)}`
       + `<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span></header>`
-      + unitLinks(u, r) + triesRow(u) + scoreChart(u.roundList) + `<p class="say" data-a="say">${esc(u.sentence)}</p><div class="next" data-a="next"><b>Next</b>${esc(u.next)}</div>`),
+      + unitLinks(u, r) + triesRow(u) + chainRow(u, ctx) + scoreChart(u.roundList) + `<p class="say" data-a="say">${esc(u.sentence)}</p><div class="next" data-a="next"><b>Next</b>${esc(u.next)}</div>`),
     '<h2 data-a="h-Bar">Bar and behaviours</h2>',
     blk('behaviours', `<section class="card"><p>${linkify(u.bar, r)}</p>${behaviourList(u.behaviours, r, u.evidenceItems, ctx, `p-${u.id}`)}</section>`),
     '<h2 data-a="h-Evidence">Evidence and artifacts</h2>',
     blk('evidence', `<section class="card">${loose.length ? evidenceList(loose, r, ctx, `p-${u.id}-ev`) : '<p class="empty">No evidence outside the behaviours.</p>'}</section>`),
     '<h2 data-a="h-Rounds">Rounds</h2>',
-    blk('rounds', `<section class="card">${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
+    blk('rounds', `<section class="card">${earlier(u.chain, r)}${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
     '<h2 data-a="h-Notes">Notes and questions</h2>',
     blk('notes', `<section class="card">${u.asks.length ? `<ul class="needs-list">${u.asks.map((q) => questionItem(q, form, r)).join('')}</ul>` : ''}`
       + (notes ? `<ul>${notes}</ul>` : (u.asks.length ? '' : '<p class="empty">None.</p>'))

@@ -141,6 +141,16 @@ export function triesRow(u) {
   return `<div class="row" title="${esc(help)}"><span>Tries used: ${u.rounds} of ${u.maxRounds}${u.after ? ` · after ${esc(u.after)}` : ''}</span></div>${bar(u.rounds, u.maxRounds, tone, help)}`;
 }
 
+// The same work in other runs (#36): "Continues run-a (3 tries, stopped) · Continued in run-b: pass".
+export function chainRow(u, ctx) {
+  const c = u.chain;
+  if (!c) return '';
+  const name = (l) => (l.known && ctx?.runHref ? `<a href="${esc(ctx.runHref(l.run))}">${esc(l.run)}</a>` : esc(l.run));
+  const one = (l) => `${name(l)} <span class="cause">(${l.known ? `${l.rounds.length} ${l.rounds.length === 1 ? 'try' : 'tries'}, ${esc(l.status)}` : 'not here'})</span>`;
+  const parts = [c.before.length && `Continues ${c.before.map(one).join(' → ')}`, c.after.length && `Continued in ${c.after.map(one).join(' → ')}`].filter(Boolean);
+  return `<p class="cause chain" data-a="chain-${esc(u.id)}">${parts.join(' · ')}${c.after.length ? ` · finally ${chip(c.final.status ?? 'unknown', c.final.status ?? '')}` : ''}</p>`;
+}
+
 function unitCard(u, ctx, form, repo) {
   const flag = u.attention ? `<span class="chip flag" title="${esc(`The lead is on it: ${u.attention}`)}">${esc(u.attentionLabel)}</span> ` : '';
   const raw = [u.gap && `<dt>Last gap</dt><dd>${linkify(u.gap, repo)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${linkify(u.evidence, repo)}</dd>`].filter(Boolean).join('');
@@ -149,6 +159,7 @@ function unitCard(u, ctx, form, repo) {
     + unitLinks(u, repo)
     + `<p class="say" data-a="say-${esc(u.id)}">${esc(u.sentence)}</p>`
     + triesRow(u)
+    + chainRow(u, ctx)
     + (u.who ? `<p class="cause" data-a="who-${esc(u.id)}">${esc(u.who)}</p>` : '')
     + scoreChart(u.roundList)
     + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo, [], null, `u-${u.id}`)) : '')

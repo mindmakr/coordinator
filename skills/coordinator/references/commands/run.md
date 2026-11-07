@@ -50,6 +50,10 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 
 **After each verdict and each merge**, move the board if the project has one (`references/sub-skills/board.md`) and write the situation in one or two plain sentences: `S/run.mjs note <run> --kind situation --text "Security gaps: failed twice on the same route gate; a new approach is next. Roles: being checked."` It heads the HUD. Say what is happening and what comes next, in the person's words, not unit ids alone.
 
+**A unit the rules stopped.** Two ways on, both the person's call:
+- **More rounds in this run** (a round-budget stop only): ask the person, then `S/run.mjs extend <run> <unit> --rounds 1 --reason "…" --answer qN` (their answer), or without `--answer` once they left a note on the unit. It is refused without one of those, and recorded as a decision. Units stopped as blocked by it stay stopped.
+- **A follow-on run:** `S/run.mjs init <new-run> … --continues <run>:<unit>` and add the unit under the same id. Both runs record the link; the dashboard, unit page, maps and coordinator page show the chain, and `stats` counts it as one unit (rounds added up, outcome from the last run). For a follow-on run made without the flag: `S/run.mjs link <new-run> <unit> --continues <run>:<unit>`.
+
 **Pit stops.** After a unit merges, a decision is recorded, or the run closes (after `close`), run `S/run.mjs push <run>` so the run is in the repo for another machine (`references/durability.md`). Never after every step.
 
 Briefs for agents outside a git worktree of this repo carry `COORDINATOR_DIR` from `S/run.mjs where`.

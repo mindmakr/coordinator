@@ -70,11 +70,18 @@ function stats(m, ctx) {
   return `${cards}<h3 class="sub">Trend over runs</h3><div class="scroll"><table><thead><tr><th scope="col">Run</th><th scope="col">Passed</th><th scope="col">Pass rate</th><th scope="col">Median rounds</th><th scope="col">Time per unit</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+// Units finished across runs (#36): each chain is one unit in the stats above.
+function chains(m, ctx) {
+  if (!m.chains?.length) return '';
+  const rows = m.chains.map((c) => `<li data-a="chain-${esc(c.links[0].run)}-${esc(c.unit)}"><b>${esc(c.unit)}</b> ${c.links.map((l) => `${runLink(l.run, ctx, m)} <span class="cause">(${l.rounds} ${l.rounds === 1 ? 'try' : 'tries'}, ${esc(l.status)})</span>`).join(' → ')} · ${c.rounds} ${c.rounds === 1 ? 'round' : 'rounds'} ${chip(c.status, c.status)}</li>`).join('');
+  return `<h3 class="sub">Work across runs</h3><p class="meta">A unit stopped in one run and finished in a follow-on run counts once in the stats, with its rounds added up.</p><ul class="plain">${rows}</ul>`;
+}
+
 function history(m, ctx) {
-  if (!m.history.length) return empty('No closed run yet.');
+  if (!m.history.length) return m.chains?.length ? chains(m, ctx) : empty('No closed run yet.');
   const rows = m.history.map((h) => `<tr data-a="h-${esc(h.run)}"><th scope="row">${runLink(h.run, ctx, m)}<div class="cause">${esc(h.goal)}</div></th><td>${chip(h.outcome, h.outcome)}</td>`
     + `<td>${h.passed}/${h.units}${h.stopped ? ` <span class="cause">${h.stopped} stopped</span>` : ''}</td><td>${stamp(h.started)}</td><td>${stamp(h.closed)}</td></tr>`).join('');
-  return `<div class="scroll"><table><thead><tr><th scope="col">Run</th><th scope="col">Outcome</th><th scope="col">Units passed</th><th scope="col">Started</th><th scope="col">Closed</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="scroll"><table><thead><tr><th scope="col">Run</th><th scope="col">Outcome</th><th scope="col">Units passed</th><th scope="col">Started</th><th scope="col">Closed</th></tr></thead><tbody>${rows}</tbody></table></div>${chains(m, ctx)}`;
 }
 
 function plans(m, ctx) {
