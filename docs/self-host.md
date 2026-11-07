@@ -102,7 +102,7 @@ The installation id is the number at the end of the installation's settings page
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | no | Web push alerts (`npx web-push generate-vapid-keys`). Both keys or neither; the subject is a `mailto:` or `https:` URL |
 | `ALERT_SWEEP_SECONDS` | no | How often quiet leads are looked for and due digests sent. Default 60 |
 | `DOORBELL_MAX_STREAMS` | no | Open doorbell streams at most. Default 500; 0 turns the doorbell off |
-| `PARSE_WORKERS` | no | Worker threads that read run and map logs, so a slow log never blocks the server. A large log never takes the last one. Default 2 (1–32) |
+| `PARSE_WORKERS` | no | Worker threads that read run and map logs, so a slow log never blocks the server. A large log never takes the last one. Default 2 (1–32). With 1, a large log may take the only worker, on purpose, so small reads wait behind it: the guarantee that a small read never waits behind a large one needs at least 2 |
 | `PARSE_SMALL_KB` | no | A log up to this size counts as small and may use any worker. Default 512 (1–16384) |
 | `PARSE_BUDGET_SECONDS` | no | Reading time each installation gets per hour. Past it, its logs wait for the next resync. Default 600 (1–3600) |
 | `SYNC_MAX_MB` | no | Log bytes one sync of one repo reads; the rest follow at the next sync, and a forced sync carries on where the last stopped. Default 64 (8–4096) |
