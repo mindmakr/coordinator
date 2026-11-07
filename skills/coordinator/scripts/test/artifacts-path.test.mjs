@@ -3,13 +3,13 @@
 // enters the state through an event, and no reader follows it or a link out.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { get as httpGet } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { storedPath } from '../lib/evidence.mjs';
+import { openStored, readStored, storedPath } from '../lib/evidence.mjs';
 import { validRun, validateEvent } from '../lib/eventschema.mjs';
 import { hud, staticCtx } from '../lib/hud.mjs';
 import { decide } from '../lib/rules.mjs';
@@ -146,4 +146,39 @@ test('live route: a link inside artifacts/ to outside is not served or embedded;
   writeFileSync(sf, '{}');
   const r = run('hud', 'L1');
   assert.notEqual(r.status, 0); assert.match(r.stderr, /evidence file .* is not <unit>\/E<n>-<name>/);
+});
+
+test('a hard link to a file elsewhere is refused: by storedPath, readStored and openStored, in the snapshot and on the live route', async () => {
+  run('init', 'H1', '--goal', 'g', '--bar', 'b', '--fence', 'f'); run('add', 'H1', 'u1', '--bar', 'b'); run('freeze', 'H1');
+  writeFileSync(join(dir, 'h.png'), PNG); writeFileSync(join(dir, 'h.log'), 'fine log');
+  assert.equal(run('evidence', 'H1', 'u1', '--kind', 'screenshot', '--file', join(dir, 'h.png')).status, 0);
+  assert.equal(run('evidence', 'H1', 'u1', '--kind', 'log', '--file', join(dir, 'h.log')).status, 0);
+  const rd = runDir('H1'); const arts = join(rd, 'artifacts', 'u1');
+  const [png, log] = ['.png', '.log'].map((x) => readdirSync(arts).find((n) => n.endsWith(x)));
+  assert.equal(readStored(rd, `u1/${log}`, 'utf8'), 'fine log', 'a stored copy with one name reads');
+  const fd = openStored(rd, `u1/${png}`); assert.notEqual(fd, null); closeSync(fd);
+  // Replace both with hard links to secrets outside the run folder.
+  writeFileSync(join(dir, 'hl-secret.log'), SECRET); writeFileSync(join(dir, 'hl-secret.png'), Buffer.concat([PNG, Buffer.from(SECRET)]));
+  for (const [n, src] of [[png, 'hl-secret.png'], [log, 'hl-secret.log']]) { unlinkSync(join(arts, n)); linkSync(join(dir, src), join(arts, n)); }
+  for (const n of [png, log]) {
+    assert.equal(storedPath(rd, `u1/${n}`), null, n); assert.equal(readStored(rd, `u1/${n}`), null, n); assert.equal(openStored(rd, `u1/${n}`), null, n);
+  }
+  assert.equal(run('hud', 'H1').status, 0);
+  for (const f of ['hud.html', 'units/u1.html']) {
+    const html = readFileSync(join(rd, f), 'utf8');
+    assert.ok(!html.includes(SECRET) && !html.includes(Buffer.from(SECRET).toString('base64').slice(0, 12)), f);
+    assert.match(html, /missing \(the stored copy is gone\)/, `${f} says missing`);
+  }
+  const c = spawn(process.execPath, [join(scripts, 'run.mjs'), 'serve', 'H1', '--port', '0'], { env, cwd: dir });
+  children.push(c);
+  const url = await new Promise((ok, bad) => { let b = ''; c.stdout.on('data', (d) => { b += d; const m = /"url": ?"([^"]+)"/.exec(b); if (m) ok(m[1]); }); c.once('exit', () => bad(new Error('serve exited'))); });
+  const { origin } = new URL(url); const t = new URL(url).searchParams.get('t');
+  for (const n of [png, log]) {
+    const r = await new Promise((ok) => httpGet(`${origin}/artifacts/u1/${n}?t=${t}`, (res) => { let d = ''; res.on('data', (x) => { d += x; }); res.on('end', () => ok({ status: res.statusCode, body: d })); }));
+    assert.equal(r.status, 404, n); assert.ok(!r.body.includes(SECRET));
+  }
+  // A fresh copy (one name again) is served.
+  unlinkSync(join(arts, log)); writeFileSync(join(arts, log), 'fine log');
+  const ok = await new Promise((done) => httpGet(`${origin}/artifacts/u1/${log}?t=${t}`, (res) => { let d = ''; res.on('data', (x) => { d += x; }); res.on('end', () => done({ status: res.statusCode, body: d })); }));
+  assert.equal(ok.status, 200); assert.equal(ok.body, 'fine log');
 });

@@ -102,7 +102,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs
 import { basename, extname, join, resolve } from 'node:path';
 import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
-import { addEvidence, artifact, storedPath } from './lib/evidence.mjs';
+import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
@@ -638,8 +638,8 @@ const commands = {
         const id = other ?? run;
         if (!isSafeId(id) || !exists(id)) return null;
         const a = artifact(load(id), target, name);
-        const p = a && storedPath(runDir(id), a.rel); // a checked name, no links, inside artifacts/<target>/
-        return p ? { file: p, type: a.type } : null;
+        const fd = a ? openStored(runDir(id), a.rel) : null; // a checked name, no links, inside artifacts/<target>/, opened once
+        return fd === null ? null : { fd, type: a.type };
       },
       post: {
         '/answer': write('answer', (s, f) => { const id = f.get('q'); answer(s, id, { ...fromForm(find(s, id), f.getAll('choice'), f.get('other')), by: 'person', via: 'dashboard' }); return id; }),

@@ -3,7 +3,7 @@
 // masked for secrets and capped; a file must be a real image or a small text
 // file; nothing outside the run's artifacts folder is ever served.
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { STORED_FILE } from './eventschema.mjs';
 import { oneOf, optText, text } from './args.mjs';
@@ -98,18 +98,40 @@ export function addEvidence(s, unit, o, runDir) {
 
 // The stored copy of `file` (<target>/<name>) on disk, or null. Every read under artifacts/ goes
 // through here: the name must be one `evidence` writes, nothing on the way may be a link, and the
-// real path must sit directly in artifacts/<target>/.
-export function storedPath(runDir, file) {
+// real path must sit directly in artifacts/<target>/, and the file may have no other name (a
+// hard link to a file elsewhere counts as outside). Reads go through readStored/openStored.
+export function storedPath(runDir, file) { return checked(runDir, file)?.p ?? null; }
+function checked(runDir, file) {
   if (!runDir || typeof file !== 'string' || !STORED_FILE.test(file) || file.includes('..')) return null;
   const [target, name] = file.split('/');
   const root = join(runDir, 'artifacts'); const dir = join(root, target); const p = join(dir, name);
   try {
     if (lstatSync(root).isSymbolicLink() || lstatSync(dir).isSymbolicLink()) return null;
     const st = lstatSync(p);
-    if (st.isSymbolicLink() || !st.isFile()) return null;
+    if (st.isSymbolicLink() || !st.isFile() || st.nlink > 1) return null;
     if (dirname(realpathSync(p)) !== realpathSync(dir) || dirname(realpathSync(dir)) !== realpathSync(root)) return null;
+    return { p, st };
   } catch { return null; }
-  return p;
+}
+
+// The stored copy opened once, read-only and (where the platform has it) not through a link; the
+// open handle is checked again (a regular file, one name, the very file checked above), so nothing
+// can swap it between the check and the read. Returns the fd, or null; the caller closes it.
+export function openStored(runDir, file) {
+  const c = checked(runDir, file); if (!c) return null;
+  let fd;
+  try {
+    fd = openSync(c.p, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const st = fstatSync(fd);
+    if (st.isFile() && st.nlink === 1 && st.ino === c.st.ino && st.dev === c.st.dev) return fd;
+  } catch { /* gone, or refused */ }
+  if (fd !== undefined) closeSync(fd);
+  return null;
+}
+// The stored copy's bytes (or text with `enc`), read from that one handle; null when refused or gone.
+export function readStored(runDir, file, enc) {
+  const fd = openStored(runDir, file); if (fd === null) return null;
+  try { return readFileSync(fd, enc); } catch { return null; } finally { closeSync(fd); }
 }
 
 // The served artifact for a request path's two parts, only when the state names it.

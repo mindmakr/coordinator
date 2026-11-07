@@ -10,7 +10,7 @@
 // GET [/run/<run>]/maps  the run maps          GET [/run/<run>]/map  the project map, when one is built
 // GET /events?p=<path>  live updates (SSE)     GET [/run/<run>]/artifacts/<unit>/<file>  a stored screenshot or log
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { closeSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { esc } from './links.mjs';
 import { hub } from './live.mjs';
@@ -49,7 +49,7 @@ const errorPage = (msg, back) => `<!doctype html><meta charset="utf-8"><meta nam
 const pathOf = (p) => { const m = PAGE.exec(p ?? ''); return m ? p : null; };
 
 // page(path, { token, nonce }) returns the HTML or null; post[path](form) writes
-// and returns the anchor to show next; file(target, name, run) returns { file, type }
+// and returns the anchor to show next; file(target, name, run) returns { fd | file, type }
 // for an artifact the state names (run: null for the served run, else the run
 // named in /run/<run>/…), or null; version() changes when any page's data does.
 export function serve({ port = 0, page, post, file = () => null, version = () => '' }) {
@@ -77,7 +77,8 @@ export function serve({ port = 0, page, post, file = () => null, version = () =>
           const f = file(decodeURIComponent(art[2]), decodeURIComponent(art[3]), art[1] ?? null);
           if (!f) return send(res, 404, 'not found');
           let body;
-          try { body = readFileSync(f.file); } catch { return send(res, 404, 'not found: the stored copy is missing'); }
+          // f.fd: a handle the caller opened and checked; read from it, so the file cannot change in between.
+          try { body = readFileSync(f.fd ?? f.file); } catch { return send(res, 404, 'not found: the stored copy is missing'); } finally { if (f.fd !== undefined) closeSync(f.fd); }
           return send(res, 200, body, { 'Content-Type': f.type, 'Content-Security-Policy': "default-src 'none'; img-src 'self'; sandbox", 'Cache-Control': 'private, max-age=60' });
         }
         if (!pathOf(url.pathname)) return send(res, 404, 'not found');
