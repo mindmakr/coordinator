@@ -1,0 +1,32 @@
+/* The manifesto: the homepage's tokens, set quieter. One column, type does the work. */
+.mf-main { max-width: 920px; padding-top: 4.5rem; padding-bottom: 5rem; }
+.mf-kicker { font-weight: 700; color: var(--accent); margin: 0 0 1.2rem; }
+.mf-title { font-size: clamp(2.4rem, 6.4vw, 4.6rem); font-weight: 800; letter-spacing: -.035em; line-height: 1.04; margin-bottom: 2rem; }
+.mf-intro { font-size: 1.25rem; color: var(--ink-2); max-width: 38rem; }
+.mf-by { font-weight: 700; margin-top: 1.6rem; padding-left: 1rem; border-left: 3px solid var(--accent); }
+
+.principles { list-style: none; counter-reset: p; margin: 4.5rem 0 0; padding: 0; }
+.principles li { counter-increment: p; display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); column-gap: 1rem; padding: 2.4rem 0; border-top: 1px solid var(--line); }
+.principles li::before { content: counter(p); grid-row: span 2; font-weight: 800; font-size: 1.1rem; color: var(--accent); padding-top: .55rem; font-variant-numeric: tabular-nums; }
+.principles h2 { font-size: clamp(1.6rem, 3.6vw, 2.5rem); font-weight: 800; letter-spacing: -.025em; line-height: 1.12; }
+.principles h2 a { color: var(--ink); text-decoration: none; }
+.principles h2 a:hover { text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 6px; }
+.principles p { margin: .9rem 0 0; font-size: 1.15rem; color: var(--ink-2); max-width: 36rem; }
+.principles li:target h2 a { text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 6px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .principles h2 a { color: transparent; background: linear-gradient(90deg, var(--ink) 50%, color-mix(in srgb, var(--ink) 25%, transparent) 50%) 100% 0 / 200% 100% no-repeat; -webkit-background-clip: text; background-clip: text; animation: mf-fill linear both; animation-timeline: view(); animation-range: entry 30% cover 40%; }
+    @keyframes mf-fill { to { background-position: 0 0; } }
+  }
+}
+
+.mf-end { margin-top: 2rem; padding-top: 2.4rem; border-top: 1px solid var(--line); font-size: 1.1rem; color: var(--ink-2); }
+.mf-sign { font-size: .95rem; }
+
+@media (max-width: 600px) {
+  .mf-main { padding-top: 2.6rem; }
+  .principles li { grid-template-columns: 2.4rem minmax(0, 1fr); padding: 1.8rem 0; }
+  .principles li::before { padding-top: .3rem; }
+}
+@media print { .principles h2 a { color: var(--ink) !important; background: none !important; } }
