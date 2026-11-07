@@ -28,9 +28,11 @@ function stall(t, ip, length, send) {
   if (send) s.write(Buffer.alloc(send, 0x61));
   return { status, socket: s };
 }
-const signed = async (t, ip, pad = '') => {
+// target: the hook target headers GitHub sets ({ type, id }); this App's own by default.
+const signed = async (t, ip, pad = '', target = { type: 'integration', id: t.cfg.github.appId }) => {
   const b = JSON.stringify({ zen: 'hi', hook_id: 1, installation: { id: 7 }, pad });
-  const r = await fetch(`${t.base}/webhook`, { method: 'POST', body: b, headers: { 'X-Forwarded-For': ip, 'X-GitHub-Event': 'ping', 'X-GitHub-Delivery': `e-${++n}`, 'X-Hub-Signature-256': sign(t.cfg.github.webhookSecret, b) } });
+  const to = target ? { 'X-GitHub-Hook-Installation-Target-Type': target.type, 'X-GitHub-Hook-Installation-Target-ID': String(target.id) } : {};
+  const r = await fetch(`${t.base}/webhook`, { method: 'POST', body: b, headers: { 'X-Forwarded-For': ip, 'X-GitHub-Event': 'ping', 'X-GitHub-Delivery': `e-${++n}`, 'X-Hub-Signature-256': sign(t.cfg.github.webhookSecret, b), ...to } });
   return r.status;
 };
 
@@ -57,6 +59,10 @@ test('c14: stalled bodies cannot starve the webhook: a cap per address group, a 
     // GitHub's deliveries still get through, from its hook addresses; nobody else reaches the reserve.
     assert.equal(await signed(t, '140.82.115.1', 'x'.repeat(6000)), 200);
     assert.equal(await signed(t, '192.0.2.10', 'x'.repeat(6000)), 503);
+    // c14 round 5: from GitHub's addresses too, a hook that does not name this App (someone's repo hook) stays out of the reserve.
+    assert.equal(await signed(t, '140.82.115.1', 'x'.repeat(6000), { type: 'repository', id: 4242 }), 503);
+    assert.equal(await signed(t, '140.82.115.1', 'x'.repeat(6000), { type: 'repository', id: t.cfg.github.appId }), 503, 'a repo whose id is the App id');
+    assert.equal(await signed(t, '140.82.115.1', 'x'.repeat(6000), null), 503);
     // The deadline: every stalled body is cut, its bytes are released, and it counts as a refusal.
     const codes = await Promise.all(open.slice(0, 1).concat(open.slice(2, -1)).map((x) => x.status));
     assert.ok(codes.every((c) => c === 408 || c === 'closed'), String(codes));

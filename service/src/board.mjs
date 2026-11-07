@@ -39,18 +39,20 @@ const byName = (fields, name) => fields.find((f) => f?.name?.toLowerCase() === n
 const option = (field, name) => field?.options?.find((o) => o.name.toLowerCase() === String(name).toLowerCase()) ?? null;
 
 // One board session per refresh: the project and its fields are read once.
-export function boardSession({ gh, token, board }) {
+// spend (optional, trail.mjs): called before every GitHub call; it throws when the budget is spent.
+export function boardSession({ gh, token, board, spend = () => {} }) {
   let project;
+  const graphql = (query, vars) => { spend(); return gh.graphql(token, query, vars); };
   async function load() {
     if (project !== undefined) return project;
-    const d = await gh.graphql(token, PROJECT, { login: board.owner, number: board.number });
+    const d = await graphql(PROJECT, { login: board.owner, number: board.number });
     project = d?.organization?.projectV2 ?? null;
     if (!project) return null;
     const fields = project.fields.nodes;
     // The coordinator's own two fields, made once.
-    if (!byName(fields, RUN_FIELD)) await gh.graphql(token, CREATE, { project: project.id, name: RUN_FIELD, type: 'TEXT' });
-    if (!byName(fields, STATE_FIELD)) await gh.graphql(token, CREATE, { project: project.id, name: STATE_FIELD, type: 'SINGLE_SELECT', options: STATES.map((name) => ({ name, color: 'GRAY', description: '' })) });
-    if (!byName(fields, RUN_FIELD) || !byName(fields, STATE_FIELD)) project = (await gh.graphql(token, PROJECT, { login: board.owner, number: board.number }))?.organization?.projectV2 ?? null;
+    if (!byName(fields, RUN_FIELD)) await graphql(CREATE, { project: project.id, name: RUN_FIELD, type: 'TEXT' });
+    if (!byName(fields, STATE_FIELD)) await graphql(CREATE, { project: project.id, name: STATE_FIELD, type: 'SINGLE_SELECT', options: STATES.map((name) => ({ name, color: 'GRAY', description: '' })) });
+    if (!byName(fields, RUN_FIELD) || !byName(fields, STATE_FIELD)) project = (await graphql(PROJECT, { login: board.owner, number: board.number }))?.organization?.projectV2 ?? null;
     return project;
   }
 
@@ -59,11 +61,11 @@ export function boardSession({ gh, token, board }) {
     const p = await load();
     if (!p) return 'no board';
     const [owner, name] = ref.repo.split('/');
-    const d = await gh.graphql(token, ITEMS, { owner, name, number: Number(ref.n) });
+    const d = await graphql(ITEMS, { owner, name, number: Number(ref.n) });
     const item = d?.repository?.issueOrPullRequest?.projectItems?.nodes?.find((i) => i?.project?.id === p.id);
     if (!item) return 'not on board';
     const fields = p.fields.nodes;
-    const set = (field, value) => gh.graphql(token, SET, { project: p.id, item: item.id, field: field.id, value });
+    const set = (field, value) => graphql(SET, { project: p.id, item: item.id, field: field.id, value });
     const runField = byName(fields, RUN_FIELD);
     if (runField) await set(runField, { text: runId });
     const opt = option(byName(fields, STATE_FIELD), state);

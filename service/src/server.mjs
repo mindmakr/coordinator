@@ -29,6 +29,7 @@ export const MAX_WEBHOOK_PER_IP = 512 * 1024;
 export const WEBHOOK_RESERVE = 6 * 1024 * 1024; // c14: the part of the budget only GitHub's hook addresses may use
 export const SMALL_WEBHOOK = 64 * 1024; // c14: WEBHOOK_SOURCES=any: a body declared this size or less may use the reserve
 export const WEBHOOK_BODY_MS = 10_000; // c14: a webhook body must arrive in full this soon (GitHub waits 10 s)
+const RESYNC_LISTERS = 4; // c14 round 5: installations whose repos are listed at once by resyncAll
 const MAX_FORM = 4 * 1024;
 const MAX_WRITE_FORM = 16 * 1024; // c12: an answer or note of 1000 characters, percent-encoded
 const WRITE_ROUTES = new Set(['answer', 'note']); // c12: POST /r/<owner>/<repo>/run/<run>/answer|note
@@ -70,13 +71,18 @@ function readBody(req, max, budget = null, deadlineMs = 0) {
 // every address of one IPv6 /64) cannot fill the budget, and nothing outside GitHub reaches the
 // reserve. With WEBHOOK_SOURCES=any nobody is known to be GitHub: every group is capped, and the
 // reserve takes bodies declared `small` or less from anyone.
+// c14 round 5: GitHub's addresses also deliver every other repo's and App's hooks, so anyone can aim
+// their own hooks here. Only a delivery that names this App (src.ours) is uncapped and may use the
+// reserve; any other from GitHub counts under the hook target it names (hookGroup), capped like an
+// address group and kept out of the reserve.
 export function webhookBudget({ max = MAX_WEBHOOK_INFLIGHT, perGroup = MAX_WEBHOOK_PER_IP, reserve = WEBHOOK_RESERVE, small = SMALL_WEBHOOK, any = false } = {}) {
   const total = { used: 0, peak: 0, max };
   const byGroup = new Map(); // group → bytes
-  const mayReserve = (src, declared) => (any ? Number.isFinite(declared) && declared <= small : src.github);
+  const mayReserve = (src, declared) => (any ? Number.isFinite(declared) && declared <= small : src.github && src.ours !== false);
+  const capped = (src) => !src.github || src.ours === false;
   // Why `bytes` more cannot be taken now (an HttpError), or null.
   const refusal = (src, bytes, declared) => {
-    if (!src.github && (byGroup.get(src.group) ?? 0) + bytes > perGroup) return new HttpError(429, 'too many bodies at once from this address; try again');
+    if (capped(src) && (byGroup.get(src.group) ?? 0) + bytes > perGroup) return new HttpError(429, 'too many bodies at once from this address; try again');
     if (total.used + bytes > max - (mayReserve(src, declared) ? 0 : reserve)) return new HttpError(503, 'busy; try again');
     return null;
   };
@@ -85,7 +91,7 @@ export function webhookBudget({ max = MAX_WEBHOOK_INFLIGHT, perGroup = MAX_WEBHO
     // Before reading: whether a body of the declared length could be taken at all.
     refusal(src, declared) {
       if (!Number.isFinite(declared)) return null;
-      if (!src.github && declared > perGroup) return new HttpError(413, 'too large from this address');
+      if (capped(src) && declared > perGroup) return new HttpError(413, 'too large from this address');
       return refusal(src, declared, declared);
     },
     open(src, declared) {
@@ -94,18 +100,22 @@ export function webhookBudget({ max = MAX_WEBHOOK_INFLIGHT, perGroup = MAX_WEBHO
         add(n) {
           const no = refusal(src, n, declared);
           held += n; total.used += n; total.peak = Math.max(total.peak, total.used);
-          if (!src.github) byGroup.set(src.group, (byGroup.get(src.group) ?? 0) + n);
+          if (capped(src)) byGroup.set(src.group, (byGroup.get(src.group) ?? 0) + n);
           return no;
         },
         release() {
           total.used -= held;
-          if (!src.github) { const left = (byGroup.get(src.group) ?? 0) - held; if (left > 0) byGroup.set(src.group, left); else byGroup.delete(src.group); }
+          if (capped(src)) { const left = (byGroup.get(src.group) ?? 0) - held; if (left > 0) byGroup.set(src.group, left); else byGroup.delete(src.group); }
           held = 0;
         },
       };
     },
   };
 }
+
+// c14 round 5: what a delivery from GitHub's addresses that does not name this App counts under: the
+// hook target it names (a repo, an org, another App), so one sender's hooks share one cap.
+export const hookGroup = (h) => `hook:${String(h['x-github-hook-installation-target-type'] ?? '').slice(0, 20)}:${String(h['x-github-hook-installation-target-id'] ?? '').slice(0, 20)}`;
 
 // senders (tests): { email, push, github } in place of the ones built from the settings.
 export function createApp({ config, db, gh, log, now = Date.now, senders = null }) {
@@ -200,12 +210,16 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   async function webhook(req, res) {
     const addr = clientIp(req);
     const ip = groupOf(addr); // the refusal limiter's key
-    const src = { group: groupOf(addr, { v4Bits: 24 }), github: sources.trusted(addr) }; // the budget's
+    const github = sources.trusted(addr);
     const close = { Connection: 'close' };
     const length = Number(req.headers['content-length']);
     if (length > MAX_WEBHOOK) return send(res, 413, 'too large', close);
     // c14: the header is believed only from GitHub's hook addresses (from anyone with WEBHOOK_SOURCES=any).
-    const ours = (src.github || sources.any) && String(req.headers['x-github-hook-installation-target-id'] ?? '') === String(config.github.appId);
+    // c14 round 5: and the target is an App (GitHub always sends the type), so a repo whose id equals the App's is not it.
+    const kind = req.headers['x-github-hook-installation-target-type'];
+    const ours = (github || sources.any) && (kind === undefined || kind === 'integration') && String(req.headers['x-github-hook-installation-target-id'] ?? '') === String(config.github.appId);
+    // The budget's account: an address group, or (from GitHub, not naming this App) the hook target it names.
+    const src = github && !ours ? { group: hookGroup(req.headers), github, ours } : { group: groupOf(addr, { v4Bits: 24 }), github, ours };
     const wait = ours ? 0 : limits.webhookFailures.blocked(ip);
     if (wait) return send(res, 429, 'too many requests', { ...close, 'Retry-After': String(wait) });
     const full = inflight.refusal(src, length);
@@ -390,15 +404,26 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   server.headersTimeout = 20_000;
 
   // Every installation re-read from GitHub: a missed or failed delivery heals at the next pass.
-  // Unchanged branch tips cost one ref read each.
+  // Unchanged branch tips cost one ref read each. c14 round 5: installations are listed a few at a
+  // time and every repo's sync is queued at once, so the sync queue takes installations in turn;
+  // one installation with many repos no longer stands in front of the rest for the whole pass.
   async function resyncAll() {
-    const out = [];
-    for (const id of await db.installationIds()) {
-      try { out.push({ installation: id, repos: await ingest.syncInstallation(id) }); } catch (e) {
-        log.warn('resync failed', { installation: id, error: e });
-        out.push({ installation: id, error: e.message });
+    const ids = await db.installationIds();
+    const out = new Array(ids.length);
+    const fail = (i, e) => { log.warn('resync failed', { installation: ids[i], error: e }); out[i] = { installation: ids[i], error: e.message }; };
+    const waits = [];
+    let next = 0;
+    const lister = async () => {
+      while (next < ids.length) {
+        const i = next++;
+        try {
+          const { done } = await ingest.queueInstallation(ids[i]);
+          waits.push(done.then((repos) => { out[i] = { installation: ids[i], repos }; }, (e) => fail(i, e)));
+        } catch (e) { fail(i, e); }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(RESYNC_LISTERS, ids.length) }, lister));
+    await Promise.all(waits);
     return out;
   }
   let timer = null;

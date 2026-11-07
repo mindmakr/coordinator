@@ -35,6 +35,8 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
     if (p.action === 'deleted') {
       // Every row about the installation goes: repos, runs, links, events, trackers, commands, alerts
       // (sent and queued) and its audit trail. One audit row stays: that it was removed, and by whom.
+      // c14 round 5: first its queued syncs and trail refreshes go, and running ones stop writing.
+      ingest.forget?.(id);
       await db.deleteInstallation(id);
       if (forget) await forget(id);
       await db.audit('installation.deleted', { installationId: id, login: p.sender?.login ?? null });

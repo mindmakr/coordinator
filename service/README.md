@@ -103,13 +103,19 @@ Syncs are queued (c14), so many pushes at once cannot fill the memory. A push fo
 |---|---|---|
 | `SYNC_CONCURRENCY` | 4 | Repo syncs that run at once, in all (1-64) |
 | `SYNC_PER_INSTALLATION` | 2 | Of those, how many one installation may run; installations take turns (1-64) |
-| `SYNC_BLOB_MB` | 64 | Blob bytes fetched and not yet read, in all. A blob is fetched only when it fits (16-4096) |
+| `SYNC_BLOB_MB` | 192 | Memory the blobs being read may take, in all. Each blob counts 5 times its size (GitHub's base64 text, the parsed string, the bytes, the worker's copy and the text read from it), and is fetched only when it fits (16-4096) |
+| `SYNC_JOB_SECONDS` | 300 | One sync of one repo stops reading after this; the rest follow at the next sync. A job that waited more than 30 minutes mints a fresh token (10-1200) |
+| `TRAIL_CONCURRENCY` | 4 | Trail refreshes (tracker comments, board cards) at once. They run after the sync has given its slot back, so a slow trail never holds a sync slot (1-64) |
+| `TRAIL_PER_INSTALLATION` | 1 | Of those, how many one installation may run; installations take turns (1-64) |
+| `TRAIL_READS` | 300 | GitHub reads (comment pages, board queries, a linked repo's `coordinator.json`) one installation's trail may make per 10 minutes. Past it the run stays owed and the next sync carries on, like comment writes past their 200. A card found not on the board is asked about again only when the unit's state changes (10-100000) |
+
+The periodic resync lists a few installations at a time and queues all their repos at once, so installations take turns in the queue. After an uninstall its queued syncs and trail refreshes are dropped, and a running one writes nothing more.
 
 `npm run sync -- <id> --force` re-reads every log even when the branch tip has not moved. When that is more than `SYNC_MAX_MB`, the repo is marked in the database (`repos.reread`), and every later sync, forced or the service's own, carries the pass on until it is done.
 
 ### Webhook sources
 
-GitHub delivers webhooks from published ranges (`hooks` in `GET /meta`). With `WEBHOOK_SOURCES=github` the service fetches them from `GITHUB_API_URL/meta` at start and every 24 hours (`src/hooksource.mjs`), and uses a built-in copy until a fetch succeeds or when one fails; a failed or empty answer keeps the list in use. Only those addresses may use the last 6 MB of the webhook budget, and only from them does the App header skip the refused-delivery limit. A comma-separated list of CIDRs is used as given and never fetched (GitHub Enterprise Server). `any` trusts no address: every address group is capped alike, the reserve takes bodies of 64 KB or less from anyone, and the App header is believed from anyone. Nothing is stored; the list lives in memory.
+GitHub delivers webhooks from published ranges (`hooks` in `GET /meta`). With `WEBHOOK_SOURCES=github` the service fetches them from `GITHUB_API_URL/meta` at start and every 24 hours (`src/hooksource.mjs`), and uses a built-in copy until a fetch succeeds or when one fails; a failed or empty answer keeps the list in use. Only those addresses may use the last 6 MB of the webhook budget, and only from them does the App header skip the refused-delivery limit. GitHub's addresses also deliver everyone else's repo and App hooks, so a delivery from them that does not name this App (`X-GitHub-Hook-Installation-Target-Type` `integration` and `-ID` the App id) counts under the hook target it names, capped like an address group, and stays out of the reserve. A comma-separated list of CIDRs is used as given and never fetched (GitHub Enterprise Server). `any` trusts no address: every address group is capped alike, the reserve takes bodies of 64 KB or less from anyone, and the App header is believed from anyone. Nothing is stored; the list lives in memory.
 
 ## Alerts and the doorbell
 
