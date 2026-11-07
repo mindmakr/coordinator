@@ -6,6 +6,8 @@
 //                      [--max-minutes 240] [--max-units 6] [--max-added 2] [--stale-minutes 45]
 //                      [--repo owner/name] (resolves #123 and shas; else the project's git remote) [--theme file.css]
 //                      [--study-budget 2] (side studies allowed while waiting, 0-10)
+//                      [--models on|off] model routing for this project (.coordinator/coordinator.json "models");
+//                      `run.mjs init --models on|off` with no run only sets that
 //   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
@@ -13,7 +15,8 @@
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link [--label L]
 //   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL] [--url U --label L]   GitHub issues, PRs and merges for the unit
 //   run.mjs freeze <run>
-//   run.mjs start <run> <unit>      only when next says build, or check-stale with phase building
+//   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
+//                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only)
 //   run.mjs beat <run> <unit> [--text T]     builder or critic still working (T: the milestone, e.g. "pushed")
 //   run.mjs built <run> <unit> [--report R]  builder finished (R: its report in short): the unit waits for a critic
 //   run.mjs reset <run> <unit> --reason R     in-progress unit with no artifact goes back to build (after a crash)
@@ -21,6 +24,7 @@
 //                  score and gap required on fail; cause is the critic's root-cause tag (drives same-gap);
 //                  on a run with --paths, pass needs a clean detect.mjs --unit result;
 //                  [--behaviour B1=pass:"evidence" | B1=fail:"gap" …]: a pass needs every behaviour passing
+//                  [--model M] the model that judged (refused below the strong model while routing is on)
 //                  [--critic SETUP] who judged (e.g. "review skill high + security"): stats groups escapes by it
 //                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
 //                  the unit stays judging, and its pass is refused until every required specialist passed
@@ -57,6 +61,7 @@
 //                  map history (a map.reset event push and pull accept); --force records a build cut short by the cap;
 //                  --pit-stop stages the log and summary in the run's pit-stop/map (push carries them), or copies them to --dest
 //   run.mjs touches <run> <path> [--json]   what that file touches, from the map, for a builder's brief
+//   run.mjs models [--role builder|critic|… --class docs]   the routing table, or the model for one role and task class
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
 //                  recorded, the run closed): the run's events, snapshot and README, project lessons and
@@ -77,6 +82,7 @@ import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
 import { remoteWatch } from './lib/remote.mjs';
+import { byModel, judgeAllowed, modelName, route, routing, setRouting } from './lib/models.mjs';
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
@@ -95,9 +101,10 @@ import { render } from './lib/workbench.mjs';
 import { build as buildMap, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, touchesOf } from './lib/map/index.mjs';
 
 const FLAGS = {
-  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget'],
+  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models'],
+  start: ['model', 'why'], models: ['role', 'class'],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist'], strategy: ['text'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
@@ -185,6 +192,9 @@ function judged(evidence, v, gapText, causeText) {
 
 const commands = {
   init([run], o) {
+    let models;
+    if (o.models !== undefined) models = setRouting(baseDir('project'), oneOf(o.models, ['on', 'off'], '--models') === 'on');
+    if (run === undefined && models !== undefined) return { models, file: join(baseDir('project'), 'coordinator.json') };
     safeId(run, 'run');
     const fresh = {
       id: run, tag: safeId(o.tag ?? 'general', 'tag'),
@@ -227,8 +237,15 @@ const commands = {
   },
   freeze([run]) { return change(run, 'run.freeze', (s) => { if (!s.units.length) throw new Error('add units first'); s.frozen = true; }); },
   // A new build: the critic marks every behaviour again.
-  start([run, unit]) {
-    return change(run, 'unit.start', (s) => { const u = unitOf(s, unit); expect(s, u, 'start'); u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours); log(u, 'start', `try ${u.rounds.length + 1}`); }, { unit });
+  start([run, unit], o) {
+    const model = modelName(o.model, 'model'); const why = optText(o.why, 80);
+    if (why && !model) throw new Error('--why goes with --model');
+    return change(run, 'unit.start', (s) => {
+      const u = unitOf(s, unit); expect(s, u, 'start'); u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours);
+      delete u.builtBy; delete u.builtWhy;
+      if (model) { u.builtBy = model; if (why) u.builtWhy = why; }
+      log(u, 'start', `try ${u.rounds.length + 1}${model ? ` on ${model}${why ? ` (${why})` : ''}` : ''}`);
+    }, { unit });
   },
   beat([run, unit], o) {
     return change(run, 'unit.beat', (s) => { const u = unitOf(s, unit); if (!['building', 'judging'].includes(u.status)) throw new Error(`unit ${unit} is ${u.status}`); expect(s, u, 'beat'); u.heartbeatAt = now(); log(u, 'beat', optText(o.text, 200) ?? ''); }, { unit });
@@ -295,10 +312,13 @@ const commands = {
       const evidence = optText(o.evidence);
       const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const critic = optText(o.critic, 120);
+      const judge = modelName(o.model, 'model');
+      if (judge && !judgeAllowed(routing(baseDir('project')), judge)) throw new Error(`verdict refused: critics are never routed down; ${judge} is below the strong model (references/routing.md)`);
+      const judgedBy = judge ? { judgedBy: judge } : {};
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
         if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
-        (u.specialistMarks ??= {})[name] = { verdict, score: score(o.score), gap, cause, evidence, ...(critic ? { critic } : {}), at: now() };
+        (u.specialistMarks ??= {})[name] = { verdict, score: score(o.score), gap, cause, evidence, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
         return;
       }
       const missing = (u.specialists ?? []).filter((n) => u.specialistMarks?.[n]?.verdict !== 'pass');
@@ -308,8 +328,8 @@ const commands = {
         throw new Error(`pass refused: no clean detect result for round ${round}; run detect.mjs --run ${s.id} --unit ${u.id} --base … first`);
       }
       const marks = mark(u.behaviours ?? [], o.behaviour, verdict);
-      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
-      u.report = null; delete u.specialistMarks;
+      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
+      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy;
       u.status = verdict === 'pass' ? 'pass' : 'open';
     }, { unit });
   },
@@ -532,14 +552,22 @@ const commands = {
     return pull({ run, dir: runDir(run), base: baseDir('project'), project: projectDir(), from: o.from, after: derived, restore: { map: mapRestore(runDir(run)) } });
   },
   stats(_, o) {
-    return stats(commands.list().filter((r) => !r.error && r.closed && (!o.tag || r.tag === o.tag)).map((r) => load(r.run)));
+    const runs = commands.list().filter((r) => !r.error && r.closed && (!o.tag || r.tag === o.tag)).map((r) => load(r.run));
+    return { ...stats(runs), ...byModel(runs) };
+  },
+  // The routing table (references/routing.md), or the model for one role and task class.
+  models(_, o) {
+    const cfg = routing(baseDir('project'));
+    for (const w of cfg.warnings) console.error(`warning: ${w}`);
+    if (o.role === undefined) return cfg;
+    return { role: o.role, class: o.class ?? null, ...route(cfg, String(o.role), typeof o.class === 'string' ? o.class : null) };
   },
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(['next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

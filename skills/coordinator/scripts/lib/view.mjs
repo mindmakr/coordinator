@@ -1,5 +1,6 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
+import { whoUnit } from './models.mjs';
 import { attention, attentionLabel, clip, dotState, sentence, situation, timeLeft } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
 import { bySetup, escapes, unmet } from './rules.mjs';
@@ -68,6 +69,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
         next: label(d),
         personNotes: personNotes.filter((n) => n.unit === u.id),
         bar: u.bar, behaviours: u.behaviours ?? [], evidenceItems: u.evidence ?? [], links: u.links ?? [],
+        who: whoUnit(u), // which model built and judged (lib/models.mjs)
         roundList: u.rounds, stopReason: u.stopReason ?? null,
         // Files in the unit's last checked diff (the gaming check records the count); null before one.
         files: typeof u.detect?.files === 'number' ? u.detect.files : null,

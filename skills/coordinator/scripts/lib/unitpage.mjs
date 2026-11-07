@@ -2,6 +2,7 @@
 // and behaviours with their evidence, every round, notes and questions for it,
 // its links and its own timeline. Same shell, same rules as the dashboard.
 import { linkify } from './links.mjs';
+import { whoRound } from './models.mjs';
 import { liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
 import { behaviourList, blk, chip, dot, esc, evidenceList, hash, keyed, page, stamp, timelineTools } from './parts.mjs';
 
@@ -9,6 +10,7 @@ function round(r, repo) {
   const marks = (r.behaviours ?? []).map((m) => `<li data-a="r${r.n}-${esc(m.id)}">${chip(m.status, m.status)} <b>${esc(m.id)}</b>${m.evidence ? ` ${linkify(m.evidence, repo)}` : ''}</li>`).join('');
   return `<div class="round" data-a="round-${r.n}"><h4>Round ${r.n} ${chip(r.verdict, r.verdict)}${r.score !== null && r.score !== undefined ? ` <span class="cause">score ${esc(r.score)}</span>` : ''}`
     + `${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''} ${stamp(r.at, 'cause')}</h4>`
+    + (whoRound(r) ? `<p class="cause" data-a="r${r.n}-who">${esc(whoRound(r))}</p>` : '')
     + `<dl>${r.report ? `<dt>Builder's report</dt><dd>${linkify(r.report, repo)}</dd>` : ''}`
     + `${r.gap ? `<dt>Gap</dt><dd>${linkify(r.gap, repo)}</dd>` : ''}${r.evidence ? `<dt>Critic's evidence</dt><dd>${linkify(r.evidence, repo)}</dd>` : ''}</dl>`
     + (marks ? `<ul class="behaviours">${marks}</ul>` : '') + '</div>';

@@ -147,6 +147,7 @@ function unitCard(u, ctx, form, repo) {
     + unitLinks(u, repo)
     + `<p class="say" data-a="say-${esc(u.id)}">${esc(u.sentence)}</p>`
     + triesRow(u)
+    + (u.who ? `<p class="cause" data-a="who-${esc(u.id)}">${esc(u.who)}</p>` : '')
     + scoreChart(u.roundList)
     + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo, [], null, `u-${u.id}`)) : '')
     + (u.evidenceItems.length ? toggle(`u-${u.id}-ev`, `Evidence · ${u.evidenceItems.length}`, evidenceList(u.evidenceItems, repo, ctx, `u-${u.id}-ev`)) : '')

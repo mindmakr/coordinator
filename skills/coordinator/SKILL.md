@@ -24,12 +24,12 @@ Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare skill),
 
 - **Ask once, through the question tool.** One batch before the run, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Then decide within the answers, log each decision, and stop only for an unapproved gated action (`references/guardrails.md`).
 - **The dashboard takes answers.** Mirror questions with `run.mjs ask`; `run.mjs watch` wakes you (`references/hud.md`).
-- **Short replies.** Outcome first; a context line when several runs are active (`references/craft.md`).
+- **Short replies.** Outcome first; context when several runs are active (`references/craft.md`).
 - **The bar decides.** Behaviours make up the bar, written before building. A fresh critic, never the builder, marks each against the real artifact, with evidence (`references/bar.md`).
 - **No slop.** Everything people read meets the craft bar; UI starts from references (`references/craft.md`).
-- **The harness is the team.** Staff roles from its agents, skills and tools (`references/team.md`); built-in sub-skills cover gaps (`references/sub-skills.md`).
+- **The harness is the team.** Staff roles from its agents, skills and tools (`references/team.md`), cheap models on mechanical builds only (`references/routing.md`); sub-skills cover gaps (`references/sub-skills.md`).
 - **The log decides.** `.coordinator/runs/<run>/events.jsonl`, written only by `run.mjs`, says what happens next; memory only caches it (`references/durability.md`).
-- **The fence holds.** Out-of-scope work is logged as a follow-up, never built.
+- **The fence holds.** Out-of-scope work becomes a follow-up, never built.
 - **Evidence or it didn't happen.** A PASS without evidence is a FAIL. Record evidence per behaviour (`run.mjs evidence`). `detect.mjs` flags bar-gaming.
 - **It gets better.** A retro ends every run: lessons, budgets (`references/learning.md`) and upstream fixes (`references/upstream.md`).
 
