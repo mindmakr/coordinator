@@ -36,7 +36,7 @@ export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = fals
     cli('freeze', id);
     cli('start', id, 'u1');
     cli('built', id, 'u1', '--report', 'done');
-    cli('verdict', id, 'u1', 'fail', '--evidence', 'test red', '--gap', `still wrong ${XSS}`, '--cause', 'stale cache', '--score', '4');
+    cli('verdict', id, 'u1', 'fail', '--severity', 'high', '--evidence', 'test red', '--gap', `still wrong ${XSS}`, '--cause', 'stale cache', '--score', '4');
     if (mapOut) {
       const root = join(dir, 'project', 'src');
       mkdirSync(root, { recursive: true });

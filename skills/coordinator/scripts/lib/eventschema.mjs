@@ -48,6 +48,8 @@ export const KINDS = {
   'unit.extend': { unit: 'required', payload: changes },
   'unit.touches': { unit: 'required', payload: changes },
   'unit.sync': { unit: 'required', payload: changes },
+  // The targeted check of a pass's fold-ins (run.mjs foldin).
+  'unit.foldin': { unit: 'required', payload: changes },
   behaviour: { unit: 'optional', payload: changes },
   evidence: { unit: 'optional', payload: changes },
   note: { unit: 'optional', payload: changes },

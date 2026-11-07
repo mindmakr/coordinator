@@ -20,6 +20,8 @@ export const PERSON_SURFACES = ['dashboard', 'web'];
 const APPROVE = /\bapproved?\b/i;
 const DOUBT = /\b(no|not|don'?t|do not|never|refuse[ds]?|reject(ed)?|declined?|disapprove[ds]?|unapproved|wait|maybe|perhaps|unless|but|if|once|after|when|until)\b|n't\b|\?/i;
 
+// Words that refuse, hedge or ask: a person's confirmed words with any of these never count as a clear pick.
+export const doubtful = (t) => DOUBT.test(String(t ?? ''));
 export const fromPerson = (e) => !!e && e.by !== 'lead' && (PERSON_SURFACES.includes(e.via) || (e.via === 'cli' && !!e.confirm));
 export const noteApproves = (text) => APPROVE.test(String(text ?? '')) && !DOUBT.test(String(text ?? ''));
 

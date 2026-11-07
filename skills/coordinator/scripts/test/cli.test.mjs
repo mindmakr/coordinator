@@ -55,7 +55,7 @@ test('scope is capped after freeze and unsafe ids are refused', () => {
 test('next records stops so they survive a restart', () => {
   run('init', 'r4', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'r4', 'u', '--bar', 'b'); run('freeze', 'r4'); run('start', 'r4', 'u'); run('built', 'r4', 'u');
-  run('verdict', 'r4', 'u', 'fail', '--gap', 'wrong total', '--evidence', 'test output', '--score', '3');
+  run('verdict', 'r4', 'u', 'fail', '--severity', 'high', '--gap', 'wrong total', '--evidence', 'test output', '--score', '3');
   assert.equal(run('next', 'r4').out.units[0].action, 'stop');
   const state = JSON.parse(readFileSync(join(dir, 'runs', 'r4', 'state.json'), 'utf8'));
   assert.deepEqual([state.units[0].status, state.units[0].stopReason], ['stopped', 'budget: rounds']);
@@ -71,7 +71,7 @@ test('steps the loop did not ask for are refused', () => {
   assert.equal(run('strategy', 'r5', 'a', '--text', 'x').code, 1, 'not asked for');
   assert.equal(run('integrate', 'r5', 'pass', '--evidence', 'x').code, 1, 'units not done');
   run('start', 'r5', 'a'); run('built', 'r5', 'a');
-  run('verdict', 'r5', 'a', 'fail', '--gap', 'g', '--evidence', 'e', '--score', '3');
+  run('verdict', 'r5', 'a', 'fail', '--severity', 'high', '--gap', 'g', '--evidence', 'e', '--score', '3');
   assert.equal(run('start', 'r5', 'a').code, 1, 'round budget spent');
   assert.deepEqual(run('next', 'r5').out.units.map((u) => u.action), ['stop', 'stop'], 'a stopped, b blocked');
   assert.equal(run('next', 'r5').out.decision, 'stopped');
@@ -80,7 +80,7 @@ test('steps the loop did not ask for are refused', () => {
 test('default budgets reach the stuck stop before the round budget', () => {
   run('init', 'r6', '--goal', 'g', '--bar', 'b', '--fence', 'f');
   run('add', 'r6', 'u', '--bar', 'b'); run('freeze', 'r6');
-  const round = () => { run('start', 'r6', 'u'); run('built', 'r6', 'u'); run('verdict', 'r6', 'u', 'fail', '--gap', 'total off by one cycle', '--evidence', 'e', '--score', '3'); };
+  const round = () => { run('start', 'r6', 'u'); run('built', 'r6', 'u'); run('verdict', 'r6', 'u', 'fail', '--severity', 'high', '--gap', 'total off by one cycle', '--evidence', 'e', '--score', '3'); };
   round(); round();
   assert.equal(run('next', 'r6').out.units[0].action, 'change-strategy');
   assert.equal(run('strategy', 'r6', 'u', '--text', 'compute from cycle dates').code, 0);
@@ -232,10 +232,10 @@ test('round 5: empty diffs prove nothing, early close needs a reason, fails need
   const d = spawnSync(process.execPath, [join(scripts, 'detect.mjs'), '--diff-file', empty, '--run', 'r30', '--unit', 'u'], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
   assert.equal(d.status, 2, 'an empty diff is refused');
   assert.equal(run('verdict', 'r30', 'u', 'pass', '--evidence', 'ok').code, 1, 'so the PASS stays refused');
-  assert.equal(run('verdict', 'r30', 'u', 'fail', '--evidence', 'e', '--score', '3').code, 1, 'a fail needs a gap');
-  assert.equal(run('verdict', 'r30', 'u', 'fail', '--evidence', 'e', '--score', ' ', '--gap', 'g').code, 1, 'a blank score is refused');
+  assert.equal(run('verdict', 'r30', 'u', 'fail', '--severity', 'high', '--evidence', 'e', '--score', '3').code, 1, 'a fail needs a gap');
+  assert.equal(run('verdict', 'r30', 'u', 'fail', '--severity', 'high', '--evidence', 'e', '--score', ' ', '--gap', 'g').code, 1, 'a blank score is refused');
   assert.equal(run('note', 'r30', '--kind', 'info', '--text', 'a', '--text', 'b').code, 1, 'a flag given twice');
-  run('verdict', 'r30', 'u', 'fail', '--evidence', 'e', '--score', '3', '--gap', 'wrong total');
+  run('verdict', 'r30', 'u', 'fail', '--severity', 'high', '--evidence', 'e', '--score', '3', '--gap', 'wrong total');
   assert.equal(run('close', 'r30', '--outcome', 'partial').code, 1, 'quitting early needs a reason');
   assert.equal(run('close', 'r30', '--outcome', 'partial', '--reason', 'owner moved priorities').code, 0);
 });
@@ -251,7 +251,7 @@ test('long opposite lessons stay apart', () => {
 test('verdict --cause is stored and drives change-strategy; show and hud.html follow the state', () => {
   run('init', 'r40', '--goal', 'g', '--bar', 'b', '--fence', 'f');
   run('add', 'r40', 'u', '--bar', 'b'); run('freeze', 'r40');
-  const round = (gap) => { run('start', 'r40', 'u'); run('built', 'r40', 'u'); return run('verdict', 'r40', 'u', 'fail', '--gap', gap, '--cause', 'hand-rolled parser', '--evidence', 'e', '--score', '4'); };
+  const round = (gap) => { run('start', 'r40', 'u'); run('built', 'r40', 'u'); return run('verdict', 'r40', 'u', 'fail', '--severity', 'high', '--gap', gap, '--cause', 'hand-rolled parser', '--evidence', 'e', '--score', '4'); };
   assert.equal(round('<script>x</script> plural keys misread').code, 0);
   round('rich-text tags ignored');
   const u = JSON.parse(readFileSync(join(dir, 'runs', 'r40', 'state.json'), 'utf8')).units[0];

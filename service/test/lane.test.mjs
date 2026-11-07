@@ -29,7 +29,7 @@ async function hook(t, event, body) {
 const refsRun = (id, repo) => makeRun(id, { issues: Array.from({ length: 10 }, (_, i) => `${repo}#${i + 1}`) });
 let plain; const plainRun = () => (plain ??= makeRun('r1')); // one log, built once, for repos that need any run
 
-test('s5: a victim syncs while other installations\' trails are held on GitHub; the sync slots are free meanwhile', { timeout: 120_000 }, async () => {
+test('s5: a victim syncs while other installations\' trails are held on GitHub; the sync slots are free meanwhile', { timeout: 600_000 }, async () => {
   const g = gate(); let held = 0;
   const gh = fakeGitHub(); gh.makeBoard({ items: [] });
   const g0 = gh.graphql.bind(gh);
@@ -51,7 +51,7 @@ test('s5: a victim syncs while other installations\' trails are held on GitHub; 
     await t.db.upsertInstallation({ id: 9, account: 'victim' });
     gh.addRepo('v/web', { id: 900, installationId: 9, files: stateFiles({ r1: plainRun() }) });
     await t.db.upsertRepo({ installationId: 9, id: 900, fullName: 'v/web', private: true });
-    guarded = guardTimer(g);
+    guarded = guardTimer(g, 540_000); // a hang guard only: full-suite load must never fire it
     for (const inst of [66, 67]) for (let k = 0; k < 2; k++) attackers.push(t.app.ingest.syncRepo(inst, { id: inst * 100 + k, fullName: `m${inst}/r${k}` }));
     // Every attacker sync has read its log and given its slot back; their trails wait on GitHub, one
     // per installation (TRAIL_PER_INSTALLATION), the other two queued in the lane, none in a sync slot.
