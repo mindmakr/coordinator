@@ -207,3 +207,16 @@ test('round 3: notes with a value on the next line, a credential table row or a 
   writeFileSync(notes, '## Ops\nThe otp is Q7vSynthOdd!x2-changed in the sandbox only.\n');
   run('report', 'r2', '--file', notes, '--i-checked');
 });
+
+test('round 4: the closed rule refuses a credential word with a value nearby, never a file:line after "otp", and the page states the rule', () => {
+  const notes = join(root, 'r4.md');
+  writeFileSync(notes, '## Changes\n- The code now expires after 15 minutes (see `backend/src/services/shared/otp.service.ts:415`).\n- `password_changed_at` added in `drizzle/0119_x.sql`.\n');
+  run('report', 'r2', '--file', notes);
+  writeFileSync(notes, '## Ops\nThe kiosk PIN, for now, stays 48219930 until Monday.\n');
+  const r = cli('report', 'r2', '--file', notes);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /r4\.md:2/);
+  assert.ok(!(r.stdout + r.stderr).includes('48219930'));
+  run('init', 'r5', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  assert.match(readFileSync(join(runDir('r5'), 'report.html'), 'utf8'), /Release notes never carry credentials, tokens or one-time codes\. Name the setting \(e\.g\. API_TOKEN\), never its value\./);
+});

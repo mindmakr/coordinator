@@ -166,3 +166,49 @@ test('prose shapes stay linear', () => {
     assert.ok(readCost(large) <= 5 * large.length + 4 * WINDOW && readCost(huge) <= 5 * huge.length + 4 * WINDOW, JSON.stringify(large.slice(0, 20)));
   }
 });
+
+// Round 4 (the critic's probe, synthetic values): every listed shape is masked.
+test('release-note shapes: next line after "to:", camelCase names, pw, other languages, wrapped rows, OTP and PIN, user@x / pw, YAML, unnamed env', () => {
+  const V = 'Zq8vSynthTk7';
+  const cases = [
+    `- Set the password to:\n  ${V}a`, `| Var | Value |\n| --- | --- |\n| API_TOKEN | ${V}b |`, `- Copy Studio login: translator / ${V}c#1`,
+    `pw = ${V}d`, `The password is ${V}e for the tester account.`, 'For QA the password is synthhunter2x.',
+    `\`\`\`yaml\ndb:\n  user: app\n  password: ${V}f\n\`\`\``, 'password: synthcorrecthorsebattery', `dbPassword = ${V}g`, `db_password=${V}h`,
+    `\`\`\`\nJWT_SECRET=${V}i\nSMTP_PASS=${V}j\n\`\`\``, `TAQNYAT_BEARER=${V}k`, `{ "apiKey": "${V}l", "clientSecret": "${V}m" }`,
+    `| Var | Value |\n| --- | --- |\n| API_TOKEN | (see below) |\n| | ${V}n |`, `| Name | Kind | Value |\n| --- | --- | --- |\n| SMTP | password | ${V}o |`,
+    `كلمة المرور: ${V}p`, `كلمة السر هي ${V}q`, `پاس ورڈ: ${V}r`, `mot de passe : ${V}s`, `Passwort: ${V}t`, `contraseña: ${V}u`,
+    `Use admin@example.test / ${V}v to sign in.`, 'OTP for the demo user: 834921', 'PIN: 4821-9930', `- API key:\n- ${V}w`,
+  ];
+  for (const c of cases) {
+    const m = maskSecrets(c);
+    assert.doesNotMatch(m, /Zq8vSynthTk7|synthhunter|synthcorrect|834921|4821-9930/, c);
+    assert.equal(findSecret(c), true, c);
+  }
+});
+
+test('ordinary release-note prose is not over-masked', () => {
+  const prose = [
+    '- Sign-in: password reset now sends the token by SMS; the token is valid for 15 minutes (see `backend/src/services/shared/otp.service.ts:415`).',
+    "- The API key rotation job `boss.schedule('rotate-keys', '0 3 * * *')` runs nightly; set `JWT_SECRET` in the env (value from the vault).",
+    '- Login: employee / HR admin / platform admin all use national ID + password.',
+    '- Migration `backend/drizzle/0119_remarkable_secret_warriors.sql` adds `password_changed_at`.',
+    '- Secret scanning: none. Token refresh fixed in PR #1218 (https://github.com/mindmakr/payday-web-nextjs/pull/1218).',
+    '| `TAQNYAT_BEARER_TOKEN` | set in Dokploy (unchanged) |', '| `SESSION_KEY_TTL` | 3600s |', '| `PASSWORD_MIN_LENGTH` | 12chars |',
+    '- Testers: password: use the seeded one from the QA sheet.', '- Key: Riyadh2026 time zone, cutoff 20 / statement 21 / payday 27.',
+    '- Credentials: none needed for the public pages / landing.', 'The OTP screen now shows the code length (6 digits).', 'PIN entry: 4 digits on the kiosk.',
+    'NEXT_PUBLIC_API_URL=/v1', 'DATABASE_URL=postgres://localhost:5432/payday', 'كلمة المرور مطلوبة', 'Passwort vergessen?',
+  ].join('\n');
+  assert.equal(maskSecrets(prose), prose);
+});
+
+test('release-note shapes stay linear', () => {
+  const inputs = [
+    (n) => 'password to:\n'.repeat(n), (n) => '| API_TOKEN | x |\n| |'.repeat(n), (n) => 'a@b.c / '.repeat(n), (n) => 'OTP: 1 '.repeat(n),
+    (n) => 'كلمة المرور: '.repeat(n), (n) => 'A_B='.repeat(2 * n), (n) => `A_B=${'aB1'.repeat(2 * n)}`, (n) => '\n  password: '.repeat(n),
+    (n) => '| SMTP | password | '.repeat(n), (n) => 'user: a password: '.repeat(n),
+  ];
+  for (const make of inputs) {
+    const large = make(5000); const huge = make(40000);
+    assert.ok(readCost(large) <= 5 * large.length + 4 * WINDOW && readCost(huge) <= 5 * huge.length + 4 * WINDOW, JSON.stringify(large.slice(0, 20)));
+  }
+});

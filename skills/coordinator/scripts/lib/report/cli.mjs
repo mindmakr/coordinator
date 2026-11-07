@@ -19,21 +19,26 @@ export const NOTES_MAX = 200 * 1024;
 const files = (dir) => ({ draft: join(dir, 'report', 'draft.json'), draftMd: join(dir, 'report', 'draft.md'), quality: join(dir, 'quality.json') });
 const tryJson = (f) => { try { return existsSync(f) ? readJson(f, null) : null; } catch { return null; } };
 
-// After masking, a line that still pairs a credential word with a password-like value: prose is
-// open-ended, so storing it is refused until the lead looks (--i-checked). Values are never echoed.
-const CRED = /\b(?:pass(?:word|wd|phrase|code)?|pwd|token|secret|api[_ -]?key|private[_ -]?key|credentials?|login|otp)\b/gi;
+// The closed rule: release notes never carry credentials, tokens or one-time codes. After masking,
+// a line where a credential word (any language) has a value nearby is refused until the lead checks
+// it (--i-checked). Nearby: within the next six words on its line, or the first word of the next line
+// when the word ends its line with ":". A value is a word with a letter and a digit or symbol, a run of
+// four or more digits, or any non-plain word right after "<word>:" or "<word> is". Values are never echoed.
+const CRED = /(?:\b(?:pass(?:word|wd|phrase|code)?|pwd|pw|token|secret|api[_ -]?key|private[_ -]?key|credentials?|login|otp|pin)\b(?![.\/_-]\w)|كلمة (?:المرور|السر)|پاس ?ورڈ|\bpasswort\b|\bkennwort\b|\bmot de passe\b|\bcontraseña|\bsenha\b)/giu;
 const AFTER_PASS = /^\s*(?:[:=]|is\b)\s*["'`]?([^\s"'`|,;]{6,})/i;
-const plainWord = (v) => /^[a-z]+[.,;:!?)]*$/.test(v) || /^[A-Z][A-Z0-9_]*$/.test(v) || /^[A-Z][a-z]+$/.test(v);
-const pathLike = (v) => /[/\\]|\.[a-z]{1,5}$|^https?:|^#\d+$|^\[redacted\]/i.test(v);
-const strong = (v) => v.length >= 8 && /[A-Za-z]/.test(v) && /[0-9!@#$%^&*+=?~]/.test(v);
+const plainWord = (v) => /^[a-z]+[.,;:!?)]*$/.test(v) || /^[A-Z][A-Z0-9_]*$/.test(v) || /^[A-Z][a-z]+[.,;:!?)]*$/.test(v);
+// A file, a file:line, a URL, a PR or a value already masked is not a credential.
+const pathLike = (v) => /[/\\]|\.[a-z]{1,5}(?::\d+)?[`).,;]*$|^https?:|^#\d+|\[redacted\]/i.test(v);
+const valueLike = (v) => !pathLike(v) && ((v.length >= 8 && /[A-Za-z]/.test(v) && /[0-9!@#$%^&*+=?~]/.test(v)) || /^\d[\d -]{2,}\d$/.test(v));
 export function credentialLines(text) {
-  const out = [];
-  text.split('\n').forEach((l, i) => {
+  const out = []; const L = text.split('\n');
+  L.forEach((l, i) => {
     for (const m of l.matchAll(CRED)) {
-      const rest = l.slice(m.index + m[0].length, m.index + m[0].length + 80);
+      let rest = l.slice(m.index + m[0].length, m.index + m[0].length + 80);
+      if (/^(?:\s+to)?\s*:\s*$/i.test(rest) && L[i + 1] !== undefined) rest = `: ${L[i + 1].replace(/^\s*[-*>|]?\s*/, '')}`;
       const direct = AFTER_PASS.exec(rest)?.[1]?.replace(/[.,;:!?)]+$/, '');
-      const near = rest.split(/[\s|`"']+/).filter(Boolean).slice(0, 6);
-      if ((direct && !pathLike(direct) && !plainWord(direct)) || near.some((v) => !pathLike(v) && strong(v))) { out.push(i + 1); break; }
+      const near = rest.split(/[\s|`"'(),;]+/).map((v) => v.replace(/[.:!?]+$/, '')).filter(Boolean).slice(0, 6);
+      if ((direct && !pathLike(direct) && !plainWord(direct)) || near.some(valueLike)) { out.push(i + 1); break; }
     }
   });
   return out;
