@@ -115,7 +115,7 @@ function gapItem(g, ctx, m) {
   const text = long ? `${esc(clip(g.text, GAP_CLIP))}${toggle(`gap-${g.id}`, 'Full text', `<p class="say">${linkify(g.text, null)}</p>`)}` : linkify(g.text, null);
   const r = g.resolution;
   const why = r ? (r.reason.length > REASON_CLIP ? `<span title="${esc(r.reason)}">${esc(clip(r.reason, REASON_CLIP))}</span>` : linkify(r.reason, null)) : '';
-  const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : `by ${esc(r.by)}${r.confirm ? `, their words: “${esc(clip(r.confirm, 120))}”` : ''}`}: ${why}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
+  const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : r.checked ? `by ${esc(r.by)}, checked with gh` : `by ${esc(r.by)}${r.confirm ? `, their words: “${esc(clip(r.confirm, 120))}”` : ''}`}: ${why}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
   const carried = g.carried ? `<div class="cause"><b>carried → ${esc(g.carried)}</b>: open until that unit passes or its gap is resolved</div>` : '';
   return `<li data-a="gap-${esc(g.id)}" data-gap data-run="${esc(g.run)}" data-kind="${esc(g.kind)}">${badge(GAP_BADGE[g.kind] ?? 'info', KIND_LABEL[g.kind] ?? g.kind)} ${text}`
     + `${g.cause ? `<div class="cause">cause: ${esc(g.cause)}</div>` : ''}`
@@ -135,7 +135,8 @@ function gapsSection(m, ctx) {
   const g = m.gaps;
   if (!g.openCount && !g.resolvedCount) return empty('No gaps: no stopped or unfinished unit, open follow-up, question, escape or upstream proposal in any run.');
   const head = `<p class="meta"><b>${gapsLine(g)}</b> · ${g.resolvedCount} resolved. Stopped and unfinished units, runs closed early, follow-ups, out-of-fence items, deferred work, questions for you, upstream proposals and escapes, from every run. `
-    + 'Close one with <code>run.mjs gap close &lt;run&gt; &lt;id&gt; --reason R</code>: a decision in that run’s log.</p>';
+    + 'Close one with <code>run.mjs gap close &lt;run&gt; &lt;id&gt; --reason R</code>: a decision in that run’s log. '
+    + (g.lastCheck ? `Last checked against GitHub ${stamp(g.lastCheck.at)}: ${count(g.lastCheck.asked, 'reference')} asked, ${g.lastCheck.closed} closed.</p>` : 'Not checked against GitHub yet: <code>run.mjs gaps --check --dry-run</code>.</p>');
   const open = g.openCount ? `<div class="lists gaps" data-gaps-open>${gapGroups(g.open, ctx, m, 'open')}</div>` : `<div data-gaps-open>${empty('No open gap.')}</div>`;
   const resolved = g.resolvedCount ? `<div data-gaps-resolved>${toggle('self-gaps-resolved', `Resolved · ${g.resolvedCount}`, `<div class="lists gaps">${gapGroups(g.resolved, ctx, m, 'resolved')}</div>`)}</div>` : '';
   return head + (ctx.live ? gapTools(g) : '') + open + resolved;

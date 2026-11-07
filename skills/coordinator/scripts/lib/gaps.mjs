@@ -43,6 +43,25 @@ const REF = /https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(issues|pull)\/(\d+)|(?
 const TRACK = /\b(?:tracked|filed|opened|moved|logged|raised|continues?|continued)(?:\s+(?:as|in|at|to|under))?\s*(?:an?\s+)?(?:(?:follow-up\s+)?issue|pr|pull request)?\s*:?\s*$/i;
 const WAIT = /\b(?:pr|pull|waits?|waiting|after|until|merges?|on)\s*$/i;
 
+// Every issue or PR reference in a text, as { owner, repo, n, url, before } (the 48 characters before it).
+export function allRefs(text, repo) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(REF)) {
+    let full; let n;
+    if (m[1]) { full = m[1]; n = m[3]; } else {
+      if (m[4] && !m[5]) continue;
+      const owner = m[4] ?? repo?.split('/')[0]; const name = m[5] ?? (m[4] ? null : repo?.split('/')[1]);
+      if (!owner || !name) continue;
+      full = `${owner}/${name}`; n = m[6];
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(full)) continue;
+    out.push({ repo: full, n: Number(n), url: `https://github.com/${full}/issues/${n}`, before: text.slice(Math.max(0, m.index - 48), m.index), bare: !m[1] && !m[4] && !m[5] });
+  }
+  return out;
+}
+// The run's repo: --repo, else the one its unit links name most.
+export const runRepo = (run) => (typeof run?.repo === 'string' ? run.repo : repoFromText(JSON.stringify(run?.units ?? [])));
+
 function trackedRefs(text, repo) {
   const out = [];
   for (const m of String(text ?? '').matchAll(REF)) {
@@ -183,7 +202,7 @@ function closures(run) {
   const m = new Map();
   for (const n of run.notes ?? []) {
     if (!n || n.kind !== 'decision' || typeof n.gap !== 'string') continue;
-    m.set(n.gap, n.reopen ? null : { reason: String(n.reason ?? n.text ?? ''), by: n.by === 'person' ? 'person' : 'lead', at: n.at ?? null, derived: false, ...(n.confirm ? { confirm: String(n.confirm) } : {}) });
+    m.set(n.gap, n.reopen ? null : { reason: String(n.reason ?? n.text ?? ''), by: n.by === 'person' ? 'person' : 'lead', at: n.at ?? null, derived: false, ...(n.confirm ? { confirm: String(n.confirm) } : {}), ...(n.checked && typeof n.checked === 'object' ? { checked: { at: String(n.checked.at ?? ''), ref: String(n.checked.ref ?? ''), state: String(n.checked.state ?? '') } } : {}) });
   }
   return m;
 }
@@ -194,7 +213,7 @@ export function gaps(runs) {
   const byId = new Map(list.map((r) => [r.id, r]));
   const out = []; const runGaps = [];
   for (const run of list) {
-    const repo = typeof run.repo === 'string' ? run.repo : repoFromText(JSON.stringify(run.units));
+    const repo = runRepo(run);
     noteGaps(run, list, repo, out);
     questionGaps(run, out);
     const units = []; unitGaps(run, repo, units); out.push(...units);
@@ -242,7 +261,7 @@ export function gapsModel(runs) {
 
 // The decision note `gap close` (or `gap reopen`) adds to the run that owns the gap.
 // A closure by the person carries their own words (`confirm`), like `answer --by person --confirm`.
-export function closeGap(s, id, { reason, by = 'lead', confirm = null, reopen = false, at = new Date().toISOString() }) {
+export function closeGap(s, id, { reason, by = 'lead', confirm = null, reopen = false, checked = null, at = new Date().toISOString() }) {
   const p = parseGapId(id);
   if (!p) throw new Error(`not a gap id: ${id} (source:run:unit:seq, as run.mjs gaps lists them)`);
   if (p.run !== s.id) throw new Error(`gap ${id} belongs to run ${p.run}, not ${s.id}`);
@@ -250,7 +269,7 @@ export function closeGap(s, id, { reason, by = 'lead', confirm = null, reopen = 
   if (by === 'person' && !(typeof confirm === 'string' && confirm.trim())) throw new Error('--by person needs --confirm "<their words>": never close a gap for the person without them');
   if (by !== 'person' && confirm !== null) throw new Error('--confirm goes with --by person');
   s.notes ??= [];
-  s.notes.push({ kind: 'decision', text: `${reopen ? 'reopened' : 'closed'} gap ${id}: ${reason}`, gap: id, reason, by, ...(by === 'person' ? { via: 'cli', confirm: confirm.trim() } : {}), ...(reopen ? { reopen: true } : {}), at });
+  s.notes.push({ kind: 'decision', text: `${reopen ? 'reopened' : 'closed'} gap ${id}: ${reason}`, gap: id, reason, by, ...(by === 'person' ? { via: 'cli', confirm: confirm.trim() } : {}), ...(reopen ? { reopen: true } : {}), ...(checked ? { checked } : {}), at });
 }
 
 // `run.mjs gaps`: one line per gap, then the count.

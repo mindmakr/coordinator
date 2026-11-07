@@ -59,6 +59,10 @@
 //                  history, plans, proposals, side study); --html writes coordinator.html in the state folder
 //   run.mjs gaps [--json] [--all]   open gaps across every run here (stopped and unfinished units, runs closed early,
 //                  follow-ups, out-of-fence items, open questions, upstream proposals, escapes); --all adds resolved ones
+//   run.mjs gaps --check [--run R] [--dry-run]   asks GitHub through gh (opt-in; the gaps view's only network call)
+//                  whether the issues and PRs open gaps name are closed or merged, and closes those gaps with a
+//                  decision note "checked on <date>: <ref> merged" (a stopped unit's merged PR is also linked);
+//                  --dry-run lists them and changes nothing; no gh, or not signed in: says so, changes nothing
 //   run.mjs gap close|reopen <run> <id> --reason R [--by lead | --by person --confirm "their words"]   closes (or
 //                  reopens) one gap: a decision note in that run's log (closed runs too); the id as gaps prints it
 //   run.mjs serve <run> [--port P]  the live dashboard (forms, unit pages, live updates) on 127.0.0.1, behind a per-start token;
@@ -134,7 +138,8 @@ import { hasRetro, retroCommand } from './lib/retro.mjs';
 import { answer, answerText, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
-import { loadRuns, loadSelf, selfVersion } from './lib/selfdata.mjs';
+import { gapsCheckFile, loadRuns, loadSelf, selfVersion } from './lib/selfdata.mjs';
+import { planCheck } from './lib/gapcheck.mjs';
 import { closeGap, gaps, gapsText, parseGapId } from './lib/gaps.mjs';
 import { selfPage } from './lib/selfpage.mjs';
 import { addStudy } from './lib/study.mjs';
@@ -146,7 +151,7 @@ const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues'],
   extend: ['rounds', 'reason', 'answer'],
   start: ['model', 'why', 'force-model'], models: ['role', 'class'],
-  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all'], gap: ['reason', 'by', 'confirm'],
+  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
@@ -607,6 +612,22 @@ const commands = {
     return null;
   },
   gaps(_, o) {
+    if (o.check !== undefined || o['dry-run'] !== undefined || o.run !== undefined) {
+      if (o.check !== true) throw new Error('--run and --dry-run go with --check');
+      const only = o.run === undefined ? null : safeId(o.run, 'run');
+      if (only && !exists(only)) throw new Error(`no run: ${only}`);
+      const plan = planCheck(loadRuns(), { only });
+      if (!plan.ok) { console.error(plan.error); return { checked: false, reason: plan.error, closes: [] }; }
+      if (o['dry-run'] !== true) {
+        const at = now();
+        for (const c of plan.closes) {
+          if (c.merge && c.unit) change(c.run, 'unit.link', (s) => { const u = unitOf(s, c.unit); u.links = [...(u.links ?? []), { kind: 'merge', url: c.merge, label: 'checked with gh', at }]; }, { closedOk: true, unit: c.unit });
+          change(c.run, 'note', (s) => closeGap(s, c.gap, { reason: c.reason, by: 'lead', checked: { at, ref: c.ref, state: c.state } }), { closedOk: true, unit: c.unit && load(c.run).units.some((u) => u.id === c.unit) ? c.unit : null });
+        }
+        writeAtomic(gapsCheckFile(), `${JSON.stringify({ at, asked: plan.asked, closed: plan.closes.length, run: only })}\n`);
+      }
+      return { checked: true, dryRun: o['dry-run'] === true, asked: plan.asked, closes: plan.closes };
+    }
     const list = gaps(loadRuns()).filter((g) => o.all || g.status === 'open');
     if (o.json) return list;
     process.stdout.write(gapsText(list));

@@ -145,7 +145,7 @@ function decisions(runs) {
  * runs: every readable state; lessons: { global, project }; context: COORDINATOR.md text or null;
  * current: the run being served (or null). Returns the page and text model.
  */
-export function selfModel({ runs, lessons = {}, context = null, current = null, nowMs = Date.now() }) {
+export function selfModel({ runs, lessons = {}, context = null, current = null, gapsCheck = null, nowMs = Date.now() }) {
   const sorted = [...runs].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const units = sorted.reduce((n, r) => n + r.units.length, 0);
   const minutes = sorted.reduce((n, r) => {
@@ -193,7 +193,7 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
     plans: sorted.filter((r) => !r.closed).reverse().map((r) => plan(r, nowMs)),
     proposals: proposals(sorted, all),
     // Everything left undone across runs (lib/gaps.mjs), open and resolved.
-    gaps: gapsModel(sorted),
+    gaps: { ...gapsModel(sorted), lastCheck: gapsCheck && typeof gapsCheck.at === 'string' ? { at: gapsCheck.at, asked: Number(gapsCheck.asked) || 0, closed: Number(gapsCheck.closed) || 0 } : null },
     study: {
       runs: sorted.filter((r) => (r.studies ?? []).length || !r.closed).map((r) => ({ run: r.id, used: (r.studies ?? []).length, cap: studyCap(r), open: !r.closed })),
       log: sorted.flatMap((r) => (r.studies ?? []).map((x) => ({ ...x, run: r.id }))).sort((a, b) => String(b.at).localeCompare(String(a.at))),
