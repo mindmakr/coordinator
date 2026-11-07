@@ -1,7 +1,7 @@
 // doctor: each check passes and fails on a fake setup, and nothing it prints carries a token.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -98,13 +98,18 @@ test('settings: every key checked; public state, a weak critic and a public stat
   put('{ nope');
   assert.equal(settingsCheck(c)[0].status, 'fail');
   writeFileSync(join(p, 'theme.css'), ':root{--primary:#123456}');
-  put({ state: 'repo', visibility: 'private', service: 'https://coord.example.com', theme: 'theme.css', budgets: { rounds: 4, minutes: 240 }, merge: ['test'], models: { builder: 'sonnet', critic: 'opus' } });
+  put({ state: 'repo', visibility: 'private', service: 'https://coord.example.com', theme: 'theme.css', budgets: { rounds: 4, minutes: 240 }, merge: ['test'], models: { strong: 'opus', builder: 'sonnet', critic: 'opus', mechanical: 'haiku' } });
   assert.deepEqual(settingsCheck(c).map((r) => r.status), ['ok', 'ok']);
+  put({ branch: 'main' });
+  assert.deepEqual(settingsCheck(c).map((r) => r.status), ['fail', 'fail'], 'settings and state agree');
   const problems = (v) => checkSettings(v, p).map((x) => `${x.level}:${x.key}`);
   assert.deepEqual(problems({ visibility: 'public' }), ['fail:stateRepo']);
   assert.deepEqual(problems({ visibility: 'public', state: 'local' }), []);
   assert.deepEqual(problems({ models: false }), []);
-  assert.deepEqual(problems({ models: { builder: 'opus', critic: 'haiku' } }), ['warn:models']);
+  assert.deepEqual(problems({ models: { builder: 'opus', critic: 'sonnet' } }), [], 'no strong: no judge floor to compare');
+  assert.deepEqual(problems({ models: { strong: 'opus', critic: 'sonnet', 'visual-critic': 'opus', builder: 'haiku' } }), ['warn:models']);
+  assert.deepEqual(problems({ models: { strong: 'opus', integrator: 'haiku', specialist: 'sonnet' } }), ['warn:models', 'warn:models']);
+  assert.deepEqual(problems({ models: { strong: 'sonnet', critic: 'opus', 'billing-migration': 'opus' } }), []);
   assert.deepEqual(problems({ models: 'opus' }), ['fail:models']);
   assert.deepEqual(problems({ service: 'http://coord.example.com' }), ['fail:service']);
   assert.deepEqual(problems({ service: `https://x:${TOKEN}@coord.example.com` }), ['fail:service']);
@@ -133,7 +138,11 @@ test('locks and dashboards: stale ones warn, live ones pass', () => {
   assert.equal(locksCheck(c).status, 'warn');
   assert.equal(dashboardsCheck(c)[0].status, 'ok');
   writeFileSync(join(c.base, 'runs', 'r1', 'serve.json'), JSON.stringify({ pid: 999_999, port: 7600 }));
-  assert.equal(dashboardsCheck({ ...c, alive: () => false })[0].status, 'warn');
+  assert.equal(dashboardsCheck({ ...c, alive: () => false, fix: false })[0].status, 'warn');
+  const gone = dashboardsCheck({ ...c, alive: () => false })[0];
+  assert.match(gone.text, /removed a stale dashboard record/);
+  assert.ok(!existsSync(join(c.base, 'runs', 'r1', 'serve.json')), 'the stale record is removed');
+  writeFileSync(join(c.base, 'runs', 'r1', 'serve.json'), JSON.stringify({ pid: 999_999, port: 7600 }));
   assert.equal(dashboardsCheck({ ...c, alive: () => true })[0].status, 'ok');
   writeFileSync(join(c.base, 'runs', 'r1', 'state.json'), JSON.stringify({ closed: { outcome: 'done' } }));
   const r = dashboardsCheck({ ...c, alive: () => true })[0];

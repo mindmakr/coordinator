@@ -1,6 +1,6 @@
 # /coordinator init
 
-Learn the project once, so that every later run starts informed and asks only about the task.
+Learn the project once, so that every later run starts informed and asks only about the task, and set up what the coordinator needs on this machine (where run state goes, theme, budgets, merge rule, hosted app). It ends by running doctor.
 
 ## Steps
 
@@ -54,7 +54,7 @@ Leave other keys to their own questions (model routing: `models`). Write `.coord
 | `theme` | a `.css` file; `COORDINATOR.md`'s `Theme:` line wins | the dashboard |
 | `budgets` | `{ "rounds": 1-8, "minutes": 5-10080 }` | `run.mjs init` defaults; flags still win |
 | `merge` | branch names a run may merge into on a pass; `[]` = PR only | the lead (`guardrails.md`) |
-| `models` | `false` (routing off) or `{ role or task class: model name }` | staffing (`team.md`) |
+| `models` | `false` (routing off), absent (built-in routing), or `{ strong, critic, specialist, visual-critic, integrator, builder, researcher, mechanical, or a task class: model name }`; doctor warns when a judge is below `strong` | staffing (`team.md`) |
 
 Then run `node <skill-dir>/scripts/doctor.mjs` and show its lines. Fix what the answers cover; list the rest as the person's to-do, each with its fix line.
 

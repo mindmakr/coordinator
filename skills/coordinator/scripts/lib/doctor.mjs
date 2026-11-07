@@ -121,11 +121,12 @@ export function settingsCheck(ctx) {
   if (missing) return [out('settings', 'ok', 'no coordinator.json: built-in defaults'), stateRepoCheck(ctx, {})];
   if (error) return [out('settings', 'fail', `coordinator.json ${error}`, 'fix the file or rerun /coordinator:init')];
   const problems = checkSettings(settings, ctx.project);
+  const stateBad = problems.filter((p) => p.level === 'fail' && ['state', 'visibility', 'stateRepo', 'remote', 'branch'].includes(p.key));
   const worst = problems.some((p) => p.level === 'fail') ? 'fail' : problems.length ? 'warn' : 'ok';
   const lines = [worst === 'ok'
     ? out('settings', 'ok', `coordinator.json valid (${Object.keys(settings).join(', ') || 'empty'})`)
     : out('settings', worst, `coordinator.json: ${problems.map((p) => p.text).join('; ')}`, 'edit .coordinator/coordinator.json or rerun /coordinator:init')];
-  lines.push(stateRepoCheck(ctx, settings));
+  lines.push(stateBad.length ? out('state', 'fail', `run state settings are invalid: ${stateBad.map((p) => p.text).join('; ')}`, 'fix them in .coordinator/coordinator.json; push refuses until then') : stateRepoCheck(ctx, settings));
   return lines;
 }
 
@@ -170,7 +171,13 @@ export function dashboardsCheck(ctx) {
     let rec = null;
     try { rec = JSON.parse(readFileSync(f, 'utf8')); } catch { /* unreadable */ }
     if (!rec || !Number.isInteger(rec.pid)) { lines.push(out('dashboards', 'warn', `unreadable runs/${run}/serve.json`, 'delete it')); continue; }
-    if (!(ctx.alive ?? alive)(rec.pid)) { lines.push(out('dashboards', 'warn', `runs/${run}/serve.json names pid ${rec.pid}, which is gone`, `delete runs/${run}/serve.json`)); continue; }
+    if (!(ctx.alive ?? alive)(rec.pid)) {
+      // Its server is gone, so the record is only stale: remove it, or say how.
+      let removed = false;
+      if (ctx.fix !== false) { try { rmSync(f); removed = true; } catch { /* leave it */ } }
+      lines.push(out('dashboards', removed ? 'ok' : 'warn', removed ? `removed a stale dashboard record for ${run} (pid ${rec.pid} is gone)` : `runs/${run}/serve.json names pid ${rec.pid}, which is gone`, removed ? undefined : `delete ${f}`));
+      continue;
+    }
     let closed = false;
     try { closed = !!JSON.parse(readFileSync(join(runs, run, STATE), 'utf8')).closed; } catch { /* no snapshot */ }
     lines.push(closed ? out('dashboards', 'warn', `dashboard for closed run ${run} still holds port ${rec.port} (pid ${rec.pid})`, `stop pid ${rec.pid}`)
@@ -185,21 +192,29 @@ export function artifactsCheck(ctx) {
   const runs = join(ctx.base, 'runs');
   let dirs = [];
   try { dirs = readdirSync(runs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { /* no runs */ }
-  const lines = [];
+  const lines = []; const notes = [];
   let tracked = null;
   for (const run of dirs) {
     let s;
     try { s = JSON.parse(readFileSync(join(runs, run, STATE), 'utf8')); } catch { continue; }
     const dir = join(runs, run);
     const bad = verifyStored(s, dir);
-    if (bad.length) lines.push(out('artifacts', 'fail', `${run}: stored artifacts ${bad.map((b) => `${b.file} ${b.problem}`).join(', ')}`, 'restore them from a pushed copy (run.mjs pull), or re-add the evidence'));
+    for (const b of bad) {
+      const fix = b.sourceExists ? `run.mjs adopt ${run} (copies it again from ${b.source})`
+        : b.source ? `the original (${b.source}) is gone: re-run the step that made it, then run.mjs evidence ${run} ${b.unit ?? '--goal'} --file <path>`
+          : `re-attach it: run.mjs evidence ${run} ${b.unit ?? '--goal'} --file <the original>`;
+      lines.push(out('artifacts', 'fail', `${run}: stored artifact ${b.file} ${b.problem}`, fix));
+    }
     tracked ??= ctx.tracked ?? trackedFiles(ctx.project);
     const rows = adopt(s, dir, { project: ctx.project, home: ctx.home, tracked });
-    const loose = rows.filter((r) => r.status === 'adoptable').length;
-    const gone = rows.filter((r) => r.status === 'missing').length;
+    const count = (k) => rows.filter((r) => r.status === k).length;
+    const loose = count('adoptable'); const unclear = count('unclear'); const gone = count('missing'); const refused = count('refused');
     if (loose) lines.push(out('artifacts', 'warn', `${run}: ${loose} file(s) mentioned outside the run folder, not adopted${gone ? ` (${gone} already gone)` : ''}`, `run.mjs adopt ${run}`));
+    if (unclear) lines.push(out('artifacts', 'warn', `${run}: ${unclear} mentioned path(s) could not be read with certainty (spaces or brackets, not found)`, `run.mjs adopt ${run} --dry-run, then attach each with run.mjs evidence … --file "<path>"`));
+    if (!loose && !unclear && (gone || refused)) notes.push(`${run}: ${gone} gone, ${refused} refused`);
   }
-  return lines.length ? lines : [out('artifacts', 'ok', dirs.length ? 'stored artifacts intact; mentioned files adopted' : 'no runs yet')];
+  if (lines.length) return lines;
+  return [out('artifacts', 'ok', dirs.length ? `stored artifacts intact; nothing left to adopt${notes.length ? ` (${notes.join('; ')})` : ''}` : 'no runs yet')];
 }
 
 export function worktreesCheck(ctx) {

@@ -507,8 +507,8 @@ const commands = {
       if (expected && d !== expected) s.notes.push({ kind: 'decision', text: `closed early as ${outcome} at "${d}": ${text(o.reason, 'reason (closing before the rules end the run)', 500)}`, at: now() });
       s.closed = { outcome, decision: d, at: now() };
     });
-    const loose = adopt(load(run), runDir(run), { project: projectDir(), home: homedir() }).filter((r) => r.status === 'adoptable');
-    return loose.length ? Object.assign(closed, { warning: `${loose.length} file(s) the run mentions live outside its folder; run: run.mjs adopt ${run}` }) : closed;
+    const loose = adopt(load(run), runDir(run), { project: projectDir(), home: homedir() }).filter((r) => ['adoptable', 'repairable', 'unclear'].includes(r.status));
+    return loose.length ? Object.assign(closed, { warning: `${loose.length} file(s) the run mentions are not safely stored in its folder (outside it, damaged, or an unclear path); run: run.mjs adopt ${run} --dry-run` }) : closed;
   },
   adopt([run], o) {
     const dry = o['dry-run'] !== undefined;
@@ -517,7 +517,7 @@ const commands = {
     else change(run, 'evidence', (s) => { rows = adopt(s, runDir(run), { project: projectDir(), home: homedir(), apply: true }); }, { closedOk: true });
     const count = (k) => rows.filter((r) => r.status === k).length;
     console.log(rows.length ? table(rows) : 'no file paths mentioned');
-    console.log(`${dry ? 'adoptable' : 'adopted'} ${count(dry ? 'adoptable' : 'adopted')}, already ${count('already')}, inside ${count('inside')}, tracked ${count('tracked')}, missing ${count('missing')}, refused ${count('refused')}`);
+    console.log(`${dry ? 'adoptable' : 'adopted'} ${count(dry ? 'adoptable' : 'adopted')}, ${dry ? 'repairable' : 'repaired'} ${count(dry ? 'repairable' : 'repaired')}, already ${count('already')}, inside ${count('inside')}, tracked ${count('tracked')}, missing ${count('missing')}, unclear ${count('unclear')}, refused ${count('refused')}`);
     return null;
   },
   list() {

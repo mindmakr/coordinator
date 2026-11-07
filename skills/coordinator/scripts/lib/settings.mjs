@@ -8,7 +8,8 @@
 //   theme       the dashboard's CSS theme file (COORDINATOR.md `Theme:` wins)
 //   budgets     { rounds 1-8, minutes 5-10080 }: defaults for `run.mjs init`
 //   merge       branches a run may merge into when the review passes ([] = PR only)
-//   models      false (routing off) or { role or task class: model name }
+//   models      false (routing off) or { strong, critic, specialist, visual-critic, integrator,
+//               builder, researcher, mechanical, or a task class: model name }
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, isAbsolute, join, resolve } from 'node:path';
 
@@ -16,6 +17,8 @@ export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'se
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 const name = (v) => typeof v === 'string' && v.trim() !== '' && !v.startsWith('-');
 const BRANCH = /^[A-Za-z0-9._/-]{1,100}$/;
+// Roles that judge: they must not run on a weaker model than `strong`.
+export const JUDGES = ['critic', 'specialist', 'visual-critic', 'integrator'];
 // Higher is stronger; unknown names are not compared.
 const RANK = [['haiku', 1], ['sonnet', 2], ['opus', 3]];
 const rank = (m) => RANK.find(([k]) => String(m).toLowerCase().includes(k))?.[1] ?? null;
@@ -72,8 +75,11 @@ export function checkSettings(s, project) {
   if (s.models !== undefined && s.models !== false) {
     if (!isObj(s.models) || !Object.values(s.models).every(name)) bad('models', 'models must be false or { role: model name }');
     else {
-      const c = rank(s.models.critic); const b = rank(s.models.builder);
-      if (c !== null && b !== null && c < b) bad('models', `critic (${s.models.critic}) is weaker than builder (${s.models.builder}); routing ignores that and keeps the critic at least as strong`, 'warn');
+      const strong = rank(s.models.strong);
+      for (const role of JUDGES) {
+        const r = rank(s.models[role]);
+        if (strong !== null && r !== null && r < strong) bad('models', `${role} (${s.models[role]}) is below strong (${s.models.strong}); routing ignores that and keeps judges at strong`, 'warn');
+      }
     }
   }
   return out;

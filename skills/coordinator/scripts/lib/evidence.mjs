@@ -10,7 +10,7 @@ import { maskSecrets } from './secrets.mjs';
 import { webUrl } from './links.mjs';
 import { writeAtomic } from './store.mjs';
 
-export const KINDS = ['test', 'screenshot', 'log', 'link'];
+export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link'];
 export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perTarget: 60 };
 export const GOAL_DIR = '_goal'; // cannot clash with a unit id, which starts with a letter or digit
 export const IMAGE = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
