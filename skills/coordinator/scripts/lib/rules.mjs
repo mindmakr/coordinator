@@ -63,9 +63,25 @@ export function decideUnit(unit, run, nowMs) {
   const scores = rounds.map((r) => r.score).filter((s) => typeof s === 'number');
   if (scores.length > NO_PROGRESS_ROUNDS) {
     const before = Math.max(...scores.slice(0, -NO_PROGRESS_ROUNDS));
-    if (scores.slice(-NO_PROGRESS_ROUNDS).every((s) => s <= before)) return stop('no progress');
+    if (scores.slice(-NO_PROGRESS_ROUNDS).every((s) => s <= before)) return stop(noProgress(unit));
   }
   return { action: 'build', gap: last.gap };
+}
+
+// The no-progress reason. When one behaviour failed in each of the last rounds
+// and every other behaviour marked in the last round passed, the stop names it:
+// that is usually an open-ended line ("catch every X"), not worse work (#35).
+export function noProgress(unit) {
+  const window = unit.rounds.slice(-NO_PROGRESS_ROUNDS);
+  const failing = (r) => (r.behaviours ?? []).filter((m) => m.status === 'fail').map((m) => m.id);
+  const last = unit.rounds.at(-1)?.behaviours ?? [];
+  const lone = failing(unit.rounds.at(-1) ?? {});
+  if (lone.length !== 1 || !last.some((m) => m.status === 'pass')) return 'no progress';
+  const id = lone[0];
+  if (!window.every((r) => failing(r).includes(id))) return 'no progress';
+  const words = (unit.behaviours ?? []).find((b) => b.id === id)?.text;
+  const quoted = words ? ` ("${words.length > 120 ? `${words.slice(0, 119)}…` : words}")` : '';
+  return `no progress: only ${id}${quoted} kept failing while the rest passed; state it as a closed list or a fixed inventory, or move it to its own unit (references/bar.md)`;
 }
 
 export function decide(run, nowMs = Date.now()) {

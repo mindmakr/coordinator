@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { decide, decideUnit, sameGap, stats } from '../lib/rules.mjs';
+import { decide, decideUnit, noProgress, sameGap, stats } from '../lib/rules.mjs';
 
 const T0 = Date.parse('2026-01-01T00:00:00Z');
 const run = (units, extra = {}) => ({
@@ -113,4 +113,20 @@ test('same gap compares causes when both rounds have one, wording otherwise', ()
 test('two rounds with one cause ask for a new strategy even when the gap text differs', () => {
   const rounds = [{ ...fail('placeholder-as-error breaks i18next plurals', 6), cause: 'hand-rolled ICU scan' }, { ...fail('rich-text tags pass unchecked', 7), cause: 'hand-rolled ICU scan' }];
   assert.equal(decideUnit(unit(rounds), run([]), T0).action, 'change-strategy');
+});
+
+test('a no-progress stop names the one behaviour that kept failing while the rest passed (#35)', () => {
+  const m = (b1, b2) => [{ id: 'B1', status: b1, evidence: 'x' }, { id: 'B2', status: b2, evidence: 'y' }];
+  let k = 0; const gaps = ['guard misses passive voice', 'plural claims slip through', 'Arabic phrasing not caught'];
+  const r = (score, marks) => ({ ...fail(gaps[k++ % 3], score), behaviours: marks });
+  const behaviours = [{ id: 'B1', text: 'the fix works' }, { id: 'B2', text: 'a test fails when any message makes this claim' }];
+  const u = unit([r(8, m('pass', 'fail')), r(8, m('pass', 'fail')), r(6, m('pass', 'fail'))], { behaviours });
+  const reason = decideUnit(u, run([]), T0).reason;
+  assert.match(reason, /^no progress: only B2 \("a test fails when any message makes this claim"\) kept failing while the rest passed/);
+  assert.match(reason, /closed list or a fixed inventory, or move it to its own unit/);
+  assert.equal(noProgress(unit([r(8, m('fail', 'fail')), r(8, m('fail', 'fail')), r(6, m('pass', 'fail'))])).startsWith('no progress: only B2'), true, 'only the last rounds count');
+  assert.equal(noProgress(unit([r(8, m('pass', 'fail')), r(8, m('fail', 'pass')), r(6, m('pass', 'fail'))])), 'no progress', 'a different behaviour failed in the window');
+  assert.equal(noProgress(unit([r(8, m('fail', 'fail')), r(8, m('fail', 'fail')), r(6, m('fail', 'fail'))])), 'no progress', 'two failing');
+  assert.equal(noProgress(unit([r(8, [{ id: 'B2', status: 'fail' }]), r(8, [{ id: 'B2', status: 'fail' }])])), 'no progress', 'nothing else passed');
+  assert.equal(noProgress(unit([fail('a', 6), fail('b', 5), fail('c', 6)])), 'no progress', 'rounds without marks');
 });

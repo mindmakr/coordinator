@@ -45,7 +45,7 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 | `change-strategy` | Pick a different approach, `strategy --text`, then build. |
 | `check-stale` | Ask the agent. No answer and `phase: building`: `start` again and send a fresh builder. `phase: judging`: `beat` and send a fresh critic (the build is kept). |
 | `wait` | Nothing. A notification will come; never poll. |
-| `stop` | Recorded by `next` just now. Its gap goes in the report. |
+| `stop` | Recorded by `next` just now. Its gap goes in the report. A reason "no progress: only B2 kept failing …" means the rest passed: narrow B2 to a closed list or move it to a unit of its own (`references/bar.md`). |
 | `done` / `stopped` | Nothing: the unit passed, or was stopped in an earlier round. |
 
 **After each verdict and each merge**, move the board if the project has one (`references/sub-skills/board.md`) and write the situation in one or two plain sentences: `S/run.mjs note <run> --kind situation --text "Security gaps: failed twice on the same route gate; a new approach is next. Roles: being checked."` It heads the HUD. Say what is happening and what comes next, in the person's words, not unit ids alone.
