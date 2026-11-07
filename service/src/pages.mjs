@@ -160,7 +160,8 @@ export function coordinatorPage(user, repo, rows, nowMs = Date.now()) {
   return withBar(selfPage(m, nowMs, ctxFor(repo.fullName)), user, repo.fullName);
 }
 
-export function messagePage(title, text, user = null, back = null) {
-  const body = blk('head', `<header class="run"><h1>${esc(title)}</h1></header>`) + `<section class="card"><p>${esc(text)}</p><p>${back ? `<a href="${esc(back)}">Back to the run</a> · ` : ''}<a href="/">Back to your projects</a></p></section>`;
+// action (optional): trusted HTML the caller built, e.g. a one-button form, shown under the text.
+export function messagePage(title, text, user = null, back = null, action = '') {
+  const body = blk('head', `<header class="run"><h1>${esc(title)}</h1></header>`) + `<section class="card"><p>${esc(text)}</p>${action}<p>${back ? `<a href="${esc(back)}">Back to the run</a> · ` : ''}<a href="/">Back to your projects</a></p></section>`;
   return withBar(page({ title, body, ctx: plainCtx(user), path: '' }), user);
 }

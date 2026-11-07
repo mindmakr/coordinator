@@ -20,7 +20,7 @@ const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
   const t0 = now(); const deadline = t0 + maxSeconds * 1000;
   const ms = {};
-  const files = listFiles(root, Date.now() + maxSeconds * 1000); // the walk keeps real time, whatever clock the caller passes
+  const { files, cut } = listFiles(root, { deadline, now }); // the caller's clock, so a test clock is the only one
   ms.list = now() - t0;
   const cache = new Map();
   const read = (f) => {
@@ -33,7 +33,7 @@ export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
 
   // 1. Scan: every source file once, until the time cap.
   const t1 = now();
-  const info = new Map(); let partial = false;
+  const info = new Map(); let partial = cut;
   for (const f of files) {
     if (!JS.test(f) && !OTHER.test(f)) continue;
     if (now() > deadline) { partial = true; break; }

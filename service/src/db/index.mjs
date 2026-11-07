@@ -8,7 +8,7 @@
 // Sessions hold encrypted tokens and a hash of the cookie, never the cookie.
 
 const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'run', 'putRun', 'dropRunsExcept', 'deleteInstallation',
-  'putRunMap', 'markTrailPending', 'clearTrailPending', 'repoByName', 'setUnitRefs', 'runsReferencing', 'addGhEvent', 'ghEvents', 'tracker', 'putTracker'];
+  'putRunMap', 'startReread', 'markTrailPending', 'clearTrailPending', 'repoByName', 'setUnitRefs', 'runsReferencing', 'addGhEvent', 'ghEvents', 'tracker', 'putTracker'];
 
 // c12 writes: comment commands, claimed once each.
 SCOPED.push('claimCommand', 'finishCommand', 'releaseCommand');

@@ -3,7 +3,8 @@
 // secret masking as a second net.
 import { maskSecrets } from './core.mjs';
 
-const clean = (v) => (typeof v === 'string' ? maskSecrets(v).slice(0, 500) : v);
+// Clipped before masking, so a huge field costs no more than a short one.
+const clean = (v) => (typeof v === 'string' ? maskSecrets(v.slice(0, 1000)).slice(0, 500) : v);
 
 export function logger(out = process.stdout) {
   const write = (level, msg, fields = {}) => {

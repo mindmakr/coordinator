@@ -14,25 +14,31 @@ export const OTHER = /\.(?:py|go|rs|java|kt|kts|rb|php|c|cc|cpp|cxx|h|hpp|cs|dar
 const ignoredFile = (f) => /\.d\.[cm]?ts$|\.min\.js$/.test(f) || (/(^|\/)\.env(\.|$)/.test(f) && !ENV_TEMPLATE.test(f));
 export const ENV_TEMPLATE = /(^|\/)\.env\.(example|sample|template|dist)$/;
 
-function walk(root, rel = '', out = [], deadline = Infinity) {
+// The walk asks the caller's clock once per folder, so a test clock decides
+// where it stops, not the machine's load. `cut` says it stopped early.
+function walk(root, rel, out, over) {
+  if (out.cut || over()) { out.cut = true; return out; }
   let entries;
   try { entries = readdirSync(join(root, rel), { withFileTypes: true }); } catch { return out; }
   for (const e of entries) {
-    if (Date.now() > deadline || out.length > 200_000) break;
+    if (out.cut) break;
+    if (out.length > 200_000) { out.cut = true; break; }
     const p = rel ? `${rel}/${e.name}` : e.name;
-    if (e.isDirectory()) { if (!SKIP.has(e.name) && !e.name.startsWith('.')) walk(root, p, out, deadline); } else if (e.isFile()) out.push(p);
+    if (e.isDirectory()) { if (!SKIP.has(e.name) && !e.name.startsWith('.')) walk(root, p, out, over); } else if (e.isFile()) out.push(p);
   }
   return out;
 }
 
-export function listFiles(root, deadline = Infinity) {
+// Returns the sorted file list; `cut` is true when the folder walk ran out of time.
+export function listFiles(root, { deadline = Infinity, now = Date.now } = {}) {
   let files;
   try {
     const raw = execFileSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
     files = raw.split('\0').filter(Boolean);
   } catch { files = []; }
-  if (!files.length) files = walk(root, '', [], deadline); // not a repo, or a folder git ignores
-  return [...new Set(files)].filter((f) => !skipped(f) && !ignoredFile(f)).sort();
+  let cut = false;
+  if (!files.length) { files = walk(root, '', [], () => now() > deadline); cut = !!files.cut; } // not a repo, or a folder git ignores
+  return { files: [...new Set(files)].filter((f) => !skipped(f) && !ignoredFile(f)).sort(), cut };
 }
 
 // HEAD's commit and whether a remote branch has it (so a GitHub link to it works).

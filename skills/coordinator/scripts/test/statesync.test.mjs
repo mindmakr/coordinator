@@ -231,6 +231,24 @@ test('an answer changed away after the lead used it is kept as a flagged note, a
   assert.equal(ok(cli(A, 'pull', 'r4', '--from', folder)).status, 'up-to-date');
 });
 
+test('an answer changed away after the lead closed the question by a decision says so, not "after use"', () => {
+  const folder = join(root, 'away4d', 'state');
+  const ok = (r) => { assert.equal(r.code, 0, r.err); return r.out; };
+  ok(cli(A, 'init', 'r4d', '--goal', 'g', '--bar', 'b', '--fence', 'f')); ok(cli(A, 'add', 'r4d', 'u1', '--bar', 'b'));
+  ok(cli(A, 'freeze', 'r4d')); ok(cli(A, 'start', 'r4d', 'u1'));
+  ok(cli(A, 'ask', 'r4d', '--question', 'Which?', '--header', 'Pick', '--option', 'x|the x', '--option', 'y|the y', '--unit', 'u1'));
+  ok(cli(A, 'push', 'r4d', '--to', folder)); ok(cli(B, 'pull', 'r4d', '--from', folder));
+  ok(cli(A, 'note', 'r4d', '--kind', 'decision', '--text', 'x, as recommended', '--answers', 'q1')); ok(cli(A, 'beat', 'r4d', 'u1'));
+  ok(cli(B, 'answer', 'r4d', 'q1', '--choice', 'y')); ok(cli(B, 'push', 'r4d', '--to', folder));
+  assert.equal(ok(cli(A, 'pull', 'r4d', '--from', folder)).replayed, 1);
+  assert.equal(cli(A, 'questions', 'r4d').out[0].status, 'decided', 'the decision stands');
+  const late = JSON.parse(readFileSync(join(runDir(A, 'r4d'), 'state.json'), 'utf8')).notes.filter((n) => n.changedAfterUse);
+  assert.equal(late.length, 1);
+  assert.equal(late[0].text, 'answer changed after the lead decided: q1 → y (the lead keeps its decision)');
+  assert.doesNotMatch(late[0].text, /after use/);
+  assert.equal(ok(cli(A, 'pull', 'r4d', '--from', folder)).replayed, 0, 'a second pull adds nothing');
+});
+
 test('a note or answer from the branch with fields run.mjs never writes is not replayed (no copy on every pull)', () => {
   const folder = join(root, 'away5', 'state');
   const ok = (r) => { assert.equal(r.code, 0, r.err); return r.out; };
