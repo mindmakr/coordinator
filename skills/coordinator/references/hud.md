@@ -75,9 +75,17 @@ Five pictures of one run, drawn as inline SVG from the same view model as the da
 
 **Export PDF:** every page (dashboard, unit pages, maps, project map, coordinator page) has an **Export PDF** button on the live page that opens the browser's print dialog (choose Save as PDF); the snapshot runs no script, so it says "Ctrl+P or ⌘P, then Save as PDF". The print styles are in both: always the light theme, every toggle printed open (and closed again after), live controls, panels and menus hidden, maps scaled to the page width (at most 190 mm tall), cards, rows, maps and panels kept whole and headings kept with what follows where they fit, the page title at the top of every page and "Page n of m" at the bottom.
 
+## The report and the retro: `/report` and `/retro`
+
+Two more pages per run, in the header beside Maps (**Report →** and **Retro →** on the dashboard), live on `serve` and as `report.html` and `retro.html` in the snapshot:
+
+- **Report:** the release notes the lead stored, for devops and testers; each unit with its issues, PRs and merges; migrations, env vars, scripts, jobs and copy awaiting approval read from git; and the code quality and compliance signals. `quality.md` says how each part is made.
+- **Retro:** the run's retro notes, the lessons it added (both scopes), its budget against the suggested `--max-rounds` from closed runs with the same tag, the units stopped and why, upstream proposals, and escapes with their units.
+- **Retro pending:** once every unit has passed or stopped (or the run reached done, done with gaps or stopped) and no `note --kind retro` exists, the dashboard and the retro page show a banner with the command, `/coordinator:retro <run>`. It goes once a retro note is logged.
+
 ## The snapshot: `hud.html` and `units/<unit>.html`
 
-`.coordinator/runs/<run>/hud.html`, `maps.html` and one page per unit under `units/` are rewritten after every change, in the same lock as the state. `S/run.mjs hud <run>` rewrites them on demand.
+`.coordinator/runs/<run>/hud.html`, `maps.html`, `report.html`, `retro.html` and one page per unit under `units/` are rewritten after every change, in the same lock as the state. `S/run.mjs hud <run>` rewrites them on demand.
 
 - They are read-only snapshots: no scripts, no network, no reload (its content security policy blocks all three), so they open from `file://` and can be published as a page. Open questions show their options; the page says to answer in the chat or ask for the live dashboard.
 - The theme toggle works without a script there but is not remembered; toggles start closed. Times are ISO with "UTC" spelled out.
