@@ -15,7 +15,8 @@ The skill improves in two ways: the lessons it carries into the next run, and th
 3. **Bar problems.** If a bar was gamed, vague or changed mid-run, write how to state it next time.
 4. **The skill itself.** If the run exposed a gap in this skill, not in the project, log it with `S/run.mjs note <run> --kind retro --text "upstream: <one line>"` and send it upstream (`upstream.md`). Other retro notes (`--kind retro`) and follow-ups show as proposals on the coordinator's page.
 5. **Staffing.** If a choice of agent clearly helped or hurt, add it as a lesson (`team.md`).
-6. **Close the run** with `S/run.mjs close <run> --outcome done|partial|stopped`. Its rounds, time and outcome feed `stats`.
+6. **Adopt the run's files** with `S/run.mjs adopt <run>`, so screenshots and reports in worktrees survive their removal (`durability.md`). Remove worktrees only after this.
+7. **Close the run** with `S/run.mjs close <run> --outcome done|partial|stopped`; it warns if files are still unadopted. Its rounds, time and outcome feed `stats`.
 
 A lesson that was added before only has its count raised, never duplicated. Lessons are stored in `~/.coordinator/lessons.json` with `--scope global` (the default), or in the project's `.coordinator/` with `--scope project`. Project facts belong in project scope.
 

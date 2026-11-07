@@ -1,5 +1,5 @@
 ---
-description: Learn this project once and write COORDINATOR.md
+description: Learn this project once, ask the setup questions, write COORDINATOR.md and .coordinator/coordinator.json, then run doctor
 argument-hint: "[notes about the project]"
 ---
 

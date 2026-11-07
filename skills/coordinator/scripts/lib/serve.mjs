@@ -75,7 +75,9 @@ export function serve({ port = 0, page, post, file = () => null, version = () =>
         if (art) {
           const f = file(decodeURIComponent(art[2]), decodeURIComponent(art[3]), art[1] ?? null);
           if (!f) return send(res, 404, 'not found');
-          return send(res, 200, readFileSync(f.file), { 'Content-Type': f.type, 'Content-Security-Policy': "default-src 'none'; img-src 'self'; sandbox", 'Cache-Control': 'private, max-age=60' });
+          let body;
+          try { body = readFileSync(f.file); } catch { return send(res, 404, 'not found: the stored copy is missing'); }
+          return send(res, 200, body, { 'Content-Type': f.type, 'Content-Security-Policy': "default-src 'none'; img-src 'self'; sandbox", 'Cache-Control': 'private, max-age=60' });
         }
         if (!pathOf(url.pathname)) return send(res, 404, 'not found');
         const nonce = randomBytes(16).toString('base64');

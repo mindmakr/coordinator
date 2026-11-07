@@ -2,18 +2,21 @@
 // and small text files copied into the run folder, links as links. Text is
 // masked for secrets and capped; a file must be a real image or a small text
 // file; nothing outside the run's artifacts folder is ever served.
-import { copyFileSync, lstatSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { oneOf, optText, text } from './args.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { webUrl } from './links.mjs';
 import { writeAtomic } from './store.mjs';
 
-export const KINDS = ['test', 'screenshot', 'log', 'link'];
+export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link'];
 export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perTarget: 60 };
 export const GOAL_DIR = '_goal'; // cannot clash with a unit id, which starts with a letter or digit
 export const IMAGE = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
-export const TEXT = { '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8' };
+export const TEXT = { '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.json': 'text/plain; charset=utf-8' };
+// Other documents: copied byte for byte, checked by their magic bytes, served as a download.
+export const DOC = { '.pdf': 'application/pdf' };
 export const FILE_NAME = /^E\d{1,3}-[a-z0-9][a-z0-9._-]{0,80}$/;
 
 const MAGIC = {
@@ -23,6 +26,8 @@ const MAGIC = {
   '.gif': (b) => /^GIF8[79]a$/.test(b.subarray(0, 6).toString('latin1')),
 };
 MAGIC['.jpeg'] = MAGIC['.jpg'];
+MAGIC['.pdf'] = (b) => b.subarray(0, 5).toString('latin1') === '%PDF-';
+export const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
 const listOf = (s, unit) => (unit ? (unit.evidence ??= []) : (s.goalEvidence ??= []));
 const now = () => new Date().toISOString();
@@ -34,31 +39,36 @@ function storedName(eid, src) {
   return `${eid}-${stem}${ext}`;
 }
 
-// Checks and copies a file into <runDir>/artifacts/<target>/; returns the stored relative path.
-function copyIn(src, runDir, target, eid) {
+// Checks and copies a file into <runDir>/artifacts/<target>/; returns the stored
+// relative path and the stored bytes' sha256, which `doctor` verifies later.
+export function copyIn(src, runDir, target, eid) {
   const ext = extname(src).toLowerCase();
-  if (!IMAGE[ext] && !TEXT[ext]) throw new Error(`--file must be ${[...Object.keys(IMAGE), ...Object.keys(TEXT)].join(' ')}, got: ${ext || 'no extension'}`);
+  if (!IMAGE[ext] && !TEXT[ext] && !DOC[ext]) throw new Error(`--file must be ${[...Object.keys(IMAGE), ...Object.keys(DOC), ...Object.keys(TEXT)].join(' ')}, got: ${ext || 'no extension'}`);
   let st;
   try { st = lstatSync(src); } catch { throw new Error(`no file: ${src}`); }
   if (!st.isFile()) throw new Error(`--file must be a regular file, not a link or folder: ${src}`);
-  const cap = IMAGE[ext] ? LIMITS.image : LIMITS.textFile;
+  const cap = TEXT[ext] ? LIMITS.textFile : LIMITS.image;
   if (st.size > cap) throw new Error(`--file is ${Math.ceil(st.size / 1024)} KB; the cap is ${cap / 1024} KB`);
   const name = storedName(eid, src);
   const dir = join(runDir, 'artifacts', target);
   mkdirSync(dir, { recursive: true });
-  if (IMAGE[ext]) {
-    if (!MAGIC[ext](readFileSync(src))) throw new Error(`--file does not look like a ${ext.slice(1)} image`);
+  const raw = readFileSync(src);
+  let stored;
+  if (!TEXT[ext]) {
+    if (!MAGIC[ext](raw)) throw new Error(`--file does not look like a ${ext.slice(1)} file`);
+    stored = raw;
     const tmp = join(dir, `.${name}.${process.pid}.tmp`);
-    copyFileSync(src, tmp); renameSync(tmp, join(dir, name));
+    writeFileSync(tmp, stored); renameSync(tmp, join(dir, name));
   } else {
-    const raw = readFileSync(src);
     if (raw.includes(0)) throw new Error('--file looks binary; text and log files only');
-    writeAtomic(join(dir, name), maskSecrets(raw.toString('utf8')));
+    stored = Buffer.from(maskSecrets(raw.toString('utf8')));
+    writeAtomic(join(dir, name), stored);
   }
-  return { file: `${target}/${name}`, type: IMAGE[ext] ? 'image' : 'text', bytes: st.size };
+  return { file: `${target}/${name}`, type: IMAGE[ext] ? 'image' : DOC[ext] ? 'doc' : 'text', bytes: st.size, sha256: sha256(stored) };
 }
 
-// o: { kind, text?, file?, url?, label?, behaviour? }. Returns the evidence id.
+// o: { kind, text?, file?, url?, label?, behaviour?, source? }. Returns the evidence id.
+// source: the original path a file was adopted from (`run.mjs adopt`), so adopting twice is a no-op.
 export function addEvidence(s, unit, o, runDir) {
   const kind = oneOf(o.kind, KINDS, '--kind');
   const given = ['text', 'file', 'url'].filter((k) => typeof o[k] === 'string');
@@ -77,7 +87,10 @@ export function addEvidence(s, unit, o, runDir) {
     const url = webUrl(o.url);
     if (!url || url.length > 500) throw new Error('--url must be an http(s) URL');
     item.url = maskSecrets(url);
-  } else Object.assign(item, copyIn(o.file, runDir, unit ? unit.id : GOAL_DIR, eid));
+  } else {
+    Object.assign(item, copyIn(o.file, runDir, unit ? unit.id : GOAL_DIR, eid));
+    if (typeof o.source === 'string') item.source = o.source;
+  }
   list.push(item);
   return eid;
 }
@@ -89,5 +102,5 @@ export function artifact(s, target, name) {
   const item = list.find((e) => e.file === `${target}/${name}`);
   if (!item) return null;
   const ext = extname(name);
-  return { rel: item.file, type: IMAGE[ext] ?? TEXT[ext] };
+  return { rel: item.file, type: IMAGE[ext] ?? TEXT[ext] ?? DOC[ext] };
 }

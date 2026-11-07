@@ -187,13 +187,24 @@ svg.map { display: block; max-width: none; margin: 0 auto; font: 13px var(--font
 svg.map text { fill: var(--ink); }
 svg.map .b { font-weight: 700; } svg.map .sm { font-size: 12px; } svg.map .xs { font-size: 10.5px; }
 svg.map .muted { fill: var(--muted); } svg.map .h { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); } svg.map .warn { fill: var(--wait); }
-svg.map .edge { fill: none; stroke: color-mix(in oklab, var(--muted) 45%, var(--card)); stroke-width: 1.4; }
-svg.map .edge.after { stroke: var(--muted); stroke-width: 2; }
-svg.map .edge.crit { stroke: var(--run); stroke-width: 3.5; }
-svg.map .edge.follow-up, svg.map .edge.inferred { stroke-dasharray: 4 4; }
-svg.map .edge.named { stroke: var(--pass); stroke-width: 2; }
+svg.map .edge, svg.lsw .edge { fill: none; stroke: color-mix(in oklab, var(--muted) 45%, var(--card)); stroke-width: 1.4; }
+svg.map .edge.after, svg.lsw .edge.after { stroke: var(--muted); stroke-width: 2; }
+svg.map .edge.crit, svg.lsw .edge.crit { stroke: var(--run); stroke-width: 3.5; }
+svg.map .edge.follow-up, svg.map .edge.inferred, svg.lsw .edge.follow-up, svg.lsw .edge.inferred { stroke-dasharray: 4 4; }
+svg.map .edge.follow-up, svg.lsw .edge.follow-up { stroke: color-mix(in oklab, var(--note) 70%, var(--card)); }
+svg.map .edge.named, svg.lsw .edge.named { stroke: var(--pass); stroke-width: 2; }
 svg.map .elabel { paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
-svg.map .arrow { fill: var(--muted); } svg.map .arrow.crit { fill: var(--run); }
+/* Line ends (lib/mapsvg.mjs ENDS): one shape per relation. */
+svg.map .arrow, svg.lsw .arrow { fill: var(--muted); } svg.map .arrow.crit, svg.lsw .arrow.crit { fill: var(--run); }
+svg.map .arrow.link, svg.lsw .arrow.link { fill: var(--card); stroke: var(--muted); stroke-width: 1.6; }
+svg.map .arrow.fu, svg.lsw .arrow.fu { fill: none; stroke: var(--note); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+svg.lsw { flex: none; overflow: visible; }
+/* Walkable maps (lib/mapnav.mjs): wide invisible hit lines, focusable lines, the selection. */
+svg.map .hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; } svg.map .hit.thin { stroke-width: 4; }
+svg.map .eg { outline: none; } svg.map .eg * { pointer-events: none; }
+svg.map .eg:focus-visible .edge { stroke: var(--run); stroke-width: 4; }
+svg.map .nv.sel .nd { stroke: var(--ink); stroke-width: 4.5; }
+svg.map .nv.sel > text:first-of-type { text-decoration: underline; }
 svg.map .nd { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; }
 svg.map .nd.crit { stroke: var(--run); stroke-width: 3.5; }
 svg.map .nd.goal { stroke-width: 3; }
@@ -221,8 +232,11 @@ svg.map .hc { stroke: none; }
 .h-wait { fill: color-mix(in oklab, var(--wait) 35%, var(--card)); background: color-mix(in oklab, var(--wait) 35%, var(--card)); }
 /* Map panels (lib/maptips.mjs): shown by per-box :has rules; the live script pins and places them. */
 svg.map .hl, .graph .n { transition: opacity .15s; }
-:where(svg.map:has(a.u:is(:hover, :focus))) .hl, :where(body:has(.tip[id^="tip-u"]:focus-within)) svg.map .hl { opacity: .22; }
-body[data-tips=off] svg.map .hl { opacity: 1; }
+:where(svg.map:not([data-nav]):has(a.u:is(:hover, :focus))) .hl, :where(body:has(.tip[id^="tip-u"]:focus-within)) svg.map .hl { opacity: .22; }
+:where(svg.map[data-nav]:has(:is(.nv, .eg, .hit):is(:hover, :focus-visible))) .hl, :where(svg.map[data-sel]) .hl { opacity: .22; }
+body[data-tips=off] svg.map:not([data-sel]) .hl { opacity: 1; }
+svg.map[data-sel] .hl.lit { opacity: 1; }
+svg.map[data-sel][data-focus] .hl:not(.lit) { visibility: hidden; }
 .tip { visibility: hidden; transition: visibility 0s linear .35s; position: fixed; z-index: 20; right: 16px; bottom: 16px; width: min(340px, calc(100vw - 32px)); max-height: 60vh; overflow: auto;
   padding: 10px 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: 0 6px 24px color-mix(in oklab, var(--ink) 18%, transparent); font-size: 13px; overflow-wrap: anywhere; }
@@ -247,11 +261,64 @@ body[data-tips=off] .tip:not(.pinned):not(:focus-within) { visibility: hidden !i
 .sw.ln-fu, .sw.ln-inferred { border-top-style: dashed; } .sw.ln-named { border-top-color: var(--pass); }
 .sw.ref.cross { border: 1.5px dashed var(--note); border-radius: 6px; background: var(--bg); }
 .sw.off { border: 2px dashed var(--wait); background: var(--card); }
+.map-legend.counts b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.nav-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.nav-find input { display: block; margin-top: 4px; width: min(240px, calc(100vw - 48px)); font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: calc(var(--radius) * .6); padding: 6px 8px; }
+.nav-focus { display: inline-flex; align-items: center; gap: 6px; padding-bottom: 6px; cursor: pointer; }
+/* The selection panel floats over the page, so selecting never moves the map under the pointer. */
+.nav-panel { position: fixed; z-index: 25; left: 16px; bottom: 16px; width: min(380px, calc(100vw - 32px)); max-height: 45vh; overflow: auto; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--run); border-radius: var(--radius); padding: 10px 12px; color: var(--ink); overflow-wrap: anywhere; box-shadow: 0 6px 24px color-mix(in oklab, var(--ink) 18%, transparent); }
+.nav-tools [data-nav-count] { flex-basis: 100%; min-height: 1.4em; }
+/* While something is selected the stats panel stays out of the way (unless focus is in it). */
+body:has(svg.map[data-sel]) .tip:not(:focus-within) { visibility: hidden !important; transition: none; }
+svg.map .edge.copy { pointer-events: none; }
+.nav-panel p { margin: 0 0 6px; }
+.crumbs ol { display: flex; flex-wrap: wrap; gap: 2px 4px; list-style: none; margin: 0 0 6px; padding: 0; font-size: 12px; }
+.crumbs li + li::before { content: "›"; color: var(--muted); margin-right: 4px; }
+.crumbs button, .kids button, .nav-acts button { margin: 0; min-height: 30px; padding: 3px 10px; font-size: 13px; font-weight: 600; color: var(--ink); background: var(--none-bg); border: 1px solid var(--line); }
+.crumbs button { min-height: 0; padding: 1px 6px; font-weight: 400; background: none; border-color: transparent; color: var(--run); }
+.crumbs [aria-current] button { color: var(--ink); font-weight: 600; }
+.nav-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.nav-acts a.cta { display: inline-block; padding: 5px 14px; border-radius: calc(var(--radius) * .6); background: var(--run); color: var(--on-run); font-weight: 600; text-decoration: none; }
+.kids { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 4px 0 0; padding: 0; }
+.kids [aria-selected="true"] button { border-color: var(--run); color: var(--run); }
+.nmenu { position: fixed; z-index: 30; min-width: 200px; padding: 4px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 6px 24px color-mix(in oklab, var(--ink) 22%, transparent); }
+.nmenu [role=menuitem] { display: block; width: 100%; margin: 0; min-height: 34px; padding: 6px 10px; text-align: left; font-weight: 400; color: var(--ink); background: none; border: 0; border-radius: calc(var(--radius) * .5); }
+.nmenu [role=menuitem]:hover { background: var(--none-bg); }
+.nmenu [role=menuitem]:focus { background: var(--none-bg); outline: 2px solid var(--run); outline-offset: -2px; }
+.nmenu [role=menuitem][aria-disabled="true"] { color: var(--muted); cursor: default; }
+.print-btn { margin: 0; min-height: 0; padding: 2px 10px; font-size: 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; }
+.print-hint { font-size: 12px; color: var(--muted); }
+.print-head { display: none; }
 footer { margin-top: 36px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 footer a { color: inherit; }
 @media (max-width: 520px) {
   .timeline li { grid-template-columns: auto 1fr; }
   .timeline li > :last-child { grid-column: 1 / -1; }
+}
+/* Export PDF (the browser's print): light theme, everything open, live-only controls hidden, nothing cut across pages where it fits. */
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { background: #fff; font-size: 12px; }
+  .wrap { max-width: none; padding: 0; }
+  .top .tools, .pages, .tl-tools, .nav-tools, .nav-help, .nmenu, .tips, .tip, .map-hint, form, button, .retry, .themes, .print-hint, a.back, .toc { display: none !important; }
+  .top { padding-bottom: 6px; }
+  .print-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 0 0 8px; font-size: 11px; color: var(--muted); }
+  details::details-content { content-visibility: visible !important; display: block !important; }
+  details > summary { list-style: none; }
+  pre, .scroll, .map-scroll, .map-scroll.mind { max-height: none !important; overflow: visible !important; }
+  .map-scroll { border: 0; background: none; }
+  .mapbox { max-height: none !important; overflow: visible !important; border: 0 !important; }
+  svg.graph { display: block; max-width: 100%; width: auto; height: auto; max-height: 190mm; break-inside: avoid; }
+  svg.map { max-width: 100%; width: auto; height: auto; max-height: 190mm; }
+  svg.map .hl { opacity: 1 !important; visibility: visible !important; }
+  .card, .round, .evidence, .q, .opt, tr, li, .map-scroll, svg.map, .goal, .needs, .next, .stat, .tip, .nav-panel, details, .map-legend, .map-say, img, pre, dl { break-inside: avoid; }
+  h1, h2, h3, h4, summary, header.run { break-after: avoid; }
+  h2 + *, h3 + * { break-before: avoid; }
+  section.maps > p:has(~ .map-scroll) { break-after: avoid; }
+  section.maps { break-before: auto; }
+  a { color: inherit; text-decoration: none; }
+  footer { margin-top: 16px; break-before: avoid; }
+  p, li { orphans: 3; widows: 3; }
 }
 </style>
 </head>

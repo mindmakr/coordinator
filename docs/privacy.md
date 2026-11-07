@@ -91,7 +91,7 @@ A security alert (secret scanning, code scanning, Dependabot) is kept only as it
 
 **Not done:** no model calls, no analytics or tracking, no advertising, no selling or sharing of data.
 
-Server logs are JSON lines: one per request (method, path, status and timing; never headers, cookies, query strings or bodies), plus a few events. Lines that name a person: "signed in" and a failed token refresh carry the login; an opened doorbell stream, an alert that could not be delivered and a failed access check carry the login too. Lines that carry a client address: a webhook whose signature is refused, and a webhook body that arrived too slowly. They log the address group: a full IPv4 address, or an IPv6 address cut to its /64. Secrets are masked in every line as a second net. They are kept for **[TO BE SET AT DEPLOY: log retention period]**.
+Server logs are JSON lines: one per request (method, path, status and timing; never headers, cookies, query strings or bodies), plus a few events. Lines that name a person: "signed in" and a failed token refresh carry the login; an opened doorbell stream, an alert that could not be delivered and a failed access check carry the login too. Lines that carry a client address: a webhook whose signature is refused, and a webhook body that arrived too slowly. They log the address group: a full IPv4 address, or an IPv6 address cut to its /64. Secrets are masked in every line as a second net. How long they are kept on the hosted service is set before it opens (1.0.1) and stated here. A self-hosted service keeps them as long as its operator sets.
 
 ## Who can see a run
 
