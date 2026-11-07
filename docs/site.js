@@ -1,16 +1,18 @@
-// The homepage's only script: the practice's name, the hero sweep, the loop's active step, copy buttons.
+// The homepage's only script: the practice's name, the hero scan's step, the loop's active step, copy buttons.
 // Scrolling effects are CSS scroll-driven animations; IntersectionObserver is the fallback.
 (() => {
   if (typeof TERM === 'string') document.querySelectorAll('[data-term]').forEach((el) => { el.textContent = TERM; });
 
   const io = 'IntersectionObserver' in window;
-  const xray = document.querySelector('.xray');
-  if (xray && io) {
-    const seen = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) { xray.classList.add('go'); seen.disconnect(); }
-    }, { threshold: 0.3 });
-    seen.observe(xray);
-  } else if (xray) xray.classList.add('go');
+  // The hero's scan stage: the probe crossing the middle of the screen names the step,
+  // which picks the caption (and, without scroll timelines, the scan and pan positions).
+  const stage = document.querySelector('.scan');
+  if (stage && io) {
+    const mark = new IntersectionObserver((entries) => {
+      entries.filter((e) => e.isIntersecting).forEach((e) => { stage.dataset.step = e.target.dataset.step; });
+    }, { rootMargin: '-50% 0px -50% 0px' });
+    stage.querySelectorAll('.probe').forEach((p) => mark.observe(p));
+  }
 
   const ring = document.querySelector('.ring');
   const steps = [...document.querySelectorAll('.steps li')];

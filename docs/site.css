@@ -73,43 +73,67 @@ p { margin: 0 0 1rem; }
 .nav nav a:hover { color: var(--ink); }
 @media (max-width: 860px) { .nav nav { display: none; } .nav .btn { margin-left: auto; } }
 
-/* Hero */
-.hero { padding: 3.5rem 0 4rem; }
-.hero-in { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 3rem; align-items: center; }
+/* Hero: the text, then the scan stage below it */
+.hero { padding: 3.5rem 0 2.2rem; }
+.hero-in { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 1.5rem 3rem; align-items: end; }
 h1 { display: flex; flex-direction: column; gap: .5rem; }
-.prod { font-size: clamp(2.9rem, 6.6vw, 5.4rem); font-weight: 800; letter-spacing: -.035em; line-height: 1; }
-.tag-line { font-size: clamp(1.45rem, 2.6vw, 2.1rem); font-weight: 500; color: var(--ink-2); letter-spacing: -.01em; line-height: 1.2; }
+.prod { font-size: clamp(2.9rem, 7vw, 6rem); font-weight: 800; letter-spacing: -.035em; line-height: 1; }
+.tag-line { font-size: clamp(1.45rem, 2.6vw, 2.2rem); font-weight: 500; color: var(--ink-2); letter-spacing: -.01em; line-height: 1.2; }
 .tag-line a { color: var(--ink); font-weight: 700; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 6px; }
-.lede { font-size: 1.2rem; color: var(--ink-2); max-width: 32rem; margin: 1.4rem 0 1.8rem; }
+.lede { font-size: 1.2rem; color: var(--ink-2); max-width: 32rem; margin: 0 0 1.5rem; }
 .ctas { display: flex; flex-wrap: wrap; gap: .75rem; }
+@media (max-width: 960px) { .hero { padding-top: 2.2rem; } .hero-in { grid-template-columns: minmax(0, 1fr); } }
 
+/* The scan stage. Static by default: the whole dashboard, scrollable in its frame, every caption listed. */
+@property --scan { syntax: "<percentage>"; inherits: true; initial-value: 52%; }
+@property --pan { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+.scan { position: relative; padding: 0 0 4.5rem; }
 .xray { margin: 0; }
-.lightbox { position: relative; aspect-ratio: 16 / 11; border-radius: var(--r-frame); overflow: hidden; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 30px 60px -30px var(--shade), 0 0 0 6px var(--accent-soft); }
-.lightbox .surface, .lightbox .inside img { width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
-.lightbox .surface { object-position: 0 100%; }
-.inside { --scan: 52%; position: absolute; inset: 0; background: var(--surface); clip-path: inset(0 calc(100% - var(--scan) - 30%) 0 var(--scan)); }
-.inside img { object-position: 0 0; }
-.beam { --scan: 52%; position: absolute; top: 0; bottom: 0; left: var(--scan); width: 30%; pointer-events: none; border-left: 2px solid var(--beam); border-right: 2px solid var(--beam); background: linear-gradient(90deg, var(--accent-soft), transparent 30%, transparent 70%, var(--accent-soft)); }
-.xray figcaption { font-size: .9rem; color: var(--ink-3); margin-top: .8rem; max-width: 46rem; }
+.lightbox { position: relative; border-radius: var(--r-frame); overflow: hidden; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 30px 60px -30px var(--shade), 0 0 0 6px var(--accent-soft); }
+.frame { position: relative; max-height: 72vh; overflow-y: auto; }
+.surface { width: 100%; height: auto; }
+.inside { position: absolute; inset: 0; background: var(--surface); clip-path: inset(0 calc(100% - var(--scan) - 24%) 0 var(--scan)); }
+.inside img { width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
+.beam { position: absolute; top: 0; bottom: 0; left: var(--scan); width: 24%; pointer-events: none; border-left: 2px solid var(--beam); border-right: 2px solid var(--beam); background: linear-gradient(90deg, var(--accent-soft), transparent 30%, transparent 70%, var(--accent-soft)); }
+.caps { list-style: none; margin: 1.1rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem 2.5rem; color: var(--ink-2); font-size: .98rem; }
+.caps b { color: var(--ink); }
+.probe { display: none; }
+@media (max-width: 860px) { .caps { grid-template-columns: minmax(0, 1fr); } .frame { max-height: 70vh; } }
 
-@property --scan { syntax: "<percentage>"; inherits: false; initial-value: 52%; }
-@keyframes scan { from { --scan: 6%; } to { --scan: 74%; } }
-@keyframes sweep { from { --scan: -30%; } to { --scan: 52%; } }
-
-@media (prefers-reduced-motion: no-preference) {
-  /* Without scroll timelines: one sweep when the page opens (site.js adds .go). */
-  .js .inside, .js .beam { --scan: -30%; }
-  .js .xray.go .inside, .js .xray.go .beam { animation: sweep 2.4s var(--ease) .3s both; }
-  @supports (animation-timeline: scroll()) {
-    /* With them: the scan follows the page as you scroll past the hero. */
-    .js .inside, .js .beam, .js .xray.go .inside, .js .xray.go .beam { --scan: 52%; animation: scan linear both; animation-timeline: scroll(root); animation-range: 0 85vh; animation-delay: 0s; animation-duration: auto; }
+/* Pinned: on wider screens with motion allowed, the stage is 230vh tall; the frame sticks while
+   the scan sweeps, the dashboard pans, and one caption shows at a time. */
+@media (min-width: 861px) and (prefers-reduced-motion: no-preference) {
+  .js .scan { height: 230vh; padding: 0; }
+  .js .scan-pin { position: sticky; top: 60px; height: calc(100vh - 60px); display: flex; flex-direction: column; padding-top: 14px; padding-bottom: 18px; }
+  .js .xray { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .js .lightbox { flex: 1; min-height: 0; }
+  .js .frame { position: absolute; inset: 0; max-height: none; overflow: hidden; --scan: -24%; --pan: 0%; transition: --scan .9s var(--ease), --pan .9s var(--ease); }
+  .js .surface { height: 100%; object-fit: cover; object-position: 0 var(--pan); }
+  .js .caps { display: block; position: relative; height: 3.4rem; margin-top: .9rem; font-size: 1.08rem; }
+  .js .cap { position: absolute; inset: 0; opacity: 0; transform: translateY(6px); transition: opacity .45s var(--ease), transform .45s var(--ease); }
+  .js .scan:not([data-step]) .cap[data-cap="1"], .js .scan[data-step="1"] .cap[data-cap="1"], .js .scan[data-step="2"] .cap[data-cap="2"],
+  .js .scan[data-step="3"] .cap[data-cap="3"], .js .scan[data-step="4"] .cap[data-cap="4"] { opacity: 1; transform: none; }
+  /* Probes sit where the middle of the screen is at 0, 22, 52 and 80% of the sweep (stage 230vh, sweep over 130vh). */
+  .js .probe { display: block; position: absolute; left: 0; width: 1px; }
+  .js .probe[data-step="1"] { top: 0; height: 34.2%; } .js .probe[data-step="2"] { top: 34.2%; height: 16.9%; }
+  .js .probe[data-step="3"] { top: 51.1%; height: 15.9%; } .js .probe[data-step="4"] { top: 67%; height: 33%; }
+  /* Without scroll timelines, each step sets the scan and the pan (site.js marks the step). */
+  .js .scan[data-step="2"] .frame { --scan: 20%; --pan: 13%; }
+  .js .scan[data-step="3"] .frame { --scan: 44%; --pan: 100%; }
+  .js .scan[data-step="4"] .frame { --scan: 68%; --pan: 100%; }
+  /* With them, both follow the scroll position exactly. */
+  @supports (animation-timeline: view()) {
+    .js .scan { view-timeline-name: --stage; }
+    .js .frame { transition: none; animation: stage linear both; animation-timeline: --stage; animation-range: contain 0% contain 100%; }
+    @keyframes stage {
+      0% { --scan: -24%; --pan: 0%; }
+      22% { --pan: 0%; }
+      40% { --pan: 13%; }
+      52% { --pan: 13%; }
+      74% { --pan: 100%; }
+      100% { --scan: 76%; --pan: 100%; }
+    }
   }
-}
-
-@media (max-width: 960px) {
-  .hero { padding-top: 2.2rem; }
-  .hero-in { grid-template-columns: minmax(0, 1fr); gap: 2.2rem; }
-  .lightbox { aspect-ratio: 4 / 3.4; }
 }
 
 /* Sections */
@@ -264,7 +288,7 @@ section { padding: 5.5rem 0; }
   .lede { font-size: 1.08rem; }
   .ctas .btn { flex: 1 1 auto; justify-content: center; }
 }
-@media print { .nav, .skip, .beam, .inside { display: none; } }
+@media print { .nav, .skip, .beam, .inside { display: none; } .scan { height: auto !important; } .scan-pin { position: static !important; height: auto !important; } }
 @media (max-width: 600px) {
   .cmd pre { padding-right: 1rem; }
   .cmd pre code { font-size: .8rem; }

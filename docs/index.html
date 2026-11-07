@@ -46,31 +46,46 @@
 
 <section class="hero" aria-labelledby="hero-h">
   <div class="wrap hero-in">
-    <div class="hero-copy">
-      <h1 id="hero-h"><span class="prod">Coordinator</span><span class="tag-line"><a href="lucid-coding.html" data-term>Lucid Coding</a> for your agents</span></h1>
+    <h1 id="hero-h"><span class="prod">Coordinator</span><span class="tag-line"><a href="lucid-coding.html" data-term>Lucid Coding</a> for your agents</span></h1>
+    <div class="hero-side">
       <p class="lede">See how each agent read the problem, what it built, how a blind critic judged it and why, and what is running now.</p>
       <div class="ctas">
         <a class="btn" href="#install">Install the skill</a>
         <a class="btn ghost" href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Self-host the service</a>
       </div>
     </div>
-    <figure class="xray" aria-labelledby="xray-cap">
+  </div>
+</section>
+
+<section class="scan" aria-label="A run under the scan">
+  <div class="scan-pin wrap">
+    <figure class="xray">
       <div class="lightbox">
-        <picture>
-          <source srcset="img/dash-dark.webp" media="(prefers-color-scheme: dark)">
-          <img class="surface" src="img/dash-light.webp" width="1400" height="2117" alt="The live dashboard of a real Coordinator run: the situation line, the goal, the budget, and five units with their status, tries, score trend and next step. One unit says Waiting for m4.">
-        </picture>
-        <div class="inside" aria-hidden="true">
+        <div class="frame">
           <picture>
-            <source srcset="img/flow-dark.webp" media="(prefers-color-scheme: dark)">
-            <img src="img/flow-light.webp" width="1400" height="995" alt="">
+            <source srcset="img/hero-dark.webp" media="(prefers-color-scheme: dark)">
+            <img class="surface" src="img/hero-light.webp" width="1400" height="2259" alt="The live dashboard of a real run: the situation line, the goal, a Needs you box with one question and the lead's recommended answer, and four units, one Working, one that Needs you and two Waiting for h1.">
           </picture>
+          <div class="inside" aria-hidden="true">
+            <picture>
+              <source srcset="img/flow-dark.webp" media="(prefers-color-scheme: dark)">
+              <img src="img/flow-light.webp" width="1400" height="995" alt="">
+            </picture>
+          </div>
+          <span class="beam" aria-hidden="true"></span>
         </div>
-        <span class="beam" aria-hidden="true"></span>
       </div>
-      <figcaption id="xray-cap">A real run's dashboard. Under the scan, the flow map of the project's release run: what waits on what, and which issues and runs each unit links.</figcaption>
+      <figcaption>
+        <ol class="caps">
+          <li class="cap" data-cap="1"><b>Situation and goal.</b> Where the run stands, in one line, counted from its log.</li>
+          <li class="cap" data-cap="2"><b>Needs you.</b> The one question only you can answer, asked once, with the lead's pick marked Recommended.</li>
+          <li class="cap" data-cap="3"><b>Units.</b> Working, Needs you, and Waiting for h1, each linked to the unit it waits on, with its behaviours and evidence.</li>
+          <li class="cap" data-cap="4"><b>Under the scan: the flow map.</b> What waits on what across a release run, the critical path, and the issues and PRs each unit links.</li>
+        </ol>
+      </figcaption>
     </figure>
   </div>
+  <span class="probe" data-step="1" aria-hidden="true"></span><span class="probe" data-step="2" aria-hidden="true"></span><span class="probe" data-step="3" aria-hidden="true"></span><span class="probe" data-step="4" aria-hidden="true"></span>
 </section>
 
 <section class="stance" id="lucid" aria-labelledby="stance-h">
