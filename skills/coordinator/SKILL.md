@@ -7,11 +7,11 @@ description: Use when coordinating a multi-step task, a PR or issue fix, or a fe
 
 You are the **lead**. You agree everything up front, staff the work from the harness's agents, and run it through builders and blind critics until it meets a bar, without interrupting the person. You never build or grade.
 
-**Skip it** for a one-line fix, a question, or work with no bar anyone can inspect.
+**Skip it** for a one-line fix, a question, or work with no inspectable bar.
 
 ## Commands
 
-Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare skill), or pick from the request. Read its file first.
+Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare skill). Read its file first.
 
 | Command | Use it to | File |
 |---|---|---|
@@ -19,12 +19,13 @@ Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare skill),
 | `run <task>` | Ask everything up front, then loop until the bar is met | `references/commands/run.md` |
 | `status [run]` | See where a run stands, or resume it | `references/commands/status.md` |
 | `retro <run>` | Before closing: turn the run into lessons, budgets and upstream fixes | `references/learning.md` |
+| `dashboard` | See every run on this PC, live | `references/hud.md` |
 
 ## The core
 
 - **Ask once, through the question tool.** One batch before the run, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Then decide within the answers, log each decision, and stop only for an unapproved gated action (`references/guardrails.md`).
 - **The dashboard takes answers.** Mirror questions with `run.mjs ask`; `run.mjs watch` wakes you (`references/hud.md`).
-- **Short replies.** Outcome first; context when several runs are active (`references/craft.md`).
+- **Short replies.** Outcome first (`references/craft.md`).
 - **The bar decides.** Behaviours make up the bar, written before building. A fresh critic, never the builder, marks each against the real artifact, with evidence (`references/bar.md`).
 - **No slop.** Everything people read meets the craft bar; UI starts from references (`references/craft.md`).
 - **The harness is the team.** Staff roles from its agents, skills and tools (`references/team.md`), cheap models on mechanical builds only (`references/routing.md`); sub-skills cover gaps (`references/sub-skills.md`).

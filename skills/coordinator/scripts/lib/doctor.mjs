@@ -10,6 +10,7 @@ import { STATE } from './events.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { checkSettings, readSettings } from './settings.mjs';
 import { themeFile } from './theme.mjs';
+import { readRegistry } from './registry.mjs';
 
 export const RELEASES = 'https://github.com/mindmakr/coordinator';
 const LOCK_STALE_MS = 30_000;
@@ -255,9 +256,78 @@ export function codexCheck(ctx) {
     : out('codex', 'ok', 'Codex install has every skill');
 }
 
+// Every copy of the coordinator skill this machine and project hold, by the tool that reads it
+// (references/harnesses.md). A copy is a folder with coordinator/SKILL.md; its version is in
+// scripts/lib/version.mjs, and a copy without scripts/run.mjs cannot keep a run.
+const subdirs = (d) => { try { return readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(d, e.name)); } catch { return []; } };
+export function skillRoots(project, home) {
+  const plugin = subdirs(join(home, '.claude', 'plugins', 'cache')).flatMap((m) => subdirs(join(m, 'coordinator')))
+    .filter((v) => !existsSync(join(v, '.orphaned_at'))).map((v) => ['claude-code', join(v, 'skills')]);
+  return [
+    ...plugin, ['claude-code', join(home, '.claude', 'skills')], ['claude-code', join(project, '.claude', 'skills')],
+    ['any', join(home, '.agents', 'skills')], ['any', join(project, '.agents', 'skills')],
+    ['codex', join(home, '.codex', 'skills')], ['codex', join(project, '.codex', 'skills')],
+    ['gemini', join(home, '.gemini', 'skills')], ['gemini', join(project, '.gemini', 'skills')],
+    ...subdirs(join(home, '.gemini', 'extensions')).map((x) => ['gemini', join(x, 'skills')]),
+    ['antigravity', join(home, '.gemini', 'antigravity', 'skills')], ['antigravity', join(project, '.agent', 'skills')],
+  ];
+}
+export function skillCopies(project, home) {
+  const seen = new Set(); const copies = [];
+  for (const [harness, root] of skillRoots(project, home)) {
+    const dir = join(root, 'coordinator');
+    if (!existsSync(join(dir, 'SKILL.md')) || seen.has(resolve(dir).toLowerCase())) continue;
+    seen.add(resolve(dir).toLowerCase());
+    let version = null;
+    try { version = /VERSION\s*=\s*'([^']+)'/.exec(readFileSync(join(dir, 'scripts', 'lib', 'version.mjs'), 'utf8'))?.[1] ?? null; } catch { /* older copy */ }
+    copies.push({ harness, dir, version, scripts: existsSync(join(dir, 'scripts', 'run.mjs')) });
+  }
+  return copies;
+}
+
+export function copiesCheck(ctx) {
+  const copies = ctx.copies ?? skillCopies(ctx.project, ctx.home);
+  if (!copies.length) return out('copies', 'ok', `no installed copy found beside this one (skill ${ctx.version})`);
+  const where = copies.map((c) => `${rel(ctx.home, c.dir)} ${c.version ?? 'unknown'}${c.scripts ? '' : ' (no scripts)'}`).join('; ');
+  const versions = [...new Set([ctx.version, ...copies.map((c) => c.version ?? 'unknown')])];
+  return versions.length > 1
+    ? out('copies', 'warn', `copies of the skill differ (${versions.join(', ')}): ${where}`, 'update every copy to the same version (references/harnesses.md); a run written by another version shows a warning, it does not break')
+    : out('copies', 'ok', `${copies.length} cop${copies.length === 1 ? 'y' : 'ies'}, all ${ctx.version}: ${where}`);
+}
+
+// A tool told to use the coordinator (its instructions file names it) that has no copy of the scripts
+// would have to write run state by hand, which the skill forbids (runs go only through run.mjs).
+const mentions = (f) => { try { return /coordinator/i.test(readFileSync(f, 'utf8')); } catch { return false; } };
+const filesIn = (d) => { try { return readdirSync(d).filter((n) => n.endsWith('.md')).map((n) => join(d, n)); } catch { return []; } };
+export function harnessesCheck(ctx) {
+  const copies = ctx.copies ?? skillCopies(ctx.project, ctx.home);
+  const has = (h) => copies.some((c) => c.scripts && (c.harness === h || c.harness === 'any'));
+  const told = {
+    gemini: [join(ctx.project, 'GEMINI.md'), join(ctx.home, '.gemini', 'GEMINI.md')].filter(mentions),
+    antigravity: [join(ctx.project, '.agent', 'rules'), join(ctx.project, '.agent', 'workflows'), join(ctx.project, '.agents', 'rules'), join(ctx.project, '.agents', 'workflows')].flatMap(filesIn).filter(mentions),
+  };
+  const bad = Object.entries(told).filter(([h, files]) => files.length && !has(h));
+  if (bad.length) return bad.map(([h, files]) => out('harnesses', 'warn', `${h} has coordinator instructions (${files.map((f) => rel(ctx.project, f)).join(', ')}) but no copy of the scripts`, 'copy every folder under skills/ where that tool reads skills (references/harnesses.md)'));
+  const set = Object.entries(told).filter(([, f]) => f.length).map(([h]) => h);
+  return [out('harnesses', 'ok', set.length ? `${set.join(', ')}: instructions and scripts in place` : 'no Gemini or Antigravity instructions name the coordinator')];
+}
+
+// The machine-wide register (lib/registry.mjs): every run on this PC, with the tool and skill version that last wrote it.
+export function registryCheck(ctx) {
+  let runs = [];
+  try { runs = readRegistry({ home: ctx.registryHome }); } catch (e) { return out('registry', 'warn', `run register unreadable: ${e.message}`, 'delete it; each run re-registers on its next write'); }
+  if (!runs.length) return out('registry', 'ok', 'no run registered on this PC yet');
+  const projects = new Set(runs.map((r) => r.key)).size;
+  const shown = runs.slice(0, 8).map((r) => `${r.run}${r.alias ? ` "${r.alias}"` : ''} (${r.harness ?? 'tool not recorded'}${r.skill ? ` ${r.skill}` : ''})`).join(', ');
+  const other = runs.filter((r) => r.skill && r.skill !== ctx.version);
+  const text = `${runs.length} run(s) in ${projects} project(s) on this PC: ${shown}${runs.length > 8 ? ', …' : ''}`;
+  return other.length ? out('registry', 'warn', `${text}; ${other.length} last written by another skill version (${[...new Set(other.map((r) => r.skill))].join(', ')})`, 'run.mjs list --all; update the older copies (copies line)')
+    : out('registry', 'ok', text);
+}
+
 export function diagnose(ctx) {
   const c = { exec: realExec, online: true, ...ctx };
-  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c)];
+  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
 }
 
 const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', skip: 'skip' };

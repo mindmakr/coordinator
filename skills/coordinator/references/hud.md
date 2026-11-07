@@ -75,7 +75,22 @@ About the coordinator itself, across every run in the state folder. `S/run.mjs s
 - **Proposals:** follow-ups, retro notes and `upstream:` notes from every run, and lessons ready to promote, newest first, linkified.
 - **Side study:** the rule, each run's studies against its cap, and the study log with sources and lessons (`learning.md`).
 
+- **This PC** (last): every run on this machine, from the run register (below), grouped by project with this one first and active runs first in each. Each run shows its status, the name the person uses for it, the tool and skill version that wrote it, and when it was last written; a run of another project links to its read-only pages at `/p/<key>/run/<run>`.
+
+**The snapshot `coordinator.html`** in the state folder is rewritten after every change to any run of the folder, as `hud.html` is, so it is never older than the last change. It reads the folder's runs under its own lock (about half a second on a 39 MB folder) and lists the PC's runs from the register alone, without opening them. It says when it was written, and that the live page is `/coordinator:dashboard`. `self --html` rewrites it at once.
+
 Run links go to `/run/<run>`: any other run of the folder, live and **read-only** (no forms; answer those on that run's own `serve`). Its unit pages are `/run/<run>/unit/<id>`. The page updates live when any run, lesson file or `COORDINATOR.md` changes. Tokens per unit are not recorded yet, so they are not shown.
+
+## Every run on this PC: `/coordinator:dashboard` (`S/run.mjs dashboard [--port P] [--open] | dashboard stop`)
+
+The global dashboard is for one developer on their own machine; the hosted service (`service/`) is the one for a team or the cloud. It serves, on 127.0.0.1 behind a per-start token, every run on this PC across projects and tools, grouped by project, each linked to its own read-only pages (`/p/<key>/run/<run>`, with `/unit/<id>`, `/maps`, `/report`, `/retro`; no forms; stored files stay on disk). Those pages read that project's own runs and lessons, and say "run `/coordinator:retro <run>` in <project>". `<key>` is a hash of the state folder, looked up in the register: a URL never names a folder. It updates live when the register or a registered run changes. A run's own `serve` serves the same `/p/…` pages, linked from its `/coordinator` page.
+
+- **One per machine.** It listens on a stable port, 7480 (`--port P` to choose; when 7480 is taken and no port was named, a free one), and records `{ pid, port, url }` in `~/.coordinator/dashboard.json`, readable by you only, since the URL holds the token. Run it again while it runs and it prints that link instead of starting another, once the link answers. Both `dashboard` and `list --all` first register this folder's runs from before the register.
+- `--open` opens the link in the browser. `dashboard stop` stops it by its recorded pid, only once the recorded link answers (its token proves the process is the dashboard); otherwise it drops the stale record and stops nothing.
+
+**The run register** (`lib/registry.mjs`): `~/.coordinator/registry.json` (`COORDINATOR_HOME` moves the folder). Every write to a run records it: project folder, state folder, run id, title, the name the person uses (`init --alias`), the tool and skill version that last wrote it, the tool that started it, its outcome once closed, and when. Written atomically under a lock, so leads in different tools can write at once. Titles are masked like every other text, and nothing else in it is free text. Entries whose run folder is gone are dropped on every write and skipped on every read. A run from before the register appears after its next write (`run.mjs hud <run>` is enough). `S/run.mjs list --all` prints it by project, each run with its status line. `COORDINATOR_REGISTRY=off` leaves it alone.
+
+**Where a run came from.** Every write stamps the run with the tool (`--harness`, else `COORDINATOR_HARNESS`, else detected: `harnesses.md`) and the skill version: `startedBy` once, at init, and `writer` on every event, as the event's last op, so a copy that predates the stamp still reads the log. The dashboard's header shows "started in Antigravity · skill 1.1.0", the last writer when it differs, and the `--alias` name beside the id. A run last written by another version shows a warning ("written by skill 1.0.0; this dashboard is 1.1.1") and loads as usual. A run from before the stamp says "tool and skill version not recorded".
 
 ## The maps: `/maps` and `maps.html`
 

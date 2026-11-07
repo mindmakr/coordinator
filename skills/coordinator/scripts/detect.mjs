@@ -16,6 +16,7 @@ import { parse } from './lib/args.mjs';
 import { allowed, detect, parseDiff } from './lib/gaming.mjs';
 import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { baseDir, safeId } from './lib/store.mjs';
+import { harnessOf, stamp } from './lib/harness.mjs';
 
 const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
 const PATHS_MAX = 300;
@@ -49,7 +50,7 @@ try {
   if (opt.unit) {
     // An empty diff proves nothing: it would let a PASS through unchecked.
     if (!files) throw new Error('empty diff: nothing was checked (is --head the builder\'s commit?)');
-    updateRun(dir, { kind: 'unit.detect', unit: safeId(opt.unit, 'unit') }, (s) => {
+    updateRun(dir, { kind: 'unit.detect', unit: safeId(opt.unit, 'unit'), by: stamp(harnessOf(undefined)) }, (s) => {
       if (s.closed) throw new Error(`run ${opt.run} is closed`);
       const u = s.units.find((x) => x.id === safeId(opt.unit, 'unit'));
       if (!u) throw new Error(`no unit ${opt.unit} in run ${opt.run}`);

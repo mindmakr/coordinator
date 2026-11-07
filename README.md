@@ -59,6 +59,8 @@ Then, in a project:
 /coordinator:run Fix issue #142 (wrong totals on the dashboard). Merge into dev when the review says ready.
 ```
 
+**Google Antigravity and Gemini CLI:** copy the same folders where that tool reads skills and add its rule; runs go only through `run.mjs` ([harnesses.md](skills/coordinator/references/harnesses.md)). Several tools can run leads on one project at once; each run records which tool and skill version wrote it.
+
 **OpenAI Codex CLI:** copy every folder under `skills/` into the project's `.agents/skills/`, add the [AGENTS.md block](skills/coordinator/references/codex.md#agentsmd-block), and ask for the coordinator skill by name. Codex has no question tool, so questions go to the dashboard ([what differs](skills/coordinator/references/codex.md)).
 
 **Any skills-capable harness:** copy every folder under `skills/` into your skills folder. Installed this way, the commands are `/coordinator init`, `/coordinator run <task>` and so on.
@@ -70,6 +72,7 @@ Then, in a project:
 | Command | What it does |
 |---|---|
 | `/coordinator:init` | Learns the project once: checks, protected branches, risk areas, standing rules. Asks where run state goes, the theme, budgets, the merge rule and the hosted app. Writes `COORDINATOR.md` and `.coordinator/coordinator.json`, then runs doctor |
+| `/coordinator:dashboard` | Every run on this PC, live: across projects and tools (Claude Code, Codex, Antigravity, Gemini CLI), grouped by project, each linked. One per machine on port 7480; run it again and it prints the link. `stop` stops it |
 | `/coordinator:doctor` | Checks the setup, one line per item with a fix: Node, plugin version, `gh` login and scopes, git remote, `COORDINATOR.md`, settings, stale locks and dashboards, stored evidence, worktree links, lessons, Codex. `--json`, `--offline` |
 | `/coordinator:run <task>` | Intake, then the loop until the bar is met. Takes an issue, a PR, or a plain description |
 | `/coordinator:status [run]` | Where a run stands, in a compact text view, or picks it up after a break or a crash |
@@ -97,6 +100,8 @@ A run survives a crash, a closed session or days away. Everything is in `.coordi
   <source srcset="docs/img/walk-dark.webp" media="(prefers-color-scheme: dark)">
   <img src="docs/img/walk-light.webp" alt="The flow map of a release run with one unit selected: its links lit, the rest dimmed, and a panel to open the unit or walk to its children.">
 </picture>
+
+**Local or hosted?** `/coordinator:dashboard` is for one developer: every run on this PC, served from your machine. The hosted app (below) is for a team or the cloud: runs pushed to GitHub, readable by whoever can read the repo.
 
 `run.mjs serve <run>` serves a live dashboard on 127.0.0.1, behind a token made at each start. It updates in place over Server-Sent Events.
 
