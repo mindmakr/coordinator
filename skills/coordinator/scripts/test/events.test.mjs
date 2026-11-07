@@ -114,11 +114,13 @@ test('unit events read on their own: add carries the unit, later changes name it
   run('freeze', 'e8'); run('start', 'e8', 'zeta');
   const ev = lines('e8');
   const add = ev.find((e) => e.kind === 'unit.add' && e.unit === 'alpha');
-  assert.deepEqual(add.payload.ops.map((o) => [o.op, o.path]), [['push', ['units']]]);
+  // Every change ends with the writer stamp (lib/harness.mjs): the tool and skill version that made it.
+  assert.deepEqual(add.payload.ops.map((o) => [o.op, o.path]), [['push', ['units']], ['set', ['writer']]]);
+  assert.deepEqual(Object.keys(add.payload.ops[1].value).sort(), ['harness', 'skill']);
   assert.equal(add.payload.ops[0].values[0].id, 'alpha');
   assert.equal(add.payload.ops[0].values[0].after, 'zeta');
   const start = ev.find((e) => e.kind === 'unit.start');
-  assert.ok(start.payload.ops.every((o) => JSON.stringify(o.path.slice(0, 2)) === JSON.stringify(['units', { id: 'zeta' }])), 'addressed by id, not position');
+  assert.ok(start.payload.ops.filter((o) => o.path[0] !== 'writer').every((o) => JSON.stringify(o.path.slice(0, 2)) === JSON.stringify(['units', { id: 'zeta' }])), 'addressed by id, not position');
   assert.deepEqual(run('next', 'e8').out.units.map((u) => u.id), ['zeta', 'alpha'], 'a stacked unit is listed after its base');
   assert.deepEqual(snap('e8').units.map((u) => u.id), ['zeta', 'alpha']);
   assert.ok(readFileSync(join(runDir('e8'), 'hud.html'), 'utf8').indexOf('zeta') < readFileSync(join(runDir('e8'), 'hud.html'), 'utf8').indexOf('alpha'));
@@ -198,7 +200,9 @@ test('a real 0.5 run folder migrates on a copy and behaves as before', () => {
   assert.deepEqual(ev.map((e) => e.kind), ['run.imported', 'note']);
   assert.deepEqual(ev[0].payload.state, canonical(old));
   const now = body(snap(old.id));
-  assert.deepEqual({ ...now, notes: now.notes.slice(0, -1) }, canonical(old), 'nothing but the new note changed');
+  const { writer, ...rest } = now;
+  assert.deepEqual(Object.keys(writer).sort(), ['harness', 'skill'], 'the write is stamped with its tool and skill version');
+  assert.deepEqual({ ...rest, notes: rest.notes.slice(0, -1) }, canonical(old), 'nothing but the new note (and the stamp) changed');
   assert.deepEqual(now, replay(ev));
   assert.deepEqual(run('questions', old.id).out, qBefore);
   assert.equal(run('list').out.find((x) => x.run === old.id).decision, listed.decision);

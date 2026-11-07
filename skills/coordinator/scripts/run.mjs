@@ -138,6 +138,8 @@ import { answerRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
 import { clip } from './lib/plain.mjs';
 import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
+import { harnessOf, stamp } from './lib/harness.mjs';
+import { entryFor, register, registryFile } from './lib/registry.mjs';
 import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
@@ -166,7 +168,7 @@ import { render } from './lib/workbench.mjs';
 import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
 
 const FLAGS = {
-  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
+  init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
   extend: ['rounds', 'reason', 'answer'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
@@ -246,6 +248,14 @@ function derived(s) {
   writeAtomic(join(runDir(s.id), 'maps.html'), mapsPage(v, Date.now(), { ...staticCtx(runDir(s.id), 0, theme), calls }));
   for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), { ...staticCtx(runDir(s.id), 1, theme), calls }));
   for (const [name, html] of reportPages(s, v, runDir(s.id), staticCtx(runDir(s.id), 0, theme))) writeAtomic(join(runDir(s.id), name), html);
+  registerRun(s);
+}
+
+// The machine-wide register (lib/registry.mjs): every write keeps this run listed for list --all and
+// the global dashboard. It never fails the write; COORDINATOR_REGISTRY=off leaves it alone.
+function registerRun(s) {
+  if (process.env.COORDINATOR_REGISTRY === 'off') return;
+  try { register(entryFor(s, { project: projectDir(), stateDir: baseDir('project') })); } catch (e) { console.error(`warning: the run register (${registryFile()}) was not updated: ${e.message}`); }
 }
 
 // --issue and --pr values (owner/repo#n, #n or a URL) as unit links.
@@ -309,7 +319,7 @@ function load(run) {
 // on a closed run, with the snapshot and workbench refreshed in the same lock.
 function change(run, kind, mutate, { closedOk = false, unit = null } = {}) {
   if (!exists(run)) throw new Error(`no run: ${run}`);
-  return updateRun(runDir(run), { kind, unit }, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); }, derived);
+  return updateRun(runDir(run), { kind, unit, by: BY }, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); }, derived);
 }
 
 function unitOf(s, id) {
@@ -379,6 +389,7 @@ const commands = {
     const parents = (o.continues ?? []).map((raw) => parentOf(raw, run));
     if (new Set(parents.map((c) => c.unit)).size < parents.length) throw new Error('--continues: one earlier run per unit id (continue a second one with add <run> <unit> --continues)');
     if (parents.length) fresh.continues = parents;
+    if (o.alias !== undefined) fresh.alias = text(o.alias, 'alias', 80);
     if (o.repo !== undefined) { if (typeof o.repo !== 'string' || !REPO.test(o.repo)) throw new Error('--repo must be owner/name'); fresh.repo = o.repo; }
     if (o.theme !== undefined) {
       const f = typeof o.theme === 'string' ? resolve(o.theme) : '';
@@ -386,7 +397,7 @@ const commands = {
       fresh.theme = f;
     }
     const warning = openCheck([{ what: 'the bar', text: fresh.bar }], o['accept-open'], fresh.notes);
-    const made = updateRun(runDir(run), { kind: 'run.init' }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    const made = updateRun(runDir(run), { kind: 'run.init', by: BY }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
     for (const c of parents) markParent(c, run);
     return warning ? Object.assign(made, { warning }) : made;
@@ -1038,7 +1049,16 @@ const commands = {
   },
 };
 
-const [cmd, ...rest] = process.argv.slice(2);
+// --harness works on every command: it names the tool that runs this one (lib/harness.mjs).
+const [cmd, ...argv] = process.argv.slice(2);
+const rest = []; let harnessFlag;
+for (let i = 0; i < argv.length; i++) {
+  const m = /^--harness(?:=([\s\S]*))?$/.exec(argv[i]);
+  if (!m) { rest.push(argv[i]); continue; }
+  harnessFlag = m[1] ?? argv[++i] ?? '';
+}
+let BY = null;
+try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
 if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);

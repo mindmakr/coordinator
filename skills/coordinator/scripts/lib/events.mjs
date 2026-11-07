@@ -173,7 +173,10 @@ const line = (seq, kind, unit, payload) => validateEvent({ v: V, seq, at: new Da
 // may change it or return a new one. The difference is appended as one event
 // of `kind`, then the snapshot is rewritten; both writes are atomic. A change
 // that changes nothing writes nothing. `after` runs in the same lock.
-export function updateRun(dir, { kind, unit = null }, mutate, after) {
+// by: { harness, skill } (lib/harness.mjs). Every event that changes something
+// also sets the state's `writer` to it, as one more op: older copies of the
+// skill read the line as an ordinary change, so the log stays readable to them.
+export function updateRun(dir, { kind, unit = null, by = null }, mutate, after) {
   const file = join(dir, STATE);
   return withLock(file, () => {
     const cur = readRun(dir);
@@ -184,9 +187,17 @@ export function updateRun(dir, { kind, unit = null }, mutate, after) {
     if (cur?.edited) { const ops = diff(replay(cur.log.events), cur.state); if (ops.length) add('state.edited', { ops }); }
     const before = cur?.state ?? null;
     const work = before === null ? null : clone(before);
-    const next = canonical(mutate(work) ?? work);
+    let next = canonical(mutate(work) ?? work);
     if (next === null) throw new Error('a run cannot be empty');
+    if (by && before === null) next = canonical({ ...next, startedBy: by, writer: by });
     const ops = diff(before, next);
+    if (by && before !== null && ops.length) {
+      const w = canonical(by);
+      if (!equal(next.writer, w)) next = canonical({ ...next, writer: w });
+      const i = ops.findIndex((o) => o.path.length === 1 && o.path[0] === 'writer');
+      if (i >= 0) ops.splice(i, 1);
+      ops.push({ op: 'set', path: ['writer'], value: w });
+    }
     if (ops.length) add(kind, { ops }, unit);
     if (lines.length || cur?.rebuilt || cur?.edited) {
       const buf = Buffer.concat([cur?.log?.buf ?? Buffer.alloc(0), Buffer.from(lines.join(''))]);
