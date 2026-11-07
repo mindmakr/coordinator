@@ -13,8 +13,8 @@ import { VERSION } from './version.mjs';
 
 export { esc };
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
-// The live page's script: updates, then the map panels (lib/maptips.mjs).
-const CLIENT = ['./live.client.js', './maptips.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
+// The live page's script: updates, then the map panels (lib/maptips.mjs), then walking a map (lib/mapnav.mjs).
+const CLIENT = ['./live.client.js', './maptips.client.js', './mapnav.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
 const SERVED = [matches, morph, findMatches, highlight, unhighlight];
 
@@ -62,14 +62,24 @@ export const dot = (state) => `<span class="dot dot-${cls(state)}" role="img" ar
 const nav = (ctx, path) => (ctx.pages?.length
   ? `<nav class="pages" aria-label="Pages">${ctx.pages.map((p) => `<a href="${esc(p.href)}"${p.path === path ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')}</nav>` : '');
 
+// A CSS string from any text: everything but letters, digits and spaces as a hex escape, so nothing can end the string or the rule.
+export const cssText = (t) => `"${String(t ?? '').replace(/[^A-Za-z0-9 ]/g, (c) => `\\${c.codePointAt(0).toString(16)} `)}"`;
+// Export PDF: the browser's own print to PDF. The live page has a button; the snapshot runs no script, so it says how.
+const printTool = (live) => (live ? '<button type="button" class="print-btn" data-print aria-label="Export this page as PDF (opens the print dialog; choose Save as PDF)">Export PDF</button>'
+  : '<span class="print-hint" title="Print the page and choose Save as PDF">Export PDF: Ctrl+P or ⌘P, then Save as PDF</span>');
+// The printed page's header (the title, on every page) and page numbers: page margin boxes. The export time goes on the first page.
+// The live page writes the export time in at print; the snapshot's own time is in its header.
+const printHead = () => '<div class="print-head" aria-hidden="true"><span data-printed></span></div>';
+const pageRules = (title) => `@page{size:auto;margin:14mm 12mm 16mm;@top-left{content:${cssText(title)};font:9px system-ui,sans-serif;color:#62625c}@bottom-right{content:"Page " counter(page) " of " counter(pages);font:9px system-ui,sans-serif;color:#62625c}@bottom-left{content:"Coordinator by mindmakr";font:9px system-ui,sans-serif;color:#62625c}}`;
+
 export function page({ title, body, ctx, path, closed = false }) {
   const live = ctx.live;
   const status = closed ? `<span id="live" class="live" role="status" data-state="finished">Finished${live ? '' : ' · snapshot'}</span>`
     : live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span><button id="live-retry" class="retry" type="button" hidden>Retry</button>'
       : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
-    csp: csp(live && { nonce: esc(live.nonce) }), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }),
-    top: `<div class="top">${brand()}${nav(ctx, path)}<div class="tools">${status}${THEME_TOGGLE}</div></div>`,
+    csp: csp(live && { nonce: esc(live.nonce) }), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }) + pageRules(title),
+    top: `${printHead()}<div class="top">${brand()}${nav(ctx, path)}<div class="tools">${status}${printTool(live)}${THEME_TOGGLE}</div></div>`,
     body, footer: footer(),
     attrs: live ? ` data-run="${esc(ctx.store ?? ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
     script: live ? `<script nonce="${esc(live.nonce)}">${SERVED.map((f) => `const ${f.name} = ${f.toString()};`).join('\n')}\n${CLIENT}</script>` : '',
