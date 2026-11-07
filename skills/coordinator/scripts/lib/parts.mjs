@@ -7,7 +7,7 @@ import { anchor, esc, linkify } from './links.mjs';
 import { css, DARK, LIGHT } from './theme.mjs';
 import { findMatches, highlight, unhighlight } from './highlight.mjs';
 import { morph } from './morph.mjs';
-import { DOTS } from './plain.mjs';
+import { DOTS, dotWords } from './plain.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
 
@@ -56,7 +56,37 @@ export function csp(live) {
 }
 
 // The whole page. `body` goes inside <main id="app">, which the live page patches.
-export const dot = (state) => `<span class="dot dot-${cls(state)}" role="img" aria-label="${esc(DOTS[state] ?? state)}" title="${esc(DOTS[state] ?? state)}"></span>`;
+export const dot = (state, words = DOTS[state] ?? state) => `<span class="dot dot-${cls(state)}" role="img" aria-label="${esc(words)}" title="${esc(words)}"></span>`;
+// A unit's dot with its own words: ids it waits on keep their case.
+export const unitDot = (u) => dot(u.dot, dotWords(u.dot, u.badge));
+
+// Links to other units of the same run (ctx.unitHref keeps a live page's token).
+export const unitLink = (id, ctx) => `<a class="ulink" href="${esc(ctx.unitHref(id))}">${esc(id)}</a>`;
+// The state in words ("Waiting for A" with A linked, "Up next", "Retrying"…); the raw status only for a view without one.
+export function stateChip(u, ctx) {
+  const b = u.badge;
+  if (!b) return chip(u.status, u.status);
+  const label = esc(b.lead) + b.ids.map((id) => (ctx?.unitHref ? unitLink(id, ctx) : esc(id))).join(', ');
+  const kind = ['retrying', 'stale'].includes(b.kind) ? 'flag' : `s-${cls(b.kind)}`;
+  return `<span class="chip ${kind}" title="${esc(b.title ?? '')}">${label}</span>`;
+}
+// Escaped text with the last "waiting for X" / "after X" for each id turned into a link to X.
+export function linkWaits(text, ids, ctx) {
+  let out = esc(text);
+  for (const id of ids) {
+    const e = esc(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`((?:waiting for|after) )${e}(?![\\w-])`, 'gi');
+    const hits = [...out.matchAll(re)];
+    const m = hits.at(-1);
+    if (m) out = out.slice(0, m.index) + m[1] + unitLink(id, ctx) + out.slice(m.index + m[0].length);
+  }
+  return out;
+}
+// "Blocks: D, E": every unit still waiting on this one (whatever else it waits on), linked.
+export function blocksLine(u, ctx) {
+  const ids = u.dot === 'passed' ? [] : u.dependents.filter((x) => x.dot && !['passed', 'stopped'].includes(x.dot)).map((x) => x.id);
+  return ids.length ? `<p class="cause blocks" data-a="blocks-${esc(u.id)}"><b>Blocks:</b> ${ids.map((id) => unitLink(id, ctx)).join(', ')}</p>` : '';
+}
 
 // The header's links between pages (ctx.pages, live only); the current one is marked.
 const nav = (ctx, path) => (ctx.pages?.length

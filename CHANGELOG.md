@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Who a unit waits on, in words and links:** the unit dot no longer turns amber for every unit that isn't running. A unit waiting for another shows a hollow grey dot and a **Waiting for A** badge; one ready but not started a blue dot and **Up next**; only a unit with an open question for the person takes the amber **Needs you** dot and badge (retrying moved to violet). Each id it waits on links to that unit (live page keeps the token, another run's page uses `/run/<run>/unit/A`, a snapshot `units/A.html`) in the badge, the card text, the Next line and the unit page; the waited-on unit says **Blocks: D**, and the unit page gets a **Depends on / Blocks** section. The legend, the self page's plans (linked too), the map legends and tooltips use the same words; every chip names the state (Working, Retrying, Quiet, Passed, Stopped too), a unit both blocked and asked says **Needs you · waiting for A**, and the situation line counts needs you, waiting for another unit, up next and with the lead apart.
+
 ## 1.0.0 (2026-11-07)
 
 Release notes for 1.0 (#14). Follow and steer a run from a phone, while builders and critics still run only on your machine. The service is ready to self-host today; the hosted app at app.coordinator.mindmakr.com opens with 1.0.1 (#42).
