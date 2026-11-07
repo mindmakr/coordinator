@@ -62,7 +62,7 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
     + list(b.stopped, (s) => `<b>${esc(s.id)}</b> ${linkify(s.reason, r)}`, 'No unit stopped.');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
-    blk('head', `<header class="run"><h1>Retro · ${esc(v.id)}</h1>${chip(m.has ? 'written' : 'not written', m.has ? 'pass' : 'not-yet')}<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.report ? `<a class="open" href="${esc(ctx.report)}">Report →</a>` : ''}</header>`),
+    blk('head', `<header class="run"><h1>Retro · ${esc(v.id)}</h1>${chip(m.has ? 'written' : 'not written', m.has ? 'pass' : 'not-yet')}<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.report && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.report)}">Report →</a>` : ''}</header>`),
     pending ? blk('retro-pending', pendingBanner({ id: v.id }, !v.open)) : '',
     !m.has && !pending ? `<p class="hint">No retro yet. It runs once every unit is decided: <code>${esc(retroCommand({ id: v.id }))}</code>.</p>` : '',
     '<h2>Budget</h2>', blk('retro-budget', budget),
