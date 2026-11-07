@@ -16,10 +16,10 @@ export const MECHANICAL = ['docs', 'copy', 'translations', 'renames', 'fixtures'
 // is one of PIN_WORDS or starts with one of PIN_STEMS, or it names personal data.
 export const PINNED = ['security', 'money', 'migrations', 'auth', 'payments', 'billing', 'invoicing', 'authentication', 'authorization', 'permissions', 'secrets', 'crypto', 'pii', 'personal-data'];
 const PIN_WORDS = new Set(['auth', 'authn', 'authz', 'money', 'pay', 'fee', 'fees', 'role', 'roles', 'pii', 'token', 'tokens', 'login', 'bill', 'bills', 'kyc']);
-export const PIN_STEMS = ['secur', 'migrat', 'oauth', 'payment', 'payout', 'payroll', 'salar', 'ledger', 'refund', 'wallet', 'disburs', 'kyc', 'session', 'csrf', 'rbac', 'role', 'permission', 'iban', 'schema', 'authent', 'authori', 'billing', 'invoic', 'secret', 'crypt', 'encrypt', 'password', 'credential'];
+export const PIN_STEMS = ['secur', 'migrat', 'oauth', 'payment', 'payout', 'payroll', 'salar', 'ledger', 'refund', 'wallet', 'disburs', 'kyc', 'session', 'csrf', 'rbac', 'role', 'permission', 'iban', 'schema', 'authent', 'authori', 'billing', 'invoic', 'secret', 'crypt', 'encrypt', 'password', 'credential', 'otp', 'mfa', '2fa', 'jwt', 'xss', 'inject', 'ssrf', 'acl', 'sanitiz', 'sanitis', 'cors', 'csp', 'tls', 'cookie', 'audit', 'gdpr', 'pdpl'];
 export function pinned(cls) {
   const c = String(cls).toLowerCase();
-  if (/personal[^a-z0-9]*data/.test(c)) return true;
+  if (/personal[^a-z0-9]*data|access[^a-z0-9]*control/.test(c)) return true;
   // "role" as a stem would catch "roleplay"; keep it a stem anyway: pinning too much costs money, not safety.
   return c.split(/[^a-z0-9]+/).filter(Boolean).some((w) => PIN_WORDS.has(w) || PIN_STEMS.some((s) => w.startsWith(s)));
 }
@@ -77,7 +77,7 @@ export function normalize(raw) {
     table[k] = v;
   }
   const strong = table.strong;
-  if (claudeish(strong) && family(strong) !== 'opus') throw new Error(`"models".strong = ${strong} is below opus or not a recognised opus id: judges and pinned work would run on it. Leave strong out (opus), or name an unranked model for another harness`);
+  if (claudeish(strong) && family(strong) !== 'opus') throw new Error(`"models".strong = ${strong} is not opus: a name containing claude, anthropic, haiku, sonnet or opus must be a recognised opus id (judges and pinned work run on strong). Leave strong out (opus), or name a model for another harness that mentions none of them`);
   for (const k of Object.keys(table).filter((k) => JUDGES.includes(k) || pinned(k))) {
     if (own(table, k) && !atLeast(table[k], strong)) {
       warnings.push(`"models".${k} = ${table[k]} ignored: ${JUDGES.includes(k) ? 'critics are never routed' : `${k} work is never routed`} below the strong model (${strong})`);

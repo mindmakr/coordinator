@@ -185,13 +185,13 @@ test('escalation looks at every cheap fail since the last strong build', async (
 });
 
 test('a ranked strong below opus is refused; an unranked strong is allowed', () => {
-  for (const s of ['haiku', 'claude-3-5-haiku', 'sonnet', 'Sonnet', 'claude-sonnet-4-5']) assert.throws(() => normalize({ strong: s }), /below opus/, s);
+  for (const s of ['haiku', 'claude-3-5-haiku', 'sonnet', 'Sonnet', 'claude-sonnet-4-5']) assert.throws(() => normalize({ strong: s }), /must be a recognised opus id/, s);
   assert.equal(normalize({ strong: 'gpt-x' }).strong, 'gpt-x');
   assert.equal(normalize({ strong: 'claude-opus-4-1' }).strong, 'claude-opus-4-1');
   const dir = folder();
   writeFileSync(cfgFile(dir), JSON.stringify({ models: { strong: 'sonnet' } }));
   const r = cli(dir, 'models');
-  assert.equal(r.code, 1); assert.match(r.err, /below opus/);
+  assert.equal(r.code, 1); assert.match(r.err, /must be a recognised opus id/);
 });
 
 test('family parsing is strict: one family word, version parts only', () => {
@@ -257,7 +257,7 @@ const OPUS_IDS = ['us.anthropic.claude-opus-4-1-20250805-v1:0', 'anthropic.claud
 const CHEAP_IDS = ['us.anthropic.claude-haiku-4-5', 'anthropic.claude-haiku-4-5-20251001-v1:0', 'claude-haiku-4-5@20251001', 'haiku-4-5', 'claude_haiku', 'opus-haiku', 'Claude-Sonnet', 'my-sonnet-model', 'anthropic-fast'];
 
 test('a custom strong that mentions Claude in any spelling must parse to opus', () => {
-  for (const s of CHEAP_IDS) assert.throws(() => normalize({ strong: s }), /below opus or not a recognised opus id/, s);
+  for (const s of CHEAP_IDS) assert.throws(() => normalize({ strong: s }), /must be a recognised opus id/, s);
   for (const s of OPUS_IDS) assert.equal(normalize({ strong: s }).strong, s, s);
   assert.equal(normalize({ strong: 'gpt-x' }).strong, 'gpt-x');
   for (const s of OPUS_IDS) assert.equal(family(s), 'opus', s);
@@ -282,4 +282,17 @@ test('pinning matches word stems as well as whole words', () => {
     assert.equal(route(cfg, 'builder', c).model, 'opus', c);
   }
   for (const c of ['docs', 'feedback-copy', 'payday-copy', 'translations']) assert.notEqual(route(cfg, 'builder', c).why, `${c} (always strong)`, c);
+});
+
+test('pinning covers otp, mfa, jwt, xss, injection, ssrf, acl, access control, sanitising, cors, csp, tls, cookies, audit, gdpr and pdpl', () => {
+  const cfg = normalize({ mechanical: 'haiku' });
+  for (const c of ['otp-resend', 'mfa', '2fa-setup', 'jwt-refresh', 'xss-escape', 'sql-injection', 'ssrf-guard', 'acl', 'access-control', 'accessControl-docs'.toLowerCase(), 'sanitize-html', 'sanitising', 'cors-headers', 'csp', 'tls-certs', 'cookie-banner', 'audit-log', 'gdpr-export', 'pdpl-erasure', 'encryption-at-rest']) {
+    assert.equal(route(cfg, 'builder', c).model, 'opus', c);
+  }
+});
+
+test('a Claude-looking strong that is not opus says it must be a recognised opus id', () => {
+  for (const s of ['magnum-opusx', 'opus-haiku', 'sonnet']) {
+    assert.throws(() => normalize({ strong: s }), (e) => /must be a recognised opus id/.test(e.message) && /claude, anthropic, haiku, sonnet or opus/.test(e.message), s);
+  }
 });
