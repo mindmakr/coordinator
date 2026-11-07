@@ -11,7 +11,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { DOC, GOAL_DIR, IMAGE, LIMITS, TEXT, addEvidence, copyIn, sha256 } from './evidence.mjs';
 
 export const RUN_CAP = 50 * 1024 * 1024; // all adopted files of one run together
@@ -36,7 +36,7 @@ const inside = (dir, p) => { const r = relative(dir, p); return r === '' || (!r.
 // the longest reading that names an existing file wins; when none does and a
 // reading with spaces could have been meant, the mention is marked unclear.
 // URLs are blanked first so their paths do not count.
-export function pathsIn(text, exists = () => false) {
+export function pathsIn(text, exists = () => false, folderExists = () => false) {
   let t = String(text).replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, (u) => ' '.repeat(u.length));
   const out = [];
   t = t.replace(QUOTED, (all, q, body) => {
@@ -57,7 +57,9 @@ export function pathsIn(text, exists = () => false) {
     if (found) { out.push({ raw: found, unclear: false }); continue; }
     const plain = reads.find((c) => !/[\s()[\],;]/.test(c));
     // A reading with spaces that holds another file name ("a.txt (b.md") is two mentions, not one path.
-    const spaced = reads.filter((c) => ABSOLUTE.test(c) && /[\s()[\],;]/.test(c) && !new RegExp(ENDS.source, 'i').test(c.slice(0, -m[0].length)));
+    // Prose that happens to start with / ("/map 500 without reason; … (map.json") is not a path: a
+    // reading with spaces counts only when it starts with a drive letter or ~, or its folder exists.
+    const spaced = reads.filter((c) => (/^([A-Za-z]:[\\/]|~[\\/])/.test(c) || folderExists(c)) && /[\s()[\],;]/.test(c) && !new RegExp(ENDS.source, 'i').test(c.slice(0, -m[0].length)));
     if (plain && ABSOLUTE.test(plain)) out.push({ raw: plain.replace(/[.:]+$/, ''), unclear: false });
     else if (spaced.length) out.push({ raw: spaced[0], unclear: true });
     else if (plain) out.push({ raw: plain, unclear: false });
@@ -78,7 +80,10 @@ export function mentions(s, { project, home }) {
   const at = (raw) => resolveMention(raw, project, home);
   const visit = (v, target) => {
     if (typeof v === 'string') {
-      for (const { raw, unclear } of pathsIn(v, (c) => { try { return statSync(at(c)).isFile(); } catch { return false; } })) {
+      const isFile = (c) => { try { return statSync(at(c)).isFile(); } catch { return false; } };
+      // The folder must be more than a drive or filesystem root: '/ move cards … (x.json' is prose.
+      const isFolder = (c) => { const d = dirname(at(c)); try { return parse(d).root !== d && statSync(d).isDirectory(); } catch { return false; } };
+      for (const { raw, unclear } of pathsIn(v, isFile, isFolder)) {
         const r = at(raw);
         if (!found.has(key(r))) found.set(key(r), { path: r, target, unclear });
       }
@@ -97,13 +102,15 @@ export function mentions(s, { project, home }) {
 const stored = (s) => [...(s.goalEvidence ?? []).map((e) => [e, null]), ...(s.units ?? []).flatMap((u) => (u.evidence ?? []).map((e) => [e, u]))].filter(([e]) => e.file);
 
 // Where adopt may copy from: the project, its git worktrees, the OS temp folder and the state folder.
-export function allowedRoots(project, base) {
+// A root that is the home folder or holds it (COORDINATOR_DIR=~, say) is left out:
+// it would let every file under home through.
+export function allowedRoots(project, base, home) {
   const roots = [project, tmpdir(), base];
   try {
     const out = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     for (const l of out.split('\n')) if (l.startsWith('worktree ')) roots.push(resolve(l.slice(9).trim()));
   } catch { /* not a repo */ }
-  return roots.map((r) => resolve(r));
+  return roots.map((r) => resolve(r)).filter((r) => !home || !inside(r, resolve(home)));
 }
 
 // The person's own configuration under their home folder.
@@ -114,7 +121,7 @@ export function homeConfig(p, home) {
 }
 
 // Why a path may not be copied, or null.
-export function refusal(p, { home, roots } = {}) {
+export function refusal(p, { home, roots, project } = {}) {
   const parts = p.split(/[\\/]+/);
   if (parts.some((x) => x === 'node_modules' || x === '.git')) return 'inside node_modules or .git';
   if (SECRET.test(basename(p))) return 'looks like a secret or key file';
@@ -123,6 +130,7 @@ export function refusal(p, { home, roots } = {}) {
   let st;
   try { st = lstatSync(p); } catch { return null; }
   if (st.isSymbolicLink()) return 'a symbolic link';
+  if (st.nlink > 1 && !(project && inside(project, p))) return 'a hard link (outside the project)';
   if (!st.isFile()) return 'not a regular file';
   try { if (!same(realpathSync.native(p), p)) return 'reached through a link'; } catch { return 'unreadable'; }
   return null;
@@ -147,9 +155,11 @@ const kindOf = (ext) => (IMAGE[ext] ? 'screenshot' : DOC[ext] ? 'pdf' : 'log');
 // the state. Rows: { path, unit, status, why?, evidence? }; status is adopted
 // (adoptable on a dry run), already, repaired (repairable), inside (the run
 // folder), tracked (in git), missing, unclear or refused.
-export function adopt(s, runDir, { project, home, apply = false, tracked = trackedFiles(project), roots = allowedRoots(project, dirname(dirname(runDir))) }) {
+export function adopt(s, runDir, { project, home, apply = false, tracked = trackedFiles(project), roots = allowedRoots(project, dirname(dirname(runDir)), home) }) {
   const rows = [];
   const have = stored(s);
+  // Adopted before pdf was a kind: show those PDFs as PDFs.
+  if (apply) for (const [e] of have) if (e.source && e.type === 'doc' && e.kind === 'log') e.kind = 'pdf';
   let total = have.reduce((n, [e]) => n + (e.source ? (e.bytes ?? 0) : 0), 0);
   for (const { path, target, unclear } of mentions(s, { project, home })) {
     const row = { path, unit: target };
@@ -161,7 +171,7 @@ export function adopt(s, runDir, { project, home, apply = false, tracked = track
       row.status = 'unclear'; row.why = 'not found, and spaces or brackets make the path uncertain; quote it, or attach it with evidence --file';
       continue;
     }
-    const why = refusal(path, { home, roots });
+    const why = refusal(path, { home, roots, project });
     if (prior) {
       row.evidence = prior.file;
       const bad = damage(prior, runDir);

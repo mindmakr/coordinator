@@ -3,12 +3,12 @@
 // catches a stored copy that went missing or changed.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { adopt, pathsIn } from '../lib/adopt.mjs';
+import { adopt, allowedRoots, pathsIn, refusal } from '../lib/adopt.mjs';
 import { artifactsCheck } from '../lib/doctor.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,6 +27,8 @@ writeFileSync(join(wt, 'node_modules', 'x', 'log.txt'), 'dep log');
 const cli = (...args) => spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd: project, env: { ...process.env, COORDINATOR_DIR: state }, encoding: 'utf8' });
 const run = (...a) => { const r = cli(...a); assert.equal(r.status, 0, `${a.join(' ')}: ${r.stderr}`); return r.stdout; };
 const runDir = join(state, 'runs', 'r1');
+// A home folder that holds none of the scratch folders (the real one holds the OS temp folder).
+const NOHOME = resolve('/no-such-home-for-tests');
 const p = (f) => join(wt, f).replace(/\\/g, '/');
 
 test('paths in text: absolute, Git Bash, relative, quoted, with spaces or brackets; URLs are not paths', () => {
@@ -72,12 +74,12 @@ test('adopt copies mentioned files in, refuses secrets, is idempotent, and pages
 
   // A changed stored copy, while its source still exists: doctor names the source, adopt repairs it.
   writeFileSync(join(runDir, 'artifacts', 'u1', 'E1-report.md'), 'tampered');
-  const tampered = artifactsCheck({ base: state, project, home: root }).find((x) => x.status === 'fail');
+  const tampered = artifactsCheck({ base: state, project, home: NOHOME }).find((x) => x.status === 'fail');
   assert.match(tampered.text, /E1-report\.md changed \(sha256 mismatch\)/);
   assert.match(tampered.fix, /run\.mjs adopt r1 \(copies it again from .*report\.md\)/);
   assert.match(run('adopt', 'r1'), /repaired 1,/);
   assert.equal(readFileSync(join(runDir, 'artifacts', 'u1', 'E1-report.md'), 'utf8'), '# Report\nAll green.\n');
-  assert.equal(artifactsCheck({ base: state, project, home: root })[0].status, 'ok');
+  assert.equal(artifactsCheck({ base: state, project, home: NOHOME })[0].status, 'ok');
 
   rmSync(wt, { recursive: true, force: true });
   run('note', 'r1', '--kind', 'info', '--text', 'worktree removed');
@@ -87,7 +89,7 @@ test('adopt copies mentioned files in, refuses secrets, is idempotent, and pages
   assert.match(unit, /E1-report\.md/);
   assert.match(hud, /E1-out\.pdf/);
   assert.ok(!/missing \(the stored copy is gone\)/.test(unit + hud));
-  const ok = artifactsCheck({ base: state, project, home: root })[0];
+  const ok = artifactsCheck({ base: state, project, home: NOHOME })[0];
   assert.equal(ok.status, 'ok'); assert.doesNotMatch(ok.text, /adopted/, 'never claims "adopted"');
 
   rmSync(join(runDir, 'artifacts', 'u1', 'E2-shot.png'));
@@ -95,7 +97,7 @@ test('adopt copies mentioned files in, refuses secrets, is idempotent, and pages
   const after2 = readFileSync(join(runDir, 'units', 'u1.html'), 'utf8');
   assert.match(after2, /E2-shot\.png: missing \(the stored copy is gone\)/);
   assert.ok(!/data:image\/png;base64,/.test(after2));
-  const missing = artifactsCheck({ base: state, project, home: root })[0];
+  const missing = artifactsCheck({ base: state, project, home: NOHOME })[0];
   assert.equal(missing.status, 'fail'); assert.match(missing.text, /E2-shot\.png missing/);
   assert.match(missing.fix, /is gone: re-run the step that made it, then run\.mjs evidence r1 u1 --file/);
   assert.doesNotMatch(missing.fix, /pull/);
@@ -146,9 +148,47 @@ test('doctor: an unadopted mention warns; close warns too', () => {
   writeFileSync(join(scratch, 'notes.md'), 'n');
   run('init', 'r2', '--goal', 'g', '--bar', 'b', '--fence', 'f');
   run('note', 'r2', '--kind', 'info', '--text', `kept in ${join(scratch, 'notes.md').replace(/\\/g, '/')}`);
-  const w = artifactsCheck({ base: state, project, home: root }).find((x) => x.text.startsWith('r2'));
+  const w = artifactsCheck({ base: state, project, home: NOHOME }).find((x) => x.text.startsWith('r2'));
   assert.equal(w.status, 'warn'); assert.equal(w.fix, 'run.mjs adopt r2');
   const closed = JSON.parse(run('close', 'r2', '--outcome', 'stopped', '--reason', 'test'));
   assert.match(closed.warning, /run\.mjs adopt r2/);
   assert.match(run('adopt', 'r2'), /adopted 1,/, 'adopt works on a closed run');
+});
+
+test('prose that starts with / is not a path, and never makes doctor warn', () => {
+  const prose = [
+    'reverted /map 500 without reason; ship events+md (map.json',
+    'service: / move cards in other repos (incl. private board.json',
+    'route /employers/:id/minor-holds rule; see the holds report.md',
+  ];
+  for (const t of prose) assert.deepEqual(pathsIn(t).filter((x) => x.unclear), [], t);
+  const s = { id: 'p', units: [], notes: prose.map((text) => ({ kind: 'info', text })) };
+  assert.deepEqual(adopt(s, join(state, 'runs', 'p'), { project, home: NOHOME, tracked: new Set() }).filter((r) => r.status === 'unclear'), []);
+  const dir = join(state, 'runs', 'p'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'state.json'), JSON.stringify(s));
+  assert.ok(!artifactsCheck({ base: state, project, home: NOHOME }).some((x) => x.text.startsWith('p:')), 'no warning for run p');
+  rmSync(dir, { recursive: true });
+  // A spaced reading still counts when its folder exists.
+  const real = join(root, 'has space'); mkdirSync(real);
+  const t = `saved ${real.replace(/\\/g, '/')}/gone (1).png`;
+  assert.equal(pathsIn(t, () => false, (c) => existsSync(dirname(c))).filter((x) => x.unclear).length, 1);
+});
+
+test('home is never an allowed root; hard links outside the project are refused; old adopted PDFs are re-tagged', () => {
+  const home = join(root, 'home2'); mkdirSync(home);
+  assert.ok(!allowedRoots(project, home, home).includes(resolve(home)), 'COORDINATOR_DIR=home is left out');
+  assert.ok(!allowedRoots(project, root, home).includes(resolve(root)), 'a root holding home is left out');
+  const src = join(root, 'linked-src.md'); writeFileSync(src, 'x');
+  const link = join(root, 'linked.md'); linkSync(src, link);
+  assert.match(refusal(link, { roots: [root], project }), /hard link/);
+  const inProject = join(project, 'own.md'); writeFileSync(inProject, 'x'); linkSync(inProject, join(project, 'own2.md'));
+  assert.equal(refusal(inProject, { roots: [project], project }), null, 'a hard link inside the project is fine');
+
+  const dir = join(state, 'runs', 'old'); mkdirSync(join(dir, 'artifacts', '_goal'), { recursive: true });
+  const pdf = join(root, 'plan.pdf'); writeFileSync(pdf, '%PDF-1.4\n');
+  writeFileSync(join(dir, 'artifacts', '_goal', 'E1-plan.pdf'), '%PDF-1.4\n');
+  const s = { id: 'old', units: [], goalEvidence: [{ id: 'E1', kind: 'log', type: 'doc', file: '_goal/E1-plan.pdf', source: pdf }], notes: [{ kind: 'info', text: `plan ${pdf.replace(/\\/g, '/')}` }] };
+  adopt(s, dir, { project, home: NOHOME, tracked: new Set(), apply: true });
+  assert.equal(s.goalEvidence[0].kind, 'pdf');
+  rmSync(dir, { recursive: true });
 });
