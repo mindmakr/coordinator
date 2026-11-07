@@ -98,6 +98,7 @@ const WORDS = { working: 'Working', passed: 'Passed', stopped: 'Stopped', queued
 export function stateBadge(state, u, d) {
   const ids = waitIds(u);
   const make = (lead, list = [], title = DOTS[state]) => ({ kind: state, lead, ids: list, label: `${lead}${list.join(', ')}`, title });
+  if (state === 'passed' && u?.shipped) return make(shippedLabel(u), [], 'shipped with follow-ups: the person chose to ship it at the finish line; its open findings are follow-ups');
   if (state === 'blocked') return ids.length ? make('Waiting for ', ids) : make('Waiting for another unit');
   if (state === 'needs-you') return isBlocked(d) && ids.length ? make('Needs you · waiting for ', ids) : make('Needs you');
   if (state === 'retrying' || state === 'stale') return make(WORDS[state], [], `The lead is on it: ${attention(u, d) ?? DOTS[state]}`);
@@ -109,6 +110,9 @@ export function dotWords(state, b) {
   const w = `waiting for ${b.ids.join(', ')}`;
   return state === 'blocked' ? w : `${DOTS[state] ?? state}; ${w}`;
 }
+
+// A unit the person shipped at the finish line: never shown as a clean pass.
+export const shippedLabel = (u) => `Shipped with follow-ups (score ${u.shipped?.score ?? u.rounds?.at(-1)?.score ?? 'none'})`;
 
 // The badge's label: the lead is handling it. Only Needs you and question cards address the person.
 export const attentionLabel = (reason) => (reason ? (reason.startsWith('no word') ? 'Quiet' : 'Retrying') : null);
@@ -125,6 +129,7 @@ export const purpose = (u) => clip(u.title || String(u.bar ?? '').split(/[;\n]|\
 function how(u, d) {
   const n = u.rounds.length; const last = u.rounds.at(-1);
   const why = last ? clip(last.cause || last.gap, 70) : '';
+  if (u.status === 'pass' && u.shipped) return `${shippedLabel(u).toLowerCase()} on try ${n}`;
   if (u.status === 'pass') return `passed on try ${n}`;
   if (u.status === 'stopped') return `stopped after ${n} ${n === 1 ? 'try' : 'tries'}: ${u.stopReason ?? 'stopped'}${why ? ` (last gap: ${why})` : ''}`;
   if (u.status === 'building') return `building, try ${n + 1}`;

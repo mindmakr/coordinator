@@ -16,13 +16,22 @@ function decimal(v, name, max) {
   if (!Number.isFinite(n) || n > max) throw new Error(`--${name} must be a number from 0 to ${max}, got: ${v}`);
   return Math.round(n * 100) / 100;
 }
-// "0.42 USD" or "USD 0.42": an amount and a three-letter currency code.
+// Active ISO 4217 codes (plus XAU/XAG metals left out): anything else is a typo, not a currency.
+const ISO4217 = new Set(('AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD '
+  + 'CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD '
+  + 'HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD '
+  + 'MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG '
+  + 'QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD '
+  + 'TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XOF XPF YER ZAR ZMW ZWG').split(' '));
+
+// "0.42 USD" or "USD 0.42": an amount and an ISO 4217 currency code.
 function money(v) {
   const s = typeof v === 'string' ? v.trim() : '';
   const after = /^(\d+(?:\.\d+)?)\s*([A-Za-z]{3})$/.exec(s);
   const before = /^([A-Za-z]{3})\s*(\d+(?:\.\d+)?)$/.exec(s);
   const [amount, currency] = after ? [after[1], after[2]] : before ? [before[2], before[1]] : [];
   if (amount === undefined || Number(amount) > 1e6) throw new Error(`--cost must be an amount and a currency code, e.g. "0.42 USD", got: ${v}`);
+  if (!ISO4217.has(currency.toUpperCase())) throw new Error(`--cost: ${currency} is not an ISO 4217 currency code (USD, EUR, GBP, SAR, …)`);
   return { amount: Math.round(Number(amount) * 10_000) / 10_000, currency: currency.toUpperCase() };
 }
 
@@ -37,12 +46,13 @@ export function costEntry(o, { step, role, model = null, at }) {
   return e;
 }
 
-const empty = () => ({ entries: 0, tokensIn: 0, tokensOut: 0, minutes: 0, money: {} });
+// `recorded` says which figures any entry carried, so a recorded 0 shows as 0, not "not recorded".
+const empty = () => ({ entries: 0, tokensIn: 0, tokensOut: 0, minutes: 0, money: {}, recorded: { tokensIn: false, tokensOut: false, minutes: false } });
 function add(sum, e) {
   sum.entries++;
-  if (Number.isFinite(e.tokensIn)) sum.tokensIn += e.tokensIn;
-  if (Number.isFinite(e.tokensOut)) sum.tokensOut += e.tokensOut;
-  if (Number.isFinite(e.minutes)) sum.minutes = Math.round((sum.minutes + e.minutes) * 100) / 100;
+  if (Number.isFinite(e.tokensIn)) { sum.tokensIn += e.tokensIn; sum.recorded.tokensIn = true; }
+  if (Number.isFinite(e.tokensOut)) { sum.tokensOut += e.tokensOut; sum.recorded.tokensOut = true; }
+  if (Number.isFinite(e.minutes)) { sum.minutes = Math.round((sum.minutes + e.minutes) * 100) / 100; sum.recorded.minutes = true; }
   if (e.cost && Number.isFinite(e.cost.amount)) sum.money[e.cost.currency] = Math.round(((sum.money[e.cost.currency] ?? 0) + e.cost.amount) * 10_000) / 10_000;
   return sum;
 }
@@ -66,8 +76,10 @@ const k = (n) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${Math
 export function costLine(sum) {
   if (!sum?.entries) return NONE;
   const parts = [];
-  if (sum.tokensIn || sum.tokensOut) parts.push(`${k(sum.tokensIn)} in / ${k(sum.tokensOut)} out tokens`);
-  if (sum.minutes) parts.push(`${sum.minutes} min`);
+  const r = sum.recorded ?? {};
+  const tok = [r.tokensIn ? `${k(sum.tokensIn)} in` : null, r.tokensOut ? `${k(sum.tokensOut)} out` : null].filter(Boolean);
+  if (tok.length) parts.push(`${tok.join(' / ')} tokens`);
+  if (r.minutes) parts.push(`${sum.minutes} min`);
   for (const [cur, amt] of Object.entries(sum.money).sort()) parts.push(`${amt} ${cur}`);
   return parts.length ? parts.join(' · ') : NONE;
 }

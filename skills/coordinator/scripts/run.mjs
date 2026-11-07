@@ -43,10 +43,12 @@
 //                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
 //                  the unit stays judging, and its pass is refused until every required specialist passed
 //                  --severity high|medium on a fail (required; a low or nit never fails: pass with --fold instead)
-//                  [--fold "…" …] on a pass: small findings the builder folds in before merge; next then says fold-in
+//                  [--finding "<high|medium|low|nit>: …" …] each FINDINGS line; the fail's severity is the worst; a pass lists none high or medium
+//                  [--fold "…" …] on a pass: lows and nits ("nit: …") folded in before merge; never one in a pinned area; next then says fold-in
 //                  [--full-suite yes|no] whether the critic ran the full suite this round
-//   run.mjs foldin <run> <unit> --head <sha> --evidence E   only when next says fold-in: the targeted check of the folds
-//                  (the folds and the tests they touch, no new critic round); next then says done, step merge
+//   run.mjs foldin <run> <unit> --head <sha> --evidence E [--reviewed <sha>]   only when next says fold-in: the targeted check
+//                  of the folds (no new critic round). The head must build on the reviewed one, stay under init's
+//                  --fold-max-files (10) and --fold-max-lines (200), and have a clean detect.mjs run on it; next then says done, step merge
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …] [--model M]
 //                  only when next says integrate; a pass needs every goal behaviour passing
@@ -125,9 +127,10 @@ import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mj
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
-import { allows, decide, decideUnit, FAILING, finishQuestion, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
+import { allows, decide, decideUnit, FAILING, finishQuestion, openFindings, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
 import { COST_FLAGS, costEntry, costStats } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
+import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
 import { answerRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
@@ -161,11 +164,11 @@ import { render } from './lib/workbench.mjs';
 import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
 
 const FLAGS = {
-  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open'],
+  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
   extend: ['rounds', 'reason', 'answer'],
-  start: ['model', 'why', 'force-model', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'evidence', ...COST_FLAGS],
+  start: ['model', 'why', 'force-model', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'fold', 'full-suite', ...COST_FLAGS], strategy: ['text'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', ...COST_FLAGS], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', ...COST_FLAGS],
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
@@ -173,7 +176,7 @@ const FLAGS = {
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
-const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
+const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -183,13 +186,23 @@ function applyStops(st) {
     for (const u of decide(st).units) if (u.action === 'stop') {
       const unit = st.units.find((x) => x.id === u.id); unit.status = 'stopped'; unit.stopReason = u.reason; log(unit, 'stop', u.reason);
       stopped.set(u.id, u); changed = true;
-    } else if (u.action === 'ship') { // the person chose to ship at the finish line: its mediums become follow-ups
+    } else if (u.action === 'ship') { // the person chose to ship at the finish line: every open finding becomes a follow-up
       const unit = st.units.find((x) => x.id === u.id); const last = unit.rounds.at(-1);
-      unit.status = 'pass'; unit.shipped = { answer: u.answer, round: unit.rounds.length, at: now() };
-      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: shipped with follow-ups, the person's choice at the finish line (${u.answer})`, at: now() });
-      st.notes.push({ kind: 'follow-up', unit: unit.id, text: `${unit.id}: ${last?.gap ?? 'the mediums of its last review'}`, at: now() });
+      const open = openFindings(last);
+      unit.status = 'pass'; unit.shipped = { answer: u.answer, round: unit.rounds.length, score: last?.score ?? null, findings: open.length, at: now() };
+      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: shipped with follow-ups (score ${last?.score ?? 'none'}), the person's choice at the finish line (${u.answer}); ${open.length} open finding${open.length === 1 ? '' : 's'} filed as follow-ups`, at: now() });
+      for (const f of open) st.notes.push({ kind: 'follow-up', unit: unit.id, shipped: u.answer, text: `${unit.id} (shipped, ${f.severity}${f.by === 'critic' ? '' : `, ${f.by}`}): ${f.text}`, at: now() });
       log(unit, 'ship', `shipped with follow-ups (${u.answer})`);
       stopped.set(u.id, { id: u.id, action: 'done', step: 'merge', reason: `shipped with follow-ups (${u.answer})` }); changed = true;
+    } else if (u.action === 'one-more') { // the person chose one more round: recorded like extend, then the usual rules decide
+      const unit = st.units.find((x) => x.id === u.id);
+      const lifted = unit.rounds.length >= roundCap(unit, st);
+      if (lifted) unit.extraRounds = (unit.extraRounds ?? 0) + 1;
+      const q = (st.notes ?? []).filter((n) => n.kind === 'question')[Number(u.answer.slice(1)) - 1];
+      const a = q?.history?.at(-1);
+      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: one more round${lifted ? ` (now ${roundCap(unit, st)})` : ''}, the person's choice at the finish line (${u.answer} answered "${a?.choices?.[0] ?? ''}" via ${a?.via ?? 'unknown'}${a?.confirm ? `, their words: "${String(a.confirm).slice(0, 200)}"` : ''}); the same-gap and no-progress rules still apply`, at: now() });
+      log(unit, 'extend', `one more round (${u.answer})`);
+      changed = true;
     }
   }
   return stopped;
@@ -357,6 +370,7 @@ const commands = {
         maxRounds: num(o['max-rounds'] ?? asArg(b.rounds), 4, 1, 8), maxMinutes: num(o['max-minutes'] ?? asArg(b.minutes), 240, 5, 10_080),
         maxUnits: num(o['max-units'], 6, 1, 20), maxAdded: num(o['max-added'], 2, 0, 10),
         staleMinutes: num(o['stale-minutes'], 45, 5, 1440), maxStudies: num(o['study-budget'], 2, 0, 10),
+        foldFiles: num(o['fold-max-files'], FOLD_DEFAULTS.files, 1, 100), foldLines: num(o['fold-max-lines'], FOLD_DEFAULTS.lines, 1, 5000),
       },
       createdAt: now(), frozen: false, addedAfterFreeze: 0, units: [], notes: [], integration: { rounds: [] }, closed: null,
     };
@@ -515,13 +529,17 @@ const commands = {
       if (v === 'fail' && !severity) throw new Error('--severity high|medium is required on a fail: the severity of the gap');
       if (v === 'fail' && !FAILING.includes(severity)) throw new Error(`fail refused: a ${severity} finding does not fail a round; pass, and record them as fold-ins (--fold "…")`);
       if (v === 'pass' && severity) throw new Error('--severity goes with a fail; record lows and nits on a pass with --fold');
-      const folds = (o.fold ?? []).map((f) => text(f === true ? undefined : f, 'fold', 500));
+      const findings = (o.finding ?? []).map((f) => { const x = parseFinding(text(f === true ? undefined : f, 'finding', 500)); return x; });
+      const worst = SEVERITIES.find((x) => findings.some((f) => f.severity === x));
+      if (v === 'fail' && worst && SEVERITIES.indexOf(worst) < SEVERITIES.indexOf(severity)) throw new Error(`--severity ${severity}, but a ${worst} finding is listed: the gap's severity is the worst finding's`);
+      if (v === 'pass' && FAILING.includes(worst)) throw new Error(`pass refused: a ${worst} finding is listed; a high or medium finding fails the round`);
+      const folds = (o.fold ?? []).map((f) => checkFold(text(f === true ? undefined : f, 'fold', 500))).map((f) => (f.severity === 'low' ? f.text : `nit: ${f.text}`));
       if (folds.length && v !== 'pass') throw new Error('--fold goes with a pass: a fail sends the gap back to the builder');
       if (folds.length > 10) throw new Error('at most 10 --fold items: more than that is another round');
       const fullSuite = o['full-suite'] === undefined ? null : o['full-suite'] === true ? true : oneOf(String(o['full-suite']), ['yes', 'no'], '--full-suite') === 'yes';
       const evidence = optText(o.evidence);
       const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
-      const extra = { ...(verdict === 'fail' && severity ? { severity } : {}), ...(verdict === 'pass' && folds.length ? { folds } : {}), ...(fullSuite === null ? {} : { fullSuite }) };
+      const extra = { ...(verdict === 'fail' && severity ? { severity } : {}), ...(findings.length ? { findings } : {}), ...(verdict === 'pass' && folds.length ? { folds } : {}), ...(fullSuite === null ? {} : { fullSuite }) };
       const critic = optText(o.critic, 120);
       const judge = modelName(o.model, 'model');
       const rcfg = routing(baseDir('project'));
@@ -544,6 +562,8 @@ const commands = {
       // A specialist's fold-ins ride on the pass too.
       if (verdict === 'pass') for (const [n, m] of Object.entries(u.specialistMarks ?? {})) for (const f of m.folds ?? []) extra.folds = [...(extra.folds ?? []), `${f} (${n})`];
       addCost(u, costEntry(o, { step: 'verdict', role: 'critic', model: judge, at: now() }));
+      // The head the critic reviewed, from the detect run of this round: a fold-in must build on it.
+      if (verdict === 'pass' && u.detect?.round === round && u.detect.head) extra.reviewedHead = u.detect.head;
       u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...extra, ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
       u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt;
       u.status = verdict === 'pass' ? 'pass' : 'open';
@@ -554,10 +574,22 @@ const commands = {
     return change(run, 'unit.foldin', (s) => {
       const u = unitOf(s, unit); expect(s, u, 'foldin');
       if (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head)) throw new Error('--head takes the commit the fold-ins landed on');
+      const evidence = text(o.evidence, 'evidence (what checked the fold-ins and the tests they touch)', 2000);
       const last = u.rounds.at(-1);
-      last.foldin = { head: o.head.toLowerCase(), evidence: text(o.evidence, 'evidence (what checked the fold-ins and the tests they touch)', 2000), at: now() };
+      // The fold must build on what the critic reviewed, stay small, and pass the fence and gaming check.
+      const reviewed = last.reviewedHead ?? (typeof o.reviewed === 'string' ? o.reviewed : null);
+      if (!reviewed) throw new Error(`foldin refused: no reviewed head recorded for ${u.id}'s pass (no detect run that round); give --reviewed <the commit the critic judged>`);
+      if (last.reviewedHead && o.reviewed !== undefined) throw new Error('--reviewed is recorded already (the round\'s detect head); leave it out');
+      const d = foldDiff(reviewed, o.head);
+      const caps = { files: s.budget.foldFiles ?? FOLD_DEFAULTS.files, lines: s.budget.foldLines ?? FOLD_DEFAULTS.lines };
+      if (!d.descends) throw new Error(`foldin refused: ${o.head} does not build on the reviewed head ${d.reviewed.slice(0, 12)}; a different history needs a new round`);
+      if (!d.files) throw new Error(`foldin refused: nothing changed since the reviewed head ${d.reviewed.slice(0, 12)}`);
+      if (d.files > caps.files || d.lines > caps.lines) throw new Error(`foldin refused: ${d.files} files and ${d.lines} lines changed since the reviewed head (caps ${caps.files} files, ${caps.lines} lines; init --fold-max-files/--fold-max-lines); that is a new round, not a fold-in`);
+      if (!(u.detect?.fold && u.detect.head === d.head && u.detect.base === d.reviewed)) throw new Error(`foldin refused: no detect result for this fold; run detect.mjs --run ${s.id} --unit ${u.id} --base ${d.reviewed.slice(0, 12)} --head ${d.head.slice(0, 12)} first`);
+      if (!u.detect.clean) throw new Error(`foldin refused: detect found ${u.detect.hits} hit(s) on the fold (fence or gaming); that needs a new round`);
+      last.foldin = { head: d.head, reviewed: d.reviewed, files: d.files, lines: d.lines, detect: { clean: true, files: u.detect.files }, evidence, at: now() };
       addCost(u, costEntry(o, { step: 'foldin', role: 'fold-in check', at: now() }));
-      log(u, 'foldin', `${last.folds.length} fold-in${last.folds.length === 1 ? '' : 's'} checked at ${o.head.slice(0, 12)}`);
+      log(u, 'foldin', `${last.folds.length} fold-in${last.folds.length === 1 ? '' : 's'} checked at ${d.head.slice(0, 12)}: ${d.files} files, ${d.lines} lines since the reviewed head`);
     }, { unit });
   },
   // The target branch was merged into this unit's branch: `next` stops asking until another overlapping unit merges.
