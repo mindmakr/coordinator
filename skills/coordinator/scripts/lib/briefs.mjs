@@ -24,6 +24,7 @@ function quoted(quotes) {
 
 const behaviourLines = (bs) => (bs?.length ? bs.map((b) => `  ${b.id}: ${b.text}`) : ['  (none recorded)']);
 const beatLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs beat ${run} ${unit}`;
+const evidenceLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs evidence ${run} ${unit} --kind screenshot|log --file <png, pdf, log, md or json>`;
 const NO_ASK = 'Never ask the person: report blockers to the lead.';
 
 // run: the state; o: { role, unit, quotes: [{ source, text }], where, playbook, env }.
@@ -52,6 +53,7 @@ export function buildBrief(run, o) {
       ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.'] : []),
       'Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.',
       `At each milestone (pushed, tests ran, PR opened) run: ${beatLine(run.id, u.id, o.env)} --text "<the milestone>"`,
+      `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your report is lost when the worktree goes.`,
       'Never merge, deploy, push to a protected branch, delete data or contact anyone. Never ask the person: report blockers to the lead.',
       'Report in 10 lines or fewer: what changed (paths), how to see the result (command, URL, file), the commands you ran with their pass or fail lines, and Follow-ups.',
     ].join('\n');
@@ -70,6 +72,7 @@ export function buildBrief(run, o) {
       ...playbook,
       'Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.',
       'Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.',
+      `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your reply is lost when the worktree goes.`,
       `If your checks run long, run now and then: ${beatLine(run.id, u.id, o.env)}`,
       ...(u.rounds.length ? ['Reuse an earlier cause tag (quoted above) word for word when the root cause is the same, even if the symptom differs.'] : []),
       'Reply with exactly:',

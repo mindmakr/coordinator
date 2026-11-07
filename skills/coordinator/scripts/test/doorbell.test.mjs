@@ -128,8 +128,9 @@ test('AGENTS.md names every skill file that opens a network connection', async (
   const here = fileURLToPath(new URL('..', import.meta.url));
   const agents = readFileSync(join(here, '..', '..', '..', 'AGENTS.md'), 'utf8');
   const files = readdirSync(join(here, 'lib')).filter((f) => f.endsWith('.mjs'));
-  const callers = files.filter((f) => /\b(https?)\.request\(|\bnode:net\b|execFileSync\('gh'/.test(readFileSync(join(here, 'lib', f), 'utf8')));
-  assert.deepEqual(callers.sort(), ['doorbell.mjs', 'statesync.mjs']);
+  const callers = files.filter((f) => /\b(https?)\.request\(|\bnode:net\b|execFileSync\('gh'|exec\('gh'|'ls-remote'/.test(readFileSync(join(here, 'lib', f), 'utf8')));
+  assert.deepEqual(callers.sort(), ['doctor.mjs', 'doorbell.mjs', 'statesync.mjs']);
+  assert.match(agents, /scripts\/doctor\.mjs/);
   assert.match(agents, /lib\/doorbell\.mjs/);
   assert.match(agents, /run\.mjs push` and `pull`/);
 });
