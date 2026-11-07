@@ -75,6 +75,55 @@ test('workspaces from the root package.json are searched, with globs one level d
   assert.deepEqual(staleCommands('`npm run dev`', q).missing, []);
 });
 
+test('fold 1: pnpm -w is the workspace root and takes no value; npm -w names a folder', () => {
+  const p = monorepo();
+  pkg(p, '.', { scripts: { verify: 'x' } });
+  assert.deepEqual(staleCommands('`pnpm -w verify`', p).missing, []);
+  assert.deepEqual(staleCommands('`pnpm -w db:generate`', p).missing, ['.: pnpm db:generate']);
+  assert.deepEqual(staleCommands('`npm -w backend run db:generate`', p).missing, []);
+});
+
+test('fold 2: pnpm --filter, pnpm -r and yarn workspace', () => {
+  const p = monorepo();
+  const s = (d) => staleCommands(d, p);
+  assert.deepEqual(s('`pnpm --filter backend db:generate` `pnpm -F @acme/web run lint` `pnpm --filter=./backend run test`').missing, []);
+  assert.deepEqual(s('`pnpm --filter @acme/web db:generate`').missing, ['frontend: pnpm db:generate']);
+  assert.deepEqual(s('`pnpm --filter "@acme/*" run lint`').missing, []); // a pattern: searched everywhere
+  assert.deepEqual(s('`pnpm -r run lint` `pnpm --recursive db:generate`').missing, []);
+  assert.deepEqual(s('`pnpm -r run gone`').searched, ['backend/package.json', 'frontend/package.json']);
+  assert.deepEqual(s('`yarn workspace @acme/web lint` `yarn workspace backend run db:generate`').missing, []);
+  assert.deepEqual(s('`yarn workspace @acme/web db:generate`').missing, ['frontend: yarn db:generate']);
+});
+
+test('fold 3: -w and --prefix after the script name', () => {
+  const p = monorepo();
+  assert.deepEqual(staleCommands('`npm run lint -w frontend` `npm run db:generate --prefix backend` `npm run db:generate --workspace=backend`', p).missing, []);
+  assert.deepEqual(staleCommands('`npm run lint -w backend`', p).missing, ['backend: npm run lint']);
+  assert.deepEqual(staleCommands('`npm run db:generate -- -w frontend`', p).missing, []); // after --: the script's own args
+});
+
+test('fold 4: a folder outside the project is never read', () => {
+  const p = monorepo();
+  for (const form of ['cd .. && npm run nothere', 'npm --prefix ../x run nothere', 'cd backend && npm --prefix ../.. run nothere', 'pnpm -C /tmp run nothere'])
+    assert.deepEqual(staleCommands(`\`${form}\``, p), { missing: [], searched: [], unreadable: [], found: {} }, form);
+  assert.deepEqual(staleCommands('`cd backend/.. && npm run lint`', p).missing, []);
+});
+
+test('fold 5: a package.json that is not valid JSON is named, not listed silently', () => {
+  const p = monorepo();
+  mkdirSync(join(p, 'api')); writeFileSync(join(p, 'api', 'package.json'), '{ "scripts": ');
+  const r = staleCommands('`npm run gone`', p);
+  assert.deepEqual(r.unreadable, ['api/package.json']);
+  writeFileSync(join(p, 'COORDINATOR.md'), '`npm run gone`\n');
+  assert.match(contextCheck(ctx(p)).text, /could not read api\/package\.json \(not valid JSON\)/);
+  writeFileSync(join(p, 'COORDINATOR.md'), '`cd api && npm test` `npm run lint`\n');
+  const c = contextCheck(ctx(p));
+  assert.equal(c.status, 'warn'); assert.match(c.text, /api: npm test .*could not read api\/package\.json/);
+  writeFileSync(join(p, 'COORDINATOR.md'), '`npm run db:generate`\n');
+  // api/ sorts before backend/, so it is consulted on the way: still named.
+  assert.match(contextCheck(ctx(p)).text, /commands found, could not read api\/package\.json/);
+});
+
 test('no package.json anywhere: every command warns, searched names the root file', () => {
   const p = join(root, `p${++n}`); mkdirSync(p);
   const r = staleCommands('`npm run lint`', p);

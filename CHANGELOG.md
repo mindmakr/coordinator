@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **doctor: no false "commands no package.json has" warning in monorepos (#61).** The `context` check looked only at the root `package.json`. A command named with a folder (`cd backend && npm run x`, `npm --prefix backend run x`, `pnpm -C`, `yarn --cwd`, `npm -w`) is now looked up in that folder; any other in the root `package.json`, its `workspaces` and first-level folders that have one (`backend/`, `frontend/`). The ok line names where a command was found outside the root; a warning lists the files it searched. New `scripts/lib/pkg-scripts.mjs`.
+- **doctor: no false "commands no package.json has" warning in monorepos (#61).** The `context` check looked only at the root `package.json`. A command named with a folder (`cd backend && npm run x`, `npm --prefix backend run x` or `npm run x -w backend`, `pnpm -C` or `--filter`, `yarn --cwd` or `yarn workspace`) is now looked up in that folder, and one outside the project is never read; any other (and `pnpm -r`) in the root `package.json`, its `workspaces` and first-level folders that have one (`backend/`, `frontend/`). The ok line names where a command was found outside the root; a warning lists the files it searched and names a `package.json` that is not valid JSON. New `scripts/lib/pkg-scripts.mjs`.
 
 ## 1.1.1 (2026-11-07)
 

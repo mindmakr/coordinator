@@ -82,8 +82,10 @@ export function contextCheck(ctx) {
   if (!existsSync(file)) return out('context', 'warn', 'no COORDINATOR.md: every run re-learns the project', '/coordinator:init');
   const doc = readFileSync(file, 'utf8');
   // Commands quoted in COORDINATOR.md must still be scripts in a package.json (lib/pkg-scripts.mjs).
-  const { missing, searched, found } = staleCommands(doc, ctx.project);
-  if (missing.length) return out('context', 'warn', `COORDINATOR.md names commands no package.json has: ${missing.join(', ')} (searched ${searched.join(', ')})`, '/coordinator:init to refresh it');
+  const { missing, searched, found, unreadable } = staleCommands(doc, ctx.project);
+  const bad = unreadable.length ? `; could not read ${unreadable.join(', ')} (not valid JSON)` : '';
+  if (missing.length) return out('context', 'warn', `COORDINATOR.md names commands no package.json has: ${missing.join(', ')} (searched ${searched.join(', ')})${bad}`, '/coordinator:init to refresh it');
+  if (bad) return out('context', 'warn', `COORDINATOR.md commands found${bad.replace(';', ',')}`, 'fix the package.json');
   const theme = themeFile({}, ctx.project);
   if (theme && !existsSync(theme)) return out('context', 'warn', `COORDINATOR.md Theme: file not found (${rel(ctx.project, theme)})`, 'fix the Theme: line or remove it');
   const where = Object.entries(found).map(([file, names]) => `${names.join(', ')} in ${file}`);
