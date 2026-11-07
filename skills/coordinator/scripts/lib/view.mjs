@@ -4,6 +4,7 @@ import { byModel, modelLine, unrecorded, UNSPECIFIED, whoUnit } from './models.m
 import { attention, attentionLabel, clip, dotState, sentence, situation, timeLeft } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
 import { chainLine, chainOf } from './chain.mjs';
+import { pendingSyncs, syncStep } from './overlap.mjs';
 import { bySetup, escapes, roundCap, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 
@@ -38,6 +39,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
   const personNotes = notes.filter((n) => n.kind === 'person').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at }));
   const timeline = runTimeline(run).reverse();
   const goalBehaviours = run.goalBehaviours ?? [];
+  const syncs = run.closed ? new Map() : pendingSyncs(run);
   return {
     id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo,
     continues: Array.isArray(run.continues) ? run.continues : [],
@@ -72,6 +74,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         rounds: u.rounds.length, maxRounds: roundCap(u, run), extraRounds: u.extraRounds ?? 0,
         // The same work in other runs (#36): earlier tries before, the run that finished it after.
         chain, chainText: chainLine(chain),
+        // Files an already merged unit changed too (#37): take the target in before review.
+        sync: syncs.has(u.id) ? syncStep(run.id, u.id, syncs.get(u.id), u.status === 'pass') : null,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
         evidence: last?.evidence ?? null,
@@ -131,6 +135,7 @@ export function text(v) {
     lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
+    if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
     if (u.chainText) lines.push(`${' '.repeat(w)}↔ ${clip(u.chainText, 200)}`);
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);

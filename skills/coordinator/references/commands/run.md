@@ -45,6 +45,7 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 | `change-strategy` | Pick a different approach, `strategy --text`, then build. |
 | `check-stale` | Ask the agent. No answer and `phase: building`: `start` again and send a fresh builder. `phase: judging`: `beat` and send a fresh critic (the build is kept). |
 | `wait` | Nothing. A notification will come; never poll. |
+| any, with `sync` | Another unit that changes the same files merged first. Merge the target into this unit's branch before the review (or before merging, on a passed unit), check the shared files, then `sync <run> <unit>` (`references/briefs.md`, Hot spots). |
 | `stop` | Recorded by `next` just now. Its gap goes in the report. A reason "no progress: only B2 kept failing …" means the rest passed: narrow B2 to a closed list or move it to a unit of its own (`references/bar.md`). |
 | `done` / `stopped` | Nothing: the unit passed, or was stopped in an earlier round. |
 

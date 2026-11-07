@@ -70,7 +70,10 @@
 //                  --fresh starts a new log (the old map/ is kept aside); --reset-stage also replaces the staged and pushed
 //                  map history (a map.reset event push and pull accept); --force records a build cut short by the cap;
 //                  --pit-stop stages the log and summary in the run's pit-stop/map (push carries them), or copies them to --dest
-//   run.mjs touches <run> <path> [--json]   what that file touches, from the map, for a builder's brief
+//   run.mjs touches <run> <path> [--json] [--unit U]   what that file touches, from the map, for a builder's brief;
+//                  --unit records the path as one the unit will change (no map needed for that), so `next` can
+//                  say when a unit that changes the same file merged first
+//   run.mjs sync <run> <unit> [--text T]   the target branch was merged into the unit's branch (after `next` asked)
 //   run.mjs models [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class
 //   run.mjs list | stats [--tag T] | where      where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
@@ -91,6 +94,7 @@ import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
 import { allows, decide, decideUnit, roundCap, stats } from './lib/rules.mjs';
 import { linkedRuns, parseContinues } from './lib/chain.mjs';
+import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
@@ -123,7 +127,7 @@ const FLAGS = {
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues'], note: ['kind', 'text', 'recommend', 'answers', 'unit'],
-  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json'], close: ['outcome', 'reason'], adopt: ['dry-run'], stats: ['tag'], reset: ['reason'],
+  ask: ['question', 'header', 'option', 'multi', 'unit'], answer: ['choice', 'other', 'by'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
@@ -409,6 +413,14 @@ const commands = {
       u.status = verdict === 'pass' ? 'pass' : 'open';
     }, { unit });
   },
+  // The target branch was merged into this unit's branch: `next` stops asking until another overlapping unit merges.
+  sync([run, unit], o) {
+    return change(run, 'unit.sync', (s) => {
+      const u = unitOf(s, unit);
+      u.syncedAt = now();
+      log(u, 'sync', optText(o.text, 200) ?? 'merged the target in');
+    }, { unit });
+  },
   // A unit at, or stopped by, its round budget gets N more rounds once the person approved them (#36).
   extend([run, unit], o) {
     const rounds = num(o.rounds, 0, 1, 4);
@@ -592,7 +604,10 @@ const commands = {
     const plan = decide(s);
     const cfg = routing(baseDir('project'));
     const suggest = (u) => { const e = u.action === 'build' ? escalation(cfg, unitOf(s, u.id)) : null; return e ? { ...u, model: e.model, modelWhy: e.why } : u; };
-    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? suggest(u)) };
+    // A unit that changes files an already merged unit changed takes the target in first (#37).
+    const syncs = pendingSyncs(s);
+    const sync = (u) => (syncs.has(u.id) && ['build', 'judge', 'done'].includes(u.action) ? { ...u, sync: syncStep(s.id, u.id, syncs.get(u.id), u.action === 'done') } : u);
+    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? sync(suggest(u))) };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];
@@ -665,7 +680,16 @@ const commands = {
   },
   touches([run, path], o) {
     load(run);
-    if (!path) throw new Error('usage: run.mjs touches <run> <path> [--json]');
+    if (!path) throw new Error('usage: run.mjs touches <run> <path> [--json] [--unit U]');
+    if (o.unit !== undefined) {
+      const p = normPath(path);
+      if (!p || p.length > 300 || p.split('/').includes('..') || /^[A-Za-z]:|^\//.test(p)) throw new Error('--unit records a path relative to the project root');
+      change(run, 'unit.touches', (s) => {
+        const u = unitOf(s, o.unit);
+        if (!(u.touches ?? []).includes(p)) { (u.touches ??= []).push(p); log(u, 'touches', p); }
+      }, { unit: String(o.unit) });
+      if (!hasMap(runDir(run))) { const note = { recorded: p, unit: String(o.unit), map: 'none yet: run map for what it touches' }; if (o.json === true) return note; console.log(JSON.stringify(note)); return null; }
+    }
     const out = touchesOf(run, runDir(run), path, o.json === true);
     if (o.json === true) return out;
     process.stdout.write(out);
@@ -695,7 +719,7 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);

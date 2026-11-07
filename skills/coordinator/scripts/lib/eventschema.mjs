@@ -41,6 +41,8 @@ export const KINDS = {
   'unit.detect': { unit: 'required', payload: changes },
   'unit.link': { unit: 'required', payload: changes },
   'unit.extend': { unit: 'required', payload: changes },
+  'unit.touches': { unit: 'required', payload: changes },
+  'unit.sync': { unit: 'required', payload: changes },
   behaviour: { unit: 'optional', payload: changes },
   evidence: { unit: 'optional', payload: changes },
   note: { unit: 'optional', payload: changes },
