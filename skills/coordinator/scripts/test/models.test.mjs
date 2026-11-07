@@ -26,7 +26,7 @@ test('routing is on by default: mechanical builder work is cheap, critics strong
   const cfg = normalize(undefined);
   assert.equal(cfg.on, true);
   assert.deepEqual(route(cfg, 'builder', 'docs'), { model: 'sonnet', why: 'docs (mechanical)' });
-  assert.deepEqual(route(cfg, 'builder', 'auth-refactor'), { model: null, why: 'default' });
+  assert.deepEqual(route(cfg, 'builder', 'search-ui'), { model: null, why: 'default' });
   assert.equal(route(cfg, 'critic').model, 'opus');
   assert.equal(route(cfg, 'integrator').model, 'opus');
 });
@@ -87,8 +87,8 @@ test('start and verdict record the models; the HUD, unit page and stats show the
   ok('integrate', 'm', 'pass', '--evidence', 'e'); ok('close', 'm', '--outcome', 'done');
   const st = ok('stats', '--tag', 'mod');
   assert.deepEqual(st.roundsByBuilderModel, [
-    { model: '(not recorded)', rounds: 1, passed: 1, passRate: 1 },
     { model: 'sonnet', rounds: 2, passed: 1, passRate: 0.5 },
+    { model: 'unspecified', rounds: 1, passed: 1, passRate: 1 },
   ]);
   assert.deepEqual(st.roundsByJudgeModel, [{ model: 'opus', rounds: 3 }]);
 });
@@ -103,6 +103,7 @@ test('routing off: any judging model is recorded, nothing refused', () => {
 
 test('old state without model fields loads and shows no model line', () => {
   const dir = folder(); const ok = okIn(dir);
+  writeFileSync(cfgFile(dir), JSON.stringify({ models: false })); // nothing recorded, as before this feature
   ok('init', 'old', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'old', 'a', '--bar', 'b'); ok('freeze', 'old');
   ok('start', 'old', 'a'); ok('built', 'old', 'a'); ok('verdict', 'old', 'a', 'pass', '--evidence', 'e');
   ok('hud', 'old');
@@ -162,9 +163,70 @@ test('after a try failed on a cheaper model, start refuses a cheaper one unless 
   assert.equal(n.model, 'opus'); assert.match(n.modelWhy, /sonnet failed/);
   const r = cli(dir, 'start', 'e', 'a', '--model', 'claude-haiku-4-5');
   assert.equal(r.code, 1); assert.match(r.err, /force-model/);
+  // Leaving out --model is no way round it.
+  const bare = cli(dir, 'start', 'e', 'a');
+  assert.equal(bare.code, 1); assert.match(bare.err, /--model opus/);
   assert.equal(cli(dir, 'start', 'e', 'a', '--model', 'sonnet', '--force-model').code, 1); // a reason is required
   ok('start', 'e', 'a', '--model', 'sonnet', '--force-model', 'one-word typo, opus is down');
-  assert.match(JSON.parse(readFileSync(join(dir, 'runs', 'e', 'state.json'), 'utf8')).notes.at(-1).text, /again after sonnet failed: one-word typo/);
+  assert.match(JSON.parse(readFileSync(join(dir, 'runs', 'e', 'state.json'), 'utf8')).notes.at(-1).text, /again \(retry after sonnet failed\): one-word typo/);
+  ok('built', 'e', 'a'); ok('verdict', 'e', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
+  ok('start', 'e', 'a', '--model', 'claude-opus-4-1'); // strong is always accepted
+});
+
+test('escalation looks at every cheap fail since the last strong build', async () => {
+  const { escalation } = await import('../lib/models.mjs');
+  const cfg = normalize(undefined);
+  const u = (rounds) => ({ rounds });
+  assert.ok(escalation(cfg, u([{ verdict: 'fail', builtBy: 'sonnet' }, { verdict: 'fail', builtBy: 'unspecified' }])));
+  assert.ok(escalation(cfg, u([{ verdict: 'fail', builtBy: 'haiku' }, { verdict: 'fail' }])));
+  assert.equal(escalation(cfg, u([{ verdict: 'fail', builtBy: 'sonnet' }, { verdict: 'fail', builtBy: 'OPUS' }])), null);
+  assert.equal(escalation(cfg, u([{ verdict: 'fail', builtBy: 'unspecified' }])), null);
+  assert.equal(escalation(normalize(false), u([{ verdict: 'fail', builtBy: 'sonnet' }])), null);
+});
+
+test('a ranked strong below opus is refused; an unranked strong is allowed', () => {
+  for (const s of ['haiku', 'claude-3-5-haiku', 'sonnet', 'Sonnet', 'claude-sonnet-4-5']) assert.throws(() => normalize({ strong: s }), /below opus/, s);
+  assert.equal(normalize({ strong: 'gpt-x' }).strong, 'gpt-x');
+  assert.equal(normalize({ strong: 'claude-opus-4-1' }).strong, 'claude-opus-4-1');
+  const dir = folder();
+  writeFileSync(cfgFile(dir), JSON.stringify({ models: { strong: 'sonnet' } }));
+  const r = cli(dir, 'models');
+  assert.equal(r.code, 1); assert.match(r.err, /below opus/);
+});
+
+test('family parsing is strict: one family word, version parts only', () => {
+  for (const n of ['claude-opus-4-5-haiku', 'claude-sonnet-opus', 'claude-opus-mini', 'xclaude-opus-4', 'claude-opus-4-5-fast']) assert.equal(family(n), null, n);
+  assert.equal(family('claude-opus-4-5-20251101'), 'opus');
+  assert.equal(family('claude-sonnet-4-latest'), 'sonnet');
+  assert.equal(atLeast('claude-opus-4-5-haiku', 'opus'), false);
+});
+
+test('pinned classes cover payments, billing, auth, permissions, secrets, crypto and personal data by word', () => {
+  const cfg = normalize({ mechanical: 'haiku', payments: 'haiku' });
+  for (const c of ['payments', 'billing', 'invoicing', 'invoice-pdf', 'authentication', 'authorization', 'user-permissions', 'secrets', 'crypto', 'pii', 'personal-data', 'personal_data_export', 'db-migration']) {
+    assert.equal(route(cfg, 'builder', c).model, 'opus', c);
+  }
+  assert.equal(route(cfg, 'builder', 'docs').model, 'haiku');
+  assert.equal(route(cfg, 'builder', 'payday-copy').model, null);
+  assert.equal(cfg.warnings.length, 1); // payments: haiku ignored
+});
+
+test('stats and show group models by family; unnamed models are recorded as unspecified and counted', () => {
+  const dir = folder(); const ok = okIn(dir);
+  ok('init', 'g', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--tag', 'fam');
+  for (const id of ['a', 'b', 'c', 'd']) ok('add', 'g', id, '--bar', 'b');
+  ok('freeze', 'g');
+  [['a', 'opus'], ['b', 'OPUS'], ['c', 'claude-opus-4-5']].forEach(([id, m]) => { ok('start', 'g', id, '--model', m); ok('built', 'g', id); ok('verdict', 'g', id, 'pass', '--evidence', 'e', '--model', m); });
+  ok('start', 'g', 'd'); ok('built', 'g', 'd'); ok('verdict', 'g', 'd', 'pass', '--evidence', 'e');
+  const d = JSON.parse(readFileSync(join(dir, 'runs', 'g', 'state.json'), 'utf8')).units[3].rounds[0];
+  assert.deepEqual([d.builtBy, d.judgedBy], ['unspecified', 'unspecified']);
+  const html = readFileSync(join(dir, 'runs', 'g', 'hud.html'), 'utf8');
+  assert.match(html, /opus 3\/3 passed · 1 round with no model recorded/);
+  assert.match(cli(dir, 'show', 'g').out, /models {3}opus 3\/3 passed · 1 round with no model recorded/);
+  ok('integrate', 'g', 'pass', '--evidence', 'e', '--model', 'opus'); ok('close', 'g', '--outcome', 'done');
+  const st = ok('stats', '--tag', 'fam');
+  assert.deepEqual(st.roundsByBuilderModel.map((m) => [m.model, m.rounds]), [['opus', 3], ['unspecified', 1]]);
+  assert.deepEqual(st.roundsByJudgeModel, [{ model: 'opus', rounds: 3 }, { model: 'unspecified', rounds: 1 }]);
 });
 
 test('setRouting refuses a malformed coordinator.json; init <run> --models writes only when the run is made', () => {
@@ -187,6 +249,6 @@ test('the dashboard shows rounds and pass rate per builder model while the run i
   ok('start', 'h', 'a', '--model', 'sonnet'); ok('built', 'h', 'a');
   ok('verdict', 'h', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
   const html = readFileSync(join(dir, 'runs', 'h', 'hud.html'), 'utf8');
-  assert.match(html, /data-a="budget-models"[\s\S]*sonnet 0\/1 passed \(0\)/);
-  assert.match(cli(dir, 'show', 'h').out, /models {3}sonnet 0\/1 passed \(0\)/);
+  assert.match(html, /data-a="budget-models"[\s\S]*sonnet 0\/1 passed<\/b>/); // no "(0)" after it
+  assert.match(cli(dir, 'show', 'h').out, /models {3}sonnet 0\/1 passed$/m);
 });

@@ -83,7 +83,7 @@ import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
 import { remoteWatch } from './lib/remote.mjs';
-import { atLeast, byModel, escalation, judgeAllowed, modelName, route, routing, setRouting } from './lib/models.mjs';
+import { atLeast, byModel, escalation, judgeAllowed, modelName, route, routing, setRouting, UNSPECIFIED } from './lib/models.mjs';
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
@@ -248,12 +248,16 @@ const commands = {
     return change(run, 'unit.start', (s) => {
       const u = unitOf(s, unit); expect(s, u, 'start');
       const esc = escalation(cfg, u);
-      if (esc && model && !atLeast(model, cfg.strong)) {
-        if (!force) throw new Error(`start refused: the last try failed on ${u.rounds.at(-1).builtBy}; use ${esc.model} (or --force-model "reason")`);
-        s.notes.push({ kind: 'decision', text: `${u.id}: built on ${model} again after ${u.rounds.at(-1).builtBy} failed: ${force}`, at: now() });
-      } u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours);
+      // After a cheap fail: --model at or above strong, or a cheaper one with --force-model "reason".
+      if (esc && !(model && atLeast(model, cfg.strong))) {
+        if (!force) throw new Error(`start refused: ${esc.why}; start with --model ${esc.model} (or a cheaper --model with --force-model "reason")`);
+        s.notes.push({ kind: 'decision', text: `${u.id}: built on ${model} again (${esc.why}): ${force}`, at: now() });
+      }
+      u.status = 'building'; u.heartbeatAt = now(); reopen(u.behaviours);
       delete u.builtBy; delete u.builtWhy;
-      if (model) { u.builtBy = model; if (why) u.builtWhy = why; }
+      // With routing on, an unnamed model is recorded as such, so pass rates stay honest.
+      const builtBy = model ?? (cfg.on ? UNSPECIFIED : null);
+      if (builtBy) { u.builtBy = builtBy; if (why) u.builtWhy = why; }
       log(u, 'start', `try ${u.rounds.length + 1}${model ? ` on ${model}${why ? ` (${why})` : ''}` : ''}`);
     }, { unit });
   },
@@ -323,8 +327,9 @@ const commands = {
       const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const critic = optText(o.critic, 120);
       const judge = modelName(o.model, 'model');
-      if (judge && !judgeAllowed(routing(baseDir('project')), judge)) throw new Error(`verdict refused: critics are never routed down; ${judge} is below the strong model or not it (references/routing.md)`);
-      const judgedBy = judge ? { judgedBy: judge } : {};
+      const rcfg = routing(baseDir('project'));
+      if (judge && !judgeAllowed(rcfg, judge)) throw new Error(`verdict refused: critics are never routed down; ${judge} is below the strong model or not it (references/routing.md)`);
+      const judgedBy = judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {});
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
         if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
@@ -370,10 +375,11 @@ const commands = {
       oneOf(v, ['pass', 'fail'], 'verdict');
       const evidence = optText(o.evidence);
       const judge = modelName(o.model, 'model');
-      if (judge && !judgeAllowed(routing(baseDir('project')), judge)) throw new Error(`integrate refused: the integrator is never routed down; ${judge} is below the strong model (references/routing.md)`);
+      const rcfg = routing(baseDir('project'));
+      if (judge && !judgeAllowed(rcfg, judge)) throw new Error(`integrate refused: the integrator is never routed down; ${judge} is below the strong model (references/routing.md)`);
       const j = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const marks = mark(s.goalBehaviours ?? [], o.behaviour, j.verdict);
-      s.integration.rounds.push({ ...j, evidence, at: now(), ...(judge ? { judgedBy: judge } : {}), ...(marks.length ? { behaviours: marks } : {}) });
+      s.integration.rounds.push({ ...j, evidence, at: now(), ...(judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {})), ...(marks.length ? { behaviours: marks } : {}) });
     });
   },
   note([run], o) {

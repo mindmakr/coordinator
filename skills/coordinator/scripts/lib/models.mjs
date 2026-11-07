@@ -12,7 +12,14 @@ import { writeAtomic } from './store.mjs';
 const RANK = { haiku: 1, sonnet: 2, opus: 3 };
 // Task classes the "mechanical" entry covers, and the ones pinned to strong.
 export const MECHANICAL = ['docs', 'copy', 'translations', 'renames', 'fixtures', 'mirror'];
-export const PINNED = ['security', 'money', 'migrations', 'auth'];
+// A class is pinned when it, or any word of it (split on - and _), is one of these.
+export const PINNED = ['security', 'money', 'migrations', 'auth', 'payments', 'billing', 'invoicing', 'authentication', 'authorization', 'permissions', 'secrets', 'crypto', 'pii', 'personal-data'];
+const PIN_WORDS = new Set([...PINNED, 'migration', 'payment', 'pay', 'invoice', 'invoices', 'permission', 'secret', 'authn', 'authz', 'oauth', 'login', 'password', 'passwords', 'token', 'tokens', 'encryption']);
+export function pinned(cls) {
+  const c = String(cls).toLowerCase();
+  return PIN_WORDS.has(c) || /personal[-_]data/.test(c) || c.split(/[-_]/).some((w) => PIN_WORDS.has(w));
+}
+export const UNSPECIFIED = 'unspecified';
 const ROLES = ['builder', 'critic', 'specialist', 'visual-critic', 'integrator', 'researcher'];
 export const JUDGES = ['critic', 'specialist', 'visual-critic', 'integrator'];
 export const DEFAULT = Object.freeze({ strong: 'opus', mechanical: 'sonnet' });
@@ -23,7 +30,8 @@ const own = (o, k) => Object.hasOwn(o, k);
 export function family(name) {
   const n = String(name ?? '').toLowerCase();
   if (own(RANK, n)) return n;
-  const m = /^claude-(?:[\d.]+-)*(haiku|sonnet|opus)(?:-|$)/.exec(n);
+  // Strict: exactly one family word, with only version or date parts (digits, "latest") around it.
+  const m = /^claude-(?:\d+(?:\.\d+)?-){0,3}(haiku|sonnet|opus)(?:-(?:\d+(?:\.\d+)?|latest))*$/.exec(n);
   return m ? m[1] : null;
 }
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
@@ -57,7 +65,8 @@ export function normalize(raw) {
     table[k] = v;
   }
   const strong = table.strong;
-  for (const k of [...JUDGES, ...PINNED]) {
+  if (family(strong) && family(strong) !== 'opus') throw new Error(`"models".strong = ${strong} is below opus: judges and pinned work would run on it. Leave strong out (opus), or name an unranked model for another harness`);
+  for (const k of Object.keys(table).filter((k) => JUDGES.includes(k) || pinned(k))) {
     if (own(table, k) && !atLeast(table[k], strong)) {
       warnings.push(`"models".${k} = ${table[k]} ignored: ${JUDGES.includes(k) ? 'critics are never routed' : `${k} work is never routed`} below the strong model (${strong})`);
       table[k] = strong;
@@ -82,7 +91,7 @@ export function setRouting(base, on) {
 
 // One class's choice for a builder, with a strength used to pick between classes.
 function forClass(cfg, cls) {
-  if (PINNED.includes(cls)) return { model: cfg.strong, why: `${cls} (always strong)`, w: 100 };
+  if (pinned(cls)) return { model: cfg.strong, why: `${cls} (always strong)`, w: 100 };
   if (own(cfg.table, cls)) return { model: cfg.table[cls], why: cls, w: atLeast(cfg.table[cls], cfg.strong) ? 90 : (RANK[family(cfg.table[cls])] ?? 0) };
   if (MECHANICAL.includes(cls) && own(cfg.table, 'mechanical')) return { model: cfg.table.mechanical, why: `${cls} (mechanical)`, w: RANK[family(cfg.table.mechanical)] ?? 0 };
   return { model: own(cfg.table, 'builder') ? cfg.table.builder : null, why: 'default', w: 50 };
@@ -107,10 +116,15 @@ export const judgeAllowed = (cfg, model) => !cfg.on || atLeast(model, cfg.strong
 
 // Escalation: after a round that failed on a model below strong, the next try uses strong.
 // Returns { model, why } to suggest, or null.
+// Any fail on a named model below strong since the last strong build counts.
+export const cheap = (cfg, m) => Boolean(m) && m !== UNSPECIFIED && !atLeast(m, cfg.strong);
 export function escalation(cfg, u) {
-  const last = u.rounds.at(-1);
-  if (!cfg.on || !last || last.verdict !== 'fail' || !last.builtBy || atLeast(last.builtBy, cfg.strong)) return null;
-  return { model: cfg.strong, why: `retry after ${last.builtBy} failed` };
+  if (!cfg.on) return null;
+  for (const r of [...u.rounds].reverse()) {
+    if (r.builtBy && atLeast(r.builtBy, cfg.strong)) return null;
+    if (r.verdict === 'fail' && cheap(cfg, r.builtBy)) return { model: cfg.strong, why: `retry after ${r.builtBy} failed` };
+  }
+  return null;
 }
 
 export const modelName = (v, flag) => {
@@ -132,18 +146,23 @@ export function whoUnit(u) {
   return last ? whoRound(last) : null;
 }
 
-// "sonnet 1/2 passed (0.5) · opus 3/3 passed (1)".
-export const modelLine = (list) => list.map((m) => `${m.model} ${m.passed}/${m.rounds} passed (${m.passRate})`).join(' · ');
+// "sonnet 1/2 passed · opus 3/3 passed · 1 round with no model recorded".
+export const modelLine = (list, none = 0) => [...list.map((m) => `${m.model} ${m.passed}/${m.rounds} passed`), ...(none ? [`${none} round${none === 1 ? '' : 's'} with no model recorded`] : [])].join(' · ');
+// One row per family: opus, OPUS and claude-opus-4-5 are one model here.
+const groupKey = (m) => (m ? (family(m) ?? String(m).toLowerCase()) : '(not recorded)');
+// Rounds with no model: never recorded (old state, routing off) or recorded as unspecified.
+export const unrecorded = (run) => run.units.reduce((n, u) => n + u.rounds.filter((r) => !r.builtBy || r.builtBy === UNSPECIFIED).length, 0);
 
 // Rounds and pass rate per builder model, and rounds per judging model, so the
 // person sees whether cheaper builders fail more.
 export function byModel(runs) {
   const built = new Map(); const judged = new Map();
   for (const run of runs) for (const u of run.units) for (const r of u.rounds) {
-    const b = built.get(r.builtBy ?? '(not recorded)') ?? { model: r.builtBy ?? '(not recorded)', rounds: 0, passed: 0 };
+    const key = groupKey(r.builtBy);
+    const b = built.get(key) ?? { model: key, rounds: 0, passed: 0 };
     b.rounds++; if (r.verdict === 'pass') b.passed++;
-    built.set(b.model, b);
-    const jm = r.judgedBy ?? '(not recorded)';
+    built.set(key, b);
+    const jm = groupKey(r.judgedBy);
     judged.set(jm, (judged.get(jm) ?? 0) + 1);
   }
   const sort = (a, b) => a.model.localeCompare(b.model);
