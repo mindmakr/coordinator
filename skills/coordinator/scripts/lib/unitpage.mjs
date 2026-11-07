@@ -7,8 +7,8 @@ import { linkify } from './links.mjs';
 import { unitCalls } from './map/callsview.mjs';
 import { clip } from './plain.mjs';
 import { whoRound } from './models.mjs';
-import { chainRow, liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, triesRow, unitLinks } from './hud.mjs';
-import { behaviourList, blk, blocksLine, chip, esc, evidenceList, hash, keyed, linkWaits, page, stamp, stateChip, timelineTools, unitDot, unitLink } from './parts.mjs';
+import { chainRow, liveCtx, noteForm, questionItem, scoreChart, staticCtx, timelineList, timelineOl, triesRow, unitLinks } from './hud.mjs';
+import { behaviourList, blk, blocksLine, chip, esc, evidenceList, grows, hash, keyed, linkWaits, page, stamp, stateChip, timelineTools, unitDot, unitLink } from './parts.mjs';
 
 // Depends on / Blocks: each linked unit with its state dot and badge, linked to its page.
 function links(u, ctx) {
@@ -63,11 +63,11 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     blk('rounds', `<section class="card">${earlier(u.chain, r, u.id)}${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
     '<h2 data-a="h-Notes">Notes and questions</h2>',
     blk('notes', `<section class="card">${u.asks.length ? `<ul class="needs-list">${u.asks.map((q) => questionItem(q, form, r)).join('')}</ul>` : ''}`
-      + (notes ? `<ul>${notes}</ul>` : (u.asks.length ? '' : '<p class="empty">None.</p>'))
+      + (notes ? grows(`<ul>${notes}</ul>`) : (u.asks.length ? '' : '<p class="empty">None.</p>'))
       + (form ? noteForm(form, u.id) : '') + '</section>'),
     `<h2 id="timeline" data-a="h-timeline">Timeline of ${esc(u.id)}</h2>`,
     ctx.live ? timelineTools() : '',
-    blk('timeline', timelineList([...u.timeline].reverse(), r, undefined, ctx), 'ol', ' class="timeline" data-tl-list data-ev-list'),
+    blk('timeline', timelineOl(timelineList([...u.timeline].reverse(), r, undefined, ctx)), 'div', ' class="list-anchor"'),
     blk('evv', viewer(viewerEntries(v, u.id), ctx, r)),
   ].join('\n');
   return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/unit/${u.id}`, closed: !v.open });

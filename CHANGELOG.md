@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The dashboard holds your place when a list grows just above the screen (#23).** In Chromium, with the top of the screen a few pixels below a unit's Evidence list, an item added from the CLI moved the view by the item's height (74 px measured on a copied run; every offset when the unit sat second in its row). Two things let the browser anchor to a box whose top stays put: a short card stretched to the height of its tall neighbour, and the padding a toggle or card leaves below the list. Cards in a row are now only as tall as their content, and every list that grows live (Evidence, behaviours, Decisions, Questions, Follow-ups, a unit's notes, the timeline) sits in its own anchor container whose tail, taking no room, covers that padding. Still the browser's own scroll anchoring, with no scroll correction of its own; measured within 1 px in that case and in the common ones (top of page, mid-card, timeline, filters, a unit's page).
+
 ## 1.1.1 (2026-11-07)
 
 Run several coordinators at once and see them all: a machine-wide run register, `/coordinator:dashboard` for every run on this PC, tool and skill-version stamps on every run, doctor listing installed copies, a status word with progress and ETA everywhere, and a coordinator snapshot that never goes stale. Also fixes the last medium from the 1.0 security review in the hosted service (trail-lane page budget).

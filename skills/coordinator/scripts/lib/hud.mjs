@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
-import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
+import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, grows, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
 import { viewer, viewerEntries } from './evview.mjs';
 import { readStored, storedPath } from './evidence.mjs';
@@ -235,20 +235,22 @@ export function goalBlock(v, ctx) {
 }
 
 function list(title, items, repo) {
-  const body = items.length ? `<ul>${keyed(items, (t) => `l-${title}-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None.</p>';
+  const body = items.length ? grows(`<ul>${keyed(items, (t) => `l-${title}-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None.</p>';
   return `<section class="card" data-a="list-${esc(title)}"><h3>${esc(title)} <span class="chip">${items.length}</span></h3>${body}</section>`;
 }
 
 // Open questions only, counted; answered ones in a dimmed, collapsed group with the answer first.
 function questionsCard(v, repo) {
-  const open = v.questions.length ? `<ul>${keyed(v.questions, (t) => `l-Questions-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None open.</p>';
+  const open = v.questions.length ? grows(`<ul>${keyed(v.questions, (t) => `l-Questions-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None open.</p>';
   const done = v.answeredQuestions.map((q) => `<li data-a="aq-${esc(q.id)}"><b>${esc(q.id)}</b> ${esc(q.title)}`
     + `<p class="ans"><b>Answered:</b> ${linkify(q.answer, repo)} <span class="cause">— by ${q.by === 'person' ? 'you' : esc(q.by)}${q.at ? `, ${stamp(q.at)}` : ''}</span></p>`
     + `${q.decision ? `<p class="cause">Decision: ${linkify(q.decision, repo)}</p>` : ''}</li>`).join('');
   return `<section class="card" data-a="list-Questions"><h3>Questions <span class="chip" title="open questions">${v.questions.length}</span></h3>${open}`
-    + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, `<ul class="answered">${done}</ul>`) : '') + '</section>';
+    + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, grows(`<ul class="answered">${done}</ul>`)) : '') + '</section>';
 }
 
+// The timeline's list; its block is a .list-anchor container (issue #23).
+export const timelineOl = (rows) => `<ol class="timeline" data-tl-list data-ev-list>${rows}</ol>`;
 export function timelineList(events, repo, finished = new Set(), ctx = null) {
   // Each row's key holds its time, kind, who, a hash of its text, and a number if two still match.
   return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit), ctx)).join('') : '<li class="empty">Nothing yet.</li>';
@@ -282,7 +284,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
       list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
     '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
-    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id)), ctx), 'ol', ' class="timeline" data-tl-list data-ev-list'),
+    blk('timeline', timelineOl(timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id)), ctx)), 'div', ' class="list-anchor"'),
     blk('evv', viewer(viewerEntries(v), ctx, r)),
   ].join('\n');
   return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });

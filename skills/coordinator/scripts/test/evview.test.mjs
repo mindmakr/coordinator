@@ -96,7 +96,7 @@ test('a unit page in the snapshot reaches the artifacts one folder up', () => {
   const s = state(); const html = render(s, staticCtx(runDir(s), 1), 'unit');
   assert.match(row(html, 'E1'), /src="\.\.\/artifacts\/u1\/E1-list-ar-360\.png"/);
   assert.match(overlay(html, 'E1'), /href="\.\.\/artifacts\/u1\/E1-list-ar-360\.png" download=/);
-  assert.match(html, /<ol data-k="timeline"[^>]* class="timeline" data-tl-list data-ev-list>/);
+  assert.match(html, /<div data-k="timeline"[^>]* class="list-anchor"><ol class="timeline" data-tl-list data-ev-list>/);
 });
 
 test('a missing stored copy says missing and opens nothing', () => {
