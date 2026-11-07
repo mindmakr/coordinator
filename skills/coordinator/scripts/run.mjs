@@ -19,7 +19,7 @@
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link [--label L]
 //   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL] [--url U --label L]   GitHub issues, PRs and merges for the unit
 //                  [--continues <run>:<unit>]  record afterwards that this unit continues that one (any id; closed runs too)
-//   run.mjs extend <run> <unit> --rounds N --reason R [--answer qN]   N (1-4) more rounds the person approved for a unit
+//   run.mjs extend <run> <unit> [--rounds N] --reason R [--answer qN]   N (1-4, default 1; above 1 only when their words name it) more rounds for a unit
 //                  at or stopped by its round budget: qN asked with --approves and answered with that option by the
 //                  person (dashboard, web, or answer --by person --confirm "their words"), or else their note on
 //                  the unit since its last verdict saying "approved" (lib/approval.mjs); recorded as a decision
@@ -99,10 +99,11 @@ import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
 import { allows, decide, decideUnit, roundCap, stats } from './lib/rules.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
-import { answerRefusal, noteRefusal } from './lib/approval.mjs';
+import { answerRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
+import { lastWriter } from './lib/provenance.mjs';
 import { clip } from './lib/plain.mjs';
 import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
-import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
+import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
 import { remoteWatch } from './lib/remote.mjs';
@@ -447,33 +448,54 @@ const commands = {
   },
   // A unit at, or stopped by, its round budget gets N more rounds once the person approved them (#36).
   extend([run, unit], o) {
-    const rounds = num(o.rounds, 0, 1, 4);
-    if (rounds < 1) throw new Error('--rounds must be 1-4');
+    const rounds = num(o.rounds, 1, 1, 4); // one unless the approval's words name more
     const reason = text(o.reason, 'reason', 300);
     return change(run, 'unit.extend', (s) => {
       const u = unitOf(s, unit);
       const atCap = u.status === 'stopped' ? u.stopReason === 'budget: rounds' : u.status === 'open' && u.rounds.length >= roundCap(u, s);
       if (!atCap) throw new Error(`extend refused: ${u.id} is ${u.status}${u.stopReason ? ` (${u.stopReason})` : ''}; extend only lifts a round budget the unit has used up`);
-      // Only the person's explicit yes (lib/approval.mjs); the decision quotes it.
-      let source;
+      // Only the person's explicit yes (lib/approval.mjs), given since the unit's last verdict, used once,
+      // written by the answer or note command (never a hand edit: lib/provenance.mjs); the decision quotes it.
+      const since = u.rounds.at(-1)?.at ?? s.createdAt;
+      const events = readRun(runDir(run))?.log?.events ?? [];
+      const written = (locate, kinds, what) => {
+        const by = lastWriter(events, locate, s);
+        if (!kinds.includes(by)) throw new Error(`extend refused: ${what} was last written by ${by ?? 'nothing in the log'}, not by ${kinds.join(' or ')} (a hand edit of state.json never approves)`);
+      };
+      let source; let words;
       if (o.answer !== undefined) {
         const q = questions(s).find((x) => x.id === String(o.answer));
         if (!q) throw new Error(`--answer: no question ${o.answer}`);
-        if (q.unit && q.unit !== u.id) throw new Error(`--answer: ${q.id} is about ${q.unit}, not ${u.id}`);
+        if (q.unit !== u.id) throw new Error(`--answer: ${q.id} ${q.unit ? `is about ${q.unit}` : 'names no unit'}; an approving question must name ${u.id} (ask … --unit ${u.id})`);
+        if (['used', 'decided'].includes(q.status)) throw new Error(`extend refused: ${q.id} is already ${q.status}; one approval is good for one extend: ask again`);
         const why = answerRefusal(q);
         if (why) throw new Error(`extend refused: ${why}`);
-        source = `${q.id} "${q.header ? `${q.header}: ` : ''}${clip(q.text, 160)}" answered "${q.answer.choices[0]}" via ${q.answer.via}${q.answer.confirm ? `, their words: "${clip(q.answer.confirm, 200)}"` : ''}`;
+        if (q.answer.at < since) throw new Error(`extend refused: ${q.id} was answered before ${u.id}'s last verdict; ask again`);
+        const qi = +q.id.slice(1) - 1; const hi = q.history.length - 1;
+        written((st) => st?.notes?.filter((n) => n.kind === 'question')[qi]?.history?.[hi], ['answer'], `${q.id}'s answer`);
+        written((st) => { const n = st?.notes?.filter((x) => x.kind === 'question')[qi]; return n && { approves: n.approves, unit: n.unit, options: n.options }; }, ['question'], `${q.id}`);
+        const opt = q.options.find((x) => x.label === q.answer.choices[0]);
+        words = [opt?.label, opt?.description, q.answer.confirm].filter(Boolean).join(' ');
+        source = `${q.id} "${q.header ? `${q.header}: ` : ''}${clip(q.text, 160)}" answered "${q.answer.choices[0]}${opt?.description ? ` (${clip(opt.description, 120)})` : ''}" via ${q.answer.via}${q.answer.confirm ? `, their words: "${clip(q.answer.confirm, 200)}"` : ''}`;
       } else {
-        const since = u.rounds.at(-1)?.at ?? s.createdAt;
         const n = (s.notes ?? []).findLast((x) => x.kind === 'person' && x.unit === u.id && x.at >= since);
-        if (!n) throw new Error(`extend refused: no approval from the person; give --answer qN (a question asked with --approves, answered by them), or they add a note on ${u.id} that says "approved"`);
+        if (!n) throw new Error(`extend refused: no approval from the person since ${u.id}'s last verdict; give --answer qN (a question on ${u.id} asked with --approves, answered by them), or they add a note on ${u.id} that says "approved"`);
+        if (n.usedBy) throw new Error(`extend refused: their latest note on ${u.id} was already used by an extend; one approval is good for one extend`);
         const why = noteRefusal(n);
         if (why) throw new Error(`extend refused: ${why}; their latest note on ${u.id}: "${clip(n.text, 120)}"`);
+        const ni = s.notes.indexOf(n);
+        written((st) => st?.notes?.[ni], ['note'], 'their note');
+        words = n.text;
         source = `their note via ${n.via}: "${clip(n.text, 300)}"`;
+        n.usedBy = { unit: u.id, at: now() };
       }
+      // One round unless their own words name more.
+      const named = namedRounds(words);
+      if (rounds > (named ?? 1)) throw new Error(`extend refused: --rounds ${rounds}, but the approval ${named ? `names ${named}` : 'names no number, so it is for one round'}`);
       u.extraRounds = (u.extraRounds ?? 0) + rounds;
       if (u.status === 'stopped') { u.status = 'open'; u.stopReason = null; }
-      s.notes.push({ kind: 'decision', text: `${u.id}: ${rounds} more round${rounds === 1 ? '' : 's'} (now ${roundCap(u, s)}), approved by the person (${source}): ${reason}`, at: now(), ...(o.answer !== undefined ? { answers: String(o.answer) } : {}) });
+      const scope = named ? `their words name ${named}` : 'their words name no number: one round';
+      s.notes.push({ kind: 'decision', text: `${u.id}: ${rounds} more round${rounds === 1 ? '' : 's'} (now ${roundCap(u, s)}; ${scope}), approved by the person (${source}): ${reason}`, at: now(), ...(o.answer !== undefined ? { answers: String(o.answer) } : {}) });
       log(u, 'extend', `+${rounds} round${rounds === 1 ? '' : 's'}: ${reason}`);
     }, { unit });
   },

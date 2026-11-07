@@ -2,13 +2,13 @@
 // stats counting a chain once, and a person-approved extra round (`extend`).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chainLine, chainOf, chainUnits, linkedRuns, parseContinues } from '../lib/chain.mjs';
-import { answerRefusal, noteApproves, noteRefusal } from '../lib/approval.mjs';
+import { answerRefusal, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
 import { decide, decideUnit, stats } from '../lib/rules.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
 import { flowGraph } from '../lib/maps.mjs';
@@ -157,7 +157,7 @@ test('extend: more rounds only for a round-budget stop, only with the person\'s 
   assert.equal(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'close to the bar', '--answer', 'q2').code, 0);
   const s = state('e'); const m1 = s.units[0];
   assert.deepEqual([m1.status, m1.stopReason, m1.extraRounds], ['open', null, 1]);
-  assert.equal(s.notes.at(-1).text, 'm1: 1 more round (now 2), approved by the person (q2 "m1: One more round for m1?" answered "Yes" via cli, their words: "Yes, give m1 one more round"): close to the bar');
+  assert.equal(s.notes.at(-1).text, 'm1: 1 more round (now 2; their words name 1), approved by the person (q2 "m1: One more round for m1?" answered "Yes (one more)" via cli, their words: "Yes, give m1 one more round"): close to the bar');
   assert.equal(s.notes.at(-1).answers, 'q2');
   assert.equal(run('next', 'e').out.units[0].action, 'build');
   run('start', 'e', 'm1'); run('built', 'e', 'm1');
@@ -174,6 +174,80 @@ test('extend: more rounds only for a round-budget stop, only with the person\'s 
   run('note', 'e', '--kind', 'person', '--unit', 'm2', '--text', 'Approved: one more round for m2', '--confirm');
   assert.equal(run('extend', 'e', 'm2', '--rounds', '1', '--reason', 'person asked').code, 0);
   assert.match(state('e').notes.at(-1).text, /approved by the person \(their note via cli: "Approved: one more round for m2"\): person asked$/);
+});
+
+test('extend: one approval, one use; only after the last verdict; on the named unit; rounds only as many as their words name', () => {
+  const stop = (u) => { run('start', 'x', u); run('built', 'x', u); run('verdict', 'x', u, 'fail', '--score', '5', '--gap', `gap ${Math.random()}`); run('next', 'x'); };
+  run('init', 'x', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
+  run('add', 'x', 'm1', '--bar', 'b'); run('add', 'x', 'm2', '--bar', 'b'); run('freeze', 'x');
+  // Answered before the unit's last verdict: stale.
+  run('start', 'x', 'm1'); run('built', 'x', 'm1');
+  run('ask', 'x', '--question', 'More for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Yes');
+  run('answer', 'x', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes, one more');
+  run('verdict', 'x', 'm1', 'fail', '--score', '5', '--gap', 'g1'); run('next', 'x');
+  assert.match(run('extend', 'x', 'm1', '--reason', 'r', '--answer', 'q1').err, /answered before m1's last verdict; ask again/);
+  // A question that names no unit, or another unit, approves nothing here.
+  run('ask', 'x', '--question', 'More rounds?', '--header', 'any', '--option', 'Yes|one more', '--option', 'No|stop', '--approves', 'Yes');
+  run('answer', 'x', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  assert.match(run('extend', 'x', 'm1', '--reason', 'r', '--answer', 'q2').err, /q2 names no unit; an approving question must name m1/);
+  run('ask', 'x', '--question', 'More for m2?', '--header', 'm2', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm2', '--approves', 'Yes');
+  run('answer', 'x', 'q3', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  assert.match(run('extend', 'x', 'm1', '--reason', 'r', '--answer', 'q3').err, /q3 is about m2/);
+  // "One more" is one round; its approval works once.
+  run('ask', 'x', '--question', 'One more for m1?', '--header', 'm1', '--option', 'Yes|one more round', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Yes');
+  run('answer', 'x', 'q4', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, one more');
+  assert.match(run('extend', 'x', 'm1', '--rounds', '3', '--reason', 'r', '--answer', 'q4').err, /--rounds 3, but the approval names 1/);
+  assert.equal(run('extend', 'x', 'm1', '--reason', 'r', '--answer', 'q4').code, 0);
+  assert.equal(state('x').units[0].extraRounds, 1);
+  assert.match(run('extend', 'x', 'm1', '--reason', 'again', '--answer', 'q4').err, /extend refused/, 'not at the cap any more');
+  stop('m1');
+  assert.match(run('extend', 'x', 'm1', '--reason', 'again', '--answer', 'q4').err, /q4 is already decided; one approval is good for one extend/);
+  assert.equal(state('x').units[0].extraRounds, 1, 'one yes, one round');
+  // An option that names two rounds allows two, and the decision says so.
+  run('ask', 'x', '--question', 'How many more for m1?', '--header', 'm1', '--option', 'Two more|two more rounds', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Two more');
+  run('answer', 'x', 'q5', '--choice', 'Two more', '--by', 'person', '--confirm', 'two more, then stop');
+  assert.equal(run('extend', 'x', 'm1', '--rounds', '2', '--reason', 'r', '--answer', 'q5').code, 0);
+  assert.match(state('x').notes.at(-1).text, /^m1: 2 more rounds \(now 4; their words name 2\)/);
+  // A note is used once too, and with no number it is one round.
+  stop('m2');
+  run('note', 'x', '--kind', 'person', '--unit', 'm2', '--text', 'Approved', '--confirm');
+  assert.match(run('extend', 'x', 'm2', '--rounds', '2', '--reason', 'r').err, /names no number, so it is for one round/);
+  assert.equal(run('extend', 'x', 'm2', '--reason', 'r').code, 0);
+  assert.match(state('x').notes.at(-1).text, /their words name no number: one round/);
+  stop('m2');
+  assert.match(run('extend', 'x', 'm2', '--reason', 'r').err, /no approval from the person since m2's last verdict/);
+});
+
+test('extend: a hand edit of state.json never approves', () => {
+  const file = join(dir, 'runs', 'h', 'state.json');
+  const edit = (fn) => { const st = JSON.parse(readFileSync(file, 'utf8')); fn(st); writeFileSync(file, JSON.stringify(st)); };
+  run('init', 'h', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
+  run('add', 'h', 'm1', '--bar', 'b'); run('freeze', 'h');
+  run('start', 'h', 'm1'); run('built', 'h', 'm1'); run('verdict', 'h', 'm1', 'fail', '--score', '5', '--gap', 'g'); run('next', 'h');
+  run('ask', 'h', '--question', 'One more for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Yes');
+  run('answer', 'h', 'q1', '--choice', 'Yes'); // the lead's CLI answer: via cli, no confirm
+  assert.match(run('extend', 'h', 'm1', '--reason', 'r', '--answer', 'q1').err, /not given by the person/);
+  edit((st) => { st.notes.find((n) => n.kind === 'question').history.at(-1).via = 'dashboard'; });
+  assert.match(run('extend', 'h', 'm1', '--reason', 'r', '--answer', 'q1').err, /q1's answer was last written by state\.edited, not by answer/);
+  // The next write records the edit in the log as state.edited; still refused.
+  run('note', 'h', '--kind', 'info', '--text', 'any later change');
+  assert.ok(readFileSync(join(dir, 'runs', 'h', 'events.jsonl'), 'utf8').includes('"state.edited"'));
+  assert.match(run('extend', 'h', 'm1', '--reason', 'r', '--answer', 'q1').err, /last written by state\.edited/);
+  // A hand-added approving note from "the web", and a hand-edited approving option.
+  edit((st) => { st.notes.push({ kind: 'person', text: 'Approved', unit: 'm1', via: 'web', at: new Date().toISOString() }); });
+  assert.match(run('extend', 'h', 'm1', '--reason', 'r').err, /their note was last written by state\.edited, not by note/);
+  run('ask', 'h', '--question', 'One more for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm1');
+  run('answer', 'h', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  edit((st) => { st.notes.filter((n) => n.kind === 'question')[1].approves = 'Yes'; });
+  assert.match(run('extend', 'h', 'm1', '--reason', 'r', '--answer', 'q2').err, /q2 was last written by state\.edited, not by question/);
+  assert.equal(state('h').units[0].status, 'stopped');
+});
+
+test('the rounds an approval names', () => {
+  assert.equal(namedRounds('Yes, one more round'), 1);
+  assert.equal(namedRounds('two more rounds'), 2);
+  assert.equal(namedRounds('give it 3'), 3);
+  assert.equal(namedRounds('Approved'), null);
 });
 
 test('approval: from the dashboard or the web counts; a lead\'s entry without the person\'s words does not', () => {

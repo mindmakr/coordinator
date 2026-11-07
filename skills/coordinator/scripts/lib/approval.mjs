@@ -38,3 +38,13 @@ export function noteRefusal(n) {
   if (!noteApproves(n.text)) return `the note does not clearly approve: it must say "approve" or "approved", with no no, not, but, if, maybe or question`;
   return null;
 }
+
+// How many rounds the person's own words name ("two more rounds", "3 rounds"), or null when
+// they name no number: then an approval is for one round. The largest number named wins.
+const NUMBERS = { one: 1, two: 2, three: 3, four: 4, a: null, single: 1, couple: 2 };
+export function namedRounds(words) {
+  const found = [];
+  for (const m of String(words ?? '').toLowerCase().matchAll(/\b(\d+|one|two|three|four|single)\b/g)) found.push(/^\d+$/.test(m[1]) ? +m[1] : NUMBERS[m[1]]);
+  const n = found.filter((x) => Number.isInteger(x) && x > 0);
+  return n.length ? Math.max(...n) : null;
+}
