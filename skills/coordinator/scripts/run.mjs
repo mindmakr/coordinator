@@ -109,7 +109,6 @@ import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
 import { render } from './lib/workbench.mjs';
 import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
-import { gitHead } from './lib/map/files.mjs';
 
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models'],
@@ -213,9 +212,9 @@ function unitCallsFor(run, s, unit, { root, base, head, files = [], deadline }) 
   let b = ref(base, 'base'); let h = ref(head, 'head');
   if (!b !== !h) throw new Error('--base and --head go together');
   if (!b && !files.length && u.detect?.base && u.detect?.head) { b = u.detect.base; h = u.detect.head; }
-  const fromMap = !b && !files.length ? unitFiles(runDir(run), u.id) : [];
+  const fromMap = files.length ? [] : unitFiles(runDir(run), u.id); // also the fallback when the diff's commits are gone
   if (!b && !files.length && !fromMap.length) return null; // nothing recorded to say what the unit changed
-  return computeCalls(runDir(run), { root, unit: u.id, base: b, head: h, files: files.length ? files : fromMap, source: b ? 'diff' : files.length ? 'files' : 'map build', ref: gitHead(root).commit, deadline });
+  return computeCalls(runDir(run), { root, unit: u.id, base: b, head: h, files: files.length || b ? files : fromMap, fallbackFiles: fromMap, source: files.length ? 'files' : 'map build', deadline });
 }
 
 const commands = {

@@ -8,10 +8,11 @@ import { esc } from '../links.mjs';
 import { clip } from '../plain.mjs';
 import { link } from '../mapsvg.mjs';
 
-export const LIMITS = 'Read from the code, never run. Calls through variables, callbacks and dynamic dispatch are best effort; a name it cannot tie to a project function (an outside package, a global, a dynamic call) is counted as unresolved.';
+export const LIMITS = 'Read from the code at one commit, never run. Counted: direct calls, `new X()`, methods through `this`, imports and typed fields, names passed as arguments or JSX handlers (marked passed), and JSX elements (`<Card />`, marked JSX). Not counted: decorators, calls through computed names (`handlers[name]()`), `.call`/`.apply`/`.bind`, functions held in variables or passed on as callbacks under another name, and dependency injection by string; a name it cannot tie to a project function (an outside package, a global, a dynamic call) is listed as unresolved.';
 const SHOW = 6;
 
-const blob = (r, repo, file, line) => (repo && file ? `https://github.com/${repo}/blob/${encodeURIComponent(r.ref ?? r.head ?? 'HEAD')}/${file.split('/').map(encodeURIComponent).join('/')}${line ? `#L${line}` : ''}` : null);
+// Links only at the commit every file was read at (r.ref); without one (not a git repository) there are none.
+const blob = (r, repo, file, line) => (repo && file && r.ref ? `https://github.com/${repo}/blob/${encodeURIComponent(r.ref)}/${file.split('/').map(encodeURIComponent).join('/')}${line ? `#L${line}` : ''}` : null);
 const nameOf = (x) => (x.kind === 'class' ? `new ${x.q}` : x.q === '(top)' ? `${x.file.split('/').pop()} (top level)` : x.q);
 // A long name keeps its last part (the method), which says the most: `EwaVerif….assertApprovalKyc`.
 export function short(name, n = 27) {
@@ -21,19 +22,22 @@ export function short(name, n = 27) {
   const last = name.slice(cut);
   return last.length >= n - 4 ? clip(last.slice(1), n) : `${name.slice(0, n - last.length - 1)}…${last}`;
 }
-const where = (x) => `${x.file}:${x.line}`;
-function fnLink(r, repo, x, label = nameOf(x)) {
-  const href = blob(r, repo, x.file, x.line);
+const where = (x, line = x.line) => `${x.file}:${line}`;
+// `line`: where the link lands: a definition, or for a caller the line that makes the call.
+function fnLink(r, repo, x, label = nameOf(x), line = x.line) {
+  const href = blob(r, repo, x.file, line);
   const text = `<code>${esc(label)}</code>`;
-  return href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(where(x))}">${text}</a>` : `<span title="${esc(where(x))}">${text}</span>`;
+  return href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(where(x, line))}">${text}</a>` : `<span title="${esc(where(x, line))}">${text}</span>`;
 }
-const passed = (x) => (x.k === 'ref' ? ' <span class="meta">(passed)</span>' : '');
+const passed = (x) => (x.k === 'ref' ? ' <span class="meta">(passed)</span>' : x.k === 'jsx' ? ' <span class="meta">(JSX)</span>' : '');
 
 // One callee or caller, with its own (second level) behind a toggle.
 function item(r, repo, x, more, dir) {
-  const head = `${fnLink(r, repo, x)}${passed(x)} <span class="meta">${esc(x.file.split('/').pop())}:${esc(x.line)}</span>`;
+  // A caller links to its call site (line `at`); a callee to its definition.
+  const line = dir === 'in' ? x.at ?? x.line : x.line;
+  const head = `${fnLink(r, repo, x, nameOf(x), line)}${passed(x)} <span class="meta">${esc(x.file.split('/').pop())}:${esc(line)}${dir === 'in' ? ' (the call)' : ''}</span>`;
   if (!more?.length) return `<li>${head}</li>`;
-  const sub = more.map((y) => `<li>${y.id ? fnLink(r, repo, y) : `<code>${esc(y.n)}</code>`}${passed(y)}</li>`).join('');
+  const sub = more.map((y) => `<li>${y.id ? fnLink(r, repo, y, nameOf(y), dir === 'in' ? y.at ?? y.line : y.line) : `<code>${esc(y.n)}</code>`}${passed(y)}</li>`).join('');
   return `<li><details class="cv-more"><summary>${head}</summary><p class="meta">${dir === 'out' ? 'which calls' : 'which is called by'}</p><ul>${sub}</ul></details></li>`;
 }
 
@@ -107,13 +111,14 @@ const STYLE = '<style>.cv-table td,.cv-table th{min-width:150px}.cv-list{list-st
   + 'details.cv-more{margin:0;padding:0;border:0;background:none}.cv-more summary{cursor:pointer;font-weight:400}.cv-more ul{margin:4px 0 0;padding-left:14px;list-style:none}.cv-more p{margin:4px 0 0}'
   + '@media (max-width:640px){.cv-table thead{display:none}.cv-table tr,.cv-table th,.cv-table td{display:block;min-width:0}.cv-table td::before{content:attr(data-h);display:block;font-size:12px;color:var(--muted);margin-bottom:4px}}</style>';
 
-const source = (r) => (r.head ? `the diff ${r.base.slice(0, 8)}…${r.head.slice(0, 8)}` : r.source === 'files' ? 'whole files (no diff recorded for the unit)' : esc(r.source));
+const source = (r) => (r.head && !r.note ? `the diff ${esc(String(r.base).slice(0, 8))}…${esc(String(r.head).slice(0, 8))}` : r.source === 'map build' ? 'the files its map build changed (whole files)' : r.source === 'files' ? 'whole files (no diff recorded for the unit)' : esc(r.source));
 
 // The unit page's section: the graph and the table, or how to compute them.
 export function unitCalls(r, repo, run, unit) {
   if (!r) return `<p class="empty">No call data yet. <code>run.mjs calls ${esc(run)} ${esc(unit)}</code> computes it from the unit's diff.</p>`;
-  const meta = `<p class="meta">From ${source(r)}: ${r.touchedTotal} function${r.touchedTotal === 1 ? '' : 's'} touched in ${r.files.length} JS/TS file${r.files.length === 1 ? '' : 's'}`
-    + `${r.outside ? `, ${r.outside} changed line${r.outside === 1 ? '' : 's'} outside any function` : ''}; ${r.functions} functions indexed${r.partial ? ' (partial: the time cap stopped the scan)' : ''}. ${esc(LIMITS)}</p>`;
+  const meta = `<p class="meta">From ${source(r)}: ${esc(r.touchedTotal)} function${r.touchedTotal === 1 ? '' : 's'} touched in ${r.files.length} JS/TS file${r.files.length === 1 ? '' : 's'}`
+    + `${r.outside ? `, ${esc(r.outside)} changed line${r.outside === 1 ? '' : 's'} outside any function` : ''}; ${esc(r.functions)} functions indexed${r.ref ? ` at ${esc(String(r.ref).slice(0, 8))}` : ''}${r.partial ? ' (partial: the time cap stopped the scan)' : ''}.</p>`
+    + (r.note ? `<div class="needs"><p>${esc(r.note)}</p></div>` : '') + `<p class="meta">${esc(LIMITS)}</p>`;
   return `${STYLE}${meta}${callsGraph(r, repo, `Calls around ${unit}`)}${callsTable(r, repo)}`;
 }
 
