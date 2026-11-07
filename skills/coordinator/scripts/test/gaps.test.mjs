@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { closeGap, gapId, gaps, gapsModel, gapsText, parseGapId } from '../lib/gaps.mjs';
+import { closeGap, gapHaystack, gapId, gaps, gapsModel, gapsText, parseGapId } from '../lib/gaps.mjs';
+import { findMatches } from '../lib/highlight.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
 import { selfPage } from '../lib/selfpage.mjs';
 import { liveCtx, staticCtx } from '../lib/hud.mjs';
@@ -196,9 +197,10 @@ test('the page: a Gaps section with its count in the header and the nav; escaped
   assert.match(html, /data-d="gap-follow-up:r-a:-:1"/, 'long text: the full text is behind a toggle');
   assert.match(html, /data-d="self-gaps-resolved"/); assert.doesNotMatch(html, /<details[^>]*data-d="self-gaps-resolved"[^>]* open/, 'resolved stays folded');
   assert.doesNotMatch(html, /data-gaps role/, 'no filter on the snapshot');
+  assert.doesNotMatch(html, /data-q=|name="q"/, 'no search box or search text on the snapshot');
   const live = selfPage(m, Date.now(), liveCtx({ token: 'tok', nonce: 'n' }, 'r-b'));
   assert.match(live, /href="\/run\/r-a\/unit\/u1\?t=tok"/);
-  assert.match(live, /<form class="tl-tools" data-gaps role="search">/);
+  assert.match(live, /<form class="tl-tools gap-tools" data-gaps role="search"><label class="grow">Search gaps<input type="search" name="q"/);
   assert.match(live, /<option value="question">question<\/option>/);
   assert.match(selfText(m), /gaps {6}2 open gaps across 1 run · 1 resolved/);
   assert.match(selfPage(selfModel({ runs: [] }), Date.now(), staticCtx('', 0)), /No gaps:/);
@@ -260,4 +262,33 @@ test('a decision note that opens with the unit id and says it merged resolves it
   a.notes.push({ kind: 'decision', text: 'm1 merged as PR #39 after the extra round', at: at(11) }, { kind: 'decision', text: 'm3 merged early', at: at(5) });
   const st = Object.fromEntries(gaps([a]).map((g) => [g.unit, g.status]));
   assert.deepEqual(st, { m1: 'resolved', m10: 'open', m3: 'open' });
+});
+
+test('search: a gap matches by its text, ids, kind, source, refs (#n, n, repo#n, owner/repo#n, PR #n) and URLs, folding case and accents', () => {
+  const a = mkRun('r-search', [unit('u7', 'stopped', { stopReason: 'budget', rounds: [{ n: 1, gap: 'g', at: at(1) }] })], null, { repo: 'acme/web' });
+  a.notes.push({ kind: 'follow-up', text: 'Café export broken, see https://github.com/acme/web/pull/1230 and https://example.com/Docs/x', at: at(2) });
+  a.notes.push({ kind: 'follow-up', text: 'Also mobile/app#77', at: at(3) });
+  const all = gaps([a]); const stop = all.find((g) => g.kind === 'stopped');
+  const fu = all.find((g) => g.text.startsWith('Café')); const mob = all.find((g) => g.text.startsWith('Also'));
+  const hit = (g, q) => findMatches(gapHaystack(g), q).length > 0;
+  for (const q of ['cafe', 'CAFÉ', 'r-search', 'follow-up:r-search', 'note', '#1230', '1230', 'web#1230', 'acme/web#1230', 'PR #1230', 'example.com/docs', 'follow-up']) assert.ok(hit(fu, q), `follow-up matches "${q}"`);
+  assert.ok(hit(stop, 'u7') && hit(stop, 'Stopped Unit') && hit(stop, 'budget'), 'unit id, kind label and text');
+  assert.ok(hit(mob, 'app#77') && hit(mob, '#77') && hit(mob, 'mobile/app#77'));
+  for (const q of ['#1231', 'issue #1230', 'zebra']) assert.ok(!hit(fu, q), `no match for "${q}"`);
+  assert.ok(!hit(stop, '1230'), 'another gap’s ref does not leak');
+});
+
+test('search markup: data-q is escaped on the live page and the client filters, highlights, persists and clears it', () => {
+  const a = mkRun('r-x', [unit('u1', 'stopped', { stopReason: 'x', rounds: [{ n: 1, gap: 'g', at: at(0) }] })], null, { createdAt: at(0) });
+  a.notes.push({ kind: 'follow-up', text: '"><img src=x onerror=alert(1)> & <b>bold</b>', at: at(1) });
+  const live = selfPage(selfModel({ runs: [a] }), Date.now(), liveCtx({ token: 't', nonce: 'n' }, 'r-x'));
+  const q = live.match(/data-q="([^"]*)"/g) ?? [];
+  assert.ok(q.length >= 1);
+  for (const attr of q) assert.doesNotMatch(attr, /[<>]|&(?!amp;|lt;|gt;|quot;|#39;)/, 'data-q holds escaped text only');
+  assert.doesNotMatch(live, /<img src=x|<b>bold<\/b>/);
+  const client = readFileSync(new URL('../lib/live.client.js', import.meta.url), 'utf8');
+  assert.match(client, /findMatches\(li\.dataset\.q/, 'filters on data-q');
+  assert.match(client, /highlight\(\[\.\.\.g\.querySelectorAll\('li\[data-gap\]'\)\]/, 'highlights like the timeline');
+  assert.match(client, /GAP_FIELDS = \['q', 'run', 'kind', 'status'\]/, 'the query is remembered with the filters');
+  assert.match(client, /e\.key === 'Escape'/, 'Escape clears the search');
 });
