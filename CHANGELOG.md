@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **doctor: no false "commands no package.json has" warning in monorepos (#61).** The `context` check looked only at the root `package.json`. A command named with a folder (`cd backend && npm run x`, `npm --prefix backend run x`, `pnpm -C`, `yarn --cwd`, `npm -w`) is now looked up in that folder; any other in the root `package.json`, its `workspaces` and first-level folders that have one (`backend/`, `frontend/`). The ok line names where a command was found outside the root; a warning lists the files it searched. New `scripts/lib/pkg-scripts.mjs`.
+
 ## 1.1.1 (2026-11-07)
 
 Run several coordinators at once and see them all: a machine-wide run register, `/coordinator:dashboard` for every run on this PC, tool and skill-version stamps on every run, doctor listing installed copies, a status word with progress and ETA everywhere, and a coordinator snapshot that never goes stale. Also fixes the last medium from the 1.0 security review in the hosted service (trail-lane page budget).
