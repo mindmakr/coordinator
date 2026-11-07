@@ -2,7 +2,7 @@
 // taken in turn per installation; a large read never takes the last worker; each installation has
 // a reading budget per hour; one sync reads at most LIMITS.syncBytes of logs. The first test is the
 // critic's proof (q3/q4): an attacker floods with 8 MB logs that are slow to mask, and another
-// tenant's small run must still sync in under 2 s.
+// tenant's small run must still sync, and /healthz answer, while the attacker's reads are under way.
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
@@ -28,28 +28,33 @@ function bigLog(id, bytes) {
 }
 const small = makeRun('r1', { goal: 'victim' });
 
-test('q4: an attacker pushing 8 MB logs to their own repos does not hold up another tenant: its small run syncs in under 2 s', async () => {
+test('q4: an attacker pushing 8 MB logs to their own repos does not hold up another tenant: its small run syncs while theirs are still being read', async () => {
   const runs = { r1: bigLog('r1', LIMITS.logBytes), r2: bigLog('r2', LIMITS.logBytes), r3: bigLog('r3', LIMITS.logBytes) };
   const t = await startApp();
   try {
     for (let k = 0; k < 2; k++) t.gh.addRepo(`mallory/own${k}`, { id: 90 + k, installationId: 66, files: stateFiles(runs) });
     t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles({ r1: small }) });
     await t.db.upsertInstallation({ id: 7, account: 'acme' });
+    await t.db.upsertInstallation({ id: 66, account: 'mallory' }); // a push from an unknown installation is ignored, and would prove nothing
     const hook = async (body) => {
       const b = JSON.stringify(body);
       const sig = `sha256=${createHmac('sha256', t.cfg.github.webhookSecret).update(b).digest('hex')}`;
       return (await fetch(`${t.base}/webhook`, { method: 'POST', body: b, headers: { 'X-GitHub-Event': 'push', 'X-GitHub-Delivery': String(Math.random()), 'X-Hub-Signature-256': sig } })).status;
     };
+    // Settles when the attacker's first log is fetched; its read is handed to the pool right after.
+    const orig = t.gh.blob; let fetched; const reading = new Promise((r) => { fetched = r; });
+    t.gh.blob = async (tok, full, ...a) => { const b = await orig(tok, full, ...a); if (full.startsWith('mallory/')) fetched(); return b; };
     const codes = await Promise.all([0, 1].map((k) => hook({ ref: 'refs/heads/coordinator-state', installation: { id: 66 }, repository: { id: 90 + k, full_name: `mallory/own${k}`, private: true, owner: { login: 'mallory' } } })));
     assert.deepEqual(codes, [202, 202]);
-    await new Promise((r) => setTimeout(r, 300)); // the attacker's reads are under way
-    const a = Date.now();
+    await reading; await new Promise((r) => setImmediate(r)); // the attacker's reads are under way
+    // Ordered, not timed: the other tenant's sync and /healthz both finish while every attacker sync,
+    // six 8 MB logs that share one worker, is still unfinished.
     const [out] = await t.app.ingest.syncInstallation(7);
-    const took = Date.now() - a;
     assert.deepEqual(out.updated, ['r1']);
-    assert.ok(took < 2000, `the other tenant's run synced after ${took} ms`);
-    const h = Date.now(); assert.equal((await fetch(`${t.base}/healthz`)).status, 200);
-    assert.ok(Date.now() - h < 500, 'the event loop stays free');
+    assert.equal((await fetch(`${t.base}/healthz`)).status, 200, 'the event loop stays free');
+    const attacker = await t.db.repos(66);
+    assert.equal(attacker.length, 2);
+    assert.ok(attacker.every((r) => !r.syncedAt), `the attacker's syncs finished first: ${JSON.stringify(attacker.map((r) => r.syncedAt))}`);
   } finally { await t.app.ingest.close(); await t.close(); } // close first: the attacker's queued reads end as errors
 });
 
@@ -67,13 +72,18 @@ test('pool: a large read never takes the last worker, so a small one is read at 
   const big = bigLog('r1', 1024 * 1024);
   const p = parser({ workers: 2, smallBytes: 64 * 1024 });
   try {
-    const a = performance.now(); const solo = await p.readLog('r1', big, 'x'); const one = performance.now() - a;
-    assert.equal(solo.error, undefined, solo.error);
-    const bigs = [1, 2, 3].map(() => p.readLog('r1', big, 'mallory'));
-    const b = performance.now(); assert.equal((await p.readLog('r1', small, 'acme')).seq, 7);
-    const waited = performance.now() - b;
-    assert.ok(waited < Math.max(one / 2, 300), `the small read waited ${Math.round(waited)} ms; one large read takes ${Math.round(one)} ms`);
-    await Promise.all(bigs);
+    // Warm both workers first, so a worker's start-up is not what is measured.
+    const warm = await Promise.all([p.readLog('r1', big, 'x'), p.readLog('r1', small, 'y')]);
+    assert.deepEqual(warm.map((r) => r.error), [undefined, undefined]);
+    // Ordered, not timed: three large reads are queued, then one small one. If large reads could take
+    // both workers, the small read would wait for one of them to finish; it finishes first instead.
+    const done = [];
+    const bigs = [1, 2, 3].map((i) => p.readLog('r1', big, 'mallory').then((r) => { done.push(`big${i}`); return r; }));
+    const tiny = p.readLog('r1', small, 'acme').then((r) => { done.push('small'); return r; });
+    assert.equal((await tiny).seq, 7);
+    assert.deepEqual(done, ['small'], `the small read waited behind a large one: ${done}`);
+    for (const r of await Promise.all(bigs)) assert.equal(r.error, undefined, r.error);
+    assert.deepEqual(done, ['small', 'big1', 'big2', 'big3'], 'the large reads take the one worker in turn');
   } finally { await p.close(); }
 });
 
@@ -154,10 +164,10 @@ test('sync byte cap with --force: each forced sync carries on where the last sto
 });
 
 test('readLog: a log under another run folder is refused from its first line, before the masking pass', () => {
-  const big = bigLog('r1', 2 * 1024 * 1024);
-  const a = performance.now(); const r = readLog('r9', big); const took = performance.now() - a;
-  assert.match(r.error, /describes run "r1", not r9/);
-  assert.ok(took < 100, `refused in ${Math.round(took)} ms`);
+  // The rest of the log is not JSON: a refusal that came after parsing (and so after masking) would say so.
+  const big = Buffer.concat([bigLog('r1', 2 * 1024 * 1024), Buffer.from('not json\n')]);
+  assert.match(readLog('r1', big).error, /JSON|line/i, 'read whole, the log fails on its last line');
+  assert.match(readLog('r9', big).error, /describes run "r1", not r9/);
 });
 
 test('settings: defaults, and a value out of range is refused', () => {
