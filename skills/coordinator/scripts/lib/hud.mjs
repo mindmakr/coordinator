@@ -142,11 +142,10 @@ export function triesRow(u) {
 }
 
 function unitCard(u, ctx, form, repo) {
-  const flag = u.attention ? `<span class="chip flag" title="${esc(`The lead is on it: ${u.attention}`)}">${esc(u.attentionLabel)}</span> ` : '';
   const raw = [u.gap && `<dt>Last gap</dt><dd>${linkify(u.gap, repo)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${linkify(u.evidence, repo)}</dd>`].filter(Boolean).join('');
   const passing = u.behaviours.filter((b) => b.status === 'pass').length;
   const waits = u.dependsOn.map((x) => x.id);
-  const html = `<h3><span>${unitDot(u)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${flag}${stateChip(u, ctx)}</span></h3>`
+  const html = `<h3><span>${unitDot(u)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${stateChip(u, ctx)}</span></h3>`
     + unitLinks(u, repo)
     + `<p class="say" data-a="say-${esc(u.id)}">${linkWaits(u.sentence, waits, ctx)}</p>`
     + blocksLine(u, ctx)

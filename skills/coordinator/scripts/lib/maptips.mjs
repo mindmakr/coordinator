@@ -36,7 +36,8 @@ export function neighbours(v) {
 export const near = (is, p = 'c') => ['hl', ...is.filter((i) => i !== undefined).map((i) => `${p}${i}`)].join(' ');
 
 const row = (k, v) => (v ? `<dt>${esc(k)}</dt><dd>${v}</dd>` : '');
-const state = (u) => `${u.status}${DOTS[u.dot] && !['passed', 'stopped'].includes(u.dot) ? ` · ${DOTS[u.dot]}` : ''}`;
+// The state in the dashboard's words (Waiting for A, Up next, Retrying…); an older view falls back to the status.
+const state = (u) => u.badge?.label ?? `${u.status}${DOTS[u.dot] && !['passed', 'stopped'].includes(u.dot) ? ` · ${DOTS[u.dot]}` : ''}`;
 
 export function unitTip(u, i, ctx, nowMs) {
   const trail = (u.scores ?? []).map((s) => (s.score === null ? '–' : String(s.score))).join(' → ');

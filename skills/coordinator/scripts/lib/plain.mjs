@@ -15,7 +15,8 @@ export function duration(min) {
   return r ? `${h} h ${r} min` : `${h} h`;
 }
 
-export function situation(run) {
+// `plan` and `asks` (lib/rules.mjs decide, lib/questions.mjs) split the units not yet running by who they wait on.
+export function situation(run, plan = null, asks = []) {
   const note = (run.notes ?? []).filter((n) => n.kind === 'situation').at(-1);
   if (note) return { text: note.text, at: note.at, computed: false };
   const n = run.units.length;
@@ -24,7 +25,14 @@ export function situation(run) {
   if (!n) return { text: 'No tasks yet.', at: null, computed: true };
   const tail = `${done} done${stopped ? `, ${stopped} stopped` : ''}`;
   if (run.closed) return { text: `Closed as ${run.closed.outcome}: ${tail} of ${n} tasks.`, at: null, computed: true };
-  return { text: `${count(IN_PROGRESS)} of ${n} tasks in progress, ${tail}, ${count(['open'])} waiting.`, at: null, computed: true };
+  if (!plan) return { text: `${count(IN_PROGRESS)} of ${n} tasks in progress, ${tail}, ${count(['open'])} waiting.`, at: null, computed: true };
+  // With the plan: who the rest wait on, in the dashboard's words.
+  const d = new Map(plan.units.map((x) => [x.id, x]));
+  const states = run.units.filter((u) => u.status === 'open').map((u) => dotState(u, d.get(u.id), asks));
+  const k = (...st) => states.filter((x) => st.includes(x)).length;
+  const rest = [[k('needs-you'), 'need you', 'needs you'], [k('blocked'), 'waiting for another unit'], [k('queued'), 'up next'], [k('retrying', 'stale'), 'with the lead']]
+    .filter(([c]) => c).map(([c, w, one]) => `${c} ${c === 1 && one ? one : w}`);
+  return { text: `${count(IN_PROGRESS)} of ${n} tasks in progress, ${tail}${rest.length ? `, ${rest.join(', ')}` : ''}.`, at: null, computed: true };
 }
 
 // Minutes each finished try took: from the unit's previous verdict, or for its
@@ -80,15 +88,26 @@ export function dotState(u, d, asks = []) {
   if (d?.action === 'check-stale') return 'stale';
   if (attention(u, d)) return 'retrying';
   if (['building', 'judging'].includes(u.status)) return 'working';
-  if (d?.action === 'wait' && String(d.reason ?? '').startsWith('after ')) return 'blocked';
+  if (isBlocked(d)) return 'blocked';
   return 'queued';
 }
-// The badge that names the state in words, so colour is never alone; null keeps the status chip.
-export function stateBadge(state, u) {
-  if (state === 'blocked') { const ids = waitIds(u); return { kind: 'blocked', label: ids.length ? `Waiting for ${ids.join(', ')}` : 'Waiting for another unit', ids }; }
-  if (state === 'queued') return { kind: 'queued', label: 'Up next', ids: [] };
-  if (state === 'needs-you') return { kind: 'needs-you', label: 'Needs you', ids: [] };
-  return null;
+// The state in words, so colour is never alone. `lead` + `ids` is the label with the ids
+// it waits on kept apart, so a page can link each one; `title` says more on hover.
+const isBlocked = (d) => d?.action === 'wait' && String(d.reason ?? '').startsWith('after ');
+const WORDS = { working: 'Working', passed: 'Passed', stopped: 'Stopped', queued: 'Up next', retrying: 'Retrying', stale: 'Quiet' };
+export function stateBadge(state, u, d) {
+  const ids = waitIds(u);
+  const make = (lead, list = [], title = DOTS[state]) => ({ kind: state, lead, ids: list, label: `${lead}${list.join(', ')}`, title });
+  if (state === 'blocked') return ids.length ? make('Waiting for ', ids) : make('Waiting for another unit');
+  if (state === 'needs-you') return isBlocked(d) && ids.length ? make('Needs you · waiting for ', ids) : make('Needs you');
+  if (state === 'retrying' || state === 'stale') return make(WORDS[state], [], `The lead is on it: ${attention(u, d) ?? DOTS[state]}`);
+  return WORDS[state] ? make(WORDS[state]) : null;
+}
+// The dot's spoken words: the state, and the ids it waits on in their own case.
+export function dotWords(state, b) {
+  if (!b?.ids.length) return DOTS[state] ?? state;
+  const w = `waiting for ${b.ids.join(', ')}`;
+  return state === 'blocked' ? w : `${DOTS[state] ?? state}; ${w}`;
 }
 
 // The badge's label: the lead is handling it. Only Needs you and question cards address the person.

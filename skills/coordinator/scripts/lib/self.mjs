@@ -79,7 +79,7 @@ function plan(run, nowMs) {
     run: run.id, tag: run.tag, decision: p.decision, goal: clip(run.goal, 200),
     done: run.units.length - left.length, total: run.units.length,
     next: p.units.filter((d) => ['build', 'judge', 'change-strategy', 'check-stale'].includes(d.action)).map((d) => `${d.action} ${d.id}`),
-    left: left.map((u) => { const d = byId.get(u.id) ?? {}; const dot = dotState(u, d, qs); return { id: u.id, title: u.title ?? null, status: u.status, dot, badge: stateBadge(dot, u), waitsOn: waitsOn(d, u, qs) }; }),
+    left: left.map((u) => { const d = byId.get(u.id) ?? {}; const dot = dotState(u, d, qs); return { id: u.id, title: u.title ?? null, status: u.status, dot, badge: stateBadge(dot, u, d), waitsOn: waitsOn(d, u, qs) }; }),
     needsYou: qs.map((q) => ({ id: q.id, text: clip(q.header || q.text, 140) })),
   };
 }

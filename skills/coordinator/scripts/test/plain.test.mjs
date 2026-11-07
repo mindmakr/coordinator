@@ -25,8 +25,12 @@ const render = (s, min = 45) => { const v = view(s, decide(s, T0 + min * 60_000)
 
 test('the situation is the lead\'s latest note, or counted from the state', () => {
   let r = render(state());
-  assert.equal(r.v.situation.text, '1 of 4 tasks in progress, 1 done, 2 waiting.');
-  assert.match(r.txt, /^situation {2}1 of 4 tasks in progress, 1 done, 2 waiting\.$/m);
+  assert.equal(r.v.situation.text, '1 of 4 tasks in progress, 1 done, 1 waiting for another unit, 1 with the lead.');
+  assert.match(r.txt, /^situation {2}1 of 4 tasks in progress, 1 done, 1 waiting for another unit, 1 with the lead\.$/m);
+  // Ready and asked units are named apart from blocked ones; a needs-you unit counts once.
+  const s2 = state({ notes: [{ kind: 'question', text: 'q', unit: 'u4', at: at(1) }] });
+  s2.units.push(unit('u5'));
+  assert.equal(render(s2).v.situation.text, '1 of 5 tasks in progress, 1 done, 1 needs you, 1 up next, 1 with the lead.');
   assert.match(r.html, /counted from the state/);
   r = render(state({ notes: [{ kind: 'situation', text: 'old', at: at(5) }, { kind: 'situation', text: 'u2 keeps missing the cycle dates; u3 about 15 min.', at: at(41) }] }));
   assert.equal(r.v.situation.text, 'u2 keeps missing the cycle dates; u3 about 15 min.');

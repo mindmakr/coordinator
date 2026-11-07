@@ -38,7 +38,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
   const goalBehaviours = run.goalBehaviours ?? [];
   // Each unit's state, and which units wait on which (for the links both ways).
   const dots = new Map(run.units.map((u) => [u.id, dotState(u, next.get(u.id), run.closed ? [] : qs)]));
-  const brief = (id) => { const x = run.units.find((y) => y.id === id); const st = dots.get(id); return { id, title: x?.title ?? null, status: x?.status ?? null, dot: st ?? null, badge: x ? stateBadge(st, x) : null }; };
+  const brief = (id) => { const x = run.units.find((y) => y.id === id); const st = dots.get(id); return { id, title: x?.title ?? null, status: x?.status ?? null, dot: st ?? null, badge: x ? stateBadge(st, x, next.get(id)) : null }; };
   return {
     id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo,
     goalCheck: {
@@ -47,7 +47,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
     }, bar: run.bar, fence: run.fence,
     phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
     open: !run.closed, started: run.createdAt, closedAt: run.closed?.at ?? null,
-    situation: situation(run),
+    situation: situation(run, plan, run.closed ? [] : qs),
     needsYou: run.closed ? [] : qs.filter((q) => q.open),
     answered: run.closed ? [] : qs.filter((q) => q.status === 'answered'),
     asks: qs, personNotes,
@@ -68,7 +68,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null } = {}) {
       return {
         id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, after: u.after ?? null,
         sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
-        dot: dots.get(u.id), badge: stateBadge(dots.get(u.id), u), finished: ['passed', 'stopped'].includes(dots.get(u.id)),
+        dot: dots.get(u.id), badge: stateBadge(dots.get(u.id), u, d), finished: ['passed', 'stopped'].includes(dots.get(u.id)),
         // Depends on (its after) and blocks (units whose after names it), each with its state.
         dependsOn: waitIds(u).map(brief), dependents: run.units.filter((x) => waitIds(x).includes(u.id)).map((x) => brief(x.id)),
         rounds: u.rounds.length, maxRounds: run.budget.maxRounds,

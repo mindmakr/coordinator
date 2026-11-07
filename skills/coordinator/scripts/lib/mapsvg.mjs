@@ -100,7 +100,7 @@ export function mindSvg(v, ctx) {
       });
       const status = byId.get(u.unit)?.status;
       const x0 = x - PW / 2; const y0 = y - PH / 2;
-      nodes.push(link(ctx.unitHref(u.unit), `${u.unit}: ${status ?? said(u.status)}, ${said(u.status)}${u.text ? ` — ${clip(u.text, 160)}` : ''}`,
+      nodes.push(link(ctx.unitHref(u.unit), `${u.unit}: ${byId.get(u.unit)?.badge?.label ?? status ?? said(u.status)}${u.text ? ` — ${clip(u.text, 160)}` : ''}`,
         `<rect class="nd ${st(u.status)}" x="${r1(x0)}" y="${r1(y0)}" width="${PW}" height="${PH}" rx="10"/>${txt(x0 + 10, y0 + 18, `${mark(status)} ${clip(u.label, 14)}`, 'b')}${txt(x0 + 10, y0 + 33, clip(u.text, 22), 'xs muted')}`, false, boxAttrs(ui, nb.get(ui))));
     });
     const goal = g.nodes[0]; const gb = v.goalCheck.behaviours;
@@ -214,7 +214,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const nodeOf = ({ x: nx, y, w, h, n }) => {
     if (n.kind === 'unit') {
       const status = byId.get(n.unit)?.status; const i = ix.get(n.unit);
-      const label = `${n.unit}: ${status ? `${status}, ` : ''}${said(n.status)}${n.crit ? ', on the critical path' : ''}${n.title ? ` — ${clip(n.title, 120)}` : ''}`;
+      const label = `${n.unit}: ${byId.get(n.unit)?.badge?.label ?? said(n.status)}${n.crit ? ', on the critical path' : ''}${n.title ? ` — ${clip(n.title, 120)}` : ''}`;
       return link(ctx.unitHref(n.unit), label, `<rect class="nd ${st(n.status)}${n.crit ? ' crit' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="8"/>${txt(nx + 10, y + 19, `${mark(status)} ${clip(n.label, 18)}`, 'b')}${txt(nx + 10, y + 36, clip(n.title, 24), 'sm muted')}`, false, nav.node(n.id, `u u${i} hl`, ` aria-describedby="${tipId(i)}"${data(n, 'unit')}`));
     }
     if (n.kind === 'follow-up') return link(n.url ?? ctx.home, `Follow-up${n.units.length ? ` from ${n.units.join(', ')}` : ''}: ${clip(n.text, 200)}`, `<rect class="nd fu" x="${nx}" y="${y}" width="${w}" height="${h}" rx="6"/>${txt(nx + 10, y + 16, clip(`${n.label}${n.units.length ? ` · from ${n.units.join(', ')}` : ''}`, 42), 'xs muted')}${txt(nx + 10, y + 32, clip(n.text, 36), 'sm')}`, !!n.url, nav.node(n.id, 'hl', data(n, 'follow-up')));
