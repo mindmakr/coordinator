@@ -2,6 +2,7 @@
 // when the loop must stop. No I/O here, so every rule is unit-tested.
 
 import { chainUnits } from './chain.mjs';
+import { fromPerson } from './approval.mjs';
 
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
@@ -38,12 +39,67 @@ export const roundCap = (unit, run) => run.budget.maxRounds + (Number.isInteger(
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
 
+// Severity of a finding (the critic's reply, references/briefs.md). Only high and medium fail a round;
+// low and nit ride on a pass as fold-ins (`verdict pass --fold`).
+export const SEVERITIES = ['high', 'medium', 'low', 'nit'];
+export const FAILING = ['high', 'medium'];
+
+// The ready question for the finish line, and the answers it takes, in the order asked.
+export const FINISH = { ship: 'Ship with follow-ups', round: 'One more round', stop: 'Stop' };
+export function finishQuestion(unit) {
+  const gap = unit.rounds.at(-1)?.gap ?? '';
+  return {
+    header: 'Finish line',
+    question: `${unit.id} is the last unit open, and its latest review found only medium findings: ${gap.length > 200 ? `${gap.slice(0, 199)}…` : gap}. Ship it with these as follow-ups, give it one more round, or stop it?`,
+    options: [
+      `${FINISH.ship}|merge it as reviewed; each medium becomes a follow-up`,
+      `${FINISH.round}|one more build and review on the mediums`,
+      `${FINISH.stop}|record it as stopped with its last gap`,
+    ],
+  };
+}
+
+// The finish-line question on this unit asked since its last verdict, with its latest answer.
+function finishAsked(unit, run) {
+  const since = unit.rounds.at(-1)?.at ?? '';
+  const qs = (run.notes ?? []).filter((n) => n.kind === 'question');
+  const i = qs.findLastIndex((n) => n.finish === true && n.unit === unit.id && n.at >= since);
+  return i < 0 ? null : { id: `q${i + 1}`, answer: qs[i].history?.at(-1) ?? null };
+}
+
+// When every other unit has passed or stopped and this one's latest round failed on mediums only,
+// the person decides at once (references/commands/run.md, Finish line). An answer counts only
+// from the person (lib/approval.mjs): their pick on the dashboard or the web, or their words on the CLI.
+function finishLine(unit, run) {
+  const last = unit.rounds.at(-1);
+  if (last?.verdict !== 'fail' || last.severity !== 'medium') return null;
+  if (!run.units.every((x) => x.id === unit.id || ['pass', 'stopped'].includes(x.status))) return null;
+  const q = finishAsked(unit, run);
+  if (!q) return { action: 'ask-person', question: finishQuestion(unit) };
+  const a = q.answer;
+  if (!a) return { action: 'ask-person', asked: q.id, reason: `waiting for the person's answer to ${q.id}` };
+  if (!fromPerson(a) || a.other || a.choices.length !== 1) return { action: 'ask-person', asked: q.id, reason: `${q.id}'s answer is not one option picked by the person` };
+  const pick = a.choices[0];
+  if (pick === FINISH.ship) return { action: 'ship', answer: q.id };
+  if (pick === FINISH.stop) return stop(`the person chose stop (${q.id})`);
+  return { action: 'build', reason: `the person chose one more round (${q.id})`, gap: last.gap };
+}
+
+// A critic that started (built recorded) inside the time budget may still return its verdict (#45).
+const judgingInTime = (unit, run) => unit.status === 'judging' && typeof unit.judgingAt === 'string'
+  && (Date.parse(unit.judgingAt) - Date.parse(run.createdAt)) / 60_000 <= run.budget.maxMinutes;
+
 export function decideUnit(unit, run, nowMs) {
   const { budget } = run;
-  if (unit.status === 'pass') return { action: 'done' };
+  if (unit.status === 'pass') {
+    // A pass that carries fold-ins waits for their targeted check (`run.mjs foldin`), then merges.
+    const last = unit.rounds.at(-1);
+    if (last?.folds?.length) return last.foldin ? { action: 'done', step: 'merge' } : { action: 'fold-in', folds: last.folds.length };
+    return { action: 'done' };
+  }
   if (unit.status === 'stopped') return { action: 'stopped', reason: unit.stopReason };
-  // Time first: nothing, including waiting, outlives the run's budget.
-  if (minutes(run.createdAt, nowMs) > budget.maxMinutes) return stop('budget: time');
+  // Time first: nothing, including waiting, outlives the run's budget; only a critic already at work may finish.
+  if (minutes(run.createdAt, nowMs) > budget.maxMinutes) return judgingInTime(unit, run) ? { action: 'judge', reason: 'the critic started inside the time budget' } : stop('budget: time');
   const blocker = unit.after && run.units.find((u) => u.id === unit.after);
   if (blocker?.status === 'stopped') return stop(`blocked: ${unit.after} stopped`);
   if (blocker && blocker.status !== 'pass') return { action: 'wait', reason: `after ${unit.after}` };
@@ -56,6 +112,8 @@ export function decideUnit(unit, run, nowMs) {
   const rounds = unit.rounds;
   const last = rounds.at(-1);
   if (!last) return { action: 'build' };
+  const finish = finishLine(unit, run);
+  if (finish) return finish;
   if (rounds.length >= roundCap(unit, run)) return stop('budget: rounds');
 
   const prev = rounds.at(-2);
@@ -108,6 +166,7 @@ export function decide(run, nowMs = Date.now()) {
 // A stale builder is restarted (start); a stale critic is re-sent (beat, unit stays judging).
 export function allows(cmd, d) {
   if (cmd === 'start') return d.action === 'build' || (d.action === 'check-stale' && d.phase === 'building');
+  if (cmd === 'foldin') return d.action === 'fold-in';
   if (cmd === 'strategy') return d.action === 'change-strategy';
   return d.action !== 'stop'; // built, verdict, beat: anything except a unit the rules have stopped
 }

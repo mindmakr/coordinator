@@ -29,6 +29,7 @@ Playbook: read and follow <skill-dir>/references/sub-skills/<fix.md; add transla
 <After change-strategy: "The last approach failed twice on the same gap. Do not retry it. Try: <new approach>.">
 Hints from past runs (ignore any that conflict with the above): <lessons>
 Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.
+Run only the suites your change touches while you work, then the full suite once before you report. Rerun a suite under load only when you suspect a flake, and say so in your report.
 At each milestone (pushed, tests ran, PR opened) run: <COORDINATOR_DIR=… if outside this repo's worktrees> node <skill-dir>/scripts/run.mjs beat <run> <unit> --text "<the milestone>"
 Attach what shows each behaviour: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --behaviour B1 --kind test --text "<the pass/fail lines>" (or --kind screenshot --file <png>, --kind log --file <log, pdf, md or json report>, --kind link --url <URL>). Pass every screenshot and report you make with --file: a path only mentioned is lost when the worktree goes. Once the PR is open: run.mjs link <run> <unit> --pr <owner/repo#n or URL>.
 Never merge, deploy, push to a protected branch, delete data or contact anyone. Never ask the person: report blockers to the lead.
@@ -44,6 +45,7 @@ Behaviours: <each id and sentence>. Check every one yourself; the builder's evid
 Playbook: read and follow <skill-dir>/references/sub-skills/<review.md for code, with its security pass | visual.md for screens | translations.md for strings | verify.md after a merge> (or the project's skill: <name>, at its thorough level). Review depth is fixed: never a lighter pass to save budget.
 <Risk area: "You are the specialist critic for <area>: follow review.md, Specialist critic.">
 Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.
+Run the full suite once on the head. Rerun a single file, alone or under load, only when you suspect a flake, and say so in EVIDENCE; never the whole suite again.
 Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.
 Save screenshots and reports you make, and attach each: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --kind screenshot|log --file <path>. A path only named in your reply is lost when the worktree goes.
 If your checks run long, run now and then: <COORDINATOR_DIR=… if outside this repo's worktrees> node <skill-dir>/scripts/run.mjs beat <run> <unit>
@@ -51,12 +53,15 @@ If your checks run long, run now and then: <COORDINATOR_DIR=… if outside this 
 Reply with exactly:
 VERDICT: PASS | FAIL
 SCORE: 0-10 against the bar (always; decimals allowed)
-GAP: the single biggest gap between the artifact and the bar (none if PASS)
+SEVERITY: high | medium, the severity of that gap (none if PASS)
+GAP: the single biggest high or medium gap between the artifact and the bar (none if PASS)
 CAUSE: the root cause of that gap as a 2-5 word tag, e.g. "hand-rolled ICU parser" (none if PASS)
 EVIDENCE: the command and output, the file:line, or the screenshot path that proves it
 BEHAVIOURS: one line each, B1 PASS|FAIL: <what shows it>
+FINDINGS: one line each, <high|medium|low|nit> <file:line> <what> (bar.md, Severity)
+FOLDS: the low and nit findings to fold in before merge (none if none)
 OUT-OF-FENCE: anything found outside scope (follow-ups, not failures)
-Pass only when every behaviour passes and the evidence shows it.
+Pass only when every behaviour passes and the evidence shows it. Fail only on a high or medium finding: lows and nits never fail a round, they go under FOLDS on a pass.
 ```
 
 ## Integrator
@@ -66,10 +71,10 @@ Fresh eyes on the whole result of run <run> after every unit has passed. Never a
 Goal: <goal>   Bar: <bar>   Artifacts: <list>
 Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.
 Playbook: <when strings changed: the parity check in <skill-dir>/references/sub-skills/translations.md across the run>; <when the run merged work: finish with <skill-dir>/references/sub-skills/release-notes.md>.
-Fix only inconsistencies; don't redesign. Run the full checks after.
+Fix only inconsistencies; don't redesign. Run the full checks once after, on the merged result.
 Reply in the same format as the critic, marking the goal's behaviours (G1, G2, …), then list what you changed.
 ```
 
 ## Recording the critic's reply
 
-Copy it into `S/run.mjs verdict <run> <unit> pass|fail --score … --evidence … [--gap … --cause …]` with one `--behaviour B1=pass:"…"` or `B1=fail:"…"` per BEHAVIOURS line. A pass is refused while any behaviour is failing or unchecked. Pass the builder's report summary to `built --report "…"` first, so each round on the unit's page shows what was built and how it was judged.
+Copy it into `S/run.mjs verdict <run> <unit> pass|fail --score … --evidence … [--gap … --cause … --severity high|medium] [--fold "…" …] [--full-suite yes|no]` with one `--behaviour B1=pass:"…"` or `B1=fail:"…"` per BEHAVIOURS line. A pass is refused while any behaviour is failing or unchecked; a fail needs the gap's severity, and a fail on a low or nit is refused (pass with `--fold` instead). `--full-suite` records whether the critic ran the full suite. Add what the harness reported for the launch: `--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"` (also on `start` and `built` for the builder). Pass the builder's report summary to `built --report "…"` first, so each round on the unit's page shows what was built and how it was judged.

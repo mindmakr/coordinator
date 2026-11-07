@@ -47,7 +47,9 @@ Repeat `S/run.mjs next <run>` and act on each unit:
 | `wait` | Nothing. A notification will come; never poll. |
 | any, with `sync` | Another unit that changes the same files merged first. Merge the target into this unit's branch before the review (or before merging, on a passed unit), check the shared files, then `sync <run> <unit>` (`references/briefs.md`, Hot spots). |
 | `stop` | Recorded by `next` just now. Its gap goes in the report. A reason "no progress: only B2 kept failing …" means the rest passed: narrow B2 to a closed list or move it to a unit of its own (`references/bar.md`). |
-| `done` / `stopped` | Nothing: the unit passed, or was stopped in an earlier round. |
+| `fold-in` | The pass carries fold-ins (`verdict pass --fold`). Have the builder fold them in, check only those lines and the tests they touch (you, or a light check, never a new critic round), then `foldin <run> <unit> --head <sha> --evidence "…"`. |
+| `ask-person` | **Finish line:** every other unit is decided and this one's latest round failed on mediums only. Run the `step` it gives (`ask <run> --finish <unit>`) and ask the same question through the question tool at once. Record their pick with `answer <run> qN --choice "<label>" --by person --confirm "<their words>"` (or they answer on the dashboard); `next` then ships it (pass, the gap as a follow-up), builds one more round, or stops it. |
+| `done` / `stopped` | Nothing: the unit passed, or was stopped in an earlier round. With `step: merge`, its fold-ins are checked and it can merge. |
 
 **After each verdict and each merge**, move the board if the project has one (`references/sub-skills/board.md`) and write the situation in one or two plain sentences: `S/run.mjs note <run> --kind situation --text "Security gaps: failed twice on the same route gate; a new approach is next. Roles: being checked."` It heads the HUD. Say what is happening and what comes next, in the person's words, not unit ids alone.
 
@@ -78,7 +80,9 @@ The run-level `decision` from `next`:
 
 ## 4. Finish
 
-Do the actions approved at intake (for example, merge when the review is READY) and record each one (a merge also with `link <run> <unit> --merge <PR URL>`, then a critic with `references/sub-skills/verify.md` on the merged code). Act on any answer still waiting (`questions`), then stop `watch` and `serve`. Then:
+Do the actions approved at intake (for example, merge when the review is READY) and record each one (a merge also with `link <run> <unit> --merge <PR URL>`, then a critic with `references/sub-skills/verify.md` on the merged code). Skip that re-check when the merged tree is the reviewed head merged with the target: `git merge-tree --write-tree <target before the merge> <reviewed head>` prints the same tree id as `git rev-parse <merge commit>^{tree}`. Record it with `link <run> <unit> --merge <PR URL> --same-tree <tree id>`.
+
+**Record what each launch cost** as the harness reports it when the agent finishes: `--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"` on `built` (the builder), `verdict` (the critic) and `foldin`. `show`, the dashboard and `stats` sum them per unit, model and run, and say "not recorded" where nothing was. Act on any answer still waiting (`questions`), then stop `watch` and `serve`. Then:
 
 - **Report**, as short as the content allows and at most 12 lines (replies follow `references/craft.md`): the outcome, the links, the bar and its evidence, the units stopped and why, the questions you decided on the person's behalf, the follow-ups, and the actions you took.
 - **Release notes:** Release notes never carry credentials, tokens or one-time codes. Name the setting (e.g. API_TOKEN), never its value. When work merged, `S/run.mjs report <run> --draft`, write the notes with `references/sub-skills/release-notes.md`, then `S/run.mjs report <run> --file <notes.md>`; run `S/run.mjs quality <run>` so the report carries the quality and compliance signals (`references/quality.md`). Link the report page in the reply.

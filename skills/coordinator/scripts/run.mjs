@@ -17,13 +17,17 @@
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link [--label L]
-//   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL] [--url U --label L]   GitHub issues, PRs and merges for the unit
+//   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL [--same-tree T]] [--url U --label L]   GitHub issues, PRs and merges;
+//                  --same-tree: the merged tree is the reviewed head merged with the target, so no post-merge re-check (recorded)
 //                  [--continues <run>:<unit>]  record afterwards that this unit continues that one (any id; closed runs too)
 //   run.mjs extend <run> <unit> [--rounds N] --reason R [--answer qN]   N (1-4, default 1; above 1 only when their words name it) more rounds for a unit
 //                  at or stopped by its round budget: qN asked with --approves and answered with that option by the
 //                  person (dashboard, web, or answer --by person --confirm "their words"), or else their note on
 //                  the unit since its last verdict saying "approved" (lib/approval.mjs); recorded as a decision
 //   run.mjs freeze <run>
+//   Cost (start, built, verdict, foldin): [--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"], what the harness
+//                  reported for that launch; stats, show and the HUD sum them per unit, model and run ("not recorded" when missing)
+//   --accept-open (init, add, behave): keep a bar or behaviour line that reads open-ended (lib/openbar.mjs), recorded as a bar note
 //   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
 //                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
 //                  after a try failed on a model below strong, a model below strong needs [--force-model "reason"]
@@ -38,6 +42,11 @@
 //                  [--critic SETUP] who judged (e.g. "review skill high + security"): stats groups escapes by it
 //                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
 //                  the unit stays judging, and its pass is refused until every required specialist passed
+//                  --severity high|medium on a fail (required; a low or nit never fails: pass with --fold instead)
+//                  [--fold "…" …] on a pass: small findings the builder folds in before merge; next then says fold-in
+//                  [--full-suite yes|no] whether the critic ran the full suite this round
+//   run.mjs foldin <run> <unit> --head <sha> --evidence E   only when next says fold-in: the targeted check of the folds
+//                  (the folds and the tests they touch, no new critic round); next then says done, step merge
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …] [--model M]
 //                  only when next says integrate; a pass needs every goal behaviour passing
@@ -49,6 +58,8 @@
 //                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
 //                  [--approves <label>] the option that approves a step only the person may approve (extend)
+//   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready finish-line question (ship with follow-ups,
+//                  one more round, stop); next acts on the person's pick
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
 //                  [--confirm "their words"] with --by person only: the person said this; never without their words
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
@@ -106,7 +117,9 @@ import { addEvidence, artifact } from './lib/evidence.mjs';
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
-import { allows, decide, decideUnit, roundCap, stats } from './lib/rules.mjs';
+import { allows, decide, decideUnit, FAILING, finishQuestion, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
+import { COST_FLAGS, costEntry, costStats } from './lib/cost.mjs';
+import { openWarning } from './lib/openbar.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
 import { answerRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
@@ -138,19 +151,19 @@ import { render } from './lib/workbench.mjs';
 import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
 
 const FLAGS = {
-  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues'],
+  init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open'],
   extend: ['rounds', 'reason', 'answer'],
-  start: ['model', 'why', 'force-model'], models: ['role', 'class'],
+  start: ['model', 'why', 'force-model', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
-  integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
-  behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
-  link: ['issue', 'pr', 'merge', 'url', 'label', 'continues'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
-  ask: ['question', 'header', 'option', 'multi', 'unit', 'approves'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'fold', 'full-suite', ...COST_FLAGS], strategy: ['text'],
+  integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', ...COST_FLAGS],
+  behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
+  link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
+  ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook'],
   push: ['to', 'message'], pull: ['from'],
 };
-const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
+const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -160,10 +173,28 @@ function applyStops(st) {
     for (const u of decide(st).units) if (u.action === 'stop') {
       const unit = st.units.find((x) => x.id === u.id); unit.status = 'stopped'; unit.stopReason = u.reason; log(unit, 'stop', u.reason);
       stopped.set(u.id, u); changed = true;
+    } else if (u.action === 'ship') { // the person chose to ship at the finish line: its mediums become follow-ups
+      const unit = st.units.find((x) => x.id === u.id); const last = unit.rounds.at(-1);
+      unit.status = 'pass'; unit.shipped = { answer: u.answer, round: unit.rounds.length, at: now() };
+      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: shipped with follow-ups, the person's choice at the finish line (${u.answer})`, at: now() });
+      st.notes.push({ kind: 'follow-up', unit: unit.id, text: `${unit.id}: ${last?.gap ?? 'the mediums of its last review'}`, at: now() });
+      log(unit, 'ship', `shipped with follow-ups (${u.answer})`);
+      stopped.set(u.id, { id: u.id, action: 'done', step: 'merge', reason: `shipped with follow-ups (${u.answer})` }); changed = true;
     }
   }
   return stopped;
 }
+
+// An open-ended bar or behaviour line warns (lib/openbar.mjs); --accept-open keeps it and records that.
+function openCheck(lines, accept, notes) {
+  const warning = openWarning(lines);
+  if (!warning) return null;
+  if (accept === undefined) return warning;
+  if (accept !== true) throw new Error('--accept-open takes no value');
+  notes.push({ kind: 'bar', text: `kept an open-ended line on purpose: ${lines.map((l) => `${l.what}: "${String(l.text).slice(0, 160)}"`).join('; ')}`, at: now() });
+  return null;
+}
+const addCost = (u, entry) => { if (entry) (u.costs ??= []).push(entry); };
 
 const runsDir = () => join(baseDir('project'), 'runs');
 const stateFile = (run) => join(runsDir(), safeId(run, 'run'), 'state.json');
@@ -287,6 +318,22 @@ function unitCallsFor(run, s, unit, { root, base, head, files = [], deadline }) 
   return computeCalls(runDir(run), { root, unit: u.id, base: b, head: h, files: files.length || b ? files : fromMap, fallbackFiles: fromMap, source: files.length ? 'files' : 'map build', deadline });
 }
 
+// The finish line's ready question (lib/rules.mjs), logged on the unit only when `next` asks for it.
+function askFinish(run, o) {
+  if (typeof o.finish !== 'string') throw new Error('--finish takes the unit: ask <run> --finish <unit>');
+  for (const k of ['question', 'header', 'option', 'multi', 'unit', 'approves']) if (o[k] !== undefined) throw new Error(`--${k} does not go with --finish: the question is ready-made`);
+  let id;
+  const s = change(run, 'question', (st) => {
+    const u = unitOf(st, o.finish);
+    const d = decideUnit(u, st, Date.now());
+    if (d.action !== 'ask-person' || d.asked) throw new Error(`ask --finish refused: next says "${d.action}"${d.asked ? ` (already asked as ${d.asked})` : ''} for ${u.id}`);
+    const q = finishQuestion(u);
+    id = ask(st, { question: q.question, header: q.header, option: q.options, unit: u.id });
+    st.notes.filter((n) => n.kind === 'question').at(-1).finish = true;
+  }, { unit: String(o.finish) });
+  return { ...s, asked: id };
+}
+
 const commands = {
   init([run], o) {
     const routeOn = o.models === undefined ? undefined : oneOf(o.models, ['on', 'off'], '--models') === 'on';
@@ -312,13 +359,15 @@ const commands = {
       if (!f || extname(f).toLowerCase() !== '.css' || !existsSync(f) || !statSync(f).isFile()) throw new Error('--theme must be an existing .css file');
       fresh.theme = f;
     }
+    const warning = openCheck([{ what: 'the bar', text: fresh.bar }], o['accept-open'], fresh.notes);
     const made = updateRun(runDir(run), { kind: 'run.init' }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
     for (const c of parents) markParent(c, run);
-    return made;
+    return warning ? Object.assign(made, { warning }) : made;
   },
   add([run, unit], o) {
     const cont = o.continues === undefined ? null : parentOf(o.continues, run, safeId(unit, 'unit'));
+    let warning = null;
     const out = change(run, 'unit.add', (s) => {
       safeId(unit, 'unit');
       if (s.units.some((u) => u.id === unit)) throw new Error(`unit exists: ${unit}`);
@@ -338,9 +387,10 @@ const commands = {
       s.units.push(u);
       for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
       if (cont) addContinues(s, u, cont);
+      warning = openCheck([{ what: `${unit}'s bar`, text: u.bar }, ...(u.behaviours ?? []).map((b) => ({ what: `${unit} ${b.id}`, text: b.text }))], o['accept-open'], s.notes);
     }, { unit });
     if (cont) markParent(cont, run);
-    return out;
+    return warning ? Object.assign(out, { warning }) : out;
   },
   freeze([run]) {
     return change(run, 'run.freeze', (s) => {
@@ -370,6 +420,7 @@ const commands = {
       // With routing on, an unnamed model is recorded as such, so pass rates stay honest.
       const builtBy = model ?? (cfg.on ? UNSPECIFIED : null);
       if (builtBy) { u.builtBy = builtBy; if (why) u.builtWhy = why; }
+      addCost(u, costEntry(o, { step: 'start', role: 'builder', model, at: now() }));
       log(u, 'start', `try ${u.rounds.length + 1}${model ? ` on ${model}${why ? ` (${why})` : ''}` : ''}`);
     }, { unit });
   },
@@ -379,15 +430,17 @@ const commands = {
   built([run, unit], o) {
     return change(run, 'unit.built', (s) => {
       const u = unitOf(s, unit); if (u.status !== 'building') throw new Error(`unit ${unit} is ${u.status}, not building`); expect(s, u, 'built');
-      u.status = 'judging'; u.heartbeatAt = now(); u.report = optText(o.report, 2000); log(u, 'built', u.report ?? '');
+      u.status = 'judging'; u.heartbeatAt = now(); u.judgingAt = now(); u.report = optText(o.report, 2000); log(u, 'built', u.report ?? '');
+      addCost(u, costEntry(o, { step: 'built', role: 'builder', model: u.builtBy && u.builtBy !== UNSPECIFIED ? u.builtBy : null, at: now() }));
       delete u.specialistMarks; // a new build is judged again by every specialist
     }, { unit });
   },
   behave([run, unit], o) {
-    let id;
+    let id; let warning = null;
     const s = change(run, 'behaviour', (st) => {
       if ((o.goal === true) === (unit !== undefined)) throw new Error('name a unit or --goal, not both');
       if (o.remove !== undefined && o.remove !== true) throw new Error('--remove takes no value');
+      if (o.remove !== true && typeof o.text === 'string') warning = openCheck([{ what: `${unit ?? 'the goal'} behaviour`, text: o.text }], o['accept-open'], st.notes);
       const u = unit === undefined ? null : unitOf(st, unit);
       // Dropping or rewording a behaviour changes the bar: never mid-judgement, and after freeze only with a reason.
       if (u?.status === 'judging') throw new Error(`behave refused: ${u.id} is being judged; wait for the verdict`);
@@ -399,7 +452,7 @@ const commands = {
       if (u) log(u, 'behaviour', reason ? `${what} (${reason})` : what);
       if (reason) st.notes.push({ kind: 'bar', text: `${u ? u.id : 'goal'} ${what}: ${reason}`, at: now() });
     }, { unit: unit ?? null });
-    return { ...s, behaviour: id };
+    return { ...s, behaviour: id, ...(warning ? { warning } : {}) };
   },
   behaviours([run]) { const s = load(run); return { goal: s.goalBehaviours ?? [], units: Object.fromEntries(s.units.map((u) => [u.id, u.behaviours ?? []])) }; },
   evidence([run, unit], o) {
@@ -424,6 +477,14 @@ const commands = {
         add.push({ kind: 'other', url, label: optText(o.label, 120), at: now() });
       }
       if (cont) addContinues(s, u, cont);
+      // The merged tree equals the reviewed head merged with the target: the review stands, no post-merge re-check.
+      if (o['same-tree'] !== undefined) {
+        if (typeof o['same-tree'] !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o['same-tree'])) throw new Error('--same-tree takes the tree id both sides share (git rev-parse <merge>^{tree})');
+        if (!o.merge?.length) throw new Error('--same-tree goes with --merge');
+        if (u.status !== 'pass') throw new Error(`--same-tree: ${u.id} has not passed`);
+        u.postMerge = { check: 'skipped: the merged tree equals the reviewed head merged with the target', tree: o['same-tree'].toLowerCase(), at: now() };
+        log(u, 'merge-check', `skipped: same tree ${o['same-tree'].slice(0, 12)} as reviewed`);
+      }
       if (!add.length && !cont) throw new Error('give --issue, --pr, --merge, --url or --continues');
       (u.links ??= []).push(...add);
       for (const l of add) log(u, 'link', l.url, { link: l.kind });
@@ -439,8 +500,18 @@ const commands = {
       oneOf(v, ['pass', 'fail'], 'verdict');
       if (v === 'fail' && o.score === undefined) throw new Error('--score is required on a fail (it drives the no-progress stop)');
       if (v === 'fail' && !optText(o.gap)) throw new Error('--gap is required on a fail (it drives the same-gap stop)');
+      // Only a high or medium finding fails a round; lows and nits ride on a pass as fold-ins (references/bar.md).
+      const severity = o.severity === undefined ? null : oneOf(String(o.severity).toLowerCase(), SEVERITIES, '--severity');
+      if (v === 'fail' && !severity) throw new Error('--severity high|medium is required on a fail: the severity of the gap');
+      if (v === 'fail' && !FAILING.includes(severity)) throw new Error(`fail refused: a ${severity} finding does not fail a round; pass, and record them as fold-ins (--fold "…")`);
+      if (v === 'pass' && severity) throw new Error('--severity goes with a fail; record lows and nits on a pass with --fold');
+      const folds = (o.fold ?? []).map((f) => text(f === true ? undefined : f, 'fold', 500));
+      if (folds.length && v !== 'pass') throw new Error('--fold goes with a pass: a fail sends the gap back to the builder');
+      if (folds.length > 10) throw new Error('at most 10 --fold items: more than that is another round');
+      const fullSuite = o['full-suite'] === undefined ? null : o['full-suite'] === true ? true : oneOf(String(o['full-suite']), ['yes', 'no'], '--full-suite') === 'yes';
       const evidence = optText(o.evidence);
       const { verdict, gap, cause } = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
+      const extra = { ...(verdict === 'fail' && severity ? { severity } : {}), ...(verdict === 'pass' && folds.length ? { folds } : {}), ...(fullSuite === null ? {} : { fullSuite }) };
       const critic = optText(o.critic, 120);
       const judge = modelName(o.model, 'model');
       const rcfg = routing(baseDir('project'));
@@ -449,7 +520,8 @@ const commands = {
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
         if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
-        (u.specialistMarks ??= {})[name] = { verdict, score: score(o.score), gap, cause, evidence, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
+        (u.specialistMarks ??= {})[name] = { verdict, score: score(o.score), gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
+        addCost(u, costEntry(o, { step: 'verdict', role: `critic:${name}`, model: judge, at: now() }));
         return;
       }
       const missing = (u.specialists ?? []).filter((n) => u.specialistMarks?.[n]?.verdict !== 'pass');
@@ -459,9 +531,23 @@ const commands = {
         throw new Error(`pass refused: no clean detect result for round ${round}; run detect.mjs --run ${s.id} --unit ${u.id} --base … first`);
       }
       const marks = mark(u.behaviours ?? [], o.behaviour, verdict);
-      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
-      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy;
+      // A specialist's fold-ins ride on the pass too.
+      if (verdict === 'pass') for (const [n, m] of Object.entries(u.specialistMarks ?? {})) for (const f of m.folds ?? []) extra.folds = [...(extra.folds ?? []), `${f} (${n})`];
+      addCost(u, costEntry(o, { step: 'verdict', role: 'critic', model: judge, at: now() }));
+      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...extra, ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
+      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt;
       u.status = verdict === 'pass' ? 'pass' : 'open';
+    }, { unit });
+  },
+  // The targeted check of a pass's fold-ins: only the folds and the tests they touch, no new critic round.
+  foldin([run, unit], o) {
+    return change(run, 'unit.foldin', (s) => {
+      const u = unitOf(s, unit); expect(s, u, 'foldin');
+      if (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head)) throw new Error('--head takes the commit the fold-ins landed on');
+      const last = u.rounds.at(-1);
+      last.foldin = { head: o.head.toLowerCase(), evidence: text(o.evidence, 'evidence (what checked the fold-ins and the tests they touch)', 2000), at: now() };
+      addCost(u, costEntry(o, { step: 'foldin', role: 'fold-in check', at: now() }));
+      log(u, 'foldin', `${last.folds.length} fold-in${last.folds.length === 1 ? '' : 's'} checked at ${o.head.slice(0, 12)}`);
     }, { unit });
   },
   // The target branch was merged into this unit's branch: `next` stops asking until another overlapping unit merges.
@@ -601,7 +687,10 @@ const commands = {
     process.stdout.write(selfText(m));
     return null;
   },
-  ask([run], o) { let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id }; },
+  ask([run], o) {
+    if (o.finish !== undefined) return askFinish(run, o);
+    let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id };
+  },
   answer([run, id], o) {
     if (o.confirm !== undefined && o.by !== 'person') throw new Error('--confirm needs an explicit --by person');
     return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person', via: 'cli', confirm: o.confirm === true ? '' : o.confirm }));
@@ -689,8 +778,14 @@ const commands = {
     const suggest = (u) => { const e = u.action === 'build' ? escalation(cfg, unitOf(s, u.id)) : null; return e ? { ...u, model: e.model, modelWhy: e.why } : u; };
     // A unit that changes files an already merged unit changed takes the target in first (#37).
     const syncs = pendingSyncs(s);
-    const sync = (u) => (syncs.has(u.id) && ['build', 'judge', 'done'].includes(u.action) ? { ...u, sync: syncStep(s.id, u.id, syncs.get(u.id), u.action === 'done') } : u);
-    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? sync(suggest(u))) };
+    const sync = (u) => (syncs.has(u.id) && ['build', 'judge', 'done', 'fold-in'].includes(u.action) ? { ...u, sync: syncStep(s.id, u.id, syncs.get(u.id), u.action === 'done') } : u);
+    // The command for the two steps the lead takes from here: the finish-line question and the fold-in check.
+    const how = (u) => {
+      if (u.action === 'ask-person' && !u.asked) return { ...u, step: `run.mjs ask ${s.id} --finish ${u.id}, and the same question through the question tool` };
+      if (u.action === 'fold-in') return { ...u, step: `check only the fold-ins and the tests they touch, then run.mjs foldin ${s.id} ${u.id} --head <sha> --evidence "…"` };
+      return u;
+    };
+    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? how(sync(suggest(u)))) };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];
@@ -828,7 +923,7 @@ const commands = {
   },
   stats(_, o) {
     const runs = commands.list().filter((r) => !r.error && r.closed && (!o.tag || r.tag === o.tag)).map((r) => load(r.run));
-    return { ...stats(runs), ...byModel(runs) };
+    return { ...stats(runs), ...byModel(runs), ...costStats(runs) };
   },
   // The routing table (references/routing.md), or the model for one role and task class.
   models(_, o) {
@@ -840,7 +935,7 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);

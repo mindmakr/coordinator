@@ -16,11 +16,22 @@ Pass these to `run.mjs init`. They are written into the run and enforced by `run
 
 Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run.
 
+## Test runs
+
+Full suites run again and again under load made late critic rounds three to six times the median, and the load caused the timing flakes that then failed rounds (#51). So:
+
+- **Builders** run only the suites their change touches while they work, then the full suite once before `built`.
+- **Critics** run the full suite once on the head; a specialist runs its area's tests and does not repeat the suite. `verdict --full-suite yes|no` records whether it ran.
+- **The integrator** runs the full checks once, on the merged result.
+- **Rerun under load** only a single file, only when a flake is suspected, and say so in the report or EVIDENCE.
+
 ## Loop stops, enforced by `run.mjs next`
 
 - **Same gap twice in a row:** the reply is `change-strategy`. Two rounds are the same gap when the critic gave both the same `CAUSE` tag (`verdict --cause`), even if the wording differs; when either round has no cause, most of the gap's words must match. After one change of strategy, the same gap again means `stop` (stuck).
 - **No progress:** the score has not beaten the best earlier score for 2 rounds, so `stop`.
-- **The budget is spent**, rounds or time: `stop`. Time is checked first, so even a waiting unit stops.
+- **The budget is spent**, rounds or time: `stop`. Time is checked first, so even a waiting unit stops. One exception (#45): a critic that started (`built` recorded) inside the time budget may still return its verdict after it; it gets no new build.
+- **Only a high or medium finding fails a round** (`bar.md`, Severity). Lows and nits are fold-ins on a pass, checked with `foldin`, not with a new critic round.
+- **The finish line:** the last open unit failing on mediums only gets `ask-person` before the round budget applies; the person's pick (ship with follow-ups, one more round, stop) decides, and a lead's own answer does not count (`lib/approval.mjs`).
 - **What it builds on stopped:** a stacked unit (`--after`) stops too, instead of waiting forever.
 - **A PASS with no evidence** is recorded as FAIL, and it still counts against the budget.
 - **Out-of-order steps are refused:** `start`, `strategy` and `integrate` work only when `next` asks for them; `verdict` only after `built`; `built`, `verdict` and `beat` are refused for a unit the rules have stopped; `close --outcome done` only when the run is done, never while a unit is in progress, and closing as `partial` or `stopped` before the rules end the run needs `--reason`. A fail needs `--gap` and `--score`. The rules hold even if the lead forgets to call `next`.

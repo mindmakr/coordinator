@@ -138,7 +138,9 @@ function how(u, d) {
 
 function then(u, d) {
   switch (d?.action) {
-    case 'done': return 'nothing left to do';
+    case 'done': return d.step === 'merge' ? 'its fold-ins are checked; next it merges' : 'nothing left to do';
+    case 'fold-in': return 'next a quick check of its fold-ins, then it merges';
+    case 'ask-person': return 'next the person decides: ship, one more round, or stop';
     case 'stopped': case 'stop': return 'it goes in the report as stopped';
     case 'judge': return 'next a critic checks it';
     case 'check-stale': return 'next the lead checks on the silent agent';

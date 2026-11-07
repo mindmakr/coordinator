@@ -8,7 +8,7 @@
 
 ## Steps
 
-1. **Pin the code.** Merged: check out the merge commit in your own worktree. Not merged: check the PR head and report; close nothing.
+1. **Pin the code.** Merged: check out the merge commit in your own worktree. When the merged tree equals the reviewed head merged with the target, the review stands and the lead skips this check (`commands/run.md`, Finish: `link --same-tree`). Not merged: check the PR head and report; close nothing.
 2. **One check per acceptance item:**
    - **test:** a test that asserts the item; paste its pass line;
    - **visual:** `visual.md` on the screens the item names, in the locales and sizes it names;

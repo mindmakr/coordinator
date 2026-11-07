@@ -45,10 +45,10 @@ test('a required specialist must pass the same build before the unit can pass', 
   assert.match(cli('verdict', 'sp', 'auth', 'pass', '--score', '9', '--evidence', 'e').err, /specialist security, visual has not passed/);
   assert.match(cli('verdict', 'sp', 'auth', 'pass', '--evidence', 'e', '--specialist', 'money').err, /no specialist money/);
   ok('verdict', 'sp', 'auth', 'pass', '--evidence', 'screens ok', '--specialist', 'visual', '--critic', 'visual critic');
-  ok('verdict', 'sp', 'auth', 'fail', '--score', '4', '--gap', 'timing oracle', '--evidence', 'auth.ts:12', '--specialist', 'security');
+  ok('verdict', 'sp', 'auth', 'fail', '--severity', 'high', '--score', '4', '--gap', 'timing oracle', '--evidence', 'auth.ts:12', '--specialist', 'security');
   assert.equal(state('sp').units[0].status, 'judging', 'a specialist verdict does not end the round');
   assert.match(cli('verdict', 'sp', 'auth', 'pass', '--score', '9', '--evidence', 'e').err, /specialist security has not passed/);
-  ok('verdict', 'sp', 'auth', 'fail', '--score', '5', '--gap', 'timing oracle (security specialist)', '--evidence', 'auth.ts:12');
+  ok('verdict', 'sp', 'auth', 'fail', '--severity', 'high', '--score', '5', '--gap', 'timing oracle (security specialist)', '--evidence', 'auth.ts:12');
   const r1 = state('sp').units[0].rounds[0];
   assert.equal(r1.specialists.security.verdict, 'fail'); assert.equal(r1.specialists.visual.critic, 'visual critic');
 

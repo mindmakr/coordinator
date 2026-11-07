@@ -29,7 +29,23 @@ Record them with `S/run.mjs add <run> <unit> --behaviour "…"` (repeat the flag
 - **Evidence goes on the behaviour it proves:** `S/run.mjs evidence <run> <unit> --behaviour B1 --kind test --text "…"`, or `--kind screenshot --file shot.png`, or `--kind link --url …` (limits in `guardrails.md`).
 - Behaviours describe outcomes. "Uses a Map" is not a behaviour; "answers in under 200 ms for 10k orders" is.
 - **Closed, never open-ended.** "Catch every X", "any phrasing" or "all such messages" cannot be checked: each round the builder adds cases and the critic finds a new one, so the score falls while the work gets better. State it as a closed list of cases ("these six templates") or as "every entry in this inventory" (a file, a registry, the committed keys). If no closed set exists, it is a review question for a person, not a behaviour (`sub-skills/investigate.md`, Bound the bar).
+- **`init`, `add` and `behave` warn on an open-ended line** (`lib/openbar.mjs`). The heuristic is short on purpose: an open word (every, all, any … that, catch, never … anywhere) with no closed list in the same line (a colon or brackets before a list, "these", "the following", "listed", a count before a noun such as "six templates", or an inventory, registry, manifest or file). It only warns. Rewrite the line, or keep it with `--accept-open`, which is recorded as a bar note.
 - **Guard tests get their own unit.** A guard or invariant test (a lint rule, a "no message claims X" test) goes in a unit of its own, apart from the product fix it protects, so a guard that keeps failing cannot stop a fix that passed. When a no-progress stop finds one behaviour failing in each of the last rounds while the rest pass, its reason names that behaviour: narrow it or move it out.
+
+## Severity: what fails a round
+
+Every finding the critic reports carries a severity:
+
+| Severity | Means | Round |
+|---|---|---|
+| high | a wrong result, data loss, a security hole, a behaviour failing | fails |
+| medium | a real defect against the bar, with a workaround | fails |
+| low | small and safe to fix in passing | a fold-in on a pass |
+| nit | wording or style | a fold-in on a pass |
+
+- `verdict fail` needs `--severity high|medium` for the gap. A fail on a low or a nit is refused: pass, and record them with `--fold "…"` (repeatable). A confirmed security finding is at least high (`sub-skills/review.md`).
+- **Fold-ins get a targeted check, not a new critic round.** After a pass with folds, `next` says `fold-in`: the lead, or a light check, confirms only the folds and the tests they touch, then `S/run.mjs foldin <run> <unit> --head <sha> --evidence "…"`. Then `next` says `done` with `step: merge`.
+- **The finish line.** When every other unit has passed or stopped and the last open unit's latest round failed on mediums only, `next` says `ask-person` with a ready question (ship with follow-ups, one more round, stop) instead of another build (`commands/run.md`, Loop).
 
 ## Rules
 
