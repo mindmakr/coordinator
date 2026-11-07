@@ -5,11 +5,14 @@
 const clone = (v) => (v === undefined ? undefined : structuredClone(v));
 
 export function alertStore(db) {
-  return db.kind === 'postgres' ? pgStore(db.pool) : memoryStore();
+  return db.kind === 'postgres' ? pgStore(db.pool) : memoryStore(db.alertTables ?? alertTables());
 }
 
-function memoryStore() {
-  const settings = new Map(); const subs = new Map(); const push = new Map(); const alerts = [];
+// c14: the memory store's tables, owned by the memory read model (db.alertTables) so its removeRepo
+// drops a repo's alerts and subscriptions the way Postgres does.
+export const alertTables = () => ({ settings: new Map(), subs: new Map(), push: new Map(), alerts: [] });
+
+function memoryStore({ settings, subs, push, alerts }) {
   let nextId = 1;
   const subKey = (u, i, r) => `${u}:${i}:${r}`;
   return {
@@ -47,7 +50,10 @@ function memoryStore() {
       for (const [k, s] of subs) if (s.installationId === installationId) subs.delete(k);
       for (let i = alerts.length - 1; i >= 0; i--) if (alerts[i].installationId === installationId) alerts.splice(i, 1);
     },
-    rows: (installationId) => ({ alerts: alerts.filter((a) => a.installationId === installationId).length, subscriptions: [...subs.values()].filter((s) => s.installationId === installationId).length }), // tests
+    rows: (installationId, repoId = null) => {
+      const mine = (x) => x.installationId === installationId && (repoId === null || x.repoId === repoId);
+      return { alerts: alerts.filter(mine).length, subscriptions: [...subs.values()].filter(mine).length };
+    }, // tests
   };
 }
 

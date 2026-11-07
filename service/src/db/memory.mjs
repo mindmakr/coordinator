@@ -1,5 +1,7 @@
 // In-memory adapter: same contract as postgres.mjs. For tests and a quick
 // local look; everything is gone on restart (the repo still has it all).
+import { alertTables } from '../alerts/store.mjs';
+
 const clone = (v) => (v === undefined ? undefined : structuredClone(v));
 const key = (...p) => p.join('\u0000');
 
@@ -8,10 +10,12 @@ export function memoryDb() {
   const sessions = new Map(); const audit = [];
   const refs = new Map(); const ghEvents = new Map(); const trackers = new Map();
   const commands = new Map(); // c12 writes
+  const alertRows = alertTables(); // c14: the alert store's tables (alerts/store.mjs)
   let trailCounter = 0; // trail_seq values, like Postgres's trail_seq_global
   const repoKey = (i, r) => key(i, r);
   return {
     kind: 'memory',
+    alertTables: alertRows,
     async close() {},
     async seenDelivery(id) { return deliveries.has(id); },
     async recordDelivery(id) { deliveries.set(id, Date.now()); },
@@ -36,6 +40,10 @@ export function memoryDb() {
       repos.delete(repoKey(installationId, id));
       for (const [k, r] of runs) if (r.installationId === installationId && r.repoId === id) runs.delete(k);
       for (const [k, r] of refs) if (r.installationId === installationId && r.repoId === id) refs.delete(k);
+      // c14: the repo's alerts, sent and queued for a digest, and who watched it.
+      const { alerts, subs } = alertRows;
+      for (let i = alerts.length - 1; i >= 0; i--) if (alerts[i].installationId === installationId && alerts[i].repoId === id) alerts.splice(i, 1);
+      for (const [k, x] of subs) if (x.installationId === installationId && x.repoId === id) subs.delete(k);
     },
     async repos(installationId) { return [...repos.values()].filter((r) => r.installationId === installationId).map(clone); },
     async repoByName(installationId, fullName) {

@@ -72,7 +72,17 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
       await q(`INSERT INTO repos (installation_id, id, full_name, private) VALUES ($1, $2, $3, $4)
         ON CONFLICT (installation_id, id) DO UPDATE SET full_name = $3, private = COALESCE($4, repos.private)`, [installationId, id, fullName, priv ?? null]);
     },
-    async removeRepo(installationId, id) { await q('DELETE FROM repos WHERE installation_id = $1 AND id = $2', [installationId, id]); },
+    // c14: with the repo go its alerts, sent and queued for a digest (alerts has no foreign key;
+    // subscriptions and runs cascade).
+    async removeRepo(installationId, id) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('DELETE FROM alerts WHERE installation_id = $1 AND repo_id = $2', [installationId, id]);
+        await c.query('DELETE FROM repos WHERE installation_id = $1 AND id = $2', [installationId, id]);
+        await c.query('COMMIT');
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    },
     async repos(installationId) { return (await q('SELECT * FROM repos WHERE installation_id = $1 ORDER BY full_name', [installationId])).rows.map(repoRow); },
     async repoByName(installationId, fullName) {
       return repoRow((await q('SELECT * FROM repos WHERE installation_id = $1 AND lower(full_name) = lower($2) ORDER BY synced_at DESC NULLS LAST LIMIT 1', [installationId, fullName])).rows[0]);

@@ -40,6 +40,9 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
       await db.audit('installation.deleted', { installationId: id, login: p.sender?.login ?? null });
       return { status: 200, body: 'removed' };
     }
+    // c14: only "created" makes an installation. Any other event for one this service does not
+    // know may be late, sent before an uninstall that was delivered first, and must not bring it back.
+    if (p.action !== 'created' && !(await db.installation(id))) return { status: 202, body: 'ignored: unknown installation' };
     await db.upsertInstallation({ id, account: String(p.installation?.account?.login ?? '') });
     await db.audit(`installation.${p.action}`, { installationId: id, login: p.sender?.login ?? null });
     if (p.action === 'created' || p.action === 'new_permissions_accepted' || p.action === 'unsuspend') return { status: 202, body: 'syncing', work: () => ingest.syncInstallation(id) };
@@ -48,7 +51,7 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
 
   async function reposEvent(p) {
     const id = Number(p.installation?.id);
-    await db.upsertInstallation({ id, account: String(p.installation?.account?.login ?? '') });
+    if (!(await db.installation(id))) return { status: 202, body: 'ignored: unknown installation' }; // c14: see installationEvent
     for (const r of p.repositories_removed ?? []) await db.removeRepo(id, Number(r.id));
     const added = (p.repositories_added ?? []).map(repoOf);
     for (const r of added) await db.upsertRepo({ installationId: id, ...r });
@@ -59,7 +62,7 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
   async function pushEvent(p) {
     if (p.ref !== `refs/heads/${branch}`) return { status: 202, body: 'ignored: not the state branch' };
     const id = Number(p.installation?.id);
-    if (!(await db.installation(id))) await db.upsertInstallation({ id, account: String(p.repository?.owner?.login ?? '') });
+    if (!(await db.installation(id))) return { status: 202, body: 'ignored: unknown installation' }; // c14: see installationEvent
     const repo = repoOf(p.repository);
     await db.upsertRepo({ installationId: id, ...repo });
     return { status: 202, body: 'syncing', work: () => ingest.syncRepo(id, { id: repo.id, fullName: repo.fullName }) };
