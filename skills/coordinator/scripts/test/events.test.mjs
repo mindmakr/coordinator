@@ -179,9 +179,11 @@ test('a 0.5 state.json with no events loads as before and gets a run.imported ba
   assert.match(run('show', 'e7').err, /events\.jsonl is missing/);
 });
 
-// A real run folder written by 0.5, copied (never touched in place). Skipped where it does not exist.
-const REAL = process.env.COORDINATOR_REAL_STATE ?? 'D:/projects/mindmakr/payday-web-nextjs/.coordinator/runs/payday-wave1/state.json';
-test('a real 0.5 run folder migrates on a copy and behaves as before', { skip: !existsSync(REAL) && 'no real 0.5 state on this machine' }, () => {
+// A real run folder written by 0.5: a committed copy with every free-text string
+// replaced by a placeholder (the same text always maps to the same placeholder,
+// so questions, answers and links still line up). Never a live run folder.
+const REAL = join(scripts, 'test', 'fixtures', 'old-run-0.5', 'state.json');
+test('a real 0.5 run folder migrates on a copy and behaves as before', () => {
   const old = JSON.parse(readFileSync(REAL, 'utf8'));
   mkdirSync(runDir(old.id), { recursive: true });
   copyFileSync(REAL, join(runDir(old.id), 'state.json'));

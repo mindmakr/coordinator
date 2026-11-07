@@ -1,0 +1,655 @@
+{
+  "addedAfterFreeze": 0,
+  "bar": "text 1",
+  "budget": {
+    "maxAdded": 1,
+    "maxMinutes": 720,
+    "maxRounds": 4,
+    "maxUnits": 6,
+    "staleMinutes": 60
+  },
+  "closed": {
+    "at": "2026-11-06T14:34:05.174Z",
+    "decision": "done",
+    "outcome": "partial"
+  },
+  "createdAt": "2026-11-06T09:21:21.531Z",
+  "fence": "text 2",
+  "frozen": true,
+  "goal": "text 3",
+  "id": "old-run",
+  "integration": {
+    "rounds": [
+      {
+        "at": "2026-11-06T14:33:50.131Z",
+        "cause": null,
+        "evidence": "text 4",
+        "gap": null,
+        "verdict": "pass"
+      }
+    ]
+  },
+  "notes": [
+    {
+      "at": "2026-11-06T09:21:22.777Z",
+      "kind": "decision",
+      "text": "text 5"
+    },
+    {
+      "at": "2026-11-06T09:21:22.869Z",
+      "kind": "decision",
+      "text": "text 6"
+    },
+    {
+      "at": "2026-11-06T09:21:23.007Z",
+      "kind": "decision",
+      "text": "text 7"
+    },
+    {
+      "at": "2026-11-06T09:21:23.095Z",
+      "kind": "decision",
+      "text": "text 8"
+    },
+    {
+      "at": "2026-11-06T09:21:23.208Z",
+      "kind": "decision",
+      "text": "text 9"
+    },
+    {
+      "at": "2026-11-06T09:23:15.918Z",
+      "kind": "info",
+      "text": "text 10"
+    },
+    {
+      "at": "2026-11-06T09:28:00.634Z",
+      "kind": "question",
+      "text": "text 11"
+    },
+    {
+      "at": "2026-11-06T09:35:58.109Z",
+      "kind": "situation",
+      "text": "text 12"
+    },
+    {
+      "at": "2026-11-06T09:43:30.683Z",
+      "kind": "decision",
+      "text": "text 13"
+    },
+    {
+      "at": "2026-11-06T09:43:31.112Z",
+      "kind": "situation",
+      "text": "text 14"
+    },
+    {
+      "at": "2026-11-06T09:48:37.710Z",
+      "kind": "decision",
+      "text": "text 15"
+    },
+    {
+      "at": "2026-11-06T09:49:23.698Z",
+      "kind": "situation",
+      "text": "text 16"
+    },
+    {
+      "at": "2026-11-06T10:04:18.292Z",
+      "kind": "decision",
+      "text": "text 17"
+    },
+    {
+      "answers": "q1",
+      "at": "2026-11-06T10:04:45.715Z",
+      "kind": "decision",
+      "text": "text 18"
+    },
+    {
+      "at": "2026-11-06T10:15:52.920Z",
+      "kind": "decision",
+      "text": "text 19"
+    },
+    {
+      "at": "2026-11-06T10:15:53.260Z",
+      "kind": "decision",
+      "text": "text 20"
+    },
+    {
+      "at": "2026-11-06T10:15:53.643Z",
+      "kind": "decision",
+      "text": "text 21"
+    },
+    {
+      "at": "2026-11-06T10:15:53.992Z",
+      "kind": "decision",
+      "text": "text 22"
+    },
+    {
+      "at": "2026-11-06T10:16:19.371Z",
+      "kind": "follow-up",
+      "text": "text 23"
+    },
+    {
+      "at": "2026-11-06T10:18:44.273Z",
+      "kind": "situation",
+      "text": "text 24"
+    },
+    {
+      "at": "2026-11-06T10:35:21.020Z",
+      "kind": "info",
+      "text": "text 25"
+    },
+    {
+      "at": "2026-11-06T10:58:35.373Z",
+      "kind": "situation",
+      "text": "text 26"
+    },
+    {
+      "at": "2026-11-06T11:12:28.285Z",
+      "kind": "situation",
+      "text": "text 27"
+    },
+    {
+      "at": "2026-11-06T11:29:24.428Z",
+      "kind": "strategy",
+      "text": "text 28"
+    },
+    {
+      "at": "2026-11-06T11:33:47.440Z",
+      "kind": "situation",
+      "text": "text 29"
+    },
+    {
+      "at": "2026-11-06T11:49:29.683Z",
+      "kind": "decision",
+      "text": "text 30"
+    },
+    {
+      "at": "2026-11-06T11:54:31.508Z",
+      "kind": "decision",
+      "text": "text 31"
+    },
+    {
+      "at": "2026-11-06T12:10:32.210Z",
+      "header": "Reactivate",
+      "history": [
+        {
+          "at": "2026-11-06T12:53:16.477Z",
+          "by": "person",
+          "choices": [
+            "text 32"
+          ],
+          "other": null
+        }
+      ],
+      "kind": "question",
+      "multi": false,
+      "options": [
+        {
+          "description": "text 33",
+          "label": "text 32"
+        },
+        {
+          "description": "text 34",
+          "label": "text 35"
+        }
+      ],
+      "recommend": "text 32",
+      "text": "text 36",
+      "unit": "u1213",
+      "usedAt": "2026-11-06T12:53:16.798Z"
+    },
+    {
+      "at": "2026-11-06T12:53:16.151Z",
+      "kind": "follow-up",
+      "text": "text 37"
+    },
+    {
+      "at": "2026-11-06T12:54:13.966Z",
+      "kind": "situation",
+      "text": "text 38"
+    },
+    {
+      "at": "2026-11-06T13:17:02.282Z",
+      "kind": "strategy",
+      "text": "text 39"
+    },
+    {
+      "at": "2026-11-06T14:02:12.372Z",
+      "kind": "follow-up",
+      "text": "text 40"
+    },
+    {
+      "at": "2026-11-06T14:34:05.174Z",
+      "kind": "decision",
+      "text": "text 41"
+    }
+  ],
+  "paths": [
+    "backend",
+    "frontend",
+    "content",
+    "docs"
+  ],
+  "tag": "code",
+  "units": [
+    {
+      "after": null,
+      "bar": "text 42",
+      "detect": {
+        "allow": [
+          "text 43"
+        ],
+        "at": "2026-11-06T11:15:23.804Z",
+        "base": "text 44",
+        "clean": true,
+        "files": 19,
+        "head": "text 45",
+        "hits": 0,
+        "round": 3
+      },
+      "heartbeatAt": "2026-11-06T11:15:20.976Z",
+      "id": "u1206",
+      "links": [
+        {
+          "at": "2026-11-06T14:17:20.532Z",
+          "kind": "issue",
+          "label": null,
+          "url": "text 46"
+        },
+        {
+          "at": "2026-11-06T14:17:20.533Z",
+          "kind": "pr",
+          "label": null,
+          "url": "text 47"
+        }
+      ],
+      "log": [
+        {
+          "at": "2026-11-06T14:17:20.533Z",
+          "kind": "link",
+          "link": "issue",
+          "text": "text 46"
+        },
+        {
+          "at": "2026-11-06T14:17:20.533Z",
+          "kind": "link",
+          "link": "pr",
+          "text": "text 47"
+        }
+      ],
+      "rounds": [
+        {
+          "at": "2026-11-06T10:13:03.850Z",
+          "cause": "text 48",
+          "evidence": "text 49",
+          "gap": "text 50",
+          "n": 1,
+          "score": 8,
+          "verdict": "fail"
+        },
+        {
+          "at": "2026-11-06T10:58:16.201Z",
+          "cause": "text 51",
+          "evidence": "text 52",
+          "gap": "text 53",
+          "n": 2,
+          "score": 8,
+          "verdict": "fail"
+        },
+        {
+          "at": "2026-11-06T11:33:47.259Z",
+          "cause": null,
+          "evidence": "text 54",
+          "gap": null,
+          "n": 3,
+          "score": 9,
+          "verdict": "pass"
+        }
+      ],
+      "status": "pass",
+      "stopReason": null,
+      "strategyAt": -1,
+      "strategyChanges": 0
+    },
+    {
+      "after": null,
+      "bar": "text 55",
+      "detect": {
+        "allow": [],
+        "at": "2026-11-06T10:13:24.703Z",
+        "base": "text 56",
+        "clean": true,
+        "files": 17,
+        "head": "text 57",
+        "hits": 0,
+        "round": 1
+      },
+      "heartbeatAt": "2026-11-06T10:32:34.510Z",
+      "id": "u1205",
+      "links": [
+        {
+          "at": "2026-11-06T14:17:21.312Z",
+          "kind": "issue",
+          "label": null,
+          "url": "text 58"
+        },
+        {
+          "at": "2026-11-06T14:17:21.312Z",
+          "kind": "pr",
+          "label": null,
+          "url": "text 59"
+        }
+      ],
+      "log": [
+        {
+          "at": "2026-11-06T14:17:21.312Z",
+          "kind": "link",
+          "link": "issue",
+          "text": "text 58"
+        },
+        {
+          "at": "2026-11-06T14:17:21.312Z",
+          "kind": "link",
+          "link": "pr",
+          "text": "text 59"
+        }
+      ],
+      "rounds": [
+        {
+          "at": "2026-11-06T10:49:43.341Z",
+          "cause": null,
+          "evidence": "text 60",
+          "gap": null,
+          "n": 1,
+          "score": 9,
+          "verdict": "pass"
+        }
+      ],
+      "status": "pass",
+      "stopReason": null,
+      "strategyAt": -1,
+      "strategyChanges": 0
+    },
+    {
+      "after": null,
+      "bar": "text 61",
+      "detect": {
+        "allow": [
+          "text 62"
+        ],
+        "at": "2026-11-06T10:39:03.192Z",
+        "base": "text 56",
+        "clean": true,
+        "files": 34,
+        "head": "text 63",
+        "hits": 0,
+        "round": 1
+      },
+      "heartbeatAt": "2026-11-06T10:45:16.537Z",
+      "id": "u1211",
+      "links": [
+        {
+          "at": "2026-11-06T14:17:21.935Z",
+          "kind": "issue",
+          "label": null,
+          "url": "text 64"
+        },
+        {
+          "at": "2026-11-06T14:17:21.936Z",
+          "kind": "pr",
+          "label": null,
+          "url": "text 65"
+        }
+      ],
+      "log": [
+        {
+          "at": "2026-11-06T14:17:21.936Z",
+          "kind": "link",
+          "link": "issue",
+          "text": "text 64"
+        },
+        {
+          "at": "2026-11-06T14:17:21.936Z",
+          "kind": "link",
+          "link": "pr",
+          "text": "text 65"
+        }
+      ],
+      "rounds": [
+        {
+          "at": "2026-11-06T10:57:57.557Z",
+          "cause": null,
+          "evidence": "text 66",
+          "gap": null,
+          "n": 1,
+          "score": 9,
+          "verdict": "pass"
+        }
+      ],
+      "status": "pass",
+      "stopReason": null,
+      "strategyAt": -1,
+      "strategyChanges": 0
+    },
+    {
+      "after": null,
+      "bar": "text 67",
+      "detect": {
+        "allow": [
+          "text 68"
+        ],
+        "at": "2026-11-06T10:16:37.713Z",
+        "base": "text 56",
+        "clean": true,
+        "files": 4,
+        "head": "text 69",
+        "hits": 0,
+        "round": 1
+      },
+      "heartbeatAt": "2026-11-06T10:17:52.541Z",
+      "id": "u1207",
+      "links": [
+        {
+          "at": "2026-11-06T14:17:22.769Z",
+          "kind": "issue",
+          "label": null,
+          "url": "text 70"
+        },
+        {
+          "at": "2026-11-06T14:17:22.769Z",
+          "kind": "pr",
+          "label": null,
+          "url": "text 71"
+        }
+      ],
+      "log": [
+        {
+          "at": "2026-11-06T14:17:22.769Z",
+          "kind": "link",
+          "link": "issue",
+          "text": "text 70"
+        },
+        {
+          "at": "2026-11-06T14:17:22.769Z",
+          "kind": "link",
+          "link": "pr",
+          "text": "text 71"
+        }
+      ],
+      "rounds": [
+        {
+          "at": "2026-11-06T10:41:50.476Z",
+          "cause": null,
+          "evidence": "text 72",
+          "gap": null,
+          "n": 1,
+          "score": 9,
+          "verdict": "pass"
+        }
+      ],
+      "status": "pass",
+      "stopReason": null,
+      "strategyAt": -1,
+      "strategyChanges": 0
+    },
+    {
+      "after": "u1211",
+      "bar": "text 73",
+      "detect": {
+        "allow": [
+          "text 74",
+          "text 75"
+        ],
+        "at": "2026-11-06T13:42:05.354Z",
+        "base": "text 76",
+        "clean": true,
+        "files": 32,
+        "head": "text 77",
+        "hits": 0,
+        "round": 3
+      },
+      "heartbeatAt": "2026-11-06T13:52:58.646Z",
+      "id": "u1213",
+      "links": [
+        {
+          "at": "2026-11-06T14:17:23.448Z",
+          "kind": "issue",
+          "label": null,
+          "url": "text 78"
+        },
+        {
+          "at": "2026-11-06T14:17:23.449Z",
+          "kind": "pr",
+          "label": null,
+          "url": "text 79"
+        }
+      ],
+      "log": [
+        {
+          "at": "2026-11-06T14:17:23.449Z",
+          "kind": "link",
+          "link": "issue",
+          "text": "text 78"
+        },
+        {
+          "at": "2026-11-06T14:17:23.449Z",
+          "kind": "link",
+          "link": "pr",
+          "text": "text 79"
+        }
+      ],
+      "rounds": [
+        {
+          "at": "2026-11-06T12:10:31.801Z",
+          "cause": "text 80",
+          "evidence": "text 81",
+          "gap": "text 82",
+          "n": 1,
+          "score": 8,
+          "verdict": "fail"
+        },
+        {
+          "at": "2026-11-06T13:17:01.327Z",
+          "cause": "text 80",
+          "evidence": "text 83",
+          "gap": "text 84",
+          "n": 2,
+          "score": 8,
+          "verdict": "fail"
+        },
+        {
+          "at": "2026-11-06T14:01:52.982Z",
+          "cause": "text 85",
+          "evidence": "text 86",
+          "gap": "text 87",
+          "n": 3,
+          "score": 6,
+          "verdict": "fail"
+        }
+      ],
+      "status": "stopped",
+      "stopReason": "text 88",
+      "strategyAt": 2,
+      "strategyChanges": 1
+    },
+    {
+      "after": null,
+      "bar": "text 89",
+      "detect": {
+        "allow": [
+          "text 90",
+          "text 91",
+          "text 92"
+        ],
+        "at": "2026-11-06T11:49:45.837Z",
+        "base": "text 93",
+        "clean": true,
+        "files": 29,
+        "head": "text 94",
+        "hits": 0,
+        "round": 3
+      },
+      "heartbeatAt": "2026-11-06T11:54:19.332Z",
+      "id": "u1214",
+      "links": [
+        {
+          "at": "2026-11-06T14:17:24.391Z",
+          "kind": "issue",
+          "label": null,
+          "url": "text 95"
+        },
+        {
+          "at": "2026-11-06T14:17:24.392Z",
+          "kind": "pr",
+          "label": null,
+          "url": "text 96"
+        }
+      ],
+      "log": [
+        {
+          "at": "2026-11-06T14:17:24.392Z",
+          "kind": "link",
+          "link": "issue",
+          "text": "text 95"
+        },
+        {
+          "at": "2026-11-06T14:17:24.392Z",
+          "kind": "link",
+          "link": "pr",
+          "text": "text 96"
+        }
+      ],
+      "rounds": [
+        {
+          "at": "2026-11-06T10:45:32.742Z",
+          "cause": "text 97",
+          "evidence": "text 98",
+          "gap": "text 99",
+          "n": 1,
+          "score": 7,
+          "verdict": "fail"
+        },
+        {
+          "at": "2026-11-06T11:29:03.888Z",
+          "cause": "text 97",
+          "evidence": "text 100",
+          "gap": "text 101",
+          "n": 2,
+          "score": 8,
+          "verdict": "fail"
+        },
+        {
+          "at": "2026-11-06T12:53:15.865Z",
+          "cause": null,
+          "evidence": "text 102",
+          "gap": null,
+          "n": 3,
+          "score": 9,
+          "verdict": "pass"
+        }
+      ],
+      "status": "pass",
+      "stopReason": null,
+      "strategyAt": 2,
+      "strategyChanges": 1
+    }
+  ]
+}
