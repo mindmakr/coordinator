@@ -27,8 +27,10 @@ async function hook(t, event, body) {
   return [r.status, await r.text()];
 }
 
-test('settings: defaults 4 syncs, 2 per installation, 64 MB of blobs; out of range is refused', () => {
-  assert.deepEqual(syncSettings({}), { concurrency: 4, perInstallation: 2, blobBytes: 64 * 1024 * 1024 });
+test('settings: defaults 4 syncs, 2 per installation, 192 MB of blobs, a trail lane of 4 (1 per installation), 300 trail reads, 300 s a job; out of range is refused', () => {
+  assert.deepEqual(syncSettings({}), { concurrency: 4, perInstallation: 2, blobBytes: 192 * 1024 * 1024, trailConcurrency: 4, trailPerInstallation: 1, trailReads: 300, jobMs: 300_000 });
+  assert.throws(() => syncSettings({ SYNC_JOB_SECONDS: '5000' }), /SYNC_JOB_SECONDS/);
+  assert.throws(() => syncSettings({ TRAIL_READS: '0' }), /TRAIL_READS/);
   assert.throws(() => syncSettings({ SYNC_BLOB_MB: '8' }), /SYNC_BLOB_MB=8 \(16-4096\)/);
   assert.throws(() => syncSettings({ SYNC_CONCURRENCY: '0' }), /SYNC_CONCURRENCY/);
 });
@@ -122,7 +124,7 @@ test('s1: 200 signed pushes of 8 MB logs from one installation keep memory bound
     const MB = (x) => Math.round(x / 1048576);
     console.log(`# s1: ${N} pushes; rss ${MB(base)} -> peak ${MB(peak)} MB; syncs at once peak ${s.peak}; blob bytes peak ${MB(s.blobBytes.peak)} MB`);
     assert.ok(s.peak <= 4, 'at most 4 syncs at once');
-    assert.ok(s.blobBytes.peak <= 64 * 1048576, 'blob bytes held within the budget');
+    assert.ok(s.blobBytes.peak <= s.blobBytes.max, 'blob bytes held within the budget');
     assert.ok(peak - base < 400 * 1048576, `memory grew ${MB(peak - base)} MB`);
     // Queued syncs are dropped on close; the running ones finish.
     await t.app.ingest.close(); closed = true;

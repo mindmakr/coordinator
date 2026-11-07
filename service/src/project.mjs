@@ -22,10 +22,11 @@ export function listedRepos(config) {
 
 export function projectFence({ gh, ttlMs = 60_000, now = Date.now }) {
   const cache = new Map();
-  async function agrees(token, target, stateName) {
+  async function agrees(token, target, stateName, spend) {
     const k = `${lower(target)}\u0000${lower(stateName)}`;
     const hit = cache.get(k);
     if (hit && hit.until > now()) return hit.ok;
+    spend?.(); // c14 round 5: the trail's read budget (it throws when spent)
     let ok = false;
     try {
       const buf = await gh.defaultBranchFile(token, target, 'coordinator.json');
@@ -37,12 +38,12 @@ export function projectFence({ gh, ttlMs = 60_000, now = Date.now }) {
   }
 
   // stateRepo: the run's repo row (with config); target: the repo row a unit links to.
-  // token(): a read-only installation token, minted only if needed.
-  async function allows(stateRepo, target, token) {
+  // token(): a read-only installation token, minted only if needed. spend (optional): see agrees.
+  async function allows(stateRepo, target, token, spend = null) {
     if (!target || target.installationId !== stateRepo.installationId) return false;
     if (target.id === stateRepo.id) return true;
     if (!listedRepos(stateRepo.config).has(lower(target.fullName))) return false;
-    return agrees(await token(), target.fullName, stateRepo.fullName);
+    return agrees(await token(), target.fullName, stateRepo.fullName, spend);
   }
   return { allows };
 }

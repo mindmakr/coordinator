@@ -8,6 +8,14 @@
 //   both), so a burst of pushes to one repo is one sync, not a queue of them;
 // - a blob is fetched only once its bytes fit the budget of blob bytes held at once (SYNC_BLOB_MB),
 //   and its bytes are held until it is read, so queued work holds references, never buffers.
+//   A blob is charged BLOB_HOLD times its stored size: while one is read the process holds the base64
+//   text of GitHub's answer, the parsed string, the decoded Buffer, the worker's copy and the text
+//   the reader makes from it, about five copies in all.
+// c14 round 5: a run's GitHub trail (tracker comments, board cards) is refreshed in a lane of its own
+// (TRAIL_CONCURRENCY, TRAIL_PER_INSTALLATION), after the sync has given its slot back, so a pushed log
+// that makes its trail slow cannot hold the slots other installations' syncs need. A sync job stops
+// reading after SYNC_JOB_SECONDS and leaves the rest for the next sync; the trail's GitHub reads are
+// budgeted per installation (TRAIL_READS per 10 minutes, trail.mjs) and the rest wait, like comment writes.
 
 const envInt = (k, d, min, max, env = process.env) => {
   const v = env[k];
@@ -17,10 +25,17 @@ const envInt = (k, d, min, max, env = process.env) => {
   return n;
 };
 // The largest single blob read is a 16 MB map log (ingest.mjs LIMITS.mapBytes), so the budget is at least that.
+export const BLOB_HOLD = 5;
 export const syncSettings = (env = process.env) => ({
   concurrency: envInt('SYNC_CONCURRENCY', 4, 1, 64, env),
   perInstallation: envInt('SYNC_PER_INSTALLATION', 2, 1, 64, env),
-  blobBytes: envInt('SYNC_BLOB_MB', 64, 16, 4096, env) * 1024 * 1024,
+  // Counted at BLOB_HOLD times each blob's size: 192 MB lets four 8 MB logs be read at once.
+  blobBytes: envInt('SYNC_BLOB_MB', 192, 16, 4096, env) * 1024 * 1024,
+  trailConcurrency: envInt('TRAIL_CONCURRENCY', 4, 1, 64, env),
+  trailPerInstallation: envInt('TRAIL_PER_INSTALLATION', 1, 1, 64, env),
+  trailReads: envInt('TRAIL_READS', 300, 10, 100_000, env),
+  // Under an hour with the token's age (ingest.mjs TOKEN_REUSE_MS): an installation token lasts one.
+  jobMs: envInt('SYNC_JOB_SECONDS', 300, 10, 1200, env) * 1000,
 });
 
 // Jobs per tenant (an installation) and key (a repo). submit(tenant, key, opts, run, merge) returns
@@ -71,6 +86,7 @@ export function syncQueue({ concurrency, perInstallation } = syncSettings()) {
       if (same) { same.opts = merge(same.opts, opts); return same.promise; }
       let ok; let fail;
       const promise = new Promise((a, b) => { ok = a; fail = b; });
+      promise.catch(() => {}); // a refused job's caller may have gone; the rejection is still theirs to read
       const job = { tenant, key, opts, run, ok, fail, promise };
       queued.set(key, job);
       if (!queues.has(tenant)) { queues.set(tenant, []); ring.push(tenant); }
@@ -79,6 +95,15 @@ export function syncQueue({ concurrency, perInstallation } = syncSettings()) {
       return promise;
     },
     stats: () => ({ running: busy, queued: queued.size, peak }),
+    // An installation removed: its queued jobs are refused (running ones check for themselves).
+    drop(tenant, why = 'the installation was removed') {
+      const q = queues.get(tenant);
+      if (!q) return 0;
+      queues.delete(tenant);
+      const i = ring.indexOf(tenant); if (i >= 0) ring.splice(i, 1);
+      for (const j of q) { queued.delete(j.key); j.fail(new Error(why)); }
+      return q.length;
+    },
     // Queued syncs are refused; running ones finish.
     close() {
       closed = true;
