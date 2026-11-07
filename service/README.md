@@ -75,7 +75,9 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_FILE` | yes | The App's PEM (one line with `\n`, or a mounted file) |
 | `DATABASE_URL` | for real use | Postgres connection string |
 | `GITHUB_APP_SLUG` | no | Shows an "install the App" link |
-| `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` (last entry) for rate limits |
+| `TRUST_PROXY` | behind a proxy | `1` to read the client address from `X-Forwarded-For` (last entry) for rate limits. The port must then be reachable from the proxy alone ([docs/self-host.md](../docs/self-host.md#behind-a-proxy)) |
+| `TRUSTED_PROXY_HOPS` | behind a CDN | Proxies in front that each add an `X-Forwarded-For` entry; the client is that many from the end (default 1; 2 for a CDN, then Traefik; 1–5) |
+| `WEBHOOK_SOURCES` | no | Who counts as GitHub for webhooks: `github` (default), comma-separated CIDRs, or `any` ([below](#webhook-sources)) |
 | `PORT`, `STATE_BRANCH`, `ACCESS_TTL_SECONDS` (max 60, design 10.3), `SESSION_DAYS`, `MAX_CONNECTIONS` | no | Defaults 3000, `coordinator-state`, 60, 7, 1000 |
 | `TRACKERS`, `BOARD` | no | `off` turns tracker comments or board fields off for every repo |
 | `RESYNC_MINUTES` | no | How often every installation is re-read (default 15, 0 turns it off) |
@@ -83,6 +85,37 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | no | Web push alerts (`npx web-push generate-vapid-keys`). Both keys or neither; the subject is a `mailto:` or `https:` URL |
 | `ALERT_SWEEP_SECONDS` | no | How often leads gone quiet are looked for and due digests are sent (default 60) |
 | `DOORBELL_MAX_STREAMS` | no | Open doorbell streams at most (default 500; 0 turns the doorbell off) |
+
+### Reading runs fairly
+
+Every installation's logs are read in turn by a small worker pool, so one installation pushing many large logs cannot hold up the others. All optional.
+
+| Variable | Default | What |
+|---|---|---|
+| `PARSE_WORKERS` | 2 | Worker threads that read logs. A large file never takes the last one, so a small run is read at once |
+| `PARSE_SMALL_KB` | 512 | Files up to this size count as small |
+| `PARSE_BUDGET_SECONDS` | 600 | Reading time each installation gets per hour. Past it, its logs wait for the next resync; the repo shows why, and the service logs it |
+| `SYNC_MAX_MB` | 64 | Log bytes one sync of one repo reads. The rest follow at the next sync |
+
+Syncs are queued (c14), so many pushes at once cannot fill the memory. A push for a repo already waiting joins that sync. All optional.
+
+| Variable | Default | What |
+|---|---|---|
+| `SYNC_CONCURRENCY` | 4 | Repo syncs that run at once, in all (1-64) |
+| `SYNC_PER_INSTALLATION` | 2 | Of those, how many one installation may run; installations take turns (1-64) |
+| `SYNC_BLOB_MB` | 192 | Memory the blobs being read may take, in all. Each blob counts 5 times its size (GitHub's base64 text, the parsed string, the bytes, the worker's copy and the text read from it), and is fetched only when it fits (16-4096) |
+| `SYNC_JOB_SECONDS` | 300 | One sync of one repo stops reading after this; the rest follow at the next sync. A job that waited more than 30 minutes mints a fresh token (10-1200) |
+| `TRAIL_CONCURRENCY` | 4 | Trail refreshes (tracker comments, board cards) at once. They run after the sync has given its slot back, so a slow trail never holds a sync slot (1-64) |
+| `TRAIL_PER_INSTALLATION` | 1 | Of those, how many one installation may run; installations take turns (1-64) |
+| `TRAIL_READS` | 300 | GitHub calls one installation's trail may make per 10 minutes, other than comment writes: each search for the App's own comment, each board query or field write, each read of a linked repo's `coordinator.json`. Past it the run stays owed and the next sync carries on, like comment writes past their 200. A card found not on the board is asked about again only when the unit's state changes (10-100000) |
+
+The periodic resync lists a few installations at a time and queues all their repos at once, so installations take turns in the queue. After an uninstall its queued syncs and trail refreshes are dropped, and a running one writes nothing more.
+
+`npm run sync -- <id> --force` re-reads every log even when the branch tip has not moved. When that is more than `SYNC_MAX_MB`, the repo is marked in the database (`repos.reread`), and every later sync, forced or the service's own, carries the pass on until it is done.
+
+### Webhook sources
+
+GitHub delivers webhooks from published ranges (`hooks` in `GET /meta`). With `WEBHOOK_SOURCES=github` the service fetches them from `GITHUB_API_URL/meta` at start and every 24 hours (`src/hooksource.mjs`), and uses a built-in copy until a fetch succeeds or when one fails; a failed or empty answer keeps the list in use. Only those addresses may use the last 6 MB of the webhook budget, and only from them does the App header skip the refused-delivery limit. GitHub's addresses also deliver everyone else's repo and App hooks, so a delivery from them that does not name this App (`X-GitHub-Hook-Installation-Target-Type` `integration` and `-ID` the App id) counts under the hook target it names, capped like an address group, and stays out of the reserve. A comma-separated list of CIDRs is used as given and never fetched (GitHub Enterprise Server). `any` trusts no address: every address group is capped alike, the reserve takes bodies of 64 KB or less from anyone, and the App header is believed from anyone. Nothing is stored; the list lives in memory.
 
 ## Alerts and the doorbell
 
@@ -108,7 +141,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 - Push subscriptions are accepted only for the browsers' own push services (Google, Mozilla, Apple, Microsoft), since the service posts to them.
 - For security alerts, give the App "Secret scanning alerts", "Code scanning alerts" and "Dependabot alerts" (read) and the matching events; they are optional.
 
-**The doorbell** (design 3.2, option C) lets `run.mjs watch <run> --remote` pull within seconds of a change instead of at its next poll (every 30 s). `POST /doorbell/token?repo=owner/name` with the person's GitHub token as a Bearer returns a doorbell token for that one repo, valid 15 minutes, if GitHub says they can read it; the GitHub token is used for that check and not kept. `GET /doorbell?run=<run>` with that token is a Server-Sent Events stream of `changed` events carrying only `{ "run": "<id>" }`; it ends when the token expires, and the skill mints a new one (and so re-checks access). Without the doorbell, or when it fails, polling still delivers within 60 s.
+**The doorbell** (design 3.2, option C) lets `run.mjs watch <run> --remote` pull within seconds of a change instead of at its next poll (every 30 s). `POST /doorbell/token?repo=owner/name` with the person's GitHub token as a Bearer returns a doorbell token for that one repo, valid 15 minutes, if GitHub says they can read it; the GitHub token is used for that check and not kept. `GET /doorbell?run=<run>` with that token is a Server-Sent Events stream of `changed` events carrying only `{ "run": "<id>" }`; the service also asks GitHub, as the App, whether the person can still read the repo when the stream opens and every 60 s, and ends the stream when they cannot (or GitHub cannot say); it ends when the token expires too, and the skill mints a new one (and so re-checks access with the person's own token). Without the doorbell, or when it fails, polling still delivers within 60 s.
 
 ## Register the GitHub App
 
@@ -121,7 +154,7 @@ All from the environment; [.env.example](.env.example) lists them. Nothing secre
 | Issues | write | tracker comments, comment commands | Create and edit the one tracker comment per unit; reactions and replies to commands; `issue_comment` events |
 | Pull requests | write | tracker comments, merge events | Comments on PRs; `pull_request` events |
 | Checks | read | check events | `check_suite` events |
-| Organization projects | write | board | Set the Run, Unit state and Status fields; create the two coordinator fields once. Leave it out to run without a board |
+| Organization projects | write | board | Set the Run, Unit state and Status fields; create the two coordinator fields once. Not every project uses a board, but a GitHub App cannot ask for a permission per installation, so the hosted App asks for it for the projects that do; it only ever touches a board that `coordinator.json` names. Self-hosters without boards can leave it out and set `BOARD=off` |
 
 Events: `push`, `pull_request`, `check_suite`, `issue_comment`, and for security alerts `secret_scanning_alert`, `code_scanning_alert`, `dependabot_alert` (installation events always arrive). An App registered before 0.7 needs Contents raised to write, the three security alert permissions added, and these events added in its settings; each installation then accepts the new permissions.
 
@@ -139,6 +172,8 @@ Events: `push`, `pull_request`, `check_suite`, `issue_comment`, and for security
 4. In the App's settings, keep "Expire user authorization tokens" on.
 5. Install the App on the repos whose runs you want to see.
 
+The manifest says `"public": true`, which the hosted App needs so any account can install it. A self-hosted App for your own account or organisation can set it to `false` before step 2, so nobody else can install it.
+
 ## Deploy on Dokploy
 
 One container plus Postgres:
@@ -148,7 +183,7 @@ One container plus Postgres:
 3. Environment: everything in the table above, with `DATABASE_URL` from step 1, `BASE_URL` set to the domain, and `TRUST_PROXY=1`. Mount the App key as a file and set `GITHUB_APP_PRIVATE_KEY_FILE`, or paste it into `GITHUB_APP_PRIVATE_KEY`.
 4. Domain: add it with HTTPS (Let's Encrypt), container port 3000.
 5. Deploy. Migrations run at start. `GET /healthz` answers `ok`.
-6. Point the App's webhook at `https://<domain>/webhook`, then run `npm run sync -- --all` from the container's terminal once to pick up repos installed before the service was up.
+6. Point the App's webhook at `https://<domain>/webhook`. For each installation made before the service was up, run `npm run sync -- <installation-id>` once from the container's terminal. The id is the number at the end of the installation's settings page (GitHub: Settings → Applications → Installed GitHub Apps → Configure; for an organisation, Organization settings → GitHub Apps), whose address ends in `/installations/<id>`. `sync --all` only re-reads installations already in the database, so on a new database it does nothing.
 
 Logs go to stdout as JSON lines. Deleting the database loses nothing but sessions and the audit log: a sync rebuilds every run from the repos.
 
@@ -159,15 +194,21 @@ Logs go to stdout as JSON lines. Deleting the database loses nothing but session
 
 ## Security notes
 
-- Webhooks: the HMAC SHA-256 is always checked first, in constant time, with a 5 MB body cap. A delivery that verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses, so someone else's misconfigured hook must not block ours. Only refused deliveries are counted (30 a minute per address, then 429 for refused ones only).
+- Webhooks: the HMAC SHA-256 is always checked first, in constant time, with a 5 MB body cap, and every body being read at once shares a 32 MB budget (past it: 503). A delivery that verifies is never rate limited: GitHub sends every App's hooks from a few shared addresses, so someone else's misconfigured hook must not block ours. Only refused deliveries are counted (30 a minute per address); past that, a request from that address is answered 429 before its body is read, unless it names this App in `X-GitHub-Hook-Installation-Target-ID` (GitHub sets it on every App delivery). A delivery id or a body seen before is acknowledged and skipped, so a signed body replayed under a new delivery id does nothing.
+- Webhook bodies in flight (c14): addresses are grouped, IPv4 by /24 and IPv6 by /64. A group outside GitHub's hook addresses may be sending at most 512 KB of bodies at once (past it 429; a body declared larger, 413), so filling the 32 MB budget takes 52 groups. The last 6 MB takes only GitHub's hook addresses ([Webhook sources](#webhook-sources)), which have no per-group cap, so GitHub's deliveries get through while others fill the rest (503). `X-GitHub-Hook-Installation-Target-ID` is believed only from GitHub's addresses. Every per-address limit counts an IPv6 /64 as one address. A body must arrive in full within 10 s (GitHub's own delivery timeout), or it is cut with 408. A body that is cut, too large or ends early counts as a refused delivery for its address, like a bad signature. All in memory, per container; nothing is stored. Behind a proxy, set `TRUST_PROXY=1` (and `TRUSTED_PROXY_HOPS=2` behind a CDN), or every client shares the proxy's address, and GitHub's deliveries lose the reserve.
+- Run logs, maps, lessons and `coordinator.json` are parsed, validated, replayed and masked in a worker thread, one at a time, with a 20 s limit, so no log can stall the server for other tenants. Every string in an event is at most 64 KiB (the skill's event schema), and secret masking is linear in the text (tested against inputs built to make regexes backtrack).
 - Every installation is re-read every `RESYNC_MINUTES` (15), so a missed or failed delivery heals on its own; an unchanged branch costs one ref read.
 - One run log cannot fan out: a run with more than 50 units is refused, at most 10 links per unit are written to, and comment writes are capped at 200 per installation per 10 minutes (the rest wait for the next sync).
-- Sign-in: 30 tries per 10 minutes per address; `state` compared in constant time; PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
+- Sign-in: 30 tries per 10 minutes per address; `state` and CSRF tokens compared as SHA-256 digests in constant time (any input, any length); PKCE (S256) on the code exchange; a new session on every sign-in, dropping the old one; after sign-in only this service's own page paths are followed.
 - Cookies: HttpOnly, SameSite=Lax, `Secure` and `__Host-` prefixed on https.
 - Every POST needs this site's `Origin` and the session's CSRF token. An answer or note also needs push access, asked of GitHub with the person's own token on every write (the page's disabled forms are only a hint). A comment command is committed with an installation token narrowed to contents and to the state repo's id alone (`repository_ids`), so it cannot write any other repo of the installation.
-- Comment text is data: one strict line is parsed, nothing else in the comment is read, and a command can only answer a question the lead asked or add a note (design 11.3).
+- Comment text is data: one strict line is parsed, nothing else in the comment is read, and a command can only answer a question the lead asked or add a note (design 11.3). At most 60 commands an hour per installation are handled, counted only after the commenter's push access is confirmed (c14), so strangers cannot use them up; over the cap a writer gets 😕 and a reason. Each commenter is also held to 10 commands an hour per installation, writer or not; past that their commands are ignored before any GitHub call. Both counters are in memory, keyed by installation id and by GitHub user id; nothing is stored.
+- Alert email: a new address gets alerts only after its owner presses the button on the confirmation page (opening the link, as mail scanners do, confirms nothing); at most 3 confirmation emails a day per person and per address. The address is folded first the way the SMTP envelope sees it (c14): NFKC, then the domain through IDNA to lower-case ASCII (punycode for an international name), so fullwidth or other look-alike spellings of one mailbox share its count. The count's key also drops a `+tag`, and for Gmail the dots, so `ann+1@` and `a.nn@gmail.com` count as `ann@` (the address itself is kept as typed). That folded address is the one stored and mailed; the local part must then be plain ASCII. Every alert and digest email carries a signed one-click stop link, in the text and as RFC 8058 `List-Unsubscribe` and `List-Unsubscribe-Post` headers, which works without signing in. A push endpoint registered to one person is never moved to another. GitHub mentions for security alerts are posted only on private repos.
 - Every page: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `no-store`, `nosniff`, `X-Frame-Options: DENY`, HSTS on https.
 - An unknown repo is checked with GitHub exactly like a known one the viewer cannot read, so response time does not reveal which repos the service knows.
 - Run state, lessons, `coordinator.json` and maps nested deeper than 64 levels are refused with a sync error, never a crash.
 - Every repo and run query is scoped by installation id (`src/db/index.mjs` refuses a call without one); permission answers are cached per person, never shared.
-- Uninstalling the App deletes that installation's rows at once.
+- Uninstalling the App deletes that installation's rows at once: repos, runs, links, GitHub events, trackers, comment commands, alerts (sent and waiting for a digest), alert subscriptions and its audit rows, keeping one audit row saying it was removed and by whom. Its doorbell listeners are closed. Settings, push devices and sessions belong to people, not installations, and stay.
+- A repo removed from an installation (c14) takes its runs, links, alert subscriptions and alerts with it, sent and waiting for a digest.
+- Only an `installation` `created` event makes an installation (c14). A push, repository or permissions event for an installation the service does not know is ignored, so an event sent before an uninstall but delivered after it brings nothing back. Installations made before the service was up are added with `npm run sync -- <installation-id>`, which stores one only after GitHub confirms it.
+- An uninstalled installation's id is kept (table `uninstalled`, migration 008; GitHub never reuses an id), so a late `created` event, or `npm run sync` with that id, cannot bring it back.

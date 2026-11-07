@@ -14,12 +14,17 @@ const KEY = { anyOf: [
   { type: 'object', required: ['id'], additionalProperties: false, properties: { id: { type: 'string', maxLength: 200 } } },
 ] };
 const PATH = { type: 'array', maxItems: 32, items: KEY };
-const SET = { type: 'object', required: ['op', 'path', 'value'], additionalProperties: false, properties: { op: { const: 'set' }, path: PATH, value: true } };
+// Any JSON value whose strings are at most MAX_TEXT characters. The CLI keeps its own text far
+// shorter (2000 at most); the cap bounds what a hand-edited or hostile log can make a reader mask.
+export const MAX_TEXT = 64 * 1024;
+const VALUE = { anyOf: [{ type: 'string', maxLength: MAX_TEXT }, { type: ['number', 'boolean', 'null'] }] };
+VALUE.anyOf.push({ type: 'array', items: VALUE }, { type: 'object', additionalProperties: VALUE });
+const SET = { type: 'object', required: ['op', 'path', 'value'], additionalProperties: false, properties: { op: { const: 'set' }, path: PATH, value: VALUE } };
 const DEL = { type: 'object', required: ['op', 'path'], additionalProperties: false, properties: { op: { const: 'del' }, path: { ...PATH, minItems: 1 } } };
-const PUSH = { type: 'object', required: ['op', 'path', 'values'], additionalProperties: false, properties: { op: { const: 'push' }, path: PATH, values: { type: 'array', minItems: 1 } } };
+const PUSH = { type: 'object', required: ['op', 'path', 'values'], additionalProperties: false, properties: { op: { const: 'push' }, path: PATH, values: { type: 'array', minItems: 1, items: VALUE } } };
 const OPS = { type: 'array', minItems: 1, items: { anyOf: [SET, DEL, PUSH] } };
 // A whole run: the shape every version of state.json has had.
-const RUN = { type: 'object', required: ['id', 'units'], properties: { id: ID, units: { type: 'array', items: { type: 'object', required: ['id'], properties: { id: ID } } }, snapshot: false } };
+const RUN = { type: 'object', required: ['id', 'units'], additionalProperties: VALUE, properties: { id: ID, units: { type: 'array', items: { type: 'object', required: ['id'], additionalProperties: VALUE, properties: { id: ID } } }, snapshot: false } };
 
 const changes = { type: 'object', required: ['ops'], additionalProperties: false, properties: { ops: OPS } };
 

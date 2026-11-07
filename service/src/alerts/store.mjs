@@ -5,11 +5,14 @@
 const clone = (v) => (v === undefined ? undefined : structuredClone(v));
 
 export function alertStore(db) {
-  return db.kind === 'postgres' ? pgStore(db.pool) : memoryStore();
+  return db.kind === 'postgres' ? pgStore(db.pool) : memoryStore(db.alertTables ?? alertTables());
 }
 
-function memoryStore() {
-  const settings = new Map(); const subs = new Map(); const push = new Map(); const alerts = [];
+// c14: the memory store's tables, owned by the memory read model (db.alertTables) so its removeRepo
+// drops a repo's alerts and subscriptions the way Postgres does.
+export const alertTables = () => ({ settings: new Map(), subs: new Map(), push: new Map(), alerts: [] });
+
+function memoryStore({ settings, subs, push, alerts }) {
   let nextId = 1;
   const subKey = (u, i, r) => `${u}:${i}:${r}`;
   return {
@@ -24,7 +27,13 @@ function memoryStore() {
     async unsubscribe(userId, installationId, repoId) { subs.delete(subKey(userId, installationId, repoId)); },
     async subscriptions(userId) { return [...subs.values()].filter((s) => s.userId === userId).map(clone); },
     async subscribers(installationId, repoId) { return [...subs.values()].filter((s) => s.installationId === installationId && s.repoId === repoId).map(clone); },
-    async addPush(userId, sub) { push.set(sub.endpoint, { userId, endpoint: sub.endpoint, keys: clone(sub.keys) }); },
+    // false when the endpoint is another person's: a device is never moved from one person to another.
+    async addPush(userId, sub) {
+      const prev = push.get(sub.endpoint);
+      if (prev && prev.userId !== userId) return false;
+      push.set(sub.endpoint, { userId, endpoint: sub.endpoint, keys: clone(sub.keys) });
+      return true;
+    },
     async pushSubs(userId) { return [...push.values()].filter((p) => p.userId === userId).map(({ endpoint, keys }) => ({ endpoint, keys: clone(keys) })); },
     async dropPush(endpoint) { push.delete(endpoint); },
     async recent(userId, collapseKey, sinceMs) {
@@ -37,6 +46,14 @@ function memoryStore() {
     async queued(userId) { return alerts.filter((a) => a.userId === userId && a.status === 'queued').map(clone); },
     async markSent(ids, at) { for (const a of alerts) if (ids.includes(a.id)) Object.assign(a, { status: 'sent', sentAt: at }); },
     async setStatus(id, status, detail, at) { const a = alerts.find((x) => x.id === id); if (a) Object.assign(a, { status, detail: clone(detail), sentAt: at }); },
+    async deleteInstallation(installationId) {
+      for (const [k, s] of subs) if (s.installationId === installationId) subs.delete(k);
+      for (let i = alerts.length - 1; i >= 0; i--) if (alerts[i].installationId === installationId) alerts.splice(i, 1);
+    },
+    rows: (installationId, repoId = null) => {
+      const mine = (x) => x.installationId === installationId && (repoId === null || x.repoId === repoId);
+      return { alerts: alerts.filter(mine).length, subscriptions: [...subs.values()].filter(mine).length };
+    }, // tests
   };
 }
 
@@ -69,8 +86,10 @@ function pgStore(pool) {
     async unsubscribe(userId, installationId, repoId) { await q('DELETE FROM alert_subscriptions WHERE user_id = $1 AND installation_id = $2 AND repo_id = $3', [userId, installationId, repoId]); },
     async subscriptions(userId) { return (await q('SELECT * FROM alert_subscriptions WHERE user_id = $1', [userId])).rows.map(subRow); },
     async subscribers(installationId, repoId) { return (await q('SELECT * FROM alert_subscriptions WHERE installation_id = $1 AND repo_id = $2', [installationId, repoId])).rows.map(subRow); },
+    // false when the endpoint is another person's: a device is never moved from one person to another.
     async addPush(userId, sub) {
-      await q('INSERT INTO push_subscriptions (endpoint, user_id, keys) VALUES ($1, $2, $3) ON CONFLICT (endpoint) DO UPDATE SET user_id = $2, keys = $3', [sub.endpoint, userId, JSON.stringify(sub.keys)]);
+      return (await q(`INSERT INTO push_subscriptions (endpoint, user_id, keys) VALUES ($1, $2, $3)
+        ON CONFLICT (endpoint) DO UPDATE SET keys = $3 WHERE push_subscriptions.user_id = $2`, [sub.endpoint, userId, JSON.stringify(sub.keys)])).rowCount === 1;
     },
     async pushSubs(userId) { return (await q('SELECT endpoint, keys FROM push_subscriptions WHERE user_id = $1', [userId])).rows.map((r) => ({ endpoint: r.endpoint, keys: r.keys })); },
     async dropPush(endpoint) { await q('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]); },
@@ -91,5 +110,10 @@ function pgStore(pool) {
     async queued(userId) { return (await q("SELECT * FROM alerts WHERE user_id = $1 AND status = 'queued' ORDER BY created_at, id", [userId])).rows.map(alertRow); },
     async markSent(ids, at) { await q("UPDATE alerts SET status = 'sent', sent_at = $2 WHERE id = ANY($1::bigint[])", [ids, new Date(at)]); },
     async setStatus(id, status, detail, at) { await q('UPDATE alerts SET status = $2, detail = $3, sent_at = $4 WHERE id = $1', [id, status, JSON.stringify(detail ?? {}), at ? new Date(at) : null]); },
+    // Sent and queued (digest) alerts; subscriptions also cascade with the repos.
+    async deleteInstallation(installationId) {
+      await q('DELETE FROM alerts WHERE installation_id = $1', [installationId]);
+      await q('DELETE FROM alert_subscriptions WHERE installation_id = $1', [installationId]);
+    },
   };
 }

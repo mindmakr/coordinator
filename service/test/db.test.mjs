@@ -15,7 +15,8 @@ async function fresh(kind) {
   const pg = (await import('pg')).default;
   const c = new pg.Client({ connectionString: PG });
   await c.connect();
-  await c.query('DROP TABLE IF EXISTS trackers, gh_events, unit_refs, audit, sessions, deliveries, runs, repos, installations, schema_migrations CASCADE');
+  await c.query('DROP TABLE IF EXISTS uninstalled, alerts, push_subscriptions, alert_subscriptions, alert_settings, comment_commands, trackers, gh_events, unit_refs, audit, sessions, deliveries, runs, repos, installations, schema_migrations CASCADE');
+  await c.query('DROP SEQUENCE IF EXISTS trail_seq_global');
   await c.end();
   const { postgresDb } = await import('../src/db/postgres.mjs');
   return guard(await postgresDb(PG, { max: 2 }));

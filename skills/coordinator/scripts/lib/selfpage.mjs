@@ -4,7 +4,7 @@
 // render(model, ctx) }. Same shell, theme and escaping rules as the dashboard.
 import { anchor, linkify, webUrl } from './links.mjs';
 import { count } from './self.mjs';
-import { badge, blk, chip, esc, hash, keyed, page, stamp, toggle } from './parts.mjs';
+import { badge, blk, chip, esc, hash, keyed, page, stamp, stateChip, toggle, unitDot } from './parts.mjs';
 
 const LESSONS_SHOWN = 12;
 const pct = (v) => (v === null || v === undefined ? '–' : `${v}%`);
@@ -15,6 +15,12 @@ const fact = (t) => linkify(t, null).replace(/`([^`<]+)`/g, '<code>$1</code>');
 const empty = (t) => `<p class="empty">${esc(t)}</p>`;
 
 // A run's dashboard: the served one is home, the others are read-only pages (or their hud.html on disk).
+// A unit page of another run, from that run's link: <run>/units/<id>.html on disk, /run/<run>/unit/<id> (or /unit/<id>) when served.
+const unitHrefIn = (ctx, run) => (id) => {
+  const [p, q] = ctx.runHref(run).split('?'); const e = encodeURIComponent(id);
+  const path = p.endsWith('hud.html') ? p.replace(/hud\.html$/, `units/${e}.html`) : `${p.replace(/\/$/, '')}/unit/${e}`;
+  return q ? `${path}?${q}` : path;
+};
 const runLink = (id, ctx, m) => (m.runIds.includes(id) ? `<a href="${esc(ctx.runHref(id))}">${esc(id)}</a>` : esc(id));
 const stat = (label, value, help = '') => `<div class="card stat"${help ? ` title="${esc(help)}"` : ''}><span>${esc(label)}</span><b>${value}</b></div>`;
 const meter = (p) => `<div class="bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, p ?? 0))}%"></i></div>`;
@@ -87,7 +93,7 @@ function history(m, ctx) {
 function plans(m, ctx) {
   if (!m.plans.length) return empty('No open run.');
   return `<div class="grid">${m.plans.map((p) => {
-    const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}"><b>${esc(u.id)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${chip(u.status, u.status)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
+    const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}">${u.dot ? `${unitDot(u)} ` : ''}<b>${esc(u.id)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${stateChip(u, m.runIds.includes(p.run) ? { unitHref: unitHrefIn(ctx, p.run) } : null)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
     const needs = p.needsYou.length ? `<p class="from"><b>Needs you:</b> ${p.needsYou.map((q) => `${esc(q.id)} ${esc(q.text)}`).join(' · ')}</p>` : '';
     return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${chip(p.decision, p.decision)}</h3>`
       + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.done} of ${count(p.total, 'unit')} finished</span></div>${meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`

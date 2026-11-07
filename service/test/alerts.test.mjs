@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { alertConfig } from '../src/alerts/config.mjs';
 import { inQuiet, settingsOf } from '../src/alerts/index.mjs';
 import { emailSender, pushSender } from '../src/alerts/senders.mjs';
-import { quietSince, runTriggers } from '../src/alerts/triggers.mjs';
+import { quietSince, runTriggers, TRIGGERS } from '../src/alerts/triggers.mjs';
 import { readLog } from '../src/ingest.mjs';
 import { appendEvent, makeRun, signIn, startApp, stateFiles } from './helpers.mjs';
 
@@ -62,6 +62,13 @@ test('triggers: a new question, an answer changed after use, a unit stopped and 
   late.notes.push({ kind: 'person', text: 'answer changed after use: q1 → client', unit: 'u1', at: new Date().toISOString(), changedAfterUse: { q: 'q1', choices: ['client'], other: null, by: 'person', at: new Date().toISOString() } });
   assert.deepEqual(runTriggers(b2, late, n).map((x) => [x.trigger, x.ref]), [['answer-changed', 'q1']]);
   assert.deepEqual(runTriggers(late, late, n), []);
+  // A question the lead closed by a decision: the alert says so, not "after use".
+  const dec = structuredClone(before);
+  dec.notes.push({ kind: 'decision', text: 'server', answers: 'q1', at: new Date().toISOString() });
+  const decLate = structuredClone(dec);
+  decLate.notes.push({ kind: 'person', text: 'answer changed after the lead decided: q1 → client', unit: 'u1', at: new Date().toISOString(), changedAfterUse: { q: 'q1', choices: ['client'], other: null, by: 'person', at: new Date().toISOString() } });
+  assert.deepEqual(runTriggers(dec, decLate, n).map((x) => [x.trigger, x.ref]), [['answer-changed-decided', 'q1']]);
+  assert.equal(TRIGGERS['answer-changed-decided'].label, 'answer changed after the lead decided');
 });
 
 test('triggers: a lead is quiet when units are mid-work and nothing moved for twice the stale budget', () => {
@@ -283,10 +290,18 @@ test('alerts page: subscribe needs read access; settings save; an email is used 
     assert.deepEqual([s.tz, s.quiet, s.channels.github], ['Europe/London', { start: 22, end: 7 }, false]);
     const link = /confirm\?t=([A-Za-z0-9_-]+)/.exec(t.sent.email[0].text)[1];
     assert.equal((await fetch(`${t.base}/alerts/confirm?t=x${link.slice(1)}`)).status, 400, 'a wrong token');
-    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${link}`)).status, 200);
+    const opened = await fetch(`${t.base}/alerts/confirm?t=${link}`); // what a mail scanner does
+    assert.equal(opened.status, 200);
+    assert.match(await opened.text(), /<form method="post" action="\/alerts\/confirm">.*Confirm this address/s);
+    assert.equal((await t.store.settings(5)).email ?? null, null, 'opening the link confirms nothing');
+    const confirm = () => fetch(`${t.base}/alerts/confirm`, { method: 'POST', body: new URLSearchParams({ t: link }), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    const done = await confirm();
+    assert.equal(done.status, 200);
+    assert.match(await done.text(), /Email confirmed/);
     s = await t.store.settings(5);
     assert.equal(s.email, 'ana@example.com');
-    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${link}`)).status, 400, 'used once');
+    assert.equal((await confirm()).status, 400, 'used once');
+    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${link}`)).status, 400, 'and the page says so');
     r = await form(t, cookie, '/alerts/settings', { csrf: p.csrf, tz: 'Mars/Olympus' });
     assert.match(await r.text(), /Unknown time zone/);
     p = await page(t, cookie);

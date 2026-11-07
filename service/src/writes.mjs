@@ -31,7 +31,10 @@ export function stateBranchOnly(branch, configured) {
   return branch;
 }
 
-const mask = (v) => (typeof v === 'string' ? maskSecrets(v) : v);
+// Clipped before masking: a form or comment field is at most 1000 characters once saved, so masking
+// never reads more than twice that.
+export const CLIP = 2000;
+const mask = (v) => (typeof v === 'string' ? maskSecrets(v.slice(0, CLIP)) : v);
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
@@ -52,12 +55,12 @@ export async function commitRun({ gh, token, fullName, branch, configured, runId
     if (logEntry.size > LIMITS.logBytes) throw new WriteError(413, 'the run log is too large to write to');
     const buf = await gh.blob(token, fullName, logEntry.sha);
     let log;
-    try { log = parseLog(buf, `${path}/events.jsonl`); } catch (e) { throw new WriteError(409, `the run log on the state branch is not readable: ${maskSecrets(e.message).slice(0, 200)}`); }
+    try { log = parseLog(buf, `${path}/events.jsonl`); } catch (e) { throw new WriteError(409, `the run log on the state branch is not readable: ${maskSecrets(String(e.message).slice(0, 400)).slice(0, 200)}`); }
     const state = replay(log.events);
     if (validRun(state) || state.id !== runId) throw new WriteError(409, 'the run log on the state branch is not readable');
     if (state.closed) throw new WriteError(409, 'this run is closed; it takes no more answers or notes');
     const work = clone(state);
-    try { mutate(work); } catch (e) { throw new WriteError(400, maskSecrets(String(e.message)).slice(0, 300)); }
+    try { mutate(work); } catch (e) { throw new WriteError(400, maskSecrets(String(e.message).slice(0, 600)).slice(0, 300)); }
     const next = canonical(work);
     const ops = diff(state, next);
     if (!ops.length) return { commit: head, seq: log.events.length, unchanged: true };
