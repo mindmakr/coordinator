@@ -138,7 +138,9 @@ test('rendering: state text escaped, only http(s) links leave the page, every no
   assert.match(html, /No stacked work/, 'one unit: no critical path shown');
   assert.match(html, /<div class="map-scroll flow" tabindex="0" role="region" aria-label="Flow map/);
   const fu = flowSvg(v, staticCtx('', 0), T0);
-  assert.ok(fu.indexOf('edge follow-up') > fu.indexOf('nd ref'), 'follow-up edges drawn above the issue nodes');
+  assert.ok(fu.indexOf('edge follow-up copy') > fu.indexOf('nd ref'), 'follow-up lines drawn above the issue nodes');
+  assert.ok(fu.lastIndexOf('class="hit"') < fu.indexOf('nd ref') && fu.lastIndexOf('class="hit"') < fu.indexOf('class="nd '), 'every hit stroke sits under every box');
+  assert.match(fu, /<path class="edge follow-up copy hl ed\d+ o\d+" aria-hidden="true"/, 'the copy takes no pointer and lights with its line');
 });
 
 test('layout stays inside its box for 1 to 12 units', () => {

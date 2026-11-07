@@ -9,6 +9,7 @@ import { esc } from './links.mjs';
 
 // keys: every node's key in drawing order; edges: [{ from, to }] by key.
 export function navGraph(keys, edges) {
+  const hits = [];
   const ix = new Map(keys.map((k, j) => [k, j]));
   const extra = new Map(keys.map((k) => [k, []]));
   edges.forEach((e, m) => {
@@ -23,15 +24,26 @@ export function navGraph(keys, edges) {
       const j = ix.get(key);
       return ` class="${cls} nv n${j}${[...new Set(extra.get(key))].map((c) => ` ${c}`).join('')}" data-node="${esc(key)}"${more}`;
     },
-    // A line: lit with its start node (o<j>), focusable, named for screen readers.
-    edge(m, e, label, inner) {
-      return `<g class="eg hl ed${m} o${ix.get(e.from)}" tabindex="0" role="img" aria-label="${esc(label)}" data-from="${esc(e.from)}" data-to="${esc(e.to)}"><title>${esc(label)}</title>${inner}</g>`;
+    // A line: lit with its start node (o<j>), focusable, named for screen readers. Its pointer target is
+    // drawn apart, in hitLayers(), under every box.
+    edge(m, e, label, d, inner) {
+      hits.push({ m, e, label, d });
+      return `<g class="eg hl ed${m} o${ix.get(e.from)}" tabindex="0" role="img" aria-label="${esc(label)}" data-edge="${m}" data-from="${esc(e.from)}" data-to="${esc(e.to)}"><title>${esc(label)}</title>${inner}</g>`;
     },
-    // Per node: itself, its children and its outgoing lines. Per line: itself and its ends.
+    // Two layers of invisible strokes along each line's own path: wide ones, then narrow ones over all of
+    // them, so a point on a line's centre reaches that line even where another's wide stroke covers it.
+    hitLayers() {
+      const layer = (cls) => `<g class="hits">${hits.map(({ m, e, label, d }) => `<path class="${cls} ed${m}" data-edge="${m}" data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="${d}"><title>${esc(label)}</title></path>`).join('')}</g>`;
+      return layer('hit') + layer('hit thin');
+    },
+    // The lighting class of line m (its start node), for a drawn copy of it.
+    cls(m) { return `o${ix.get(edges[m].from)}`; },
+    // Per node: itself, its children and its outgoing lines. Per line: itself and its ends. Keyboard focus
+    // lights too; the focus a mouse click leaves behind does not (it would outlast the pointer).
     rules(map) {
       const s = `svg.map.${map}`;
-      return keys.map((_, j) => `${s}:has(.n${j}:is(:hover,:focus)) :is(.n${j},.k${j},.o${j}){opacity:1}`).join('')
-        + edges.map((_, m) => `${s}:has(.ed${m}:is(:hover,:focus)) :is(.ed${m},.y${m}){opacity:1}`).join('');
+      return keys.map((_, j) => `${s}:has(.n${j}:is(:hover,:focus-visible)) :is(.n${j},.k${j},.o${j}){opacity:1}`).join('')
+        + edges.map((_, m) => `${s}:has(.ed${m}:is(:hover,:focus-visible)) :is(.ed${m},.y${m}){opacity:1}${s}:has(.hit.ed${m}:hover) .eg.ed${m} .edge{stroke-width:3}`).join('');
     },
   };
 }

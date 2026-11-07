@@ -74,7 +74,7 @@
     svg.setAttribute('data-sel', ''); if (focusMode[sel.map]) svg.setAttribute('data-focus', '');
     el.classList.add('sel', 'lit'); el.setAttribute('aria-current', 'true');
     for (const k of kidsOf(svg, key)) nodeEl(svg, k).classList.add('lit');
-    for (const e of lines(svg)) if (e.dataset.from === key) e.classList.add('lit');
+    for (const e of svg.querySelectorAll('[data-from]')) if (e.dataset.from === key) e.classList.add('lit'); // lines and their drawn copies
     delete body.dataset.tips;
     panel(svg, el);
   }
@@ -186,7 +186,7 @@
 
   // ---- pointer: click selects (modifier clicks still open links); long-press opens the menu.
   const navNode = (t) => t && t.closest && t.closest('svg[data-nav] [data-node]');
-  const navLine = (t) => t && t.closest && t.closest('svg[data-nav] .eg');
+  const navLine = (t) => t && t.closest && t.closest('svg[data-nav] :is(.eg, .hit)'); // the focusable line or its pointer target
   let press = 0; let pressAt = null; let longDone = false; let touched = false;
   document.addEventListener('pointerdown', (e) => {
     longDone = false; clearTimeout(press); touched = e.pointerType !== 'mouse';

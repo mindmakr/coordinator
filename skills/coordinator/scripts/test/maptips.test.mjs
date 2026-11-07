@@ -47,8 +47,8 @@ test('panel: one non-modal dialog per unit, described by every box of that unit,
   assert.ok(!tip.includes('javascript:'), 'only http(s) links');
   assert.match(tip, /href="units\/u1.html">Open u1/);
   assert.match(html, /body:not\(\[data-tips=off\]\):has\(\.u0:is\(:hover,:focus\)\) #tip-u0\{visibility:visible;transition-delay:0s\}/, 'CSS shows it on hover and focus');
-  assert.match(html, /svg\.map:has\(\.u1:is\(:hover,:focus\)\) :is\(\.u1,\.c1,\.e1\)[^{]*\{opacity:1\}/, 'and lights what it connects to');
-  assert.match(html, /<g class="eg hl ed0 o0" tabindex="0" role="img" aria-label="u2 waits on u1[^"]*"[^>]*><title>u2 waits on u1[^<]*<\/title><path class="hit"[^>]*\/><path class="edge after/, 'the waits-on line lights with the unit it starts from, and is focusable and named');
+  assert.match(html, /svg\.map:not\(\[data-nav\]\):has\(\.u1:is\(:hover,:focus\)\) :is\(\.u1,\.c1,\.e1\)[^{]*\{opacity:1\}/, 'and lights what it connects to');
+  assert.match(html, /<g class="eg hl ed0 o0" tabindex="0" role="img" aria-label="u2 waits on u1[^"]*"[^>]*><title>u2 waits on u1[^<]*<\/title><path class="edge after/, 'the waits-on line lights with the unit it starts from, and is focusable and named');
 });
 
 test('hostile titles and gaps are escaped in labels, hover text and panels', () => {
@@ -92,7 +92,7 @@ test('mind map: hovering a unit keeps the units it connects to lit, shared links
     unit('c19', { links: [{ url: 'https://github.com/acme/web/issues/5' }] }), unit('c20', { links: [{ url: 'https://github.com/acme/web/issues/5' }] })]);
   const boxClass = (svg, id) => new RegExp(`<a href="units/${id}\.html"[^>]* class="([^"]*)"`).exec(svg)[1].split(' ');
   const html = mapsPage(chain, T0);
-  assert.match(html, /svg\.map:has\(\.u2:is\(:hover,:focus\)\) :is\(\.u2,\.c2,\.e2\)/, 'the rule that lights c2 elements when c12 is hovered');
+  assert.match(html, /svg\.map:not\(\[data-nav\]\):has\(\.u2:is\(:hover,:focus\)\) :is\(\.u2,\.c2,\.e2\)/, 'the rule that lights c2 elements when c12 is hovered');
   const mind = mindSvg(chain, staticCtx('', 0));
   assert.ok(boxClass(mind, 'c20').includes('c4'), 'c20 shares issue 5 with c19');
   assert.match(html, /body:has\(#tip-u2:focus-within\) svg\.map :is\(\.u2,\.c2,\.e2\)/, 'lit while focus is inside the panel');

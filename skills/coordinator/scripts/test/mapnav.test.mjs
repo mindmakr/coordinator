@@ -4,7 +4,7 @@ import { hud, staticCtx } from '../lib/hud.mjs';
 import { mapPage } from '../lib/map/page.mjs';
 import { navGraph } from '../lib/mapnav.mjs';
 import { mapsPage } from '../lib/mapspage.mjs';
-import { flowSvg, relevanceSvg } from '../lib/mapsvg.mjs';
+import { flowSvg, ports, relevanceSvg } from '../lib/mapsvg.mjs';
 import { cssText } from '../lib/parts.mjs';
 import { selfPage } from '../lib/selfpage.mjs';
 import { unitPage } from '../lib/unitpage.mjs';
@@ -27,7 +27,7 @@ const nIndex = (cls) => cls.find((c) => /^n\d+$/.test(c));
 test('flow: hovering a box lights it and its direct children only, never its parent or grandchildren', () => {
   const svg = flowSvg(chain(), staticCtx('', 0), T0);
   const j = nIndex(classOf(svg, 'u:c11')).slice(1);
-  assert.match(svg, new RegExp(`svg\\.map\\.flow:has\\(\\.n${j}:is\\(:hover,:focus\\)\\) :is\\(\\.n${j},\\.k${j},\\.o${j}\\)\\{opacity:1\\}`));
+  assert.match(svg, new RegExp(`svg\\.map\\.flow:has\\(\\.n${j}:is\\(:hover,:focus-visible\\)\\) :is\\(\\.n${j},\\.k${j},\\.o${j}\\)\\{opacity:1\\}`));
   assert.ok(classOf(svg, 'u:c12').includes(`k${j}`), 'c12 waits on c11: its child');
   assert.ok(classOf(svg, 'r:acme/web#5').includes(`k${j}`), 'the issue c11 links: its child');
   assert.ok(!classOf(svg, 'u:c14').includes(`k${j}`), 'c14 is a grandchild and dims');
@@ -40,13 +40,16 @@ test('flow: hovering a box lights it and its direct children only, never its par
 test('flow and relevance: hovering or focusing a line lights the line and its two ends', () => {
   const svg = flowSvg(chain(), staticCtx('', 0), T0);
   const m = /<g class="eg hl ed(\d+) o\d+"[^>]*aria-label="c12 waits on c11[^"]*"/.exec(svg)[1];
-  assert.match(svg, new RegExp(`svg\\.map\\.flow:has\\(\\.ed${m}:is\\(:hover,:focus\\)\\) :is\\(\\.ed${m},\\.y${m}\\)\\{opacity:1\\}`));
+  assert.match(svg, new RegExp(`svg\\.map\\.flow:has\\(\\.ed${m}:is\\(:hover,:focus-visible\\)\\) :is\\(\\.ed${m},\\.y${m}\\)\\{opacity:1\\}`));
   for (const k of ['u:c11', 'u:c12']) assert.ok(classOf(svg, k).includes(`y${m}`), `${k} is an end`);
   assert.ok(!classOf(svg, 'u:c14').includes(`y${m}`));
-  assert.match(svg, /<path class="hit" d="M[^"]+"\/><path class="edge after crit" marker-start="url\(#flow-arrow-crit\)"/, 'a wide hit line under the drawn one');
+  assert.ok(svg.indexOf(`<path class="hit ed${m}" data-edge="${m}" data-from="u:c11" data-to="u:c12" d="M`) > svg.indexOf('<g class="hits">'), 'a wide pointer target along the line');
+  assert.match(svg, new RegExp(`<path class="hit thin ed${m}" data-edge="${m}"`), 'and a narrow one over all the wide ones');
+  assert.ok(svg.lastIndexOf('class="hit') < svg.indexOf('<g class="edges">'), 'pointer targets sit under the drawn lines and every box');
+  assert.match(svg, /<path class="edge after crit" marker-start="url\(#flow-arrow-crit\)"/);
   const v = viewOf([unit('a1', { title: 'export billing csv files nightly' }), unit('a2')], { goalCheck: { behaviours: [{ id: 'G1', text: 'export billing csv files', status: 'unchecked' }], evidence: [], met: false } });
   const rel = relevanceSvg(v, staticCtx('', 0));
-  assert.match(rel, /aria-label="a1 serves G1 \(shared words\)" data-from="t:G1" data-to="u:a1"/);
+  assert.match(rel, /aria-label="a1 serves G1 \(shared words\)" data-edge="0" data-from="t:G1" data-to="u:a1"/);
   const t = nIndex(classOf(rel, 't:G1')).slice(1);
   assert.ok(classOf(rel, 'u:a1').includes(`k${t}`), 'a goal behaviour\'s children are the units serving it');
   assert.ok(!classOf(rel, 'u:a2').includes(`k${t}`), 'an off-goal unit is not');
@@ -136,4 +139,15 @@ test('the print header escapes the run name inside CSS and HTML', () => {
   const v = viewOf([unit('u1')], { id: `r${HOSTILE}` });
   const html = mapsPage(v, T0);
   assert.ok(!html.includes('<script>alert') && !html.includes('<img src=x'));
+});
+
+test('lines from one box start apart, in the order of where they go, and inside the box', () => {
+  const box = { a: { y: 0, h: 46 }, b: { y: 100, h: 46 }, c: { y: 0, h: 46 }, d: { y: 200, h: 46 } };
+  const list = [{ from: 'a', to: 'd' }, { from: 'a', to: 'b' }, { from: 'a', to: 'c' }];
+  const port = ports(list, (k) => box[k]);
+  const starts = list.map((_, m) => port(m)[0]);
+  assert.equal(new Set(starts).size, 3, 'no two share a start');
+  assert.ok(starts[2] < starts[1] && starts[1] < starts[0], 'ordered by target');
+  assert.ok(starts.every((y) => y > 0 && y < 46));
+  assert.equal(port(1)[1], 123, 'a single line ends at the middle');
 });

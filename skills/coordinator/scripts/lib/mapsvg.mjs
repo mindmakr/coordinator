@@ -122,9 +122,23 @@ function stack(list, h, gap) {
   let y = TOP;
   return [...list].sort((a, b) => a.want - b.want).map((n) => { const at = Number.isFinite(n.want) ? Math.max(y, n.want) : y; y = at + h + gap; return { ...n, y: at }; });
 }
-const bez = (x1, y1, x2, y2) => { const dx = Math.max(24, (x2 - x1) / 2); return `M${r1(x1)} ${r1(y1)} C${r1(x1 + dx)} ${r1(y1)} ${r1(x2 - dx)} ${r1(y2)} ${r1(x2)} ${r1(y2)}`; };
-// A line on a walkable map: a wide invisible path to hover, then the drawn one.
-const line2 = (d, cls, end = '', at = 'end') => `<path class="hit" d="${d}"/><path class="edge ${cls}"${end ? ` marker-${at}="url(#${end})"` : ''} d="${d}"/>`;
+// Lines leave a box already apart (the control points follow the slope), so lines from one box can each be hovered.
+const bez = (x1, y1, x2, y2) => { const dx = Math.max(24, (x2 - x1) / 2); const k = (y2 - y1) * 0.25; return `M${r1(x1)} ${r1(y1)} C${r1(x1 + dx)} ${r1(y1 + k)} ${r1(x2 - dx)} ${r1(y2 - k)} ${r1(x2)} ${r1(y2)}`; };
+// A line on a walkable map, drawn; its pointer target comes from mapnav's hitLayers(), under every box.
+const line2 = (d, cls, end = '', at = 'end') => `<path class="edge ${cls}"${end ? ` marker-${at}="url(#${end})"` : ''} d="${d}"/>`;
+// Lines leaving (or reaching) one box spread along its side, in the order of where they go, so no two share an end.
+// box(key) → { y, h }. Returns m → [start y, end y].
+export function ports(list, box) {
+  const at = new Map();
+  const mid = (k) => { const b = box(k); return b.y + b.h / 2; };
+  const side = (key, which, other) => {
+    const mine = list.map((e, m) => [e, m]).filter(([e]) => e[which] === key).sort(([a], [b]) => mid(a[other]) - mid(b[other]));
+    const n = mine.length; const step = n > 1 ? Math.min(10, (box(key).h - 12) / (n - 1)) : 0;
+    mine.forEach(([, m], j) => at.set(`${which}${m}`, mid(key) + (j - (n - 1) / 2) * step));
+  };
+  for (const key of new Set(list.flatMap((e) => [e.from, e.to]))) { side(key, 'from', 'to'); side(key, 'to', 'from'); }
+  return (m) => [at.get(`from${m}`), at.get(`to${m}`)];
+}
 
 // The flow map's line ends, one per kind, so no two relations look alike.
 // waits on: a filled arrowhead at the unit waited for; critical path: the same in the run colour;
@@ -176,18 +190,23 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const said2 = (e) => { const a = node.get(e.from); const b = node.get(e.to);
     return e.kind === 'after' ? `${name(b)} waits on ${name(a)}${e.crit ? ' (critical path)' : ''}` : e.kind === 'link' ? `${name(a)} links ${name(b)}` : `${name(a)} filed ${name(b)}`; };
   // A stacked unit waits on the one before it: that line's arrowhead points back to it, and the line says so.
+  const port = ports(g.edges, (k) => pos.get(k));
   const edge = (e, m) => {
     const a = pos.get(e.from); const b = pos.get(e.to);
-    const x1 = a.x + a.w; const y1 = a.y + a.h / 2; const x2 = b.x; const y2 = b.y + b.h / 2;
+    const x1 = a.x + a.w; const x2 = b.x; const [y1, y2] = port(m);
     const end = e.crit ? 'flow-arrow-crit' : e.kind === 'after' ? 'flow-arrow-after' : e.kind === 'link' ? 'flow-arrow-link' : 'flow-arrow-fu';
-    const path = line2(bez(x1, y1, x2, y2), `${e.kind}${e.crit ? ' crit' : ''}`, end, e.kind === 'after' ? 'start' : 'end');
+    const d = bez(x1, y1, x2, y2);
+    const path = line2(d, `${e.kind}${e.crit ? ' crit' : ''}`, end, e.kind === 'after' ? 'start' : 'end');
     const words = e.kind === 'after' ? `<text class="xs muted elabel" x="${r1((x1 + x2) / 2)}" y="${r1((y1 + y2) / 2 - 6)}" text-anchor="middle">waits on</text>` : '';
-    return nav.edge(m, e, said2(e), path + words);
+    return nav.edge(m, e, said2(e), d, path + words);
   };
+  // A follow-up line crosses the issue column: its drawn copy goes above those boxes, but takes no pointer.
+  const copy = (e, m) => { const a = pos.get(e.from); const b = pos.get(e.to); const [y1, y2] = port(m);
+    return `<path class="edge follow-up copy hl ed${m} ${nav.cls(m)}" aria-hidden="true" data-from="${esc(e.from)}" data-to="${esc(e.to)}" marker-end="url(#flow-arrow-fu)" d="${bez(a.x + a.w, y1, b.x, y2)}"/>`; };
   // Follow-up lines cross the issue column, so they go above its nodes.
   const all = g.edges.map((e, m) => [e, m]);
-  const edges = all.filter(([e]) => e.kind !== 'follow-up').map(([e, m]) => edge(e, m)).join('');
-  const late = all.filter(([e]) => e.kind === 'follow-up').map(([e, m]) => edge(e, m)).join('');
+  const edges = all.map(([e, m]) => edge(e, m)).join('');
+  const late = all.filter(([e]) => e.kind === 'follow-up').map(([e, m]) => copy(e, m)).join('');
   const heads = [txt(P, 20, D ? 'Units, stacked left to right' : 'Units', 'h'), refs.length ? txt(refX, 20, 'Issues and PRs', 'h') : '', fus.length ? txt(fuX, 20, 'Follow-ups', 'h') : ''].join('');
   const data = (n, kind) => ` data-name="${esc(name(n))}" data-kind="${kind}"`;
   const nodeOf = ({ x: nx, y, w, h, n }) => {
@@ -200,7 +219,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
     return link(n.url, `${what(n)} ${n.repo}#${n.label.split('#')[1]}${n.cross ? ' (another repo)' : ''}, linked by ${n.units.join(', ')}`, `<rect class="nd ref${n.cross ? ' cross' : ''}" x="${nx}" y="${y}" width="${w}" height="${h}" rx="16"/>${txt(nx + 12, y + 18, clip(`${what(n)} ${n.label}`, 26), 'sm')}${txt(nx + 12, y + 34, clip(`linked by ${n.units.join(', ')}`, 30), 'xs muted')}`, true, nav.node(n.id, 'hl', data(n, n.kind)));
   };
   const placed = [...pos.values()];
-  const nodes = placed.filter((p) => p.n.kind !== 'follow-up').map(nodeOf).join('') + `<g class="edges">${late}</g>` + placed.filter((p) => p.n.kind === 'follow-up').map(nodeOf).join('');
+  const nodes = placed.filter((p) => p.n.kind !== 'follow-up').map(nodeOf).join('') + `<g class="edges" aria-hidden="true">${late}</g>` + placed.filter((p) => p.n.kind === 'follow-up').map(nodeOf).join('');
   const defs = `<defs>${Object.entries(ENDS).map(([id, [shape, ref, size]]) => `<marker id="${id}" viewBox="0 0 10 10" refX="${ref}" refY="5" markerWidth="${size}" markerHeight="${size}" orient="auto-start-reverse">${shape}</marker>`).join('')}</defs>`;
   const c = g.critical;
   const say = !c.stacked ? '<p class="map-say cause">No stacked work: the units run side by side, so there is no critical path.</p>' : c.path.length
@@ -208,7 +227,7 @@ export function flowSvg(v, ctx, nowMs = Date.now()) {
   const kinds = (k) => g.edges.filter((e) => e.kind === k).length;
   return say + counts([[units.length, units.length === 1 ? 'unit' : 'units'], [refs.length, 'issues and PRs'], [fus.length, fus.length === 1 ? 'follow-up' : 'follow-ups'], [kinds('after'), 'waits on'], [g.edges.length, g.edges.length === 1 ? 'line' : 'lines']])
     + (ctx.live ? navTools('flow', 'unit, issue or follow-up') : '')
-    + svg(width, height, 'Flow map: stacked units, linked issues and PRs, follow-ups, and the critical path', `${defs}${heads}<g class="edges">${edges}</g>${nodes}`, ' flow', ' data-nav="flow"')
+    + svg(width, height, 'Flow map: stacked units, linked issues and PRs, follow-ups, and the critical path', `${defs}${heads}${nav.hitLayers()}<g class="edges">${edges}</g>${nodes}`, ' flow', ' data-nav="flow"')
     + `<style>${nav.rules('flow')}</style>`
     + lineKey([['after', 'waits on: the arrow points to the unit it waits for (--after)'], ['crit', 'waits on, on the critical path'], ['link', 'links an issue or PR: a ring at the issue end'], ['fu', 'filed a follow-up: an open arrowhead at the follow-up']])
     + legend([['ref cross', 'another repo']])
@@ -277,8 +296,9 @@ export function relevanceSvg(v, ctx) {
   // A goal behaviour's children are the units that serve it.
   const lines = r.units.flatMap((u) => u.serves.map((s) => ({ from: `t:${s.target}`, to: `u:${u.unit}`, how: s.how, unit: u.unit, target: s.target })));
   const nav = navGraph([...r.targets.map((t) => `t:${t.id}`), ...r.units.map((u) => `u:${u.unit}`)], lines);
-  const edges = lines.map((e, m) => nav.edge(m, e, `${e.unit} serves ${e.target === 'goal' ? 'the goal' : e.target} (${e.how === 'named' ? 'named' : 'shared words'})`,
-    line2(bez(P + TW, tY.get(e.target) + H / 2, ux, uY.get(e.unit) + H / 2), e.how === 'named' ? 'named' : 'inferred')));
+  const port = ports(lines, (k) => ({ y: k.startsWith('t:') ? tY.get(k.slice(2)) : uY.get(k.slice(2)), h: H }));
+  const edges = lines.map((e, m) => { const [y1, y2] = port(m); const d = bez(P + TW, y1, ux, y2);
+    return nav.edge(m, e, `${e.unit} serves ${e.target === 'goal' ? 'the goal' : e.target} (${e.how === 'named' ? 'named' : 'shared words'})`, d, line2(d, e.how === 'named' ? 'named' : 'inferred')); });
   const targets = r.targets.map((t) => link(ctx.home, `${t.label}: ${said(t.status)} — ${clip(t.text, 200)}`, `<rect class="nd ${st(t.status)}" x="${P}" y="${tY.get(t.id)}" width="${TW}" height="${H}" rx="8"/>${txt(P + 10, tY.get(t.id) + 17, clip(`${t.label}: ${t.text}`, 36), 'sm')}${txt(P + 10, tY.get(t.id) + 33, clip(servedBy.get(t.id).length ? `served by ${servedBy.get(t.id).join(', ')}` : 'no unit serves it', 44), 'xs muted')}`, false,
     nav.node(`t:${t.id}`, 'hl', ` data-name="${esc(t.label)}" data-kind="goal"`))).join('');
   const units = r.units.map((u) => {
@@ -293,7 +313,7 @@ export function relevanceSvg(v, ctx) {
   const named = lines.filter((e) => e.how === 'named').length;
   return say + counts([[r.targets.length, r.targets.length === 1 ? 'goal target' : 'goal behaviours'], [on.length, 'on goal'], [off.length, 'off goal'], [named, 'named lines'], [lines.length - named, 'shared-word lines']])
     + (ctx.live ? navTools('rel', 'goal behaviour or unit') : '')
-    + svg(ux + UW2 + P, Math.max(height, TOP + r.targets.length * (H + G) + P), 'Goal relevance: which goal behaviours each unit serves', `${txt(P, 20, v.goalCheck.behaviours.length ? 'Goal behaviours' : 'Goal', 'h')}${txt(ux, 20, 'Units', 'h')}<g class="edges">${edges.join('')}</g>${targets}${offHead}${units}`, ' rel', ' data-nav="rel"')
+    + svg(ux + UW2 + P, Math.max(height, TOP + r.targets.length * (H + G) + P), 'Goal relevance: which goal behaviours each unit serves', `${txt(P, 20, v.goalCheck.behaviours.length ? 'Goal behaviours' : 'Goal', 'h')}${txt(ux, 20, 'Units', 'h')}${nav.hitLayers()}<g class="edges">${edges.join('')}</g>${targets}${offHead}${units}`, ' rel', ' data-nav="rel"')
     + `<style>${nav.rules('rel')}</style>`
     + lineKey([['named', 'serves it (named)'], ['inferred', 'serves it (shared words)']]) + legend([['off', 'off goal']]) + `<p class="map-legend"><span class="cause">No arrowheads here: every line runs from a goal behaviour on the left to a unit that serves it on the right.</span></p>` + navHelp(!!ctx.live);
 }
