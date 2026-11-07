@@ -8,9 +8,10 @@ import { pendingSyncs, syncStep } from './overlap.mjs';
 import { bySetup, escapes, roundCap, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
+import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
 
 const MINUTE = 60_000;
-const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale'];
+const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'];
 
 const label = (d) => (d ? `${d.action}${d.reason ? `: ${d.reason}` : ''}${d.phase ? ` (${d.phase})` : ''}` : '');
 
@@ -68,13 +69,15 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     // Rounds and pass rate per builder model, once any round recorded one (lib/models.mjs).
     models: byModel([run]).roundsByBuilderModel.filter((m) => !['(not recorded)', UNSPECIFIED].includes(m.model)),
     modelsUnrecorded: unrecorded(run),
+    // Tokens, minutes and money the lead recorded per launch (lib/cost.mjs); "not recorded" where none was.
+    cost: { run: costLine(runCost(run)), byModel: costByModel([run]).map((m) => ({ model: m.model, line: costLine(m) })), byUnit: run.units.map((u) => ({ id: u.id, line: costLine(unitCost(u)) })) },
     escapes: { ...escapes(run), bySetup: bySetup([run]), list: notes.filter((n) => n.kind === 'escape').map((n) => ({ unit: n.unit, round: n.round ?? null, text: n.text, at: n.at })) },
     units: run.units.map((u) => {
       const last = u.rounds.at(-1);
       const d = next.get(u.id);
       const chain = chainOf(linked ?? new Map([[run.id, run]]), run.id, u.id);
       return {
-        id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, after: u.after ?? null,
+        id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, shipped: u.shipped ?? null, after: u.after ?? null,
         sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
         dot: dots.get(u.id), badge: stateBadge(dots.get(u.id), u, d), finished: ['passed', 'stopped'].includes(dots.get(u.id)),
         // Depends on (its after) and blocks (units whose after names it), each with its state.
@@ -140,7 +143,7 @@ export function text(v) {
   ];
   for (const u of v.units) {
     const bs = u.behaviours.length ? ` · behaviours ${u.behaviours.filter((b) => b.status === 'pass').length}/${u.behaviours.length}` : '';
-    lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
+    lines.push(`${u.id.padEnd(w)}${(u.shipped ? 'shipped' : u.status).padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
     if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
@@ -149,6 +152,10 @@ export function text(v) {
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);
   if (v.models?.length || v.modelsUnrecorded) lines.push(`models   ${modelLine(v.models, v.modelsUnrecorded)}`);
   if (v.escapes?.escapes) lines.push(`escapes  ${escapeLine(v.escapes)}`);
+  if (v.cost) {
+    lines.push(`cost     run: ${v.cost.run}`, `         by unit: ${v.cost.byUnit.map((u) => `${u.id}: ${u.line}`).join('; ') || 'no units'}`);
+    if (v.cost.byModel.length) lines.push(`         by model: ${v.cost.byModel.map((m) => `${m.model}: ${m.line}`).join('; ')}`);
+  }
   const setups = (v.escapes?.bySetup ?? []).filter((g) => g.setup !== '(not recorded)' || g.escapes);
   if (setups.length) lines.push(`critics  ${setups.map((g) => `${clip(g.setup, 50)}: ${g.escapes} escape${g.escapes === 1 ? '' : 's'} in ${g.passed} passed (rate ${g.rate})`).join(' · ')}`);
   const gb = v.goalCheck.behaviours;

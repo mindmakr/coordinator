@@ -12,6 +12,8 @@ import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
 import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
+import { viewer, viewerEntries } from './evview.mjs';
+import { readStored, storedPath } from './evidence.mjs';
 import { escapeLine } from './view.mjs';
 import { pendingBanner } from './retro.mjs';
 
@@ -24,16 +26,20 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
+    live: null, theme, run: null, artifacts: !!runDir, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
-    has: (file) => !runDir || existsSync(join(runDir, 'artifacts', ...file.split('/'))),
+    // Every read goes through storedPath: the state's file names are checked, links never followed.
+    has: (file) => !runDir || storedPath(runDir, file) !== null,
+    // A stored text file's words, for the viewer (lib/evview.mjs caps them).
+    readText: (file) => readStored(runDir, file, 'utf8'),
     // Small screenshots go inline, so the snapshot shows them without loading anything.
     embed: (file) => {
       if (!runDir) return null;
-      try { const b = readFileSync(join(runDir, 'artifacts', file)); return b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null; } catch { return null; }
+      const b = readStored(runDir, file);
+      return b && b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null;
     },
   };
 }
@@ -211,9 +217,9 @@ function questionsCard(v, repo) {
     + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, `<ul class="answered">${done}</ul>`) : '') + '</section>';
 }
 
-export function timelineList(events, repo, finished = new Set()) {
+export function timelineList(events, repo, finished = new Set(), ctx = null) {
   // Each row's key holds its time, kind, who, a hash of its text, and a number if two still match.
-  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit))).join('') : '<li class="empty">Nothing yet.</li>';
+  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit), ctx)).join('') : '<li class="empty">Nothing yet.</li>';
 }
 
 export function hud(v, nowMs = Date.now(), ctx = null) {
@@ -223,7 +229,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const form = live && v.open && !ctx.readOnly ? live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
+    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open)) : '',
     blk('goal', goalBlock(v, ctx)),
@@ -232,7 +238,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),
     '<h2 data-a="h-Budget">Budget</h2>',
-    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes) + modelCard(v.models, v.modelsUnrecorded), 'div', ' class="budget"'),
+    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes) + modelCard(v.models, v.modelsUnrecorded) + costCard(v.cost), 'div', ' class="budget"'),
     '<h2 data-a="h-Units">Units</h2>',
     `<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <span class="key">${dot('needs-you')} <b>Needs you</b> = only you can unblock it;</span> <span class="key">${dot('blocked')} <b>Waiting for A</b> = blocked on another unit (A);</span> <span class="key">${dot('queued')} <b>Up next</b> = ready, not started;</span> <span class="key">${dot('working')} working;</span> <span class="key">${dot('retrying')} <b>Retrying</b> = the lead is on it;</span> <span class="key">${dot('stale')} <b>Quiet</b> = the lead is checking on a silent agent;</span> <span class="key">${dot('passed')} passed;</span> <span class="key">${dot('stopped')} stopped.</span> Score dots: red = failed try, green = passed try.</p>`,
     blk('units', v.units.length ? [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)].map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
@@ -242,7 +248,8 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
       list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
     '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
-    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id))), 'ol', ' class="timeline" data-tl-list'),
+    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id)), ctx), 'ol', ' class="timeline" data-tl-list data-ev-list'),
+    blk('evv', viewer(viewerEntries(v), ctx, r)),
   ].join('\n');
   return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
 }
@@ -252,6 +259,13 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
 function modelCard(m, none = 0) {
   if (!m?.length && !none) return '';
   return `<div class="card" data-a="budget-models" title="Rounds built on each model, and how many the critic passed"><div class="row" style="margin:0"><span>builder models</span><b>${esc(modelLine(m ?? [], none))}</b></div></div>`;
+}
+
+// Cost: tokens, minutes and money per run, unit and model, as the lead recorded them (lib/cost.mjs).
+function costCard(c) {
+  if (!c) return '';
+  const items = [...c.byUnit.map((u) => `<li>${esc(u.id)}: ${esc(u.line)}</li>`), ...c.byModel.map((m) => `<li>model ${esc(m.model)}: ${esc(m.line)}</li>`)].join('');
+  return `<div class="card" data-a="budget-cost" title="Tokens, minutes and cost each launch reported, as the lead recorded them"><div class="row" style="margin:0"><span>cost</span><b>${esc(c.run)}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
 }
 
 // Escapes: defects found after a unit passed, from note --kind escape. Shown once there is a pass.

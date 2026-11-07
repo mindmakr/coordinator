@@ -48,6 +48,8 @@ export const KINDS = {
   'unit.extend': { unit: 'required', payload: changes },
   'unit.touches': { unit: 'required', payload: changes },
   'unit.sync': { unit: 'required', payload: changes },
+  // The targeted check of a pass's fold-ins (run.mjs foldin).
+  'unit.foldin': { unit: 'required', payload: changes },
   behaviour: { unit: 'optional', payload: changes },
   evidence: { unit: 'optional', payload: changes },
   note: { unit: 'optional', payload: changes },
@@ -75,11 +77,43 @@ export function schemaFor(kind) {
   };
 }
 
+// A stored evidence file is <target>/<name>: the unit id or _goal, then the name `evidence` gives it
+// (E<n>-<cleaned name>). Pages read it under artifacts/, so nothing else may enter the state by any
+// event (a pulled log, a replay, a hand edit); lib/evidence.mjs storedPath checks again on every read.
+export const STORED_FILE = /^(?:_goal|[A-Za-z0-9][A-Za-z0-9._-]{0,63})\/E\d{1,3}-[a-z0-9][a-z0-9._-]{0,80}$/;
+const EV_LISTS = new Set(['evidence', 'goalEvidence']);
+const goodFile = (f) => f === null || (typeof f === 'string' && STORED_FILE.test(f) && !f.includes('..'));
+// The first bad evidence `file` in v, or null. ctx: what v is: an evidence 'list', an 'item', its 'file', or null.
+function badFile(v, ctx = null) {
+  if (ctx === 'file') return goodFile(v) ? null : JSON.stringify(v ?? null).slice(0, 120);
+  if (Array.isArray(v)) {
+    for (const x of v) { const b = badFile(x, ctx === 'list' ? 'item' : null); if (b !== null) return b; }
+    return null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  for (const [k, x] of Object.entries(v)) {
+    const b = badFile(x, ctx === 'item' && k === 'file' ? 'file' : EV_LISTS.has(k) ? 'list' : null);
+    if (b !== null) return b;
+  }
+  return null;
+}
+// An op's value, by where its path ends: …/evidence (a list), …/evidence/{id} (an item), …/evidence/{id}/file.
+function opBadFile(o) {
+  let i = -1;
+  o.path.forEach((k, j) => { if (typeof k === 'string' && EV_LISTS.has(k)) i = j; });
+  const after = i < 0 ? -1 : o.path.length - 1 - i;
+  const ctx = after === 0 ? 'list' : after === 1 ? 'item' : after === 2 && o.path.at(-1) === 'file' ? 'file' : null;
+  if (o.op === 'push') return badFile(o.values, ctx === 'list' ? 'list' : null);
+  return o.op === 'set' ? badFile(o.value, ctx) : null;
+}
+const fileErr = (b) => (b === null ? null : `evidence file ${b} is not <unit>/E<n>-<name>`);
+export const evidenceFileError = (payload) => fileErr(payload?.state ? badFile(payload.state) : (payload?.ops ?? []).reduce((a, o) => a ?? opBadFile(o), null));
+
 // Throws on an event that does not fit its kind's schema. `where` prefixes the message.
 export function validateEvent(e, where = 'event') {
   const kind = e && typeof e === 'object' ? e.kind : undefined;
   if (!Object.hasOwn(KINDS, kind)) throw new Error(`${where}: unknown event kind ${JSON.stringify(kind)}`);
-  const err = check(schemaFor(kind), e);
+  const err = check(schemaFor(kind), e) ?? evidenceFileError(e.payload);
   if (err) throw new Error(`${where} (${kind}): ${err}`);
   return e;
 }
@@ -90,4 +124,4 @@ export const SNAPSHOT = {
   properties: { v: { const: V }, seq: { type: 'integer', minimum: 1 }, sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' }, stateSha256: { type: 'string', pattern: '^[0-9a-f]{64}$' } },
 };
 export const validSnapshot = (m) => check(SNAPSHOT, m) === null;
-export const validRun = (s) => check(RUN, s);
+export const validRun = (s) => check(RUN, s) ?? fileErr(badFile(s));

@@ -10,6 +10,7 @@
   },
   "scripts": {
     "start": "node src/main.mjs",
+    "demo": "node src/demo.mjs",
     "sync": "node src/cli.mjs sync",
     "migrate": "node src/cli.mjs migrate",
     "test": "node --test test/*.test.mjs"

@@ -185,6 +185,13 @@ ul.plain li { overflow-wrap: anywhere; }
 ul.plain .cause { margin-top: 2px; }
 section.self .card ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
 section.self .card li { margin: 4px 0; overflow-wrap: anywhere; }
+section.self .card ul.plain { padding-left: 0; } .gaps .card { min-width: 0; } .gaps code { font-size: 11px; }
+/* The Gaps filter bar: its own row, ruled off from the panels, with room for the focus ring. */
+.gap-tools { margin: 14px 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); gap: 10px 12px; }
+.gap-tools label { flex: 1 1 150px; min-width: 0; }
+.gap-tools label.grow { flex: 3 1 280px; }
+.gap-tools select, .gap-tools input[type=search] { height: 36px; margin-top: 6px; }
+.gap-tools .gap-count { flex-basis: 100%; margin: 0; }
 header.run a.open { margin-left: auto; font-size: 14px; font-weight: 600; }
 .map-scroll:focus-visible { outline: 3px solid var(--run); outline-offset: 2px; }
 .map-scroll { overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-top: 8px; }
@@ -304,6 +311,41 @@ svg.map .edge.copy { pointer-events: none; }
 .print-btn { margin: 0; min-height: 0; padding: 2px 10px; font-size: 12px; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 999px; }
 .print-hint { font-size: 12px; color: var(--muted); }
 .print-head { display: none; }
+/* Evidence viewer (lib/evview.mjs): the overlay the URL hash names, so it works without a script; lib/evview.client.js adds keys, focus and swipe. */
+a.evlink { display: inline-flex; gap: 8px; align-items: flex-start; vertical-align: top; }
+.evt-thumb { flex: none; width: 64px; height: 44px; object-fit: cover; object-position: top; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
+a.evthumb { display: inline-block; cursor: zoom-in; }
+.evv { display: none; position: fixed; inset: 0; z-index: 40; }
+.evv:target { display: flex; align-items: center; justify-content: center; padding: 24px; }
+:root:has(.evv:target) { overflow: hidden; }
+.evv-shade { position: absolute; inset: 0; background: color-mix(in oklab, #000 62%, transparent); }
+.evv-box { position: relative; display: flex; flex-direction: column; width: min(1200px, 100%); height: 100%; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 12px 48px color-mix(in oklab, #000 40%, transparent); overflow: hidden; }
+.evv-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.evv-t { flex: 1 1 220px; margin: 0; font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--ink); overflow-wrap: anywhere; }
+.evv-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.evv-btn { display: inline-flex; align-items: center; min-height: 34px; padding: 4px 12px; border-radius: calc(var(--radius) * .6); border: 1px solid var(--line); background: var(--none-bg); color: var(--ink); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.evv-btn:hover:not([aria-disabled]) { border-color: var(--run); }
+.evv-btn[aria-disabled="true"] { opacity: .45; cursor: default; }
+.evv-x { background: var(--run); color: var(--on-run); border-color: var(--run); }
+.evv-n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 2px; }
+.evv-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--bg); overscroll-behavior: contain; touch-action: pan-y pinch-zoom; }
+.evv-img { display: block; cursor: zoom-in; }
+.evv-img img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.evv-z:checked ~ .evv-scroll { touch-action: auto; }
+.evv-z:checked ~ .evv-scroll .evv-img { cursor: zoom-out; }
+.evv-z:checked ~ .evv-scroll img { max-width: none; }
+.evv-z:not(:checked) ~ .evv-bar .evv-act, .evv-z:checked ~ .evv-bar .evv-fit { display: none; }
+.evv-z:focus-visible ~ .evv-bar .evv-zl { outline: 2px solid var(--run); outline-offset: 2px; }
+.evv-pre { margin: 0; min-height: 100%; max-height: none; border: 0; border-radius: 0; background: var(--bg); font-size: 12.5px; }
+.evv-cap { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) { .evv:target .evv-box { animation: evv-in .14s ease-out; } }
+@keyframes evv-in { from { opacity: 0; transform: scale(.985); } }
+@media (max-width: 640px) {
+  .evv:target { padding: 0; }
+  .evv-box { border: 0; border-radius: 0; }
+  .evv-bar { padding: 8px 10px; }
+  .evv-btn { padding: 4px 10px; }
+}
 footer { margin-top: 36px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 footer a { color: inherit; }
 @media (max-width: 520px) {
@@ -315,7 +357,7 @@ footer a { color: inherit; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   body { background: #fff; font-size: 12px; }
   .wrap { max-width: none; padding: 0; }
-  .top .tools, .pages, .tl-tools, .nav-tools, .nav-help, .nmenu, .tips, .tip, .map-hint, form, button, .retry, .themes, .print-hint, a.back, .toc { display: none !important; }
+  .evv, .top .tools, .pages, .tl-tools, .nav-tools, .nav-help, .nmenu, .tips, .tip, .map-hint, form, button, .retry, .themes, .print-hint, a.back, .toc { display: none !important; }
   .top { padding-bottom: 6px; }
   .print-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 0 0 8px; font-size: 11px; color: var(--muted); }
   details::details-content { content-visibility: visible !important; display: block !important; }

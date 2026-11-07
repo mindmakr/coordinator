@@ -43,4 +43,6 @@ Record every choice, routed or not, so the retro and `stats` can tell whether ch
 - `S/run.mjs start <run> <unit> --model sonnet --why docs-only`: the model building this try, and the class that chose it.
 - `S/run.mjs verdict … --model opus` and `S/run.mjs integrate … --model opus`: the model that judged. While routing is on, a judge below `strong` (or an unranked name other than `strong`) is refused.
 
+- `--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"` on `start`, `built`, `verdict` and `foldin`: what the harness reported for that launch. `stats` adds `costByRun`, `costByUnit` and `costByModel`; `show` and the dashboard print them, with "not recorded" where nothing was.
+
 While routing is on, a `start`, `verdict` or `integrate` without `--model` records `unspecified`, so pass rates stay honest and the dashboard counts the rounds with no model. The unit card and page then read "built by sonnet (docs-only) · judged by opus", and the dashboard's budget block shows rounds and pass rate per builder model. `S/run.mjs stats` adds `roundsByBuilderModel` and `roundsByJudgeModel`. In the retro, a cheap model whose pass rate sits clearly below the default's on the same kind of unit is a lesson: narrow its classes.

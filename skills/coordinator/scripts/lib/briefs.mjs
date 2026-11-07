@@ -26,6 +26,9 @@ const behaviourLines = (bs) => (bs?.length ? bs.map((b) => `  ${b.id}: ${b.text}
 const beatLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs beat ${run} ${unit}`;
 const evidenceLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs evidence ${run} ${unit} --kind screenshot|log --file <png, pdf, log, md or json>`;
 const NO_ASK = 'Never ask the person: report blockers to the lead.';
+// The test-run budget (references/guardrails.md, Test runs): full suites rerun under load caused the flakes that failed rounds.
+export const TESTS_BUILDER = 'Run only the suites your change touches while you work, then the full suite once before you report. Rerun a suite under load only when you suspect a flake, and say so in your report.';
+export const TESTS_CRITIC = 'Run the full suite once on the head. Rerun a single file, alone or under load, only when you suspect a flake, and say so in EVIDENCE; never the whole suite again.';
 
 // run: the state; o: { role, unit, quotes: [{ source, text }], where, playbook, env }.
 export function buildBrief(run, o) {
@@ -52,6 +55,7 @@ export function buildBrief(run, o) {
       ...playbook,
       ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.'] : []),
       'Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.',
+      TESTS_BUILDER,
       `At each milestone (pushed, tests ran, PR opened) run: ${beatLine(run.id, u.id, o.env)} --text "<the milestone>"`,
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your report is lost when the worktree goes.`,
       'Never merge, deploy, push to a protected branch, delete data or contact anyone. Never ask the person: report blockers to the lead.',
@@ -71,6 +75,7 @@ export function buildBrief(run, o) {
       'Check every behaviour yourself; the builder\'s evidence is a pointer, not proof.',
       ...playbook,
       'Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.',
+      TESTS_CRITIC,
       'Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.',
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your reply is lost when the worktree goes.`,
       `If your checks run long, run now and then: ${beatLine(run.id, u.id, o.env)}`,
@@ -78,12 +83,15 @@ export function buildBrief(run, o) {
       'Reply with exactly:',
       'VERDICT: PASS | FAIL',
       'SCORE: 0-10 against the bar (always; decimals allowed)',
-      'GAP: the single biggest gap between the artifact and the bar (none if PASS)',
+      'SEVERITY: high | medium, the severity of that gap (none if PASS)',
+      'GAP: the single biggest high or medium gap between the artifact and the bar (none if PASS)',
       'CAUSE: the root cause of that gap as a 2-5 word tag, e.g. "hand-rolled ICU parser" (none if PASS)',
       'EVIDENCE: the command and output, the file:line, or the screenshot path that proves it',
       'BEHAVIOURS: one line each, B1 PASS|FAIL: <what shows it>',
+      'FINDINGS: one line each, <high|medium|low|nit> <file:line> <what>. high: a wrong result, data loss, a security hole or a failing behaviour; medium: a real defect against the bar that has a workaround; low: small and safe to fix in passing; nit: wording or style',
+      'FOLDS: the low and nit findings to fold in before merge (none if none)',
       'OUT-OF-FENCE: anything found outside scope (follow-ups, not failures)',
-      'Pass only when every behaviour passes and the evidence shows it.',
+      'Pass only when every behaviour passes and the evidence shows it. Fail only on a high or medium finding: lows and nits never fail a round, they go under FOLDS on a pass.',
     ].join('\n');
   }
   if (o.role === 'integrator') {
@@ -98,7 +106,7 @@ export function buildBrief(run, o) {
       'Goal behaviours:', ...behaviourLines(run.goalBehaviours),
       ...playbook,
       'Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.',
-      'Fix only inconsistencies; don\'t redesign. Run the full checks after.',
+      'Fix only inconsistencies; don\'t redesign. Run the full checks once after, on the merged result.',
       'Reply in the same format as the critic, marking the goal\'s behaviours (G1, G2, …), then list what you changed.',
     ].join('\n');
   }

@@ -74,7 +74,7 @@ test('start and verdict record the models; the HUD, unit page and stats show the
   ok('built', 'm', 'docs');
   const low = cli(dir, 'verdict', 'm', 'docs', 'pass', '--evidence', 'e', '--model', 'sonnet');
   assert.equal(low.code, 1); assert.match(low.err, /never routed down/);
-  ok('verdict', 'm', 'docs', 'fail', '--evidence', 'e', '--gap', 'typo', '--score', '5', '--model', 'opus');
+  ok('verdict', 'm', 'docs', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'typo', '--score', '5', '--model', 'opus');
   ok('start', 'm', 'docs', '--model', 'sonnet', '--why', 'docs-only', '--force-model', 'typo only'); ok('built', 'm', 'docs');
   ok('verdict', 'm', 'docs', 'pass', '--evidence', 'e', '--model', 'opus');
   ok('start', 'm', 'core'); ok('built', 'm', 'core'); ok('verdict', 'm', 'core', 'pass', '--evidence', 'e', '--model', 'opus');
@@ -158,7 +158,7 @@ test('after a try failed on a cheaper model, start refuses a cheaper one unless 
   const dir = folder(); const ok = okIn(dir);
   ok('init', 'e', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'e', 'a', '--bar', 'b'); ok('freeze', 'e');
   ok('start', 'e', 'a', '--model', 'sonnet', '--why', 'docs'); ok('built', 'e', 'a');
-  ok('verdict', 'e', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
+  ok('verdict', 'e', 'a', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
   const n = ok('next', 'e').units.find((u) => u.id === 'a');
   assert.equal(n.model, 'opus'); assert.match(n.modelWhy, /sonnet failed/);
   const r = cli(dir, 'start', 'e', 'a', '--model', 'claude-haiku-4-5');
@@ -169,7 +169,7 @@ test('after a try failed on a cheaper model, start refuses a cheaper one unless 
   assert.equal(cli(dir, 'start', 'e', 'a', '--model', 'sonnet', '--force-model').code, 1); // a reason is required
   ok('start', 'e', 'a', '--model', 'sonnet', '--force-model', 'one-word typo, opus is down');
   assert.match(JSON.parse(readFileSync(join(dir, 'runs', 'e', 'state.json'), 'utf8')).notes.at(-1).text, /again \(retry after sonnet failed\): one-word typo/);
-  ok('built', 'e', 'a'); ok('verdict', 'e', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
+  ok('built', 'e', 'a'); ok('verdict', 'e', 'a', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
   ok('start', 'e', 'a', '--model', 'claude-opus-4-1'); // strong is always accepted
 });
 
@@ -247,7 +247,7 @@ test('the dashboard shows rounds and pass rate per builder model while the run i
   const dir = folder(); const ok = okIn(dir);
   ok('init', 'h', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'h', 'a', '--bar', 'b'); ok('freeze', 'h');
   ok('start', 'h', 'a', '--model', 'sonnet'); ok('built', 'h', 'a');
-  ok('verdict', 'h', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
+  ok('verdict', 'h', 'a', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--score', '4', '--model', 'opus');
   const html = readFileSync(join(dir, 'runs', 'h', 'hud.html'), 'utf8');
   assert.match(html, /data-a="budget-models"[\s\S]*sonnet 0\/1 passed<\/b>/); // no "(0)" after it
   assert.match(cli(dir, 'show', 'h').out, /models {3}sonnet 0\/1 passed$/m);
@@ -267,8 +267,8 @@ test('judges and escalation use the same parsing: provider ids of cheaper models
   const dir = folder(); const ok = okIn(dir);
   ok('init', 'p', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'p', 'a', '--bar', 'b'); ok('freeze', 'p');
   ok('start', 'p', 'a', '--model', 'claude_haiku'); ok('built', 'p', 'a');
-  for (const m of CHEAP_IDS) assert.equal(cli(dir, 'verdict', 'p', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '3', '--model', m).code, 1, m);
-  ok('verdict', 'p', 'a', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '3', '--model', 'us.anthropic.claude-opus-4-1-20250805-v1:0');
+  for (const m of CHEAP_IDS) assert.equal(cli(dir, 'verdict', 'p', 'a', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--score', '3', '--model', m).code, 1, m);
+  ok('verdict', 'p', 'a', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--score', '3', '--model', 'us.anthropic.claude-opus-4-1-20250805-v1:0');
   // The fail on claude_haiku escalates; a Bedrock haiku id is still cheaper, a Vertex opus id is strong.
   assert.match(cli(dir, 'start', 'p', 'a', '--model', 'anthropic.claude-haiku-4-5-20251001-v1:0').err, /force-model/);
   assert.match(cli(dir, 'start', 'p', 'a', '--model', 'opus-haiku').err, /force-model/);

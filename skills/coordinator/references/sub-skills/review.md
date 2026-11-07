@@ -20,7 +20,7 @@ A budget may cut rounds or minutes. It never cuts a pass, the diff's reach or th
 ## Steps
 
 1. **Check out the head** in your own worktree, never the builder's working copy. If the checks need a database, use your own, migrated from empty or from the project's fixture, not the builder's.
-2. **Red, then green.** Run the unit's red test on the base: it must fail for the reason the issue gives. Run it on the head: it must pass. Then run every check `COORDINATOR.md` names on the head, and paste the pass or fail lines.
+2. **Red, then green.** Run the unit's red test on the base: it must fail for the reason the issue gives. Run it on the head: it must pass. Then run every check `COORDINATOR.md` names on the head, the full suite once, and paste the pass or fail lines. Rerun only a single file you suspect is flaky, and say so (`guardrails.md`, Test runs).
 3. **Correctness pass.** Run the harness's own code-review tool on the diff at its thorough level (in Claude Code, the `code-review` skill at `high`; use `max` or `ultra` only if the person asked). Where there is none, read the diff line by line for wrong results, missed callers, broken error paths and race conditions.
 4. **Security pass.** Run the harness's security tools: a security-review skill or a security reviewer agent, and any secret, dependency or static scanner the project has, on what the PR adds. Then read the diff for:
    - authorisation on every new route and action, and tenant or owner scoping on every query;
@@ -41,13 +41,14 @@ Wording that goes through the project's own approval is not failed on nuance (`t
 
 ## Specialist critic (risk areas)
 
-For money, auth, migrations, time zones, a simulated clock, or any area `COORDINATOR.md` marks, the lead sends a second critic with this playbook plus the area: a specialist agent where the harness has one (security, database, accessibility). It runs steps 1, 2 and 7 itself and goes deep on the area. Both critics must pass, and the state enforces it: the unit is added with `add --specialist security` (comma-separated for several), the specialist's reply is recorded with `verdict … --specialist security` on the same build, and the general `verdict pass` is refused until every required specialist has passed. Record who judged with `--critic "<setup>"` on every verdict, so `stats` can give an escape rate per critic setup.
+For money, auth, migrations, time zones, a simulated clock, or any area `COORDINATOR.md` marks, the lead sends a second critic with this playbook plus the area: a specialist agent where the harness has one (security, database, accessibility). It runs steps 1 and 7 itself, the area's own tests from step 2 (not the full suite again), and goes deep on the area. Both critics must pass, and the state enforces it: the unit is added with `add --specialist security` (comma-separated for several), the specialist's reply is recorded with `verdict … --specialist security` on the same build, and the general `verdict pass` is refused until every required specialist has passed. Record who judged with `--critic "<setup>"` on every verdict, so `stats` can give an escape rate per critic setup.
 
 ## Output
 
 The critic reply from `briefs.md`:
 
-- **GAP** is the single highest finding. High and medium findings fail the unit; lows go in EVIDENCE as notes for the next round.
+- **SEVERITY** and **GAP**: the single highest finding and its severity. Only high and medium findings fail the unit (`bar.md`, Severity); a FAIL whose worst finding is low or nit is refused.
+- **FINDINGS** lists every finding with its severity; **FOLDS** lists the lows and nits for the builder to fold in on a pass.
 - **CAUSE** names the root cause in 2–5 words ("audit writes after time floor"), not the symptom ("slow sign-in"). When the cause matches an earlier round's, reuse its tag word for word: that is how the loop spots a stuck unit.
 - **EVIDENCE** gives each finding an id, severity, `path:line` at the head commit, the quoted line and the fix.
 - If the run's decisions allow review comments on the PR, post the findings as one review per round, as a comment. Never approve, request changes or merge.

@@ -116,7 +116,7 @@ A run survives a crash, a closed session or days away. Everything is in `.coordi
 The service in [`service/`](service/README.md) is a GitHub App and a web dashboard. It reads the `coordinator-state` branch and shows each run, drawn by the same renderers, to the people who can read that repo on GitHub. Answer the lead and add notes there or in an issue comment (`/coordinator answer q3 b`), and get web push, email or GitHub alerts when a run needs you. Builders and critics still run on your machine.
 
 - **Self-host today:** one container and Postgres, with your own GitHub App ([self-host](docs/self-host.md)).
-- **Hosted:** app.coordinator.mindmakr.com opens with 1.0.1, free during the beta ([#42](https://github.com/mindmakr/coordinator/issues/42)).
+- **Hosted:** app.coordinator.mindmakr.com is opening soon, free during the beta ([#42](https://github.com/mindmakr/coordinator/issues/42)).
 
 | Doc | What |
 |---|---|
@@ -149,8 +149,10 @@ Mechanical builder work (docs, copy, translations, renames, fixtures) can go to 
 | Run report (release notes for devops and testers) and retro pages | Shipped |
 | Code-quality and compliance signals (`run.mjs quality`) | Shipped |
 | Function calls per unit (`run.mjs calls`, the Calls view) | Shipped |
-| Evidence viewer | Coming in 1.1 |
-| Gaps view on the coordinator page | Coming in 1.1 |
+| Evidence viewer (screenshots in a scrollable popup) | Shipped |
+| Gaps view with search on the coordinator page | Shipped |
+| Runs that end eagerly: severity gates, fold-in checks, finish line, cost record | Shipped |
+| Local demo of the hosted app (`npm run demo`) | Shipped |
 
 ## What's inside
 

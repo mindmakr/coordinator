@@ -8,6 +8,7 @@
 //   detect.mjs --diff-file <file> [same options]
 // --run adds the fence paths recorded on the run (run.mjs init --paths).
 // --unit records the result on that unit; on a run with --paths, a PASS verdict needs it clean.
+// On a pass waiting for its fold-in check, --base <reviewed head> --head <fold head> checks the fold (run.mjs foldin needs it clean).
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,10 +53,13 @@ try {
       if (s.closed) throw new Error(`run ${opt.run} is closed`);
       const u = s.units.find((x) => x.id === safeId(opt.unit, 'unit'));
       if (!u) throw new Error(`no unit ${opt.unit} in run ${opt.run}`);
-      if (u.status !== 'judging') throw new Error(`unit ${opt.unit} is ${u.status}; detect is recorded while judging`);
+      // While judging, or on a pass whose fold-ins wait for their check (run.mjs foldin).
+      const last = u.rounds.at(-1);
+      const fold = u.status === 'pass' && last?.folds?.length > 0 && !last.foldin;
+      if (u.status !== 'judging' && !fold) throw new Error(`unit ${opt.unit} is ${u.status}; detect is recorded while judging, or on a pass waiting for its fold-in check`);
       // The paths it changed (renames by both names): `next` compares them across units (lib/overlap.mjs).
       const paths = [...new Set(changed.flatMap((f) => [f.path, f.renamedFrom].filter(Boolean)))].sort().slice(0, PATHS_MAX);
-      u.detect = { round: u.rounds.length + 1, clean: hits.length === 0, base, head, files, paths, allow, hits: hits.length, at: new Date().toISOString() };
+      u.detect = { round: fold ? u.rounds.length : u.rounds.length + 1, clean: hits.length === 0, base, head, files, paths, allow, hits: hits.length, at: new Date().toISOString(), ...(fold ? { fold: true } : {}) };
     });
   }
   console.log(JSON.stringify({ clean: hits.length === 0, base, head, files, fence, allowed: allow, hits }, null, 2));

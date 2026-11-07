@@ -2,6 +2,7 @@
 // and behaviours with their evidence, every round, notes and questions for it,
 // its links and its own timeline, and the functions its diff touched (when
 // computed). Same shell, same rules as the dashboard.
+import { viewer, viewerEntries } from './evview.mjs';
 import { linkify } from './links.mjs';
 import { unitCalls } from './map/callsview.mjs';
 import { clip } from './plain.mjs';
@@ -66,7 +67,8 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
       + (form ? noteForm(form, u.id) : '') + '</section>'),
     `<h2 id="timeline" data-a="h-timeline">Timeline of ${esc(u.id)}</h2>`,
     ctx.live ? timelineTools() : '',
-    blk('timeline', timelineList([...u.timeline].reverse(), r), 'ol', ' class="timeline" data-tl-list'),
+    blk('timeline', timelineList([...u.timeline].reverse(), r, undefined, ctx), 'ol', ' class="timeline" data-tl-list data-ev-list'),
+    blk('evv', viewer(viewerEntries(v, u.id), ctx, r)),
   ].join('\n');
   return page({ title: `${u.id} · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/unit/${u.id}`, closed: !v.open });
 }

@@ -238,7 +238,7 @@
         <dl>
           <dt>Init and doctor</dt><dd><code>/coordinator:init</code> learns the project once and asks where state goes, the theme, budgets, the merge rule and the hosted app. <code>/coordinator:doctor</code> checks the setup, one line per item with a fix.</dd>
           <dt>Claude Code and Codex CLI</dt><dd>A plugin for Claude Code. In OpenAI Codex CLI, the skill folders plus a short <code>AGENTS.md</code> block; with no question tool there, questions go to the dashboard.</dd>
-          <dt>Self-host, or hosted</dt><dd>The web service is one container and Postgres with your own GitHub App. The hosted app opens with 1.0.1. Builders and critics always run on your machine.</dd>
+          <dt>Self-host, or hosted</dt><dd>The web service is one container and Postgres with your own GitHub App. The hosted app is opening soon. Builders and critics always run on your machine.</dd>
         </dl>
       </div>
     </div>
@@ -263,10 +263,12 @@
     </div>
 
     <div class="next-up" aria-labelledby="next-h">
-      <h3 id="next-h">Coming in 1.1</h3>
+      <h3 id="next-h">Also in 1.1</h3>
       <ul>
-        <li><b>Evidence viewer.</b> Every screenshot and log of a run in one place.</li>
-        <li><b>Gaps view.</b> The gaps critics raised, across runs, on the coordinator's page.</li>
+        <li><b>Evidence viewer.</b> Open any screenshot or log from the timeline in a scrollable viewer, step through them, open in a new tab.</li>
+        <li><b>Gaps view.</b> Every open gap across runs on the coordinator's page, searchable, so nothing is forgotten.</li>
+        <li><b>Runs that end eagerly.</b> Only real defects fail a round; small fixes get a quick check; you are asked once when one unit is left.</li>
+        <li><b>Local demo of the hosted app.</b> <code>npm run demo</code> runs the web dashboard on your machine with your own runs.</li>
       </ul>
     </div>
   </div>
@@ -304,7 +306,7 @@
         <a class="btn ghost" href="https://github.com/mindmakr/coordinator/blob/main/docs/self-host.md">Self-host guide</a>
       </div>
       <div class="inst">
-        <h3>Hosted app opens with 1.0.1</h3>
+        <h3>Hosted app: opening soon</h3>
         <p>The same service, run by us, free during the beta. What it reads and keeps: <a href="https://github.com/mindmakr/coordinator/blob/main/docs/permissions.md">permissions</a> and <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">privacy</a>.</p>
         <a class="btn ghost" href="https://github.com/mindmakr/coordinator/issues/42">Follow the hosted beta</a>
       </div>

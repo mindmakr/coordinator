@@ -1,0 +1,32 @@
+{
+  "about": "Bar and behaviour lines shaped like those of 17 real runs (reworded; u1213's line is quoted from the public old-run-0.5 fixture). On the real 158 lines the narrow check flags 2: u1213 and one 'every claim true of …'. 'fine' lines must not be flagged, 'open' lines must be.",
+  "fine": [
+    "The dashboard count, the profiles count and the filtered list agree for every standing on the same data",
+    "Given any filter set on the list endpoint, when the response is read, then it carries counts computed with every filter except the count's own",
+    "Given an admin of another company asks for a person's history, then they get 403 or 404; admins in scope get all of it.",
+    "It should add every new template in en, ar and ur marked awaiting approval, and change no approved template.",
+    "It should link the platform dashboard to an all-employers list, and each employer profile shows only its own rows.",
+    "It should show no raw status value, have every string in en, ar and ur, and work at 360px and right to left (screenshots).",
+    "Every date list ordered, id tiebreak on paged lists, queues oldest first, no in-memory caps",
+    "Given every date list query in the issue, when read, then each has ORDER BY ending in id",
+    "Every event time says its zone; detail shows seconds and UTC; same instant reads the same in any browser zone",
+    "Every behaviour below passes on the PR head, judged by a full review plus security and visual critics",
+    "Given the new strings, then en, ar and ur all have them (locale parity tests pass), and the panel reads correctly in Arabic RTL and dark mode",
+    "doctor checks every setup item with a fix line each; init asks what the person needs and writes it; tests",
+    "Catch-up job reruns the three missed exports",
+    "every key in the committed en.json has an ar entry",
+    "every route listed in routes.md returns 403 without the permission",
+    "It shows totals in SAR with two decimals, in English and Arabic",
+    "all tests pass",
+    "No message is sent twice for the same event",
+    "Given an HR admin without the permission, when they open /hr/payroll, then they get a 403 and no data."
+  ],
+  "open": [
+    "#1213: every 'we notified / our team has been told' message comes from the same call that sends the notice; a test fails when a claim has no matching notice; the four money-path cases and HR bell for new requests covered",
+    "Any \"your employer was told\" message is backed by a real notice",
+    "Catch every leaked secret in the logs",
+    "It should never log a token anywhere",
+    "every message that claims we told someone is true",
+    "It accepts any phrasing of the consent question"
+  ]
+}

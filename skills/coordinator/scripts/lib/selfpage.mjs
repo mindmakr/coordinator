@@ -4,6 +4,8 @@
 // render(model, ctx) }. Same shell, theme and escaping rules as the dashboard.
 import { anchor, linkify, webUrl } from './links.mjs';
 import { count } from './self.mjs';
+import { KIND_LABEL, gapHaystack } from './gaps.mjs';
+import { clip } from './plain.mjs';
 import { badge, blk, chip, esc, hash, keyed, page, stamp, stateChip, toggle, unitDot } from './parts.mjs';
 
 const LESSONS_SHOWN = 12;
@@ -101,6 +103,47 @@ function plans(m, ctx) {
   }).join('')}</div>`;
 }
 
+// Gaps: everything left undone across runs, grouped by run. The filter and search need the live
+// page's script, so the snapshot has neither and lists them all. Resolved gaps stay listed, folded.
+const GAP_BADGE = { stopped: 'stop', unfinished: 'fail', run: 'stop', 'follow-up': 'link', 'out-of-fence': 'strategy', deferred: 'note', upstream: 'merge', question: 'question', escape: 'fail' };
+const GAP_CLIP = 220;
+const REASON_CLIP = 160;
+const gapsLine = (g) => `${count(g.openCount, 'open gap')} across ${count(g.openRuns, 'run')}`;
+function gapItem(g, ctx, m) {
+  const unit = g.unit ? (m.runIds.includes(g.run) ? ` · unit <a href="${esc(unitHrefIn(ctx, g.run)(g.unit))}">${esc(g.unit)}</a>` : ` · unit ${esc(g.unit)}`) : '';
+  const long = g.text.length > GAP_CLIP;
+  const text = long ? `${esc(clip(g.text, GAP_CLIP))}${toggle(`gap-${g.id}`, 'Full text', `<p class="say">${linkify(g.text, null)}</p>`)}` : linkify(g.text, null);
+  const r = g.resolution;
+  const why = r ? (r.reason.length > REASON_CLIP ? `<span title="${esc(r.reason)}">${esc(clip(r.reason, REASON_CLIP))}</span>` : linkify(r.reason, null)) : '';
+  const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : r.checked ? `by ${esc(r.by)}, checked with gh` : `by ${esc(r.by)}${r.confirm ? `, their words: “${esc(clip(r.confirm, 120))}”` : ''}`}: ${why}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
+  const unverified = g.unverified ? `<div class="cause"><b>tracked (unverified)</b>: ${g.unverified.map((u) => linkify(u, null)).join(', ')}, a repo the runs do not link; <code>run.mjs gaps --check</code> confirms it exists</div>` : '';
+  const carried = g.carried ? `<div class="cause"><b>carried → ${esc(g.carried)}</b>: open until that unit passes or its gap is resolved</div>` : '';
+  return `<li data-a="gap-${esc(g.id)}" data-gap data-run="${esc(g.run)}" data-kind="${esc(g.kind)}"${ctx.live ? ` data-q="${esc(gapHaystack(g))}"` : ''}>${badge(GAP_BADGE[g.kind] ?? 'info', KIND_LABEL[g.kind] ?? g.kind)} ${text}`
+    + `${g.cause ? `<div class="cause">cause: ${esc(g.cause)}</div>` : ''}`
+    + `<div class="cause">${runLink(g.run, ctx, m)}${unit}${g.at ? ` · ${stamp(g.at)}` : ''} · from ${esc(g.from)} · <code>${esc(g.id)}</code></div>${carried}${unverified}${res}</li>`;
+}
+const gapGroups = (groups, ctx, m, status) => groups.map((grp) => `<section class="card gap-run" data-gap-group data-run="${esc(grp.run)}" data-status="${status}" data-a="gaps-${status}-${esc(grp.run)}"><h3><span>${runLink(grp.run, ctx, m)}</span><span class="chip" data-gap-n>${grp.items.length}</span></h3>`
+  + `<ul class="plain">${grp.items.map((g) => gapItem(g, ctx, m)).join('')}</ul></section>`).join('');
+function gapTools(g) {
+  const opts = (vals, label) => vals.map((v) => `<option value="${esc(v)}">${esc(label(v))}</option>`).join('');
+  return '<form class="tl-tools gap-tools" data-gaps role="search">'
+    + '<label class="grow">Search gaps<input type="search" name="q" placeholder="text, run, unit, #123, PR…" autocomplete="off" spellcheck="false"></label>'
+    + `<label>Run<select name="run"><option value="">All runs</option>${opts(g.runs, (v) => v)}</select></label>`
+    + `<label>Kind<select name="kind"><option value="">All kinds</option>${opts(g.kinds, (v) => KIND_LABEL[v] ?? v)}</select></label>`
+    + '<label>Status<select name="status"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></label>'
+    + '<p class="cause gap-count" data-gaps-count aria-live="polite"></p></form>';
+}
+function gapsSection(m, ctx) {
+  const g = m.gaps;
+  if (!g.openCount && !g.resolvedCount) return empty('No gaps: no stopped or unfinished unit, open follow-up, question, escape or upstream proposal in any run.');
+  const head = `<p class="meta"><b>${gapsLine(g)}</b> · ${g.resolvedCount} resolved. Stopped and unfinished units, runs closed early, follow-ups, out-of-fence items, deferred work, questions for you, upstream proposals and escapes, from every run. `
+    + 'Close one with <code>run.mjs gap close &lt;run&gt; &lt;id&gt; --reason R</code>: a decision in that run’s log. '
+    + (g.lastCheck ? `Last checked against GitHub ${stamp(g.lastCheck.at)}: ${count(g.lastCheck.asked, 'reference')} asked, ${g.lastCheck.closed} closed.</p>` : 'Not checked against GitHub yet: <code>run.mjs gaps --check --dry-run</code>.</p>');
+  const open = g.openCount ? `<div class="lists gaps" data-gaps-open>${gapGroups(g.open, ctx, m, 'open')}</div>` : `<div data-gaps-open>${empty('No open gap.')}</div>`;
+  const resolved = g.resolvedCount ? `<div data-gaps-resolved>${toggle('self-gaps-resolved', `Resolved · ${g.resolvedCount}`, `<div class="lists gaps">${gapGroups(g.resolved, ctx, m, 'resolved')}</div>`)}</div>` : '';
+  return head + (ctx.live ? gapTools(g) : '') + open + resolved;
+}
+
 const PROPOSAL_BADGE = { upstream: 'merge', 'follow-up': 'link', retro: 'note', promote: 'pass' };
 function proposals(m, ctx) {
   if (!m.proposals.length) return empty('No proposals yet. Follow-ups, retro notes and upstream notes from every run show here.');
@@ -122,6 +165,7 @@ function study(m, ctx) {
 export const SECTIONS = [
   { id: 'age', title: 'Age', render: age },
   { id: 'plans', title: 'Plans', render: plans },
+  { id: 'gaps', title: 'Gaps', render: gapsSection },
   { id: 'stats', title: 'Working stats', render: stats },
   { id: 'learning', title: 'Learning', render: learning },
   { id: 'memory', title: 'Memory', render: memory },
@@ -131,9 +175,9 @@ export const SECTIONS = [
 ];
 
 export function selfPage(m, nowMs = Date.now(), ctx) {
-  const toc = `<nav class="toc" aria-label="Sections">${SECTIONS.map((s) => `<a href="#self-${s.id}">${esc(s.title)}</a>`).join('')}</nav>`;
+  const toc = `<nav class="toc" aria-label="Sections">${SECTIONS.map((s) => `<a href="#self-${s.id}">${esc(s.title)}${s.id === 'gaps' && m.gaps?.openCount ? ` · ${m.gaps.openCount}` : ''}</a>`).join('')}</nav>`;
   const body = [
-    blk('head', `<header class="run"><h1>Coordinator</h1><span class="meta">across ${count(m.age.runs, 'run')} in this project · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    blk('head', `<header class="run"><h1>Coordinator</h1><span class="meta">across ${count(m.age.runs, 'run')} in this project${m.gaps?.openCount ? ` · <a href="#self-gaps">${gapsLine(m.gaps)}</a>` : ''} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
     toc,
     ...SECTIONS.map((s) => `<h2 id="self-${s.id}" data-a="h-${s.id}">${esc(s.title)}</h2>${blk(`self-${s.id}`, s.render(m, ctx), 'section', ` class="self" aria-labelledby="self-${s.id}"`)}`),
   ].join('\n');

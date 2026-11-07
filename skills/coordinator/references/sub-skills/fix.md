@@ -13,7 +13,7 @@
 3. **Check the branch in the same command as every commit and push** (`git branch --show-current && git commit …`). Other agents may switch the shared checkout between your commands.
 4. **Red.** Write a test that reproduces the issue with the issue's own figures. Run it alone and watch it fail for that reason.
 5. **Fix at the cause.** Change the layer that owns the logic; reuse or create one shared helper. No fallback values, compatibility shims or second copies of a rule.
-6. **Green.** Run the red test, then every check `COORDINATOR.md` names. A failing line means not done.
+6. **Green.** Run the red test and the suites your change touches as you work, then every check `COORDINATOR.md` names and the full suite once, before you report. A failing line means not done. Rerun under load only a file you suspect is flaky, and say so.
 7. **Strings and screens.** Changed strings: follow `translations.md`. A visible change: take your own screenshots with `visual.md` so the critic has a pointer, but you don't judge them.
 8. **PR.** One per repo, into the base branch the project names. The body starts with `Fixes <owner/repo>#<n>` for each issue it closes, lists linked PRs with their merge order, and pastes the check lines. Then `run.mjs link <run> <unit> --pr …`.
 9. **Review findings** go into the same PR. Reply to each with `Fixed in <sha>: <one line>`, or the reason it is not fixed. Small, understood findings are fixed now, not filed.

@@ -56,7 +56,7 @@ test('a unit cannot pass while a behaviour is failing or unchecked; a pass mark 
   r = run('verdict', 'b2', 'u1', 'pass', '--evidence', 'e', '--score', '9', '--behaviour', 'B1=pass:totals.test 3 passed', '--behaviour', 'B2=fail:rounds down');
   assert.match(r.err, /behaviour B2 \(fail\)/);
   assert.equal(state('b2').units[0].behaviours[0].status, 'unchecked', 'a refused verdict changes nothing');
-  assert.equal(run('verdict', 'b2', 'u1', 'fail', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down').code, 0);
+  assert.equal(run('verdict', 'b2', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down').code, 0);
   let u = state('b2').units[0];
   assert.deepEqual(u.behaviours.map((b) => b.status), ['pass', 'fail']);
   assert.deepEqual(u.rounds[0].behaviours.map((m) => m.status), ['pass', 'fail']);
@@ -164,7 +164,7 @@ test('timelines: a unit holds only its own events in order; filters, ranges and 
   run('built', 't1', 'u1'); run('note', 't1', '--kind', 'person', '--text', 'u2 note', '--unit', 'u2');
   run('ask', 't1', '--question', 'Merge?', '--header', 'Merge', '--option', 'Yes', '--option', 'No', '--unit', 'u1');
   run('answer', 't1', 'q1', '--choice', 'Yes');
-  run('verdict', 't1', 'u1', 'fail', '--evidence', 'e', '--gap', 'g', '--cause', 'off by one', '--score', '4');
+  run('verdict', 't1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--cause', 'off by one', '--score', '4');
   run('evidence', 't1', 'u1', '--kind', 'log', '--text', 'log');
   run('link', 't1', 'u1', '--merge', 'https://github.com/o/r/pull/1');
   const s = state('t1');
@@ -197,7 +197,7 @@ test('the drilldown page: behaviours, rounds, notes, links and its own timeline,
   setup('d1', '--repo', 'm/p');
   run('behave', 'd1', 'u1', '--text', 'It should total');
   run('start', 'd1', 'u1'); run('built', 'd1', 'u1', '--report', 'see 7f8ad63');
-  run('verdict', 'd1', 'u1', 'fail', '--evidence', 'e', '--gap', 'off by #3', '--cause', 'rounding', '--score', '4', '--behaviour', 'B1=fail:off');
+  run('verdict', 'd1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'off by #3', '--cause', 'rounding', '--score', '4', '--behaviour', 'B1=fail:off');
   run('note', 'd1', '--kind', 'person', '--text', 'check RTL', '--unit', 'u1');
   const file = readFileSync(join(runDir('d1'), 'units', 'u1.html'), 'utf8');
   assert.match(file, /<a class="back" href="\.\.\/hud\.html">← d1 dashboard<\/a>/);
@@ -265,7 +265,7 @@ test('every time is a <time> with an ISO datetime; the snapshot spells out UTC; 
   setup('ts1');
   run('note', 'ts1', '--kind', 'situation', '--text', 'busy');
   run('start', 'ts1', 'u1'); run('built', 'ts1', 'u1');
-  run('verdict', 'ts1', 'u1', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '3');
+  run('verdict', 'ts1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--score', '3');
   run('evidence', 'ts1', 'u1', '--kind', 'log', '--text', 'x');
   run('note', 'ts1', '--kind', 'person', '--text', 'hi', '--unit', 'u1');
   const iso = /<time datetime="(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"(?: class="cause")? title="(\d{4}-\d\d-\d\d \d\d:\d\d UTC)">\2<\/time>/g;
@@ -333,7 +333,7 @@ test('after freeze a behaviour is removed or reworded only with a reason, never 
   run('start', 'br1', 'u1'); run('built', 'br1', 'u1');
   assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--remove', '--reason', 'x').err, /being judged/);
   assert.match(run('behave', 'br1', 'u1', '--text', 'new one').err, /being judged/);
-  run('verdict', 'br1', 'u1', 'fail', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down');
+  run('verdict', 'br1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down');
   assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--remove').err, /missing --reason/);
   assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--text', 'It should round, roughly').err, /missing --reason/);
   assert.equal(run('behave', 'br1', 'u1', '--text', 'It should log').code, 0, 'adding one tightens the bar: no reason needed');

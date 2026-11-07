@@ -7,6 +7,7 @@ import { answerText, questions } from './questions.mjs';
 import { chainUnits } from './chain.mjs';
 import { decide, stats } from './rules.mjs';
 import { clip, dotState, stateBadge } from './plain.mjs';
+import { gapsModel, KIND_LABEL } from './gaps.mjs';
 
 const MINUTE = 60_000;
 export const STUDY_AREAS = ['security', 'design', 'stack', 'other'];
@@ -80,7 +81,7 @@ function plan(run, nowMs) {
   return {
     run: run.id, tag: run.tag, decision: p.decision, goal: clip(run.goal, 200),
     done: run.units.length - left.length, total: run.units.length,
-    next: p.units.filter((d) => ['build', 'judge', 'change-strategy', 'check-stale'].includes(d.action)).map((d) => `${d.action} ${d.id}`),
+    next: p.units.filter((d) => ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'].includes(d.action)).map((d) => `${d.action} ${d.id}`),
     left: left.map((u) => { const d = byId.get(u.id) ?? {}; const dot = dotState(u, d, qs); return { id: u.id, title: u.title ?? null, status: u.status, dot, badge: stateBadge(dot, u, d), waitsOn: waitsOn(d, u, qs) }; }),
     needsYou: qs.map((q) => ({ id: q.id, text: clip(q.header || q.text, 140) })),
   };
@@ -144,7 +145,7 @@ function decisions(runs) {
  * runs: every readable state; lessons: { global, project }; context: COORDINATOR.md text or null;
  * current: the run being served (or null). Returns the page and text model.
  */
-export function selfModel({ runs, lessons = {}, context = null, current = null, nowMs = Date.now() }) {
+export function selfModel({ runs, lessons = {}, context = null, current = null, gapsCheck = null, nowMs = Date.now() }) {
   const sorted = [...runs].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const units = sorted.reduce((n, r) => n + r.units.length, 0);
   const minutes = sorted.reduce((n, r) => {
@@ -191,6 +192,8 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
     })),
     plans: sorted.filter((r) => !r.closed).reverse().map((r) => plan(r, nowMs)),
     proposals: proposals(sorted, all),
+    // Everything left undone across runs (lib/gaps.mjs), open and resolved.
+    gaps: { ...gapsModel(sorted), lastCheck: gapsCheck && typeof gapsCheck.at === 'string' ? { at: gapsCheck.at, asked: Number(gapsCheck.asked) || 0, closed: Number(gapsCheck.closed) || 0 } : null },
     study: {
       runs: sorted.filter((r) => (r.studies ?? []).length || !r.closed).map((r) => ({ run: r.id, used: (r.studies ?? []).length, cap: studyCap(r), open: !r.closed })),
       log: sorted.flatMap((r) => (r.studies ?? []).map((x) => ({ ...x, run: r.id }))).sort((a, b) => String(b.at).localeCompare(String(a.at))),
@@ -227,6 +230,9 @@ export function selfText(m) {
     L.push('', `chains    ${count(m.chains.length, 'unit')} worked across runs, each counted once in the stats`);
     for (const c of m.chains.slice(0, 10)) L.push(`  ${c.unit}: ${c.links.map((l) => `${l.run}${l.unit !== c.unit ? `:${l.unit}` : ''} (${l.rounds}, ${l.status})`).join(' → ')} · ${c.rounds} rounds, ${c.status}`);
   }
+  const g = m.gaps;
+  L.push('', `gaps      ${count(g.openCount, 'open gap')} across ${count(g.openRuns, 'run')} · ${g.resolvedCount} resolved (run.mjs gaps lists them; gap close <run> <id> --reason R closes one)`);
+  for (const grp of g.open.slice(0, 6)) for (const x of grp.items.slice(0, 4)) L.push(`  ${x.id} [${KIND_LABEL[x.kind]}] ${clip(x.text, 110)}`);
   L.push('', `proposals ${m.proposals.length}`);
   for (const p of m.proposals.slice(0, 8)) L.push(`  [${p.kind}] ${clip(p.text, 130)}${p.run ? ` (${p.run})` : ''}`);
   L.push('', `study     ${count(m.study.log.length, 'study', 'studies')}${m.study.runs.filter((r) => r.open).map((r) => ` · ${r.run} ${r.used}/${r.cap}`).join('')}`);
