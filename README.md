@@ -56,9 +56,9 @@ A single agent pass grades its own homework. It decides the work is "fine", stop
 
 Coordinator brings no team of its own: it staffs builders, critics and researchers from the agents, skills and tools your harness already has. It is designed for any harness that can delegate to sub-agents, run a script and ask you a question.
 
-- **Claude Code:** supported today, as a plugin or a copied skill folder.
-- **Other skills-capable harnesses:** copy `skills/coordinator` into the harness's skills folder. Fallbacks are built in (a numbered list where there is no question tool, a file path where there are no Artifacts), but so far it is packaged and released for Claude Code only.
-- **Planned for 1.0:** a second harness with its own install path and an end-to-end run. The draft design ([#15](https://github.com/mindmakr/coordinator/issues/15)) recommends OpenAI Codex CLI; the choice is still open.
+- **Claude Code:** as a plugin or a copied skill folder.
+- **OpenAI Codex CLI:** the skill folders in `.agents/skills/` and a short block in `AGENTS.md`. Codex has no question tool, so questions go to the dashboard ([what differs](skills/coordinator/references/codex.md)).
+- **Other skills-capable harnesses:** copy the skill folders into the harness's skills folder. Fallbacks are built in (a numbered list where there is no question tool, a file path where there are no Artifacts). Adapters are welcome.
 
 ## Install
 
@@ -69,11 +69,25 @@ Coordinator brings no team of its own: it staffs builders, critics and researche
 /plugin install coordinator@coordinator
 ```
 
-**Any skills-capable harness:** copy `skills/coordinator` into your skills folder (for Claude Code, `~/.claude/skills/`). Installed this way, the commands are `/coordinator init`, `/coordinator run <task>` and so on.
+**OpenAI Codex CLI:** copy every folder under `skills/` into the project's `.agents/skills/`, add the [AGENTS.md block](skills/coordinator/references/codex.md#agentsmd-block), and ask for the coordinator skill by name.
+
+**Any skills-capable harness:** copy every folder under `skills/` into your skills folder (for Claude Code, `~/.claude/skills/`). Installed this way, the commands are `/coordinator init`, `/coordinator run <task>` and so on.
 
 **Needs:** Node 18+ and git. No other dependencies.
 
-Then add `.coordinator/` to your project's `.gitignore`.
+Then add `.coordinator/` to your project's `.gitignore`. The full guide is [docs/install.md](docs/install.md).
+
+## Follow runs from anywhere (hosted beta)
+
+Install the Coordinator GitHub App from [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com) and every run the lead pushes to your repo's `coordinator-state` branch shows on the web, to the people who can read that repo. Answer the lead's questions and add notes there or in an issue comment (`/coordinator answer q3 b`), and get web push, email or GitHub alerts when a run needs you. Each issue and PR a run works on gets one tracker comment, kept current. Builders and critics still run on your machine. Free during the beta.
+
+| Doc | What |
+|---|---|
+| [Install](docs/install.md) | Claude Code and Codex CLI |
+| [Connect](docs/connect.md) | The App, the state branch, `coordinator.json` |
+| [Self-host](docs/self-host.md) | One container and your own GitHub App (Docker, Dokploy) |
+| [Permissions](docs/permissions.md) | Each App permission and why |
+| [Privacy](docs/privacy.md) | What the hosted service keeps, for how long, and what never leaves your machine |
 
 ## Use
 
@@ -112,7 +126,7 @@ You can also describe the goal ("coordinate this…") and the agent picks the co
 - **The coordinator's own page** (`/coordinator`, linked from the header; `run.mjs self` in text): across every run in the project, its age, lessons with their sources, memory (`COORDINATOR.md` and your past answers), pass rate, rounds to pass and time per unit with the trend, history, what each open run waits on, its proposals, and the side studies it ran while waiting (`init --study-budget`). Other runs open read-only at `/run/<run>`.
 - **Looks like your project:** `init --theme app/globals.css` (or `Theme:` in `COORDINATOR.md`) maps your design system's colours, fonts and radius onto it. Light, dark or system.
 
-**From anywhere (beta, self-host):** [`service/`](service/README.md) is a GitHub App and a read-only web dashboard. It reads the `coordinator-state` branch that `run.mjs push` writes and shows each run, drawn by the same renderers, to the people who can read the repo on GitHub. One container plus Postgres; the App manifest and Dokploy notes are in its README.
+**From anywhere (beta, self-host):** [`service/`](service/README.md) is a GitHub App and a web dashboard that takes answers, notes and alerts. It reads the `coordinator-state` branch that `run.mjs push` writes and shows each run, drawn by the same renderers, to the people who can read the repo on GitHub. One container plus Postgres; the App manifest and Dokploy notes are in its README.
 
 Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once; with `--remote` it also pulls answers made on the web or by comment commands from the state branch (within a minute, or seconds with the service's doorbell).
 
@@ -134,7 +148,7 @@ skills/coordinator/
 │   ├── team.md                 staffing roles from your harness's agents
 │   ├── sub-skills.md           which built-in playbook runs at which step
 │   ├── sub-skills/             investigate · plan · fix · review · verify · visual · translations · release-notes · board
-│   ├── codex.md                using the skill in OpenAI Codex CLI (discovery checked; full run not yet)
+│   ├── codex.md                the OpenAI Codex CLI adapter: install, what differs, what has been checked
 │   ├── guardrails.md           budgets, fence, stop rules, gated actions
 │   ├── durability.md           the event log and snapshot, pit-stop push/pull, heartbeats, resume
 │   ├── hud.md                  the text view, the live dashboard and the snapshot
@@ -151,7 +165,9 @@ skills/coordinator/
     │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study,
     │                           maps, heat, mapsvg, mapspage, tracker
     │   └── map/                the project map: scan, resolve, build, event log, page, touches
-    └── test/                   node:test suites
+    └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
+docs/                           the homepage, and install · connect · self-host · permissions · privacy
+tools/                          codex-e2e.mjs (a headless run in Codex CLI) and make-old-runs.mjs (the migration fixtures)
 service/                        the GitHub App and web dashboard (AGPL-3.0, its own dependencies; imports scripts/lib)
 ```
 
@@ -160,21 +176,25 @@ service/                        the GitHub App and web dashboard (AGPL-3.0, its 
 - **Short files, one job each.** Load only the playbook you need. Logic lives in pure, tested modules.
 - **State over memory.** Every run is an append-only event log (`events.jsonl`) with a snapshot derived from it (`state.json`), written atomically behind a lock, with a readable `workbench.md`. Crashes and context resets resume from it. At pit stops (a unit merged, a decision, the run closed) `run.mjs push` copies the run, masked, to a `coordinator-state` branch, and `run.mjs pull` picks it up on another machine.
 - **Safe by default.**
-  - No network calls, no shell strings, and ids validated against path traversal.
+  - Network calls only where you ask for them: `run.mjs push` and `pull` run git against your own remotes at pit stops (and `push` may ask `gh` whether the repo is public); `run.mjs watch --remote` pulls the state branch on a timer and, if you name a coordinator service, swaps your `gh` token there for a short doorbell token and keeps one connection open (`lib/remote.mjs`, `lib/doorbell.mjs`). Nothing else connects anywhere.
+  - No shell strings, and ids validated against path traversal.
   - Secrets are refused in lessons and masked in run state.
   - Merging, deploying, deleting, spending or posting needs your approval, given up front.
 - **Extensible.** New playbooks are commands or domain files that reuse the core. They never fork it.
 
 ## Coming soon
 
-Out in 0.5: behaviours and evidence on the bar, and the live dashboard with a page per unit ([Dashboard](#dashboard)). Planned, not built yet: the rest of the road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14).
+The road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14). What shipped and what is next:
 
 | Add-on | Status |
 |---|---|
-| Follow and answer a run from a phone, with alerts | On the 1.0 plan ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12), [#18](https://github.com/mindmakr/coordinator/issues/18)) |
-| Security pass as a second critic on every code change | On the 1.0 plan ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
-| Run maps: mind, flow, heat and goal relevance | On the 1.0 plan ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
-| Project map: code, settings, surfaces and reuse | Built, unreleased ([Project map](#project-map), [#21](https://github.com/mindmakr/coordinator/issues/21)) |
+| Follow and answer a run from a phone, with alerts | Built for 1.0, hosted beta ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12)) |
+| OpenAI Codex CLI as a second harness | Built for 1.0; a full end-to-end run still to pass ([codex.md](skills/coordinator/references/codex.md)) |
+| Security pass as a second critic on every code change | Shipped in 0.6 ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
+| Run maps: mind, flow, heat and goal relevance | Shipped in 0.6, labels and stats panels in 1.0 ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
+| Project map: code, settings, surfaces and reuse | Shipped in 0.6 ([Project map](#project-map), [#21](https://github.com/mindmakr/coordinator/issues/21)) |
+| A short-lived doorbell token for this App alone (device login) | Next; today the doorbell uses your `gh` token ([permissions](docs/permissions.md#the-doorbell-and-your-gh-token)) |
+| Slack alerts | After 1.0 |
 | Compliance and audit trails, API flows, caller and callee graphs, function and external dependency maps | Proposed; [tell us what you need](https://github.com/mindmakr/coordinator/issues/new/choose) |
 
 ## Contributing
@@ -206,4 +226,4 @@ More on the [homepage](https://mindmakr.github.io/coordinator/).
 
 ## License
 
-[MIT](LICENSE) for the skill and its shared code. The hosted service in `service/` is [AGPL-3.0](service/LICENSE).
+The skill, its scripts and the shared code are [MIT](LICENSE). The hosted service in `service/` is [AGPL-3.0](service/LICENSE): you may run and change it, and if you offer a changed version to others over a network, you share your changes.

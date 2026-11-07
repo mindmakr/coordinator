@@ -9,7 +9,8 @@ import { makeRun, startApp, stateFiles } from './helpers.mjs';
 
 const PR = 'https://github.com/acme/web/pull/12';
 const MOBILE_PR = 'https://github.com/acme/mobile/pull/5';
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A promise and the function that settles it: the tests force each interleaving with these, never a sleep.
+const gate = () => { let open; const p = new Promise((r) => { open = r; }); return Object.assign(p, { open }); };
 
 async function world() {
   let clock = Date.parse('2026-11-06T12:00:00Z');
@@ -24,16 +25,32 @@ async function world() {
   };
   t.body = (k) => (t.gh.comments.get(k) ?? []).map((c) => c.body).join('\n');
   t.pending = async () => (await t.db.runs(7, 70))[0].trailPending;
-  // web#12's comment edit is slow, so a second refresh has time to start while it is in flight;
+  // web#12's comment edit is held until the test lets it go (`t.release()`), so a second refresh is
+  // sure to arrive while it is in flight; `t.writing` settles when the held edit has started, and
   // `overlap` records any comment write that starts while another is still running.
   t.slowWeb = () => {
     const orig = t.gh.updateComment;
+    const held = gate(); t.writing = gate(); t.release = held.open;
     let inFlight = 0; t.overlap = 0;
     t.gh.updateComment = async (tok, full, ...a) => {
       if (inFlight++) t.overlap++;
-      try { if (full === 'acme/web') await sleep(300); return await orig(tok, full, ...a); } finally { inFlight--; }
+      try { if (full === 'acme/web') { t.writing.open(); await held; } return await orig(tok, full, ...a); } finally { inFlight--; }
     };
     return () => { t.gh.updateComment = orig; };
+  };
+  // Settles once a webhook's refresh has joined the repo's queue (ingest.refreshRuns queues it at once).
+  t.queued = () => {
+    const orig = t.app.ingest.refreshRuns; const joined = gate();
+    t.app.ingest.refreshRuns = (...a) => { const p = orig(...a); joined.open(); t.app.ingest.refreshRuns = orig; return p; };
+    return joined;
+  };
+  // While web#12's edit is held: send a webhook, wait until its refresh is queued behind the held one, then let the edit go.
+  t.sendWhileWriting = async (event, payload, delivery) => {
+    await t.writing;
+    const joined = t.queued();
+    assert.equal((await t.send(event, payload, delivery)).status, 202);
+    await joined;
+    t.release();
   };
   return t;
 }
@@ -56,9 +73,8 @@ test('a webhook refresh deferred while an owed run is being retrailed keeps its 
     assert.equal(await t.pending(), true);
     t.tick(CAPS.windowMs + 1);
     const restore = t.slowWeb();
-    const resync = t.app.resyncAll(); // retrails the owed run; its web#12 edit is slow
-    await sleep(100);
-    await t.send('check_suite', mobileChecks, 'x3'); // its refresh waits in the queue, then is over budget
+    const resync = t.app.resyncAll(); // retrails the owed run; its web#12 edit is held
+    await t.sendWhileWriting('check_suite', mobileChecks, 'x3'); // its refresh waits in the queue, then is over budget
     await resync; await t.app.idle(); restore();
     assert.equal(t.overlap, 0, 'no two refreshes of the repo ran at once');
     assert.match(t.body('acme/web#12'), /merged/);
@@ -78,8 +94,7 @@ test('two overlapping webhooks: the second waits for the first, and its deferral
     assert.equal(await t.pending(), false);
     const restore = t.slowWeb();
     const first = t.send('pull_request', mergedWeb, 'y1');
-    await sleep(100);
-    await t.send('check_suite', mobileChecks, 'y2');
+    await t.sendWhileWriting('check_suite', mobileChecks, 'y2');
     await first; await t.app.idle(); restore();
     assert.equal(t.overlap, 0, 'no two refreshes of the repo ran at once');
     assert.equal(await t.pending(), true, 'the second refresh was over budget: still owed');
@@ -100,8 +115,7 @@ test('a webhook refresh that hits a GitHub 5xx while another is mid-write keeps 
       return slow(tok, full, ...a);
     };
     const first = t.send('pull_request', mergedWeb, 'z1');
-    await sleep(100);
-    await t.send('check_suite', mobileChecks, 'z2');
+    await t.sendWhileWriting('check_suite', mobileChecks, 'z2');
     await first; await t.app.idle(); restore();
     assert.equal(await t.pending(), true, 'the failed write is still owed');
     t.tick(60_000); await t.app.resyncAll();

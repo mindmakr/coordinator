@@ -29,7 +29,7 @@ export async function migrate(pool) {
   }
 }
 
-const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons, config: r.config ?? null, private: r.private ?? null } : null);
+const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons, config: r.config ?? null, private: r.private ?? null, reread: r.reread === true } : null);
 const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at), mapSha: r.map_sha ?? null, map: r.map ?? null, mapError: r.map_error ?? null, trailPending: r.trail_pending === true, trailSeq: Number(r.trail_seq ?? 0) } : null);
 
 // schema (tests): a throwaway schema of its own, dropped on close.
@@ -52,18 +52,41 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
       await q("DELETE FROM deliveries WHERE at < now() - interval '14 days'");
     },
 
+    // false (and nothing stored) for an id that was uninstalled: GitHub never reuses one, so a late event cannot bring it back.
     async upsertInstallation({ id, account }) {
-      await q('INSERT INTO installations (id, account) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET account = $2, updated_at = now()', [id, account]);
+      return (await q(`INSERT INTO installations (id, account) SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM uninstalled WHERE id = $1)
+        ON CONFLICT (id) DO UPDATE SET account = $2, updated_at = now()`, [id, account])).rowCount > 0;
     },
+    async wasUninstalled(id) { return (await q('SELECT 1 FROM uninstalled WHERE id = $1', [id])).rowCount > 0; },
     async installation(id) { const r = (await q('SELECT id, account FROM installations WHERE id = $1', [id])).rows[0]; return r ? { id: Number(r.id), account: r.account } : null; },
     async installationIds() { return (await q('SELECT id FROM installations')).rows.map((r) => Number(r.id)); },
-    async deleteInstallation(id) { await q('DELETE FROM installations WHERE id = $1', [id]); },
+    // Repos, runs, links, events, trackers and commands cascade from installations; the audit trail has no key, so it goes by hand.
+    async deleteInstallation(id) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('INSERT INTO uninstalled (id) VALUES ($1) ON CONFLICT DO NOTHING', [id]);
+        await c.query('DELETE FROM audit WHERE installation_id = $1', [id]);
+        await c.query('DELETE FROM installations WHERE id = $1', [id]);
+        await c.query('COMMIT');
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    },
 
     async upsertRepo({ installationId, id, fullName, private: priv }) {
       await q(`INSERT INTO repos (installation_id, id, full_name, private) VALUES ($1, $2, $3, $4)
         ON CONFLICT (installation_id, id) DO UPDATE SET full_name = $3, private = COALESCE($4, repos.private)`, [installationId, id, fullName, priv ?? null]);
     },
-    async removeRepo(installationId, id) { await q('DELETE FROM repos WHERE installation_id = $1 AND id = $2', [installationId, id]); },
+    // c14: with the repo go its alerts, sent and queued for a digest (alerts has no foreign key;
+    // subscriptions and runs cascade).
+    async removeRepo(installationId, id) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('DELETE FROM alerts WHERE installation_id = $1 AND repo_id = $2', [installationId, id]);
+        await c.query('DELETE FROM repos WHERE installation_id = $1 AND id = $2', [installationId, id]);
+        await c.query('COMMIT');
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    },
     async repos(installationId) { return (await q('SELECT * FROM repos WHERE installation_id = $1 ORDER BY full_name', [installationId])).rows.map(repoRow); },
     async repoByName(installationId, fullName) {
       return repoRow((await q('SELECT * FROM repos WHERE installation_id = $1 AND lower(full_name) = lower($2) ORDER BY synced_at DESC NULLS LAST LIMIT 1', [installationId, fullName])).rows[0]);
@@ -72,11 +95,22 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     async repoForPage(fullName, id) {
       return repoRow((await q('SELECT * FROM repos WHERE lower(full_name) = lower($1) AND id = $2 ORDER BY synced_at DESC NULLS LAST LIMIT 1', [fullName, Number(id)])).rows[0]);
     },
-    async setRepoSync(installationId, id, { headSha, error = null, lessons, config }) {
+    async setRepoSync(installationId, id, { headSha, error = null, lessons, config, reread }) {
       const set = ['head_sha = $3', 'sync_error = $4', 'synced_at = now()']; const v = [installationId, id, headSha, error];
       if (lessons !== undefined) { v.push(JSON.stringify(lessons)); set.push(`lessons = $${v.length}`); }
       if (config !== undefined) { v.push(JSON.stringify(config)); set.push(`config = $${v.length}`); }
+      if (reread !== undefined) { v.push(Boolean(reread)); set.push(`reread = $${v.length}`); }
       await q(`UPDATE repos SET ${set.join(', ')} WHERE installation_id = $1 AND id = $2`, v);
+    },
+    // c14: a forced re-read starts (unless one is unfinished): the runs' blob shas are forgotten, so each is read again.
+    async startReread(installationId, id) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        const started = (await c.query('UPDATE repos SET reread = true WHERE installation_id = $1 AND id = $2 AND NOT reread', [installationId, id])).rowCount > 0;
+        if (started) await c.query('UPDATE runs SET events_sha = NULL, map_sha = NULL WHERE installation_id = $1 AND repo_id = $2', [installationId, id]);
+        await c.query('COMMIT');
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
     },
 
     async runs(installationId, repoId) { return (await q('SELECT * FROM runs WHERE installation_id = $1 AND repo_id = $2 ORDER BY run_id', [installationId, repoId])).rows.map(runRow); },
