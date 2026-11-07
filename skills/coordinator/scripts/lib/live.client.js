@@ -67,13 +67,44 @@
     tools.addEventListener('submit', (e) => e.preventDefault());
   }
 
+  // Gaps (the coordinator's page): run, kind and status, remembered here; empty groups hide.
+  const gapForm = document.querySelector('form[data-gaps]');
+  const gapKey = key('gaps');
+  function applyGaps() {
+    const f = document.querySelector('form[data-gaps]'); if (!f) return;
+    const run = f.run.value; const kind = f.kind.value; const status = f.status.value;
+    let shown = 0;
+    document.querySelectorAll('[data-gap-group]').forEach((g) => {
+      let n = 0;
+      g.querySelectorAll('li[data-gap]').forEach((li) => { const ok = (!run || li.dataset.run === run) && (!kind || li.dataset.kind === kind); li.hidden = !ok; if (ok) n++; });
+      const chip = g.querySelector('[data-gap-n]'); if (chip) chip.textContent = String(n);
+      const st = g.dataset.status; const want = status === 'all' || status === st;
+      g.hidden = !n || !want; if (want) shown += n;
+    });
+    const open = document.querySelector('[data-gaps-open]'); const res = document.querySelector('[data-gaps-resolved]');
+    if (open) open.hidden = status === 'resolved';
+    if (res) res.hidden = status === 'open';
+    const c = f.querySelector('[data-gaps-count]'); if (c) c.textContent = `${shown} shown`;
+  }
+  if (gapForm) {
+    const s = load(gapKey, null);
+    if (s) ['run', 'kind', 'status'].forEach((k) => { if (s[k] !== undefined && [...gapForm[k].options].some((o) => o.value === s[k])) gapForm[k].value = s[k]; });
+    const changed = (e) => {
+      save(gapKey, { run: gapForm.run.value, kind: gapForm.kind.value, status: gapForm.status.value });
+      const d = document.querySelector('[data-gaps-resolved] details'); if (d && e && e.target === gapForm.status && gapForm.status.value !== 'open') d.open = true;
+      applyGaps();
+    };
+    gapForm.addEventListener('change', changed); gapForm.addEventListener('submit', (e) => e.preventDefault());
+    applyGaps();
+  }
+
   // Show finished units (passed, stopped) or not: the checkbox drives the CSS; remembered here.
   const fin = document.getElementById('show-finished');
   if (fin) { fin.checked = load(key('finished'), true); fin.addEventListener('change', () => save(key('finished'), fin.checked)); }
 
   // Forms: typing in "Other" picks Other; a form being filled is never swapped.
   app.addEventListener('input', (e) => {
-    const form = e.target.form; if (!form || form.matches('[data-tl]')) return;
+    const form = e.target.form; if (!form || form.matches('[data-tl],[data-gaps]')) return;
     form.dataset.dirty = '1';
     if (e.target.name === 'other') { const o = form.querySelector('input[value="__other"]'); if (o) o.checked = true; }
   });
@@ -117,6 +148,7 @@
     morph(app, tpl.content, { busy, skipped: () => { pending = true; }, added: applyOpen });
     localTimes(app);
     applyTimeline();
+    applyGaps();
     document.dispatchEvent(new CustomEvent('coordinator:patched')); // the maps put back what the morph reset
   }
   document.addEventListener('focusout', () => setTimeout(() => { if (pending && latest) patch(latest); }, 0));

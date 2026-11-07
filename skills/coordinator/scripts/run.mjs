@@ -57,6 +57,10 @@
 //                  one side study while the run waits (capped per run by --study-budget); lessons it added go in with lessons.mjs add --source
 //   run.mjs self [--json] [--html]  the coordinator's own view across every run here (age, learning, memory, stats,
 //                  history, plans, proposals, side study); --html writes coordinator.html in the state folder
+//   run.mjs gaps [--json] [--all]   open gaps across every run here (stopped and unfinished units, runs closed early,
+//                  follow-ups, out-of-fence items, open questions, upstream proposals, escapes); --all adds resolved ones
+//   run.mjs gap close|reopen <run> <id> --reason R [--by person|lead]   closes (or reopens) one gap: a decision note
+//                  in that run's log (closed runs too); the id is kind:run:unit:seq as gaps prints it
 //   run.mjs serve <run> [--port P]  the live dashboard (forms, unit pages, live updates) on 127.0.0.1, behind a per-start token;
 //                  /maps the run's maps, /coordinator the self view, /run/<other> another run read-only
 //   run.mjs watch <run> [--remote [--every S]]   one line per new or changed answer and per note from the person; never exits.
@@ -119,7 +123,8 @@ import { mapsPage } from './lib/mapspage.mjs';
 import { answer, answerText, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
-import { loadSelf, selfVersion } from './lib/selfdata.mjs';
+import { loadRuns, loadSelf, selfVersion } from './lib/selfdata.mjs';
+import { closeGap, gaps, gapsText, parseGapId } from './lib/gaps.mjs';
 import { selfPage } from './lib/selfpage.mjs';
 import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
@@ -130,7 +135,7 @@ const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues'],
   extend: ['rounds', 'reason', 'answer'],
   start: ['model', 'why', 'force-model'], models: ['role', 'class'],
-  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'],
+  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all'], gap: ['reason', 'by'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model'], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report'],
   behave: ['goal', 'id', 'text', 'remove', 'reason'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
@@ -575,6 +580,24 @@ const commands = {
     process.stdout.write(selfText(m));
     return null;
   },
+  gaps(_, o) {
+    const list = gaps(loadRuns()).filter((g) => o.all || g.status === 'open');
+    if (o.json) return list;
+    process.stdout.write(gapsText(list));
+    return null;
+  },
+  gap([verb, run, id], o) {
+    const reopen = oneOf(verb, ['close', 'reopen'], 'gap close|reopen') === 'reopen';
+    const reason = text(o.reason, 'reason', 500);
+    const p = parseGapId(id);
+    if (!p) throw new Error(`not a gap id: ${id} (run.mjs gaps lists them)`);
+    if (p.run !== run) throw new Error(`gap ${id} belongs to run ${p.run}, not ${run}`);
+    const found = gaps(loadRuns()).find((g) => g.id === id);
+    if (!found) throw new Error(`no gap ${id} in run ${run} (run.mjs gaps --all lists them)`);
+    if (!reopen && found.status === 'resolved' && !found.resolution.derived) throw new Error(`gap ${id} is already closed: ${found.resolution.reason}`);
+    if (reopen && (found.status === 'open' || found.resolution.derived)) throw new Error(`gap ${id} was not closed by a note${found.status === 'resolved' ? ` (the state resolves it: ${found.resolution.reason})` : ''}`);
+    return change(run, 'note', (s) => closeGap(s, id, { reason, by: o.by ?? 'lead', reopen }), { closedOk: true, unit: p.unit && load(run).units.some((u) => u.id === p.unit) ? p.unit : null });
+  },
   ask([run], o) { let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id }; },
   answer([run, id], o) {
     if (o.confirm !== undefined && o.by !== 'person') throw new Error('--confirm needs an explicit --by person');
@@ -774,9 +797,9 @@ const commands = {
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|push|pull|adopt|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|brief|close|gaps|gap|push|pull|adopt|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
