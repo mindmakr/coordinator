@@ -5,7 +5,7 @@ import { createHmac } from 'node:crypto';
 import { request } from 'node:http';
 import { test } from 'node:test';
 import { CONFIRMS_PER_DAY } from '../src/alerts/routes.mjs';
-import { COMMANDS_PER_HOUR, commands as makeCommands } from '../src/commands.mjs';
+import { COMMANDS_PER_COMMENTER_PER_HOUR, COMMANDS_PER_HOUR, commands as makeCommands } from '../src/commands.mjs';
 import { guard } from '../src/db/index.mjs';
 import { memoryDb } from '../src/db/memory.mjs';
 import { silent } from '../src/log.mjs';
@@ -223,7 +223,7 @@ test('p3: past the failure limit a body is not read; all bodies being read at on
       const codes = await Promise.all(Array.from({ length: 30 }, () => unsigned(new URL(t2.base).port, big)));
       const b = t2.app.webhookBytes();
       assert.ok(b.peak <= b.max + 1024 * 1024, `at most the budget (plus one chunk) was held at once: ${b.peak} of ${b.max}`);
-      assert.ok(codes.some((c) => c === 503 || c === 'reset'), 'some were turned away for the budget');
+      assert.ok(codes.some((c) => c === 503 || c === 429 || c === 'reset'), 'some were turned away for the budget');
       assert.ok(codes.every((c) => [401, 429, 503, 'reset'].includes(c)), String(codes));
       assert.equal(b.used, 0, 'every byte is released');
     } finally { await t2.close(); }
@@ -306,16 +306,40 @@ test('hardening: a security alert is never posted as a mention on a public repo'
   } finally { await t.close(); }
 });
 
-test('hardening: comment commands are handled at most COMMANDS_PER_HOUR an hour per installation', async () => {
-  const db = guard(memoryDb());
-  await db.upsertInstallation({ id: 7, account: 'acme' }); await db.upsertInstallation({ id: 8, account: 'other' });
-  const cmds = makeCommands({ db, gh: {}, writes: {}, log: silent });
-  const comment = (inst, id) => ({ action: 'created', installation: { id: inst }, repository: { full_name: 'acme/web' }, issue: { number: 1 }, comment: { id, body: '/coordinator note hi', user: { login: 'x', type: 'User' } } });
-  const bodies = [];
-  for (let i = 1; i <= COMMANDS_PER_HOUR + 5; i++) bodies.push((await cmds.handle(comment(7, i))).body);
-  assert.equal(bodies.filter((b) => b === 'command note').length, COMMANDS_PER_HOUR);
-  assert.equal(bodies.at(-1), 'ignored: too many commands this hour');
-  assert.equal((await cmds.handle(comment(8, 1))).body, 'command note', 'another installation is not affected');
+// c14 (q3): every /coordinator comment counted against the installation's cap before the
+// permission check, so strangers' comments on a public issue used up the tenant's commands.
+test('hardening: the hourly cap counts only commands from writers; each commenter has a cap of their own', async () => {
+  const base = guard(memoryDb());
+  await base.upsertInstallation({ id: 7, account: 'acme' }); await base.upsertInstallation({ id: 8, account: 'other' });
+  const db = { ...base, repos: async () => [{ id: 70, fullName: 'acme/web' }], runsReferencing: async () => [{ repoId: 70, runId: 'r1' }], run: async () => ({ state: { closed: false, units: [] } }) };
+  const writers = new Set(Array.from({ length: 10 }, (_, i) => `w${i}`));
+  const asked = []; const written = []; const replies = []; const reactions = new Map();
+  const gh = {
+    installationToken: async () => 'tok', react: async (tok, full, id, content) => { reactions.set(id, content); }, createComment: async (tok, full, n, text) => { replies.push(text); },
+    permission: async (tok, full, login) => { asked.push(login); return { push: writers.has(login) }; },
+  };
+  const cmds = makeCommands({ db, gh, writes: { fromCommand: async (x) => { written.push(x.login); } }, log: silent });
+  let cid = 0;
+  const comment = (inst, login, userId) => ({ action: 'created', installation: { id: inst }, repository: { full_name: 'acme/web' }, issue: { number: 1 }, comment: { id: ++cid, body: '/coordinator note hi', user: { login, id: userId, type: 'User' } } });
+  const run = async (p) => { const r = await cmds.handle(p); if (r.work) await r.work(); return r.body; };
+
+  // Strangers, many of them: refused at the permission check, and the installation's cap untouched.
+  for (let i = 0; i < COMMANDS_PER_HOUR * 2; i++) assert.equal(await run(comment(7, `stranger${i % 20}`, 1000 + (i % 20))), 'command note');
+  assert.equal(written.length, 0);
+  // One stranger is capped on their own: past the cap nothing is read, so no permission call.
+  const before = asked.length;
+  const mine = [];
+  for (let i = 0; i < COMMANDS_PER_COMMENTER_PER_HOUR + 3; i++) mine.push(await run(comment(7, 'mallory', 666)));
+  assert.equal(mine.filter((b) => b === 'command note').length, COMMANDS_PER_COMMENTER_PER_HOUR);
+  assert.equal(mine.at(-1), 'ignored: too many commands from this person this hour');
+  assert.equal(asked.length - before, COMMANDS_PER_COMMENTER_PER_HOUR);
+  // Writers still have the whole cap: COMMANDS_PER_HOUR are written, then the rest are refused with a reason.
+  for (let i = 0; i < COMMANDS_PER_HOUR + 2; i++) await run(comment(7, `w${i % 10}`, i % 10 + 1));
+  assert.equal(written.length, COMMANDS_PER_HOUR);
+  assert.deepEqual([cid - 1, cid].map((id) => reactions.get(id)), ['confused', 'confused'], 'over the cap: refused, after the writer check');
+  assert.ok(replies.length <= 20, 'refusal replies keep their own cap');
+  assert.equal(await run(comment(8, 'w0', 1)), 'command note', 'another installation is not affected');
+  assert.equal(written.length, COMMANDS_PER_HOUR + 1);
 });
 
 // p5 (found clean; kept as a regression test): hostile run text is escaped on every page.

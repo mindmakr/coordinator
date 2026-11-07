@@ -41,6 +41,7 @@ test('webhook: an unsigned or wrongly signed delivery is refused before parsing'
 test('webhook: a push to the state branch is ingested once; a redelivery and a same-head push change nothing', async () => {
   const t = await startApp();
   t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles({ r1: makeRun('r1') }) });
+  await t.db.upsertInstallation({ id: 7, account: 'acme' });
   try {
     let r = await post(t, pushPayload({ ref: 'refs/heads/main' }), { delivery: 'd0' });
     assert.equal(r.status, 202);
@@ -84,6 +85,36 @@ test('webhook: installation events add and remove repos; a deleted installation 
     r = await post(t, { action: 'deleted', installation: { id: 7 } }, { event: 'installation', delivery: 'i3' });
     assert.equal(r.status, 200);
     assert.equal(await t.db.installation(7), null);
+  } finally { await t.close(); }
+});
+
+// c14: a push sent before an uninstall but delivered after it recreated the installation's rows.
+test('webhook: only installation.created makes an installation; a late push, repos or permissions event after an uninstall brings nothing back', async () => {
+  const t = await startApp();
+  t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles({ r1: makeRun('r1') }) });
+  try {
+    let r = await post(t, pushPayload(), { delivery: 'u0' });
+    assert.equal(r.status, 202);
+    assert.match(await r.text(), /unknown installation/, 'a push for an installation never created here');
+    assert.equal(await post(t, { action: 'created', installation: { id: 7, account: { login: 'acme' } } }, { event: 'installation', delivery: 'u1' }).then((x) => x.status), 202);
+    await t.app.idle();
+    assert.equal((await t.db.runs(7, 70)).length, 1);
+    assert.equal((await post(t, { action: 'deleted', installation: { id: 7 } }, { event: 'installation', delivery: 'u2' })).status, 200);
+    const late = [
+      ['push', pushPayload({ after: 'late' })],
+      ['installation_repositories', { action: 'added', installation: { id: 7, account: { login: 'acme' } }, repositories_added: [{ id: 70, full_name: 'acme/web' }] }],
+      ['installation', { action: 'new_permissions_accepted', installation: { id: 7, account: { login: 'acme' } } }],
+      ['installation', { action: 'unsuspend', installation: { id: 7, account: { login: 'acme' } } }],
+    ];
+    for (const [i, [event, body]] of late.entries()) {
+      r = await post(t, body, { event, delivery: `late-${i}` });
+      assert.equal(r.status, 202, event);
+      assert.match(await r.text(), /unknown installation/, event);
+    }
+    await t.app.idle();
+    assert.equal(await t.db.installation(7), null);
+    assert.deepEqual(await t.db.repos(7), []);
+    assert.deepEqual(await t.db.installationIds(), []);
   } finally { await t.close(); }
 });
 

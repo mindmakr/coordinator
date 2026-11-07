@@ -9,6 +9,7 @@
 //   GET|POST /alerts/unsubscribe?u=&s=  stops alert email (signed link, RFC 8058 one-click; no sign-in)
 //   GET  /alerts/sw.js, /alerts/push.js   the service worker and the page's one script
 import { createHash, randomBytes } from 'node:crypto';
+import { domainToASCII } from 'node:url';
 import { esc, page, blk } from '../core.mjs';
 import { limiter } from '../ratelimit.mjs';
 import { settingsOf } from './index.mjs';
@@ -20,7 +21,22 @@ const MAX_WATCHED = 50;
 const CONFIRM_MS = 24 * 3600_000;
 const MAX_LINK_FORM = 1024;
 export const CONFIRMS_PER_DAY = 3; // confirmation emails per person, and per address
-const EMAIL = /^[^\s@<>"',;]{1,64}@[^\s@<>"',;]{1,190}\.[A-Za-z]{2,24}$/;
+const EMAIL = /^[^\s@<>"',;]{1,64}@[^\s@<>"',;]{1,190}\.(?:[A-Za-z]{2,24}|xn--[A-Za-z0-9-]{1,59})$/;
+
+// c14: an address as the SMTP envelope will see it, or null. NFKC folds fullwidth and other
+// compatibility forms; the domain goes through IDNA (UTS 46, as nodemailer does) to lower-case
+// ASCII, punycode for an international name. The local part must then be printable ASCII.
+// → { address (stored and mailed), key (the per-address limiter's key: the address in lower case) }
+export function normalEmail(raw) {
+  const s = String(raw ?? '').normalize('NFKC').trim();
+  const at = s.lastIndexOf('@');
+  if (at < 1) return null;
+  const local = s.slice(0, at);
+  const domain = domainToASCII(s.slice(at + 1).toLowerCase());
+  if (!domain || !/^[\x21-\x7e]+$/.test(local)) return null;
+  const address = `${local}@${domain}`;
+  return EMAIL.test(address) && address.length <= 254 ? { address, key: address.toLowerCase() } : null;
+}
 const hash = (s) => createHash('sha256').update(s).digest('hex');
 const META_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'";
 export const PAGE_CSP = `${META_CSP}; frame-ancestors 'none'`;
@@ -124,12 +140,14 @@ export function alertRoutes({ alerts, acl, db, config, send, now = Date.now, log
     const qs = hour('quiet_start'); const qe = hour('quiet_end');
     const next = { ...prev, tz, quiet: qs === null || qe === null ? null : { start: qs, end: qe }, includeText: f.get('include_text') === '1', channels: { push: f.get('ch_push') === '1', email: f.get('ch_email') === '1', github: f.get('ch_github') === '1' } };
     let notice = 'Saved.';
-    const email = String(f.get('email') ?? '').trim();
+    const typed = String(f.get('email') ?? '').trim();
+    const norm = typed ? normalEmail(typed) : null;
+    if (typed && !norm) return 'That email address does not look right.';
+    const email = norm?.address ?? '';
     if (!email) Object.assign(next, { email: null, emailPending: null, emailTokenHash: null, emailTokenExp: null });
-    else if (email !== s.email && email !== prev.emailPending) {
-      if (!EMAIL.test(email) || email.length > 254) return 'That email address does not look right.';
+    else if (email !== normalEmail(s.email)?.address && email !== normalEmail(prev.emailPending)?.address) {
       if (!send.email) return 'Email is not set up on this service, so the address cannot be confirmed.';
-      const who = String(user.userId); const where = email.toLowerCase();
+      const who = String(user.userId); const where = norm.key;
       if (confirms.user.blocked(who) || confirms.address.blocked(where)) return 'Too many confirmation emails today; try again tomorrow.';
       confirms.user.hit(who); confirms.address.hit(where);
       // A new address gets alerts only once its owner follows the link, so nobody can point alerts at someone else.

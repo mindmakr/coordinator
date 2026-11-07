@@ -22,6 +22,11 @@ import { senders as makeSenders } from './alerts/senders.mjs';
 
 const MAX_WEBHOOK = 5 * 1024 * 1024;
 export const MAX_WEBHOOK_INFLIGHT = 32 * 1024 * 1024; // every webhook body being read at once, together
+export const MAX_WEBHOOK_PER_IP = 5 * 1024 * 1024; // c14: the bodies one client address is sending at once
+export const SMALL_WEBHOOK = 64 * 1024; // c14: a body declared this size or less may use the reserve
+export const WEBHOOK_RESERVE = 4 * 1024 * 1024; // c14: the part of the budget only small bodies may use
+export const SMALL_WEBHOOK_PER_IP = 1024 * 1024; // c14: the small bodies one client address is sending at once
+export const WEBHOOK_BODY_MS = 10_000; // c14: a webhook body must arrive in full this soon (GitHub waits 10 s)
 const MAX_FORM = 4 * 1024;
 const MAX_WRITE_FORM = 16 * 1024; // c12: an answer or note of 1000 characters, percent-encoded
 const WRITE_ROUTES = new Set(['answer', 'note']); // c12: POST /r/<owner>/<repo>/run/<run>/answer|note
@@ -32,26 +37,69 @@ const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 
-// budget (webhooks): { used, peak, max } bytes shared by every body being read at once; a body
-// that would take the total past max is refused with 503, so many large posts at once cannot
-// fill the memory however few of them carry a valid signature.
-function readBody(req, max, budget = null) {
+// budget (webhooks): an account from webhookBudget().open(); a body that would take its client
+// address or the whole budget past the limit is refused, so many large posts at once cannot fill
+// the memory however few of them carry a valid signature.
+// deadlineMs: the whole body must have arrived by then, else 408 (a stalled body holds nothing for long).
+function readBody(req, max, budget = null, deadlineMs = 0) {
   return new Promise((ok, fail) => {
     let size = 0; let done = false; const chunks = [];
-    const finish = (fn, v) => { if (done) return; done = true; if (budget) budget.used -= size; fn(v); };
+    let timer = null;
+    const finish = (fn, v) => { if (done) return; done = true; clearTimeout(timer); budget?.release(); fn(v); };
     const refuse = (e) => { finish(fail, e); req.destroy(); };
+    if (deadlineMs) timer = setTimeout(() => refuse(new HttpError(408, 'the body took too long')), deadlineMs);
     req.on('data', (c) => {
       if (done) return;
       size += c.length;
-      if (budget) { budget.used += c.length; budget.peak = Math.max(budget.peak, budget.used); }
+      const over = budget ? budget.add(c.length) : null;
       if (size > max) refuse(new HttpError(413, 'too large'));
-      else if (budget && budget.used > budget.max) refuse(new HttpError(503, 'busy; try again'));
+      else if (over) refuse(over);
       else chunks.push(c);
     });
     req.on('end', () => finish(ok, Buffer.concat(chunks)));
     req.on('error', (e) => finish(fail, e));
     req.on('close', () => finish(fail, new HttpError(400, 'the request ended early')));
   });
+}
+
+// c14: the bytes of every webhook body being read at once. All together at most max, of which the
+// last `reserve` bytes take only bodies declared `small` or less (GitHub's usual deliveries). One
+// client address holds at most perIp in larger bodies and smallPerIp in small ones, so a client
+// stalling large bodies blocks neither other addresses nor small deliveries from its own address.
+export function webhookBudget({ max = MAX_WEBHOOK_INFLIGHT, perIp = MAX_WEBHOOK_PER_IP, reserve = WEBHOOK_RESERVE, small = SMALL_WEBHOOK, smallPerIp = SMALL_WEBHOOK_PER_IP } = {}) {
+  const total = { used: 0, peak: 0, max };
+  const byIp = new Map(); // `${ip} small|large` → bytes
+  const isSmall = (declared) => Number.isFinite(declared) && declared <= small;
+  const keyOf = (ip, declared) => `${ip} ${isSmall(declared) ? 'small' : 'large'}`;
+  // Why `bytes` more cannot be taken now (an HttpError), or null.
+  const refusal = (ip, bytes, declared) => {
+    if ((byIp.get(keyOf(ip, declared)) ?? 0) + bytes > (isSmall(declared) ? smallPerIp : perIp)) return new HttpError(429, 'too many bodies at once from this address; try again');
+    if (total.used + bytes > max - (isSmall(declared) ? 0 : reserve)) return new HttpError(503, 'busy; try again');
+    return null;
+  };
+  return {
+    stats: () => ({ ...total, addresses: byIp.size }),
+    // Before reading: whether a body of the declared length could be taken at all.
+    refusal: (ip, declared) => (Number.isFinite(declared) ? refusal(ip, declared, declared) : null),
+    open(ip, declared) {
+      const k = keyOf(ip, declared);
+      let held = 0;
+      return {
+        add(n) {
+          const no = refusal(ip, n, declared);
+          held += n; total.used += n; total.peak = Math.max(total.peak, total.used);
+          byIp.set(k, (byIp.get(k) ?? 0) + n);
+          return no;
+        },
+        release() {
+          total.used -= held;
+          const left = (byIp.get(k) ?? 0) - held;
+          if (left > 0) byIp.set(k, left); else byIp.delete(k);
+          held = 0;
+        },
+      };
+    },
+  };
 }
 
 // senders (tests): { email, push, github } in place of the ones built from the settings.
@@ -79,7 +127,11 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     sync: limiter({ max: 6, windowMs: 10 * 60_000, now }),
     pages: limiter({ max: 600, windowMs: 60_000, now }),
   };
-  const inflight = { used: 0, peak: 0, max: config.webhookInflightBytes ?? MAX_WEBHOOK_INFLIGHT };
+  const inflight = webhookBudget({
+    max: config.webhookInflightBytes ?? MAX_WEBHOOK_INFLIGHT,
+    perIp: config.webhookPerIpBytes ?? MAX_WEBHOOK_PER_IP,
+    reserve: config.webhookReserveBytes ?? WEBHOOK_RESERVE,
+  });
   const pending = new Set();
   const background = (fn) => {
     const p = Promise.resolve().then(fn).catch((e) => log.error('background work failed', { error: e }));
@@ -122,7 +174,9 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   // request names this App as its target (X-GitHub-Hook-Installation-Target-ID, which GitHub sets on
   // every App delivery): someone else's App delivering here from GitHub's shared addresses is
   // turned away unread, ours still gets through. A forged header buys only a read within the
-  // in-flight budget (MAX_WEBHOOK_INFLIGHT across all bodies at once) and a signature check.
+  // in-flight budget (webhookBudget: per address, in all, and a reserve for small bodies) and a
+  // signature check. c14: a body not in full within WEBHOOK_BODY_MS, cut short, or too large counts
+  // as a refusal for its address, like a bad signature.
   async function webhook(req, res) {
     const ip = clientIp(req);
     const close = { Connection: 'close' };
@@ -131,8 +185,16 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     const ours = String(req.headers['x-github-hook-installation-target-id'] ?? '') === String(config.github.appId);
     const wait = ours ? 0 : limits.webhookFailures.blocked(ip);
     if (wait) return send(res, 429, 'too many requests', { ...close, 'Retry-After': String(wait) });
-    if (Number.isFinite(length) && inflight.used + length > inflight.max) return send(res, 503, 'busy; try again', { ...close, 'Retry-After': '5' });
-    const raw = await readBody(req, MAX_WEBHOOK, inflight);
+    const full = inflight.refusal(ip, length);
+    if (full) return send(res, full.status, full.message, { ...close, 'Retry-After': '5' });
+    let raw;
+    try {
+      raw = await readBody(req, MAX_WEBHOOK, inflight.open(ip, length), config.webhookBodyMs ?? WEBHOOK_BODY_MS);
+    } catch (e) {
+      if (e instanceof HttpError && e.status !== 503) limits.webhookFailures.hit(ip);
+      if (e instanceof HttpError && e.status === 408) log.warn('webhook body too slow', { ip });
+      throw e;
+    }
     if (!verifySignature(config.github.webhookSecret, raw, req.headers['x-hub-signature-256'])) {
       if (limited(res, 'webhookFailures', ip)) return;
       log.warn('webhook signature refused', { ip });
@@ -319,7 +381,7 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
   let sweeping = false;
   return {
     server, ingest, resyncAll, alerts, doorbell: bell,
-    webhookBytes: () => ({ ...inflight }), // tests: the in-flight budget, and its high-water mark
+    webhookBytes: () => inflight.stats(), // tests: the in-flight budget, and its high-water mark
     // c12: the alerts sweep (leads gone quiet, digests due), every ALERT_SWEEP_SECONDS.
     startAlerts(everyMs) {
       alertTimer = setInterval(() => { if (!sweeping) { sweeping = true; background(() => alerts.sweep().finally(() => { sweeping = false; })); } }, everyMs);
