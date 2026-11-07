@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Security: one installation's trail refresh can no longer hold a trail slot for most of an hour (#42, review round 5).** Every page of comments the trail reads is now charged to `TRAIL_READS` (one search used to be charged once while it read up to 10 pages of 100). The App's own tracker comment is edited by its recorded id with no search; a search runs only when no id is recorded, reads at most 2 pages, and a comment not found there is posted new; a deleted one is re-posted without a search. Each refresh also has its own cap of 100 GitHub reads, whatever the 10-minute window has left, and checks `SYNC_JOB_SECONDS` and an uninstall between refs; out of time or reads, the run stays owed and the next sync carries on.
+- **Tracker comments stay small:** the last 5 scores and the first 3 open question headers only (`… →` and `; …` mark the rest), so a comment no longer grows with a unit's history.
+- **A card found not on the board** is asked about again after a day, not only when the unit's state changes, so a card added to the board later is picked up.
+
 ## 1.1.0 (2026-11-07)
 
 Lucid Coding: see what your agents did and are doing. Maps you can walk, function calls per unit, an evidence viewer, a Gaps view, release reports, quality and compliance signals, model routing with a record, doctor and setup, runs that end eagerly, a local demo of the hosted app, and the Lucid Coding manifesto. Also fixes a 1.0.0 issue where a crafted evidence path could make a snapshot read a local file outside the run.

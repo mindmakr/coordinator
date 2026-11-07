@@ -69,3 +69,14 @@ test('null and non-object entries in rounds are skipped, never thrown on', () =>
   assert.match(b, /Tries:\*\* 1 of/);
   assert.match(b, /last verdict `fail`/);
 });
+
+test('the body stays small however many rounds and questions the unit has (#42)', () => {
+  const s = run();
+  s.units[0].rounds = Array.from({ length: 1000 }, (_, i) => ({ n: i + 1, verdict: 'fail', score: 1e300 + i, gap: 'g'.repeat(500) }));
+  for (let i = 0; i < 50; i++) ask(s, { question: `q${i} ${'x'.repeat(300)}`, header: `H${i}`, option: ['a|x', 'b|y'], unit: 'u1' });
+  const body = trackerBody(s, 'u1', { url: 'https://example.test/u1', detail: true, github: ['PR merged', 'PR checks passed'] });
+  assert.ok(body.length < 2000, `${body.length} chars`);
+  assert.match(body, /scores … → /);
+  assert.match(body, /50 open questions .*; …\)/);
+  assert.equal((body.match(/1e\+300/g) ?? []).length, 5);
+});

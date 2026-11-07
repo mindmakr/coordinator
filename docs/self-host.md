@@ -113,7 +113,7 @@ The installation id is the number at the end of the installation's settings page
 | `SYNC_JOB_SECONDS` | no | One sync of one repo stops reading after this; the rest follow at the next sync. Default 300 (10–1200) |
 | `TRAIL_CONCURRENCY` | no | Trail refreshes (tracker comments, board cards) at once, in all. They run after the sync has given its slot back, so a slow trail never holds a sync slot. Default 4 (1–64) |
 | `TRAIL_PER_INSTALLATION` | no | Of those, how many one installation may run; installations take turns. Default 1 (1–64) |
-| `TRAIL_READS` | no | GitHub calls one installation's trail may make per 10 minutes, other than comment writes (searches for the App's own comment, board queries and field writes, a linked repo's `coordinator.json`). Past it the run stays owed and a later sync carries on. Default 300 (10–100000) |
+| `TRAIL_READS` | no | GitHub calls one installation's trail may make per 10 minutes, other than comment writes (each page of a search for the App's own comment, board queries and field writes, a linked repo's `coordinator.json`). Past it, or past 100 reads in one refresh, the run stays owed and a later sync carries on. Default 300 (10–100000) |
 | `WEBHOOK_SOURCES` | no | Who counts as GitHub for webhooks: `github` (default: GitHub's published hook ranges), a comma-separated list of CIDRs (for GitHub Enterprise Server), or `any` ([Webhook sources](#webhook-sources)) |
 | `GITHUB_API_URL`, `GITHUB_WEB_URL` | no | Another GitHub host. Defaults `https://api.github.com` and `https://github.com`; other hosts are untested |
 
