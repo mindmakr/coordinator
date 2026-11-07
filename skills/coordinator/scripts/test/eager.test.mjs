@@ -326,7 +326,8 @@ test('a specialist mark after the general fail closed the round is kept, and the
   // The general critic's medium fail lands first and closes round 1.
   ok('verdict', 'race', 'a', 'fail', '--score', '8', '--gap', 'labels', '--evidence', 'e', '--severity', 'medium');
   const before = nextOf('race', 'a');
-  assert.equal(before.action, 'build', 'no finish-line question while security has no mark on the round');
+  assert.deepEqual([before.action, before.reason], ['wait', 'waiting for specialist marks: security'], 'no build and no finish-line question while security has no mark on the round');
+  assert.match(cli('start', 'race', 'a').err, /start refused: next says "wait" \(waiting for specialist marks: security\)/);
   assert.match(cli('ask', 'race', '--finish', 'a').err, /ask --finish refused/);
   // The specialist's high arrives late: recorded on round 1, and it keeps Ship off the table.
   ok('verdict', 'race', 'a', 'fail', '--score', '3', '--gap', 'timing oracle', '--evidence', 'auth.ts:12', '--severity', 'high', '--specialist', 'security');
@@ -339,14 +340,18 @@ test('a specialist mark after the general fail closed the round is kept, and the
   // Next round: a late specialist pass completes the marks, and only then is the person asked.
   build('race', 'a');
   ok('verdict', 'race', 'a', 'fail', '--score', '8', '--gap', 'labels still', '--evidence', 'e', '--severity', 'medium');
-  assert.equal(nextOf('race', 'a').action, 'build');
+  assert.equal(nextOf('race', 'a').action, 'wait');
   ok('verdict', 'race', 'a', 'pass', '--evidence', 'constant time now', '--specialist', 'security');
   assert.equal(nextOf('race', 'a').action, 'ask-person');
   // Once a new build starts, a late mark for the old round is refused.
   ok('init', 'race2', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'race2', 'a', '--bar', 'b', '--specialist', 'security'); ok('freeze', 'race2');
   build('race2', 'a'); ok('verdict', 'race2', 'a', 'fail', '--score', '5', '--gap', 'g', '--evidence', 'e', '--severity', 'high');
-  ok('start', 'race2', 'a');
+  assert.match(cli('start', 'race2', 'a', '--force-start').err, /missing --reason/);
+  assert.match(cli('start', 'race2', 'a', '--reason', 'x').err, /--reason goes with --force-start/);
+  ok('start', 'race2', 'a', '--force-start', '--reason', 'the security critic is down; the next round gets one');
+  assert.match(state('race2').notes.find((n) => n.kind === 'decision').text, /started try 2 before security marked round 1; their findings on it are lost: the security critic is down/);
   assert.match(cli('verdict', 'race2', 'a', 'pass', '--evidence', 'e', '--specialist', 'security').err, /verdict refused: unit a is building/);
+  assert.match(cli('start', 'race', 'a', '--force-start', '--reason', 'r').err, /--force-start refused: next says "ask-person"/);
 });
 
 test('the reviewed head comes from built --head or verdict --head, not the lead\'s --reviewed', () => {

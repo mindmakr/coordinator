@@ -146,6 +146,11 @@ export function decideUnit(unit, run, nowMs) {
   const rounds = unit.rounds;
   const last = rounds.at(-1);
   if (!last) return { action: 'build' };
+  // After a general fail, wait for every required specialist to mark that round: a new build would
+  // close it, and a finding still to come would be lost. Only rounds with a severity (this version
+  // on), so older runs never wait on marks that could not be recorded then. `start --force-start` skips it.
+  const unmarked = last.verdict === 'fail' && last.severity ? (unit.specialists ?? []).filter((n) => !last.specialists?.[n]) : [];
+  if (unmarked.length) return { action: 'wait', reason: `waiting for specialist marks: ${unmarked.join(', ')}`, specialists: unmarked };
   // The finish line never asks about a unit the rules would stop as stuck or making no
   // progress, and "one more round" does not lift those rules; otherwise the order is as before.
   const prev = rounds.at(-2);

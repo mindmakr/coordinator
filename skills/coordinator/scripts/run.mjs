@@ -168,7 +168,7 @@ import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAtt
 const FLAGS = {
   init: ['goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
   extend: ['rounds', 'reason', 'answer'],
-  start: ['model', 'why', 'force-model', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
+  start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', 'head', ...COST_FLAGS], strategy: ['text'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', ...COST_FLAGS],
@@ -432,9 +432,19 @@ const commands = {
     if (why && !model) throw new Error('--why goes with --model');
     const force = o['force-model'] === undefined ? null : text(o['force-model'] === true ? undefined : o['force-model'], 'reason for --force-model', 300);
     if (force && !model) throw new Error('--force-model goes with --model');
+    if (o['force-start'] !== undefined && o['force-start'] !== true) throw new Error('--force-start takes no value; give --reason R');
+    const early = o['force-start'] === true ? text(o.reason, 'reason (starting before the specialists marked the round)', 300) : null;
+    if (!early && o.reason !== undefined) throw new Error('--reason goes with --force-start');
     const cfg = routing(baseDir('project'));
     return change(run, 'unit.start', (s) => {
-      const u = unitOf(s, unit); expect(s, u, 'start');
+      const u = unitOf(s, unit);
+      // A new build ends the round: a specialist mark still to come could no longer be recorded.
+      if (early) {
+        const d = decideUnit(u, s, Date.now());
+        if (!s.frozen || d.action !== 'wait' || !d.specialists) throw new Error(`--force-start refused: next says "${d.action}" for ${u.id}; it only skips a wait for specialist marks`);
+        s.notes.push({ kind: 'decision', text: `${u.id}: started try ${u.rounds.length + 1} before ${d.specialists.join(', ')} marked round ${u.rounds.length}; their findings on it are lost: ${early}`, at: now() });
+        log(u, 'start', `early: without ${d.specialists.join(', ')}`);
+      } else expect(s, u, 'start');
       const esc = escalation(cfg, u);
       // After a cheap fail: --model at or above strong, or a cheaper one with --force-model "reason".
       if (esc && !(model && atLeast(model, cfg.strong))) {
@@ -596,7 +606,7 @@ const commands = {
       // The fold must build on what the critic reviewed, stay small, and pass the fence and gaming check.
       const reviewed = last.reviewedHead ?? (typeof o.reviewed === 'string' ? o.reviewed : null);
       if (!reviewed) throw new Error(`foldin refused: no reviewed head recorded for ${u.id}'s pass (no --head on built or verdict, no detect run that round); give --reviewed <the commit the critic judged>`);
-      if (last.reviewedHead && o.reviewed !== undefined) throw new Error('--reviewed is recorded already (the round\'s detect head); leave it out');
+      if (last.reviewedHead && o.reviewed !== undefined) throw new Error('--reviewed is recorded already (the reviewed head, from verdict --head, the round\'s detect run or built --head); leave it out');
       const d = foldDiff(reviewed, o.head);
       const caps = { files: s.budget.foldFiles ?? FOLD_DEFAULTS.files, lines: s.budget.foldLines ?? FOLD_DEFAULTS.lines };
       if (!d.descends) throw new Error(`foldin refused: ${o.head} does not build on the reviewed head ${d.reviewed.slice(0, 12)}; a different history needs a new round`);
