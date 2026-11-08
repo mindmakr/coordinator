@@ -171,7 +171,7 @@ function noteGaps(run, list, repo, out) {
       return out.push({ ...base, kind: 'upstream', from: `${n.kind} note`, auto: auto ?? tracked() });
     }
     if (n.kind !== 'follow-up') return; // a retro note that is not an upstream proposal is a lesson, not a gap
-    out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'follow-up', from: typeof n.shipped === 'string' ? `shipped with follow-ups (${n.shipped})` : 'follow-up note', auto: folded(n.text, run, list) ?? tracked() });
+    out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'follow-up', from: n.noVerdict === true ? 'shipped without a final verdict' : typeof n.shipped === 'string' ? `shipped with follow-ups (${n.shipped})` : 'follow-up note', auto: folded(n.text, run, list) ?? tracked() });
   });
 }
 

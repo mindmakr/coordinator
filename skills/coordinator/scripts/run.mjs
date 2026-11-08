@@ -14,6 +14,8 @@
 //   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--continues <run>:<unit>] this unit, under its own id, continues that unit of an earlier run
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
+//   run.mjs add-specialist <run> <unit> <name> --reason R   a critic that must also pass, added after add: required from the
+//                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link [--label L]
@@ -24,6 +26,10 @@
 //                  at or stopped by its round budget: qN asked with --approves and answered with that option by the
 //                  person (dashboard, web, or answer --by person --confirm "their words"), or else their note on
 //                  the unit since its last verdict saying "approved" (lib/approval.mjs); recorded as a decision
+//   run.mjs ship <run> <unit> --merge URL --reason R (--confirm "their words" | --answer qN)   a unit merged on the person's
+//                  decision with no final verdict (open, building, judging or stopped): ends shipped ("Shipped without a final
+//                  verdict"; delivered, never a clean pass), links the merge, and files the missing verdict and its last round's
+//                  open findings as follow-ups; without --confirm or --answer, their latest note on the unit (lib/approval.mjs)
 //   run.mjs freeze <run>
 //   Cost (start, built, verdict, foldin): [--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"], what the harness
 //                  reported for that launch; stats, show and the HUD sum them per unit, model and run ("not recorded" when missing)
@@ -31,7 +37,8 @@
 //   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
 //                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
 //                  after a try failed on a model below strong, a model below strong needs [--force-model "reason"]
-//   run.mjs beat <run> <unit> [--text T]     builder or critic still working (T: the milestone, e.g. "pushed")
+//   run.mjs beat <run> <unit> [--text T]     builder or critic still working (T: the milestone, e.g. "pushed"); on an open unit
+//                  (work started early, e.g. a stacked unit begun at the person's request) only logged, marked early
 //   run.mjs built <run> <unit> [--report R]  builder finished (R: its report in short): the unit waits for a critic
 //                  [--head <sha>] the commit the builder reported (the reviewed head for fold-ins, unless verdict --head names one)
 //   run.mjs reset <run> <unit> --reason R     in-progress unit with no artifact goes back to build (after a crash)
@@ -48,6 +55,9 @@
 //                  [--fold "…" …] on a pass: lows and nits ("nit: …") folded in before merge; never one in a pinned area; next then says fold-in
 //                  [--full-suite yes|no] whether the critic ran the full suite this round
 //                  [--head <sha>] the commit the critic judged; a specialist may mark a round the general fail just closed
+//   run.mjs verdict <run> <unit> pass|fail --early --score N --evidence E [--gap G --severity S] [--specialist NAME] [--head <sha>]
+//                  an early review of work on an open or building unit (started before its try): recorded apart, never a
+//                  round, moves and passes nothing; next, show and the unit page list it (early)
 //   run.mjs foldin <run> <unit> --head <sha> --evidence E [--reviewed <sha>]   only when next says fold-in: the targeted check
 //                  of the folds (no new critic round). The head must build on the reviewed one, stay under init's
 //                  --fold-max-files (10) and --fold-max-lines (200), and have a clean detect.mjs run on it; next then says done, step merge
@@ -57,7 +67,8 @@
 //   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person|escape --text T
 //                  escape: --unit U, a passed unit where a defect turned up later (a later review, verify, test, a person); counted by stats
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
-//                  [--unit U] (person: a note from the person about one unit) [--confirm] (person: their words, pasted)
+//                  [--unit U] (person: a note from the person about one unit; decision, follow-up, info: scoped to that unit,
+//                  shown on its page) [--confirm] (person: their words, pasted)
 //   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P]
 //                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
@@ -120,7 +131,8 @@
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
 //                  recorded, the run closed): the run's events, snapshot and README, project lessons and
 //                  stats, masked, to the coordinator-state branch (never main; a public repo needs a
-//                  private companion repo, references/durability.md)
+//                  private companion repo, references/durability.md); "visibility" in .coordinator/coordinator.json,
+//                  else gh is asked, else refused (the refusal, and init while it is unset, name the file and key)
 //   run.mjs pull <run> [--from branch|./folder]   restores the run on another machine, or appends the
 //                  copy's newer events; never overwrites local events the copy lacks. After the lead's own
 //                  later events, it replays the copy's extra answers and person notes (nothing else) on top
@@ -140,12 +152,12 @@ import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mj
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
-import { allows, decide, decideUnit, FAILING, finishQuestion, openFindings, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
+import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
 import { COST_FLAGS, costEntry, costStats } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
-import { answerRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
+import { answerRefusal, decisionRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
 import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
@@ -155,14 +167,14 @@ import { entryFor, projectKey, readRegistry, register, registryFile, registryHom
 import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
 import { pathToFileURL } from 'node:url';
 import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
-import { pull, push } from './lib/statesync.mjs';
+import { pull, push, VISIBILITY_HINT } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
 import { remoteWatch } from './lib/remote.mjs';
 import { atLeast, byModel, escalation, judgeAllowed, modelName, route, routing, setRouting, UNSPECIFIED } from './lib/models.mjs';
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
-import { readSettings } from './lib/settings.mjs';
+import { readSettings, settingsFile } from './lib/settings.mjs';
 import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
@@ -183,10 +195,10 @@ import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAtt
 
 const FLAGS = {
   init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
-  extend: ['rounds', 'reason', 'answer'],
+  extend: ['rounds', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', 'head', ...COST_FLAGS], strategy: ['text'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', ...COST_FLAGS],
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
@@ -194,6 +206,8 @@ const FLAGS = {
   brief: ['role', 'quote', 'source', 'where', 'playbook'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'],
 };
+// Notes about one unit (#45): scoped with --unit, shown on its page.
+const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
@@ -416,6 +430,16 @@ function unitCallsFor(run, s, unit, { root, base, head, files = [], deadline }) 
   return computeCalls(runDir(run), { root, unit: u.id, base: b, head: h, files: files.length || b ? files : fromMap, fallbackFiles: fromMap, source: files.length ? 'files' : 'map build', deadline });
 }
 
+// Checks that what approves a step was last written by one of `kinds` of event (the answer, question or
+// note command), never by a hand edit of state.json (lib/provenance.mjs).
+function writtenBy(run, s, cmd) {
+  const events = readRun(runDir(run))?.log?.events ?? [];
+  return (locate, kinds, what) => {
+    const by = lastWriter(events, locate, s);
+    if (!kinds.includes(by)) throw new Error(`${cmd} refused: ${what} was last written by ${by ?? 'nothing in the log'}, not by ${kinds.join(' or ')} (a hand edit of state.json never approves)`);
+  };
+}
+
 // The finish line's ready question (lib/rules.mjs), logged on the unit only when `next` asks for it.
 function askFinish(run, o) {
   if (typeof o.finish !== 'string') throw new Error('--finish takes the unit: ask <run> --finish <unit>');
@@ -463,7 +487,10 @@ const commands = {
     const made = updateRun(runDir(run), { kind: 'run.init', by: BY }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
     for (const c of parents) markParent(c, run);
-    return warning ? Object.assign(made, { warning }) : made;
+    // push needs to know whether the repo is public; say where to put it now, not at the first pit stop (#66).
+    const st = settings();
+    const setup = st.visibility === undefined && st.state !== 'local' && !st.stateRepo ? `before push: gh is asked whether this repo is public, and the push is refused when it cannot say. ${VISIBILITY_HINT(settingsFile(baseDir('project')))}` : null;
+    return Object.assign(made, warning ? { warning } : {}, setup ? { setup } : {});
   },
   add([run, unit], o) {
     const cont = o.continues === undefined ? null : parentOf(o.continues, run, safeId(unit, 'unit'));
@@ -491,6 +518,21 @@ const commands = {
     }, { unit });
     if (cont) markParent(cont, run);
     return warning ? Object.assign(out, { warning }) : out;
+  },
+  // A required second critic for a unit added without it (#45): it judges the build being judged now,
+  // or the next one; a round that closed before it was added never waits on its mark.
+  'add-specialist'([run, unit, name], o) {
+    const who = safeId(name, 'specialist');
+    const reason = text(o.reason, 'reason', 300);
+    return change(run, 'unit.specialist', (s) => {
+      const u = unitOf(s, unit);
+      if (['pass', 'stopped'].includes(u.status)) throw new Error(`add-specialist refused: ${u.id} is ${u.status}; a specialist joins before the unit's verdict`);
+      if ((Date.now() - Date.parse(s.createdAt)) / 60_000 > s.budget.maxMinutes) throw new Error('add-specialist refused: the time budget is spent; it stops new critics');
+      if ((u.specialists ?? []).includes(who)) throw new Error(`${u.id} already has specialist ${who}`);
+      u.specialists = [...(u.specialists ?? []), who];
+      (u.specialistFrom ??= {})[who] = u.rounds.length + 1;
+      s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: specialist ${who} added, required from round ${u.rounds.length + 1}: ${reason}`, at: now() });
+    }, { unit });
   },
   freeze([run]) {
     return change(run, 'run.freeze', (s) => {
@@ -534,8 +576,17 @@ const commands = {
       log(u, 'start', `try ${u.rounds.length + 1}${model ? ` on ${model}${why ? ` (${why})` : ''}` : ''}`);
     }, { unit });
   },
+  // On an open unit (work started early, e.g. a stacked unit begun at the person's request, #66) the beat is
+  // only logged, marked early: the unit stays open and no rule reads it; `start` still begins its first try.
   beat([run, unit], o) {
-    return change(run, 'unit.beat', (s) => { const u = unitOf(s, unit); if (!['building', 'judging'].includes(u.status)) throw new Error(`unit ${unit} is ${u.status}`); expect(s, u, 'beat'); u.heartbeatAt = now(); log(u, 'beat', optText(o.text, 200) ?? ''); }, { unit });
+    return change(run, 'unit.beat', (s) => {
+      const u = unitOf(s, unit);
+      if (!['building', 'judging', 'open'].includes(u.status)) throw new Error(`unit ${unit} is ${u.status}`);
+      expect(s, u, 'beat');
+      const t = optText(o.text, 200) ?? '';
+      if (u.status === 'open') { log(u, 'beat', `early (not started): ${t}`.trim()); return; }
+      u.heartbeatAt = now(); log(u, 'beat', t);
+    }, { unit });
   },
   built([run, unit], o) {
     return change(run, 'unit.built', (s) => {
@@ -611,9 +662,21 @@ const commands = {
       // A required specialist whose mark arrives after the general critic's fail closed the round:
       // recorded on that round (its high must count), once, before a new build starts (#51 round 3).
       const closed = u.rounds.at(-1);
-      const late = o.specialist !== undefined && ['open', 'stopped'].includes(u.status) && closed?.verdict === 'fail' && !closed.specialists?.[String(o.specialist)];
-      if (u.status !== 'judging' && !late) throw new Error(`verdict refused: unit ${unit} is ${u.status}; record built first`);
-      if (!late) expect(s, u, 'verdict');
+      // An early review (#66): a critic judged work on an open or building unit (a stacked unit started early, before
+      // its base passed). Recorded apart, in u.early: it is never a round, never moves the unit, and passes nothing.
+      if (o.early !== undefined && o.early !== true) throw new Error('--early takes no value');
+      const early = o.early === true;
+      if (early) {
+        if (!['open', 'building'].includes(u.status)) throw new Error(`verdict --early refused: ${u.id} is ${u.status}; ${u.status === 'judging' ? 'record the verdict without --early' : 'an early review is for work not yet judged'}`);
+        if (decideUnit(u, s, Date.now()).action === 'stop') throw new Error(`verdict --early refused: the rules stop ${u.id}`);
+        for (const k of ['fold', 'behaviour']) if (o[k] !== undefined) throw new Error(`--${k} does not go with --early: an early review passes nothing`);
+        if (o.score === undefined) throw new Error('--score is required on an early review');
+        if (!optText(o.evidence)) throw new Error('--evidence is required on an early review');
+      }
+      const late = !early && o.specialist !== undefined && ['open', 'stopped'].includes(u.status) && closed?.verdict === 'fail' && !closed.specialists?.[String(o.specialist)]
+        && requiredOn(u, u.rounds.length).includes(String(o.specialist));
+      if (u.status !== 'judging' && !late && !early) throw new Error(`verdict refused: unit ${unit} is ${u.status}; record built first (a review of work started early: verdict --early)`);
+      if (!late && !early) expect(s, u, 'verdict');
       oneOf(v, ['pass', 'fail'], 'verdict');
       if (o.head !== undefined && (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head))) throw new Error('--head takes the commit the critic judged');
       if (v === 'fail' && o.score === undefined) throw new Error('--score is required on a fail (it drives the no-progress stop)');
@@ -639,9 +702,17 @@ const commands = {
       const rcfg = routing(baseDir('project'));
       if (judge && !judgeAllowed(rcfg, judge)) throw new Error(`verdict refused: critics are never routed down; ${judge} is below the strong model or not it (references/routing.md)`);
       const judgedBy = judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {});
+      if (early) {
+        const by = o.specialist === undefined ? 'critic' : safeId(String(o.specialist), 'specialist');
+        const head = typeof o.head === 'string' ? { head: o.head.toLowerCase() } : {};
+        (u.early ??= []).push({ n: u.early.length + 1, before: u.rounds.length + 1, by, verdict, score: score(o.score), gap, cause, evidence, ...extra, ...head, ...(critic ? { critic } : {}), ...judgedBy, at: now() });
+        addCost(u, costEntry(o, { step: 'verdict', role: by === 'critic' ? 'critic' : `critic:${by}`, model: judge, at: now() }));
+        log(u, 'early', `early review ${u.early.length} by ${by}: ${verdict} ${score(o.score)}${gap ? `: ${clip(gap, 120)}` : ''} (not a round)`);
+        return;
+      }
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
-        if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
+        if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (run.mjs add-specialist ${s.id} ${u.id} ${name} --reason …)`);
         const mark = { verdict, score: score(o.score), gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
         if (late) { (closed.specialists ??= {})[name] = { ...mark, late: true }; log(u, 'verdict', `${name}: ${verdict} on round ${closed.n ?? u.rounds.length}, after the round closed`); }
         else (u.specialistMarks ??= {})[name] = mark;
@@ -713,11 +784,7 @@ const commands = {
       // Only the person's explicit yes (lib/approval.mjs), given since the unit's last verdict, used once,
       // written by the answer or note command (never a hand edit: lib/provenance.mjs); the decision quotes it.
       const since = u.rounds.at(-1)?.at ?? s.createdAt;
-      const events = readRun(runDir(run))?.log?.events ?? [];
-      const written = (locate, kinds, what) => {
-        const by = lastWriter(events, locate, s);
-        if (!kinds.includes(by)) throw new Error(`extend refused: ${what} was last written by ${by ?? 'nothing in the log'}, not by ${kinds.join(' or ')} (a hand edit of state.json never approves)`);
-      };
+      const written = writtenBy(run, s, 'extend');
       let source; let words;
       if (o.answer !== undefined) {
         const q = questions(s).find((x) => x.id === String(o.answer));
@@ -753,6 +820,62 @@ const commands = {
       const scope = named ? `their words name ${named}` : 'their words name no number: one round';
       s.notes.push({ kind: 'decision', text: `${u.id}: ${rounds} more round${rounds === 1 ? '' : 's'} (now ${roundCap(u, s)}; ${scope}), approved by the person (${source}): ${reason}`, at: now(), ...(o.answer !== undefined ? { answers: String(o.answer) } : {}) });
       log(u, 'extend', `+${rounds} round${rounds === 1 ? '' : 's'}: ${reason}`);
+    }, { unit });
+  },
+  // A unit merged on the person's decision with no final verdict (#66): it ends shipped, delivered, never a clean
+  // pass. The missing verdict and any open findings of its last round become follow-ups (Gaps); the merge is linked.
+  ship([run, unit], o) {
+    const reason = text(o.reason, 'reason', 300);
+    if (o.merge === undefined) throw new Error('--merge URL is required: the PR or merge that shipped it');
+    if (o.answer !== undefined && o.confirm !== undefined) throw new Error('--answer or --confirm, not both');
+    if (o.confirm === true) throw new Error('--confirm takes their words: --confirm "what the person said"');
+    return change(run, 'unit.ship', (s) => {
+      const u = unitOf(s, unit);
+      if (!s.frozen) throw new Error('freeze the run first');
+      if (u.status === 'pass') throw new Error(`ship refused: ${u.id} has ${u.shipped ? 'shipped' : 'passed'} already`);
+      const [merge] = refLinks(s, 'merge', [o.merge]);
+      const written = writtenBy(run, s, 'ship');
+      // Their decision since the unit's last verdict (or since it was added), used once, quoted in the decision.
+      const since = u.rounds.at(-1)?.at ?? s.createdAt;
+      let source; let answers = null;
+      if (o.answer !== undefined) {
+        const q = questions(s).find((x) => x.id === String(o.answer));
+        if (!q) throw new Error(`--answer: no question ${o.answer}`);
+        if (q.unit !== u.id) throw new Error(`--answer: ${q.id} ${q.unit ? `is about ${q.unit}` : 'names no unit'}; the question must name ${u.id} (ask … --unit ${u.id})`);
+        if (['used', 'decided'].includes(q.status)) throw new Error(`ship refused: ${q.id} is already ${q.status}; ask again`);
+        const qi = +q.id.slice(1) - 1;
+        const finish = s.notes.filter((n) => n.kind === 'question')[qi]?.finish === true;
+        const why = answerRefusal(finish ? { ...q, approves: FINISH.ship } : q);
+        if (why) throw new Error(`ship refused: ${why}`);
+        if (q.answer.at < since) throw new Error(`ship refused: ${q.id} was answered before ${u.id}'s last verdict; ask again`);
+        written((st) => st?.notes?.filter((n) => n.kind === 'question')[qi]?.history?.[q.history.length - 1], ['answer'], `${q.id}'s answer`);
+        written((st) => { const n = st?.notes?.filter((x) => x.kind === 'question')[qi]; return n && { approves: n.approves, unit: n.unit, options: n.options }; }, ['question'], `${q.id}`);
+        source = `${q.id} answered "${q.answer.choices[0]}" via ${q.answer.via}${q.answer.confirm ? `, their words: "${clip(q.answer.confirm, 200)}"` : ''}`;
+        answers = q.id;
+      } else {
+        // --confirm "their words": the lead pastes what the person said (references/commands/run.md); recorded as their note.
+        if (o.confirm !== undefined) personNote(s, { text: o.confirm, unit: u.id, via: 'cli', confirm: true });
+        const n = (s.notes ?? []).findLast((x) => x.kind === 'person' && x.unit === u.id && x.at >= since);
+        if (!n) throw new Error(`ship refused: no decision from the person on ${u.id} since its last verdict; give --confirm "their words", --answer qN (a question on ${u.id} they answered), or they add a note on ${u.id}`);
+        if (n.usedBy) throw new Error(`ship refused: their latest note on ${u.id} was already used by an ${n.usedBy.by ?? 'extend'}`);
+        const why = decisionRefusal(n);
+        if (why) throw new Error(`ship refused: ${why}`);
+        if (o.confirm === undefined) written((st) => st?.notes?.[s.notes.indexOf(n)], ['note'], 'their note');
+        source = `their words via ${n.via}: "${clip(n.text, 300)}"`;
+        n.usedBy = { unit: u.id, by: 'ship', at: now() };
+      }
+      const was = u.status; const last = u.rounds.at(-1);
+      const open = openFindings(last);
+      u.status = 'pass'; u.stopReason = null; u.heartbeatAt = null;
+      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt; delete u.builtHead;
+      u.shipped = { verdict: 'none', was, ...(answers ? { answer: answers } : {}), round: u.rounds.length, score: last?.score ?? null, findings: open.length, merge: merge.url, at: now() };
+      (u.links ??= []).push(merge);
+      log(u, 'link', merge.url, { link: 'merge' });
+      log(u, 'ship', `shipped without a final verdict (was ${was}): ${reason}`);
+      s.notes.push({ kind: 'decision', unit: u.id, ...(answers ? { answers } : {}), text: `${u.id}: shipped without a final verdict (it was ${was}${u.rounds.length ? `, last round ${u.rounds.length} ${last.verdict}` : ', no round recorded'}), merged as ${merge.url} on the person's decision (${source}): ${reason}`, at: now() });
+      const tag = { kind: 'follow-up', unit: u.id, shipped: answers ?? 'person', noVerdict: true };
+      s.notes.push({ ...tag, text: `${u.id} (shipped without a final verdict): no critic judged what merged (${merge.url}); review it after the fact or record why not`, at: now() });
+      for (const f of open) s.notes.push({ ...tag, text: `${u.id} (shipped, ${f.severity}${f.by === 'critic' ? '' : `, ${f.by}`}): ${f.text}`, at: now() });
     }, { unit });
   },
   reset([run, unit], o) {
@@ -802,11 +925,11 @@ const commands = {
         s.notes.push({ kind: 'escape', unit: u.id, round: passed + 1, text: text(o.text, 'text', 1000), at: now() });
       }, { closedOk: true, unit: typeof o.unit === 'string' ? o.unit : null });
     }
-    if (o.unit !== undefined) throw new Error('--unit goes with --kind person or escape (or ask)');
+    if (o.unit !== undefined && !UNIT_NOTES.includes(kind)) throw new Error(`--unit goes with --kind ${['person', 'escape', ...UNIT_NOTES].join(', ')} (or ask)`);
     if (o.recommend !== undefined && kind !== 'question') throw new Error('--recommend goes with --kind question');
     if (o.answers !== undefined && kind !== 'decision') throw new Error('--answers goes with --kind decision');
     return change(run, kind === 'question' ? 'question' : 'note', (s) => {
-      const note = { kind, text: text(o.text, 'text', kind === 'situation' ? 400 : 1000), at: now() };
+      const note = { kind, ...(o.unit !== undefined ? { unit: unitOf(s, String(o.unit)).id } : {}), text: text(o.text, 'text', kind === 'situation' ? 400 : 1000), at: now() };
       if (o.recommend !== undefined) note.recommend = text(o.recommend, 'recommend', 300);
       if (o.answers !== undefined) {
         const asked = s.notes.filter((n) => n.kind === 'question').length;
@@ -815,7 +938,7 @@ const commands = {
         note.answers = o.answers;
       }
       s.notes.push(note);
-    }, { closedOk: ['follow-up', 'retro'].includes(kind) });
+    }, { closedOk: ['follow-up', 'retro'].includes(kind), unit: typeof o.unit === 'string' ? safeId(o.unit, 'unit') : null });
   },
   study([run], o) { let id; const s = change(run, 'study', (st) => { id = addStudy(st, o); }); return { ...s, study: id }; },
   self(_, o) {
@@ -1025,7 +1148,9 @@ const commands = {
       if (u.action === 'fold-in') return { ...u, step: `check only the fold-ins and the tests they touch, then run.mjs foldin ${s.id} ${u.id} --head <sha> --evidence "…"` };
       return u;
     };
-    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? how(sync(suggest(u)))) };
+    // Early reviews since the last round (verdict --early, #66): shown and counted, never a round.
+    const early = (u) => { const e = earlySummary(unitOf(s, u.id)); return e ? { ...u, early: e } : u; };
+    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? early(how(sync(suggest(u))))) };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];
@@ -1064,7 +1189,7 @@ const commands = {
     const closed = change(run, 'run.close', (s) => {
       applyStops(s); // an expired budget ends in-progress units first
       const busy = s.units.filter((u) => ['building', 'judging'].includes(u.status)).map((u) => u.id);
-      if (busy.length) throw new Error(`close refused: ${busy.join(', ')} still in progress`);
+      if (busy.length) throw new Error(`close refused: ${busy.join(', ')} still in progress (merged on the person's decision with no final verdict: run.mjs ship ${s.id} <unit> --merge URL --reason R --confirm "their words")`);
       const d = decide(s).decision;
       if (outcome === 'done' && d !== 'done') throw new Error(`close --outcome done refused: the run is at "${d}"; use partial or stopped`);
       // Ending before the rules say so (giving up early) needs a stated reason.
@@ -1223,9 +1348,9 @@ for (let i = 0; i < argv.length; i++) {
 }
 let BY = null;
 try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

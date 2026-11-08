@@ -6,7 +6,7 @@ import { attention, attentionLabel, clip, dotState, sentence, situation, stateBa
 import { answerText, questions } from './questions.mjs';
 import { chainLine, chainOf } from './chain.mjs';
 import { pendingSyncs, syncStep } from './overlap.mjs';
-import { bySetup, escapes, roundCap, unmet } from './rules.mjs';
+import { bySetup, earlySummary, escapes, roundCap, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
 import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
@@ -96,9 +96,13 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         evidence: last?.evidence ?? null,
         next: label(d),
         personNotes: personNotes.filter((n) => n.unit === u.id),
+        // The lead's decisions, follow-ups and info about this unit (note --unit, #45).
+        unitNotes: notes.filter((n) => n.unit === u.id && ['decision', 'follow-up', 'info'].includes(n.kind)).map((n) => ({ kind: n.kind, text: n.text, at: n.at })),
         bar: u.bar, behaviours: u.behaviours ?? [], evidenceItems: u.evidence ?? [], links: u.links ?? [],
         who: whoUnit(u), // which model built and judged (lib/models.mjs)
         roundList: u.rounds, stopReason: u.stopReason ?? null,
+        // Early reviews (verdict --early, #66): every one on the unit page, the ones since the last round counted.
+        earlyList: Array.isArray(u.early) ? u.early : [], early: earlySummary(u),
         // Files in the unit's last checked diff (the gaming check records the count); null before one.
         files: typeof u.detect?.files === 'number' ? u.detect.files : null,
         asks: qs.filter((q) => q.unit === u.id), timeline: unitTimeline(run, u.id),
@@ -152,6 +156,7 @@ export function text(v) {
     lines.push(`${u.id.padEnd(w)}${(u.shipped ? 'shipped' : u.status).padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
+    if (u.early) lines.push(`${' '.repeat(w)}◦ ${clip(u.early.text, 200)}`);
     if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
     if (u.chainText) lines.push(`${' '.repeat(w)}↔ ${clip(u.chainText, 200)}`);
   }

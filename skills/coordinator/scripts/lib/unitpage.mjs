@@ -28,6 +28,15 @@ function round(r, repo) {
     + (marks ? `<ul class="behaviours">${marks}</ul>` : '') + '</div>';
 }
 
+// Early reviews (verdict --early, #66): a critic's look at work begun before the unit's try. Listed apart,
+// never as a round; "before round N" is the round they came ahead of.
+function earlyReviews(list, repo) {
+  if (!list.length) return '';
+  const line = (e) => `<li data-a="early-${esc(e.n)}">${chip(e.verdict, e.verdict)} <b>${esc(e.by)}</b> before round ${esc(e.before)}${typeof e.score === 'number' ? ` · score ${esc(e.score)}` : ''}${e.head ? ` · ${esc(String(e.head).slice(0, 12))}` : ''}`
+    + `${e.gap ? ` · ${linkify(clip(e.gap, 200), repo)}` : ''}${e.evidence ? ` <span class="cause">${linkify(clip(e.evidence, 200), repo)}</span>` : ''} ${stamp(e.at, 'cause')}</li>`;
+  return `<h3 data-a="h-early">Early reviews (not rounds)</h3><ol class="earlier">${list.map(line).join('')}</ol>`;
+}
+
 // The rounds this unit had in the runs it continues (#36), oldest first, one line each.
 function earlier(c, repo, id) {
   const runs = (c?.before ?? []).filter((l) => l.known);
@@ -47,7 +56,8 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   const r = v.repo;
   const loose = u.evidenceItems.filter((e) => !e.behaviour);
   const calls = ctx.calls?.get(u.id) ?? null; // lib/map/calls.mjs, map/calls/<unit>.json
-  const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
+  const notes = keyed(u.personNotes, (n) => `n-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}">${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('')
+    + keyed(u.unitNotes ?? [], (n) => `ln-${n.at}-${hash(n.text)}`).map(([n, k]) => `<li data-a="${esc(k)}"><b>${esc(n.kind)}:</b> ${linkify(n.text, r)} <span class="cause">${stamp(n.at)}</span></li>`).join('');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
     blk('head', `<header class="run"><h1>${unitDot(u)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</h1>${stateChip(u, ctx)}`
@@ -60,7 +70,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     blk('evidence', `<section class="card">${loose.length ? evidenceList(loose, r, ctx, `p-${u.id}-ev`) : '<p class="empty">No evidence outside the behaviours.</p>'}</section>`),
     ...(calls ? ['<h2 data-a="h-Calls">Function calls</h2>', blk('calls', `<section class="card">${unitCalls(calls, r, v.id, u.id)}</section>`)] : []),
     '<h2 data-a="h-Rounds">Rounds</h2>',
-    blk('rounds', `<section class="card">${earlier(u.chain, r, u.id)}${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
+    blk('rounds', `<section class="card">${earlier(u.chain, r, u.id)}${u.roundList.length ? u.roundList.map((x) => round(x, r)).join('') : '<p class="empty">No round yet.</p>'}${earlyReviews(u.earlyList ?? [], r)}${u.stopReason ? `<p><b>Stopped:</b> ${esc(u.stopReason)}</p>` : ''}</section>`),
     '<h2 data-a="h-Notes">Notes and questions</h2>',
     blk('notes', `<section class="card">${u.asks.length ? `<ul class="needs-list">${u.asks.map((q) => questionItem(q, form, r)).join('')}</ul>` : ''}`
       + (notes ? `<ul>${notes}</ul>` : (u.asks.length ? '' : '<p class="empty">None.</p>'))
