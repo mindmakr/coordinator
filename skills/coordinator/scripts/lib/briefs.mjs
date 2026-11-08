@@ -26,9 +26,12 @@ const behaviourLines = (bs) => (bs?.length ? bs.map((b) => `  ${b.id}: ${b.text}
 const beatLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs beat ${run} ${unit}`;
 const evidenceLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs evidence ${run} ${unit} --kind screenshot|log --file <png, pdf, log, md or json>`;
 const NO_ASK = 'Never ask the person: report blockers to the lead.';
-// The test-run budget (references/guardrails.md, Test runs): full suites rerun under load caused the flakes that failed rounds.
-export const TESTS_BUILDER = 'Run only the suites your change touches while you work, then the full suite once before you report. Rerun a suite under load only when you suspect a flake, and say so in your report.';
-export const TESTS_CRITIC = 'Run the full suite once on the head. Rerun a single file, alone or under load, only when you suspect a flake, and say so in EVIDENCE; never the whole suite again.';
+// The test-run budget (references/guardrails.md, Test runs): full suites rerun under load caused the flakes that
+// failed rounds (#51), and checks run whatever changed took most of a 14-hour run (#65).
+export const TESTS_BUILDER = 'Run only the tests mapped to the files you changed (COORDINATOR.md\'s mapping, else the runner\'s related-files mode such as `vitest related --run <files>`), plus typecheck and lint for each side you touched. Not the full suite: the critic runs it once on the head. Rerun a test under load only when you suspect a flake, and say so in your report.';
+export const TESTS_CRITIC = 'Run the tests mapped to the changed files, plus typecheck and lint for each side touched. Then, only if nothing has failed the round, run the full suite once on the head; any other critic of this head cites that run. Rerun a single file, alone or under load, only when you suspect a flake, and say so in EVIDENCE; never the whole suite again.';
+// From round 2 the critic reviews what changed since the head the last critic judged (sub-skills/review.md, Delta review).
+export const deltaLine = (head) => `This is a later round: review the delta, \`git diff ${head} <head>\`, plus the code that calls what it changed. A behaviour the delta does not touch passes by reference to the last round's evidence. Review the whole unit again only when the delta touches most of it.`;
 
 // run: the state; o: { role, unit, quotes: [{ source, text }], where, playbook, env }.
 export function buildBrief(run, o) {
@@ -73,10 +76,12 @@ export function buildBrief(run, o) {
       `Fence: ${run.fence}`,
       'Behaviours:', ...behaviourLines(u.behaviours),
       'Check every behaviour yourself; the builder\'s evidence is a pointer, not proof.',
+      ...(last?.reviewedHead ? [deltaLine(last.reviewedHead)] : []),
       ...playbook,
       'Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.',
       TESTS_CRITIC,
       'Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.',
+      ...(u.detect?.allow?.length && u.detect.round === u.rounds.length + 1 ? [`The lead allowed these detect hits for this round (decisions in the run): ${u.detect.allow.join(', ')}. detect.mjs keeps them when you rerun it on the same base and head without --allow.`] : []),
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your reply is lost when the worktree goes.`,
       `If your checks run long, run now and then: ${beatLine(run.id, u.id, o.env)}`,
       ...(u.rounds.length ? ['Reuse an earlier cause tag (quoted above) word for word when the root cause is the same, even if the symptom differs.'] : []),
@@ -90,8 +95,8 @@ export function buildBrief(run, o) {
       'BEHAVIOURS: one line each, B1 PASS|FAIL: <what shows it>',
       'FINDINGS: one line each, <high|medium|low|nit> <file:line> <what>. high: a wrong result, data loss, a security hole or a failing behaviour; medium: a real defect against the bar that has a workaround; low: small and safe to fix in passing; nit: wording or style',
       'FOLDS: the low and nit findings to fold in before merge (none if none)',
-      'OUT-OF-FENCE: anything found outside scope (follow-ups, not failures)',
-      'Pass only when every behaviour passes and the evidence shows it. Fail only on a high or medium finding: lows and nits never fail a round, they go under FOLDS on a pass.',
+      'OUT-OF-FENCE: anything found outside scope, and gaps that predate this change and are none of its behaviours (follow-ups, not failures; bar.md, Severity)',
+      'Pass only when every behaviour passes and the evidence shows it. Fail only on a high or medium finding that this change causes or that fails one of its behaviours: an older gap goes under OUT-OF-FENCE, and lows and nits go under FOLDS on a pass.',
     ].join('\n');
   }
   if (o.role === 'integrator') {

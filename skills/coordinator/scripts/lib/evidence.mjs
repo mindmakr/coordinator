@@ -12,7 +12,9 @@ import { webUrl } from './links.mjs';
 import { writeAtomic } from './store.mjs';
 
 export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link'];
-export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perTarget: 60 };
+// perRound: pieces per unit (or the goal) in one round, so a long unit never runs out (#66); a piece records the
+// round it came in (pieces from before, with none, count toward no round). total: what an id (E1-E999) can number.
+export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perRound: 60, total: 999 };
 export const GOAL_DIR = '_goal'; // cannot clash with a unit id, which starts with a letter or digit
 export const IMAGE = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 export const TEXT = { '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.json': 'text/plain; charset=utf-8' };
@@ -75,12 +77,15 @@ export function addEvidence(s, unit, o, runDir) {
   const given = ['text', 'file', 'url'].filter((k) => typeof o[k] === 'string');
   if (given.length !== 1) throw new Error('give exactly one of --text, --file or --url');
   const list = listOf(s, unit);
-  if (list.length >= LIMITS.perTarget) throw new Error(`${LIMITS.perTarget} pieces of evidence at most`);
+  // The round this piece belongs to: the unit's try under way (or next), or the goal's integration round.
+  const round = (unit ? unit.rounds?.length ?? 0 : s.integration?.rounds?.length ?? 0) + 1;
+  if (list.length >= LIMITS.total) throw new Error(`${LIMITS.total} pieces of evidence at most for ${unit ? unit.id : 'the goal'}`);
+  if (list.filter((e) => e.round === round).length >= LIMITS.perRound) throw new Error(`${LIMITS.perRound} pieces of evidence at most in one round (round ${round} of ${unit ? unit.id : 'the goal'})`);
   const behaviours = unit ? (unit.behaviours ?? []) : (s.goalBehaviours ?? []);
   const behaviour = o.behaviour === undefined ? null : String(o.behaviour).toUpperCase();
   if (behaviour && !behaviours.some((b) => b.id === behaviour)) throw new Error(`no behaviour ${o.behaviour}`);
   const eid = `E${list.length + 1}`;
-  const item = { id: eid, kind, label: optText(o.label, 120), behaviour, at: now() };
+  const item = { id: eid, kind, label: optText(o.label, 120), behaviour, round, at: now() };
   if (o.text !== undefined) {
     const t = text(o.text, 'text', LIMITS.text + 1);
     item.text = t.length > LIMITS.text ? `${t.slice(0, LIMITS.text)}\n… (cut at ${LIMITS.text} characters)` : t;

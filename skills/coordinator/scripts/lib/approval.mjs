@@ -43,6 +43,17 @@ export function noteRefusal(n) {
   return null;
 }
 
+// Why a person's note does not clearly record their decision, or null when it does. For a step that
+// records what the person already decided rather than asking leave (today: `run.mjs ship`, a unit merged
+// on their word without a final verdict, #66): it must come from the person, as above, and carry no
+// refusing, hedging or asking word; "approve" itself is not needed ("Yes, merge; rest as issues").
+export function decisionRefusal(n) {
+  if (!fromPerson(n)) return 'the note was not added by the person on the dashboard or the web (a lead\'s `note --kind person` counts only with --confirm, pasting their words)';
+  if (!String(n.text ?? '').trim()) return 'the note is empty';
+  if (DOUBT.test(String(n.text))) return `their words do not clearly say it: "${String(n.text).slice(0, 120)}" (no, not, but, if, once, after, when, until, maybe or a question)`;
+  return null;
+}
+
 // How many rounds the person's own words name, or null when they name none: then an
 // approval is for one round. Only 1-4 (a digit or a word) right before "round(s)" or
 // "more" counts ("two more rounds", "3 rounds", "one more"); any other number ("PR 1234")

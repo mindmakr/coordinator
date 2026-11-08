@@ -27,6 +27,8 @@
     "Catch every leaked secret in the logs",
     "It should never log a token anywhere",
     "every message that claims we told someone is true",
-    "It accepts any phrasing of the consent question"
+    "It accepts any phrasing of the consent question",
+    "No way for an operator to approve on something they did not see",
+    "Nothing an operator approves goes unseen"
   ]
 }

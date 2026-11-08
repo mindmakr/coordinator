@@ -19,10 +19,12 @@ Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `
 
 ## Test runs
 
-Full suites run again and again under load made late critic rounds three to six times the median, and the load caused the timing flakes that then failed rounds (#51). So:
+Full suites run again and again under load made late critic rounds three to six times the median, and the load caused the timing flakes that then failed rounds (#51). In another run, a full database suite run two or three times per head, and checks that did not match the change (a frontend-only change running the whole database suite), took most of 14 hours (#65). So checks follow what changed:
 
-- **Builders** run only the suites their change touches while they work, then the full suite once before `built`.
-- **Critics** run the full suite once on the head; a specialist runs its area's tests and does not repeat the suite. `verdict --full-suite yes|no` records whether it ran.
+- **Sides, at planning.** The lead records each unit's sides: backend, frontend, a shared contract (an API both sides use), a migration. Record them with `note <run> --kind info --text "<unit> sides: …"` and put them in each brief's `--where`.
+- **Mapped tests.** Builders and critics run only the tests mapped to the changed files: the mapping `COORDINATOR.md` declares under Checks, else the runner's related-files mode (`vitest related --run <files>`, `jest --findRelatedTests <files>`). Plus typecheck and lint for each side touched; a shared contract counts as both sides, and a migration adds the project's migration check.
+- **One full suite per unit head, by one agent.** The general critic runs it, once, last, and only when nothing has failed the round: a round that already fails on a high or medium does not need it, and a head that passes always has one. Builders do not run it; specialist and visual critics cite that run by its head. `verdict --full-suite yes|no` records whether it ran. A fold-in runs only the tests the folds touch.
+- **Stacked units.** After `sync` merges a base change in, a stacked unit's earlier full-suite run stands unless the merged-in change touched files its mapped tests cover; then the next critic runs it again.
 - **The integrator** runs the full checks once, on the merged result.
 - **Rerun under load** only a single file, only when a flake is suspected, and say so in the report or EVIDENCE.
 
@@ -30,14 +32,14 @@ Full suites run again and again under load made late critic rounds three to six 
 
 - **Same gap twice in a row:** the reply is `change-strategy`. Two rounds are the same gap when the critic gave both the same `CAUSE` tag (`verdict --cause`), even if the wording differs; when either round has no cause, most of the gap's words must match. After one change of strategy, the same gap again means `stop` (stuck).
 - **No progress:** the score has not beaten the best earlier score for 2 rounds, so `stop`.
-- **The budget is spent**, rounds or time: `stop`. Time is checked first, so even a waiting unit stops. One exception (#45): a critic that started (`built` recorded) inside the time budget may still return its verdict after it, and a silent one is still checked on (`check-stale`); it gets no new build.
+- **The budget is spent**, rounds or time: `stop`. Time is checked first, so even a waiting unit stops. One exception (#45): a critic that started (`built` recorded) inside the time budget may still return its verdict after it, and a silent one is still checked on (`check-stale`); it gets no new build. Its pass still counts: when it is the run's last open unit (the budget stopped no other), the integration check of that work may be logged once after the budget (`integrate`), and a pass there lets `close --outcome done` through. The budget stops only new builds and critics.
 - **Only a high or medium finding fails a round** (`bar.md`, Severity). Lows and nits are fold-ins on a pass, checked with `foldin`, not with a new critic round.
 - **The finish line:** the last open unit failing from round 2 on (or at 8 or more) with medium findings at most, from the general critic and every specialist, gets `ask-person` before the round budget applies, unless the rules would stop it as stuck or making no progress. The person's pick (ship with follow-ups, one more round, stop) decides; a lead's own answer, or words that refuse or hedge, do not count (`lib/approval.mjs`).
 - **A fold-in stays a fold-in:** it builds on the reviewed head, stays under the caps (`--fold-max-files` 10, `--fold-max-lines` 200) and passes detect, or it is a new round.
 - **What it builds on stopped:** a stacked unit (`--after`) stops too, instead of waiting forever.
 - **A PASS with no evidence** is recorded as FAIL, and it still counts against the budget.
 - **Out-of-order steps are refused:** `start`, `strategy` and `integrate` work only when `next` asks for them; `verdict` only after `built`; `built`, `verdict` and `beat` are refused for a unit the rules have stopped; `close --outcome done` only when the run is done, never while a unit is in progress, and closing as `partial` or `stopped` before the rules end the run needs `--reason`. A fail needs `--gap` and `--score`. The rules hold even if the lead forgets to call `next`.
-- **Integration** has the same time budget and same-gap stop: it ends as `done-with-gaps`.
+- **Integration** has the same time budget and same-gap stop: it ends as `done-with-gaps`, except the one check after a late pass above.
 
 ## The fence (staying on task)
 
@@ -61,7 +63,7 @@ Merging, deploying, a push to a protected or release branch, a force push, delet
 - **Text** (`--text`) is stored inline, masked for secrets and cut at 20,000 characters.
 - **Files** (`--file`) are a local file the lead chooses (a screenshot, a test log). They are copied into `.coordinator/runs/<run>/artifacts/<unit>/` (the goal's into `artifacts/_goal/`) under a new name, `E<n>-<cleaned name>`, so no path from the outside is ever reused. Only images (`.png`, `.jpg`, `.webp`, `.gif`, up to 5 MB, and the bytes must really be that image) and text logs (`.txt`, `.log`, up to 512 KB, no binary). A text file's copy is masked for secrets like all state text; the original is left as it was. Choose files that hold nothing the person would not share. A symlink or folder is refused.
 - **URLs** (`--url`) must be http(s).
-- At most 60 pieces of evidence per unit, and 30 behaviours.
+- At most 60 pieces of evidence per unit in one round (999 in all), and 30 behaviours.
 - `serve` returns an artifact only when the state names that exact file for that unit; every other path, `..` included, is a 404.
 
 ## The live dashboard (`run.mjs serve`)
