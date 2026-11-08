@@ -61,7 +61,7 @@ Merging, deploying, a push to a protected or release branch, a force push, delet
 - **Text** (`--text`) is stored inline, masked for secrets and cut at 20,000 characters.
 - **Files** (`--file`) are a local file the lead chooses (a screenshot, a test log). They are copied into `.coordinator/runs/<run>/artifacts/<unit>/` (the goal's into `artifacts/_goal/`) under a new name, `E<n>-<cleaned name>`, so no path from the outside is ever reused. Only images (`.png`, `.jpg`, `.webp`, `.gif`, up to 5 MB, and the bytes must really be that image) and text logs (`.txt`, `.log`, up to 512 KB, no binary). A text file's copy is masked for secrets like all state text; the original is left as it was. Choose files that hold nothing the person would not share. A symlink or folder is refused.
 - **URLs** (`--url`) must be http(s).
-- At most 60 pieces of evidence per unit, and 30 behaviours.
+- At most 60 pieces of evidence per unit in one round (999 in all), and 30 behaviours.
 - `serve` returns an artifact only when the state names that exact file for that unit; every other path, `..` included, is a 404.
 
 ## The live dashboard (`run.mjs serve`)

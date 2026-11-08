@@ -32,15 +32,16 @@ export function redactor(project) {
 const redactLog = (log, red) => Buffer.from(log.events.map((e) => `${JSON.stringify(red(e))}\n`).join(''));
 
 // .coordinator/coordinator.json (optional): { visibility, state, remote, stateRepo, branch } (lib/settings.mjs).
+// `file` (where it is or would be) rides along so a refusal can name it.
 function config(base) {
   const file = join(base, 'coordinator.json');
-  if (!existsSync(file)) return {};
+  if (!existsSync(file)) return { file };
   const c = JSON.parse(readFileSync(file, 'utf8'));
   if (!isObj(c)) throw new Error(`${file}: expected an object`);
   if (c.visibility !== undefined && !['private', 'internal', 'public'].includes(c.visibility)) throw new Error(`${file}: visibility must be private, internal or public`);
   if (c.state !== undefined && !['local', 'repo'].includes(c.state)) throw new Error(`${file}: state must be local or repo`);
   for (const k of ['remote', 'stateRepo', 'branch']) if (c[k] !== undefined && (typeof c[k] !== 'string' || !c[k] || c[k].startsWith('-'))) throw new Error(`${file}: ${k} must be a non-empty string`);
-  return c;
+  return { ...c, file };
 }
 
 const run = (cwd, args, { input, env, buffer } = {}) => execFileSync('git', args, {
@@ -82,12 +83,21 @@ function destination(project, cfg, t) {
   return { branch, remote };
 }
 
-// Design Q7: run state (questions, notes, evidence) never lands in a public repo.
+// Design Q7: run state (questions, notes, evidence) never lands in a public repo. Without "visibility" in
+// .coordinator/coordinator.json, `gh` is asked; when it cannot say, the refusal names the file and the key to set.
 function gate(project, cfg, what) {
-  const vis = cfg.visibility ?? (() => { try { return execFileSync('gh', ['repo', 'view', '--json', 'visibility', '-q', '.visibility'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 }).trim().toLowerCase(); } catch { return ''; } })();
-  if (vis === 'public') throw new Error(`refused: ${what} belongs to a public repo; set "stateRepo" in .coordinator/coordinator.json to a private companion repo, or push to a folder outside the repo`);
-  if (!['private', 'internal'].includes(vis)) throw new Error(`refused: cannot tell whether the repo is public (${what}); set "visibility" in .coordinator/coordinator.json`);
+  let why = null;
+  const vis = cfg.visibility ?? (() => {
+    try { return execFileSync('gh', ['repo', 'view', '--json', 'visibility', '-q', '.visibility'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 }).trim().toLowerCase(); } catch (e) {
+      why = e.code === 'ENOENT' ? 'gh is not installed' : 'gh could not say (not signed in, or the remote is not on GitHub)';
+      return '';
+    }
+  })();
+  if (vis === 'public') throw new Error(`refused: ${what} belongs to a public repo; set "stateRepo" in ${cfg.file} to a private companion repo, or push to a folder outside the repo`);
+  if (!['private', 'internal'].includes(vis)) throw new Error(`refused: cannot tell whether the repo is public (${what}${why ? `; ${why}` : ''}). ${VISIBILITY_HINT(cfg.file)}`);
 }
+// How to tell push the repo's visibility: also printed by `run.mjs init` while the file does not say.
+export const VISIBILITY_HINT = (file) => `Set "visibility" in ${file}: {"visibility": "private"} (or "internal"; a "public" repo also needs "stateRepo", a private companion repo), or push to a folder outside the repo`;
 
 function tip(project, d) {
   if (!d.remote) return (tryGit(project, ['rev-parse', '--verify', '--quiet', `refs/heads/${d.branch}^{commit}`]) ?? '').trim() || null;

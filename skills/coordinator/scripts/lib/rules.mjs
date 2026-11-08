@@ -40,6 +40,16 @@ export const roundCap = (unit, run) => run.budget.maxRounds + (Number.isInteger(
 // required from the next build on, never on a round that closed before it was added (#45).
 export const requiredOn = (unit, n) => (unit.specialists ?? []).filter((name) => (unit.specialistFrom?.[name] ?? 1) <= n);
 
+// Early reviews (`verdict --early`, #66): a critic's look at work started before the unit's try did (a stacked
+// unit begun early). Never a round: no rule here reads them. These are the ones since the last formal round.
+export const earlyReviews = (unit) => (Array.isArray(unit.early) ? unit.early : []).filter((r) => r?.before === unit.rounds.length + 1);
+// "2 early reviews (security pass 9.3; critic fail 6)": how `next` and the pages name them.
+export function earlySummary(unit) {
+  const list = earlyReviews(unit);
+  if (!list.length) return null;
+  return { count: list.length, text: `${list.length} early review${list.length === 1 ? '' : 's'}, not rounds (${list.map((r) => `${r.by} ${r.verdict}${typeof r.score === 'number' ? ` ${r.score}` : ''}`).join('; ')})` };
+}
+
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
 
