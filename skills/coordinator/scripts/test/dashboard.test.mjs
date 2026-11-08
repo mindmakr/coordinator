@@ -317,8 +317,22 @@ test('every list that grows live sits in its own anchor container (#23)', () => 
   assert.match(unit, /<section class="card"><div class="list-anchor"><ul class="evlist" data-ev-list>/, 'the unit page\'s Evidence');
   assert.match(unit, /<div class="list-anchor"><ul><li data-a="n-/, 'the unit page\'s notes');
   // The container's tail takes no room and covers the padding below the list; cards are no taller than their content.
-  assert.match(live, /\.list-anchor \{ margin-bottom: -24px; \}/);
-  assert.match(live, /\.list-anchor::after \{ content: ""; display: block; height: 24px; pointer-events: none; \}/);
+  assert.match(live, /\.list-anchor \{ margin-bottom: calc\(-1 \* var\(--list-tail\)\); \}/);
+  assert.match(live, /\.list-anchor::after \{ content: ""; display: block; height: var\(--list-tail\); pointer-events: none; \}/);
+  // The tail must cover at least the card's bottom padding and border, read from the template itself.
+  const tpl = readFileSync(join(scripts, 'lib', 'hud.template.html'), 'utf8');
+  const vars = Object.fromEntries([...tpl.matchAll(/(--[\w-]+): ([^;]+);/g)].map(([, k, x]) => [k, x.trim()]));
+  const px = (x) => {
+    for (let i = 0; i < 10 && x.includes('var('); i++) x = x.replace(/var\((--[\w-]+)\)/g, (_, k) => vars[k] ?? 'NaN');
+    const sum = /^calc\((.*)\)$/.exec(x)?.[1] ?? x;
+    return sum.split(' + ').reduce((t, part) => t + Number(/^(\d+(?:\.\d+)?)px$/.exec(part.trim())?.[1] ?? NaN), 0);
+  };
+  const card = /\n\.card \{([^}]*)\}/.exec(tpl)[1];
+  const pad = px(/padding: ([^;]+);/.exec(card)[1].trim().split(' ')[0]);
+  const border = px(/border: (\S+) solid/.exec(card)[1]);
+  const tail = px(/\.list-anchor::after \{[^}]*height: ([^;]+);/.exec(tpl)[1]);
+  assert.ok(Number.isFinite(pad) && Number.isFinite(border) && Number.isFinite(tail), `read ${pad}/${border}/${tail}`);
+  assert.ok(tail >= pad + border, `the tail (${tail}px) covers the card's padding and border (${pad + border}px)`);
   assert.match(live, /\.grid, \.lists \{ align-items: start; \}/);
 });
 

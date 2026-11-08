@@ -83,7 +83,7 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: v
 .eta b { color: var(--ink); margin-right: 6px; }
 .next { margin-top: 14px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--run); border-radius: var(--radius); }
 .next b { margin-right: 6px; }
-details { margin-top: 10px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; }
+details { margin-top: 10px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--toggle-pad) 14px; }
 summary { cursor: pointer; font-weight: 600; }
 dl { margin: 8px 0 0; } dt { font-weight: 600; margin-top: 8px; } dd { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--none-bg); color: var(--ink); white-space: nowrap; }
@@ -106,9 +106,10 @@ dl { margin: 8px 0 0; } dt { font-weight: 600; margin-top: 8px; } dd { margin: 2
 /* Issue #23: a list that grows live sits in its own anchor container. Its tail, a box just under the list whose height
    the container gives back (so nothing moves), covers the padding and border its toggle and card leave below the list. With the top of the screen there,
    the browser's scroll anchoring holds on to the tail, which moves with the list, not to a parent whose top stays put. */
-.list-anchor { margin-bottom: -24px; }
-.list-anchor::after { content: ""; display: block; height: 24px; pointer-events: none; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; min-width: 0; }
+:root { --card-pad: 14px; --toggle-pad: 10px; --list-tail: calc(var(--card-pad) + var(--toggle-pad)); } /* the tail is the card's and the toggle's padding: change one and it follows */
+.list-anchor { margin-bottom: calc(-1 * var(--list-tail)); }
+.list-anchor::after { content: ""; display: block; height: var(--list-tail); pointer-events: none; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--card-pad); min-width: 0; }
 .card h3 { margin: 0; font-size: 15px; display: flex; justify-content: space-between; gap: 8px; align-items: center; overflow-wrap: anywhere; }
 .card h3 a.open { font-weight: 600; font-size: 13px; white-space: nowrap; }
 .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
