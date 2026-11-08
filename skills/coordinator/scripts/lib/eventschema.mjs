@@ -46,6 +46,8 @@ export const KINDS = {
   'unit.detect': { unit: 'required', payload: changes },
   'unit.link': { unit: 'required', payload: changes },
   'unit.extend': { unit: 'required', payload: changes },
+  // A unit merged on the person's decision without a final verdict (run.mjs ship, #66).
+  'unit.ship': { unit: 'required', payload: changes },
   // A specialist added after the unit was (run.mjs add-specialist, #45).
   'unit.specialist': { unit: 'required', payload: changes },
   'unit.touches': { unit: 'required', payload: changes },

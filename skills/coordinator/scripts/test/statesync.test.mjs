@@ -132,7 +132,9 @@ test('state never goes to main, a branch that is not ours, or a public repo with
   assert.match(cli(A, 'push', 'r1').err, /public repo; set "stateRepo"/);
   assert.match(cli(A, 'push', 'r1', '--to', join(A, 'state-copy')).err, /public repo/, 'nor a folder inside it');
   configure(A, {});
-  assert.match(cli(A, 'push', 'r1').err, /cannot tell whether the repo is public/, 'unknown visibility fails closed');
+  const unknown = cli(A, 'push', 'r1').err;
+  assert.match(unknown, /cannot tell whether the repo is public/, 'unknown visibility fails closed');
+  assert.match(unknown, /Set "visibility" in .*a-state[\\/]coordinator\.json: \{"visibility": "private"\}/, 'and names the file and the key to set (#66)');
   configure(A, { visibility: 'public', stateRepo: companion });
   const tipBefore = git(origin, 'rev-parse', 'coordinator-state').trim();
   const r = cli(A, 'push', 'r1');
