@@ -297,9 +297,9 @@ test('cost: start, built and verdict record what the harness reported; show, sta
 test('the briefs carry the test-run budget and the severity format', () => {
   setup('brief'); const s = state('brief');
   const b = buildBrief(s, { role: 'builder', unit: 'a' });
-  assert.match(b, /Run only the suites your change touches.*then the full suite once before you report/s);
+  assert.match(b, /Run only the tests mapped to the files you changed.*Not the full suite: the critic runs it once on the head/s);
   const c = buildBrief(s, { role: 'critic', unit: 'a' });
-  assert.match(c, /Run the full suite once/); assert.match(c, /only when you suspect a flake, and say so/);
+  assert.match(c, /run the full suite once on the head/); assert.match(c, /only when you suspect a flake, and say so/);
   assert.match(c, /FINDINGS: one line each, <high\|medium\|low\|nit> <file:line> <what>/);
   assert.match(c, /FOLDS:/); assert.match(c, /Fail only on a high or medium finding/);
 });

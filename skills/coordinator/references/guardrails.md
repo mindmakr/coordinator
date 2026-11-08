@@ -19,10 +19,12 @@ Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `
 
 ## Test runs
 
-Full suites run again and again under load made late critic rounds three to six times the median, and the load caused the timing flakes that then failed rounds (#51). So:
+Full suites run again and again under load made late critic rounds three to six times the median, and the load caused the timing flakes that then failed rounds (#51). In another run, a full database suite run two or three times per head, and checks that did not match the change (a frontend-only change running the whole database suite), took most of 14 hours (#65). So checks follow what changed:
 
-- **Builders** run only the suites their change touches while they work, then the full suite once before `built`.
-- **Critics** run the full suite once on the head; a specialist runs its area's tests and does not repeat the suite. `verdict --full-suite yes|no` records whether it ran.
+- **Sides, at planning.** The lead records each unit's sides: backend, frontend, a shared contract (an API both sides use), a migration. Record them with `note <run> --kind info --text "<unit> sides: …"` and put them in each brief's `--where`.
+- **Mapped tests.** Builders and critics run only the tests mapped to the changed files: the mapping `COORDINATOR.md` declares under Checks, else the runner's related-files mode (`vitest related --run <files>`, `jest --findRelatedTests <files>`). Plus typecheck and lint for each side touched; a shared contract counts as both sides, and a migration adds the project's migration check.
+- **One full suite per unit head, by one agent.** The general critic runs it, once, last, and only when nothing has failed the round: a round that already fails on a high or medium does not need it, and a head that passes always has one. Builders do not run it; specialist and visual critics cite that run by its head. `verdict --full-suite yes|no` records whether it ran. A fold-in runs only the tests the folds touch.
+- **Stacked units.** After `sync` merges a base change in, a stacked unit's earlier full-suite run stands unless the merged-in change touched files its mapped tests cover; then the next critic runs it again.
 - **The integrator** runs the full checks once, on the merged result.
 - **Rerun under load** only a single file, only when a flake is suspected, and say so in the report or EVIDENCE.
 

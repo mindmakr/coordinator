@@ -69,7 +69,7 @@ test('quoted text cannot forge a closing marker', () => {
 test('the reply format and rules match the templates in briefs.md', () => {
   const doc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../references/briefs.md'), 'utf8');
   const crit = buildBrief(run, { role: 'critic', unit: 'web', quotes: [] });
-  for (const l of ['VERDICT: PASS | FAIL', 'Pass only when every behaviour passes and the evidence shows it.', 'OUT-OF-FENCE: anything found outside scope (follow-ups, not failures)']) {
+  for (const l of ['VERDICT: PASS | FAIL', 'Pass only when every behaviour passes and the evidence shows it.', 'OUT-OF-FENCE: anything found outside scope, and gaps that predate this change and are none of its behaviours (follow-ups, not failures; bar.md, Severity)']) {
     assert.ok(doc.includes(l) && crit.includes(l), l);
   }
   const bld = buildBrief(run, { role: 'builder', unit: 'web', quotes: [] });
