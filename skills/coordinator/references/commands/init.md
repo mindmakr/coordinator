@@ -8,7 +8,8 @@ Learn the project once, so that every later run starts informed and asks only ab
 2. **Ask only what is left**, in one batch, each question with your recommended answer first. Typical gaps:
    - Which branch work goes into, and which branches are protected.
    - Whether a run may merge into the working branch when the review passes, or only open the PR.
-   - Which checks prove a change: the exact commands, and whether any need a database or service.
+   - Which checks prove a change: the exact commands, and whether any need a database or service. Which tests cover which files or sides (backend, frontend, shared contract, migration), so builders and critics run only those, and the one full-suite command (`guardrails.md`, Test runs).
+   - Which screen widths each surface needs (for example, admin desktop only, end-user phone and desktop).
    - Risk areas the critic must always check, such as money, auth, migrations, time zones, or a simulated clock.
    - The review skill or reviewer to use, if any.
    - How the person wants to be told: only at the end, or also when a unit stops.
@@ -18,8 +19,8 @@ Learn the project once, so that every later run starts informed and asks only ab
 ```
 # Coordinator context
 ## Work flow        base branch, protected branches, PR rules
-## Checks           commands that prove a change, and what each needs
-## Risk areas       what a critic must always check here
+## Checks           commands that prove a change, what each needs, which tests map to which files or sides, the full-suite command
+## Risk areas       what a critic must always check here, and screen widths per surface
 ## Review           the review skill or reviewer, and what "ready" looks like
 ## Standing rules   actions pre-approved for every run (e.g. "merge into test when review is READY")
 ## Never            actions that need a person every time
