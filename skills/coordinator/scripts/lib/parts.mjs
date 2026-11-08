@@ -36,6 +36,8 @@ export function keyed(items, keyOf) {
   const seen = new Map();
   return items.map((it) => { const k = keyOf(it); const n = (seen.get(k) ?? 0) + 1; seen.set(k, n); return [it, n > 1 ? `${k}~${n}` : k]; });
 }
+// A list that grows live, in its own anchor container (issue #23): see `.list-anchor` in hud.template.html.
+export const grows = (list) => `<div class="list-anchor">${list}</div>`;
 export const toggle = (key, summary, body, cls2 = 'raw') => `<details class="${cls2}" data-d="${esc(key)}" data-a="d-${esc(key)}"><summary>${summary}</summary>${body}</details>`;
 
 // Connected nodes: one hub, three ends. Neutral ink, so it sits on any theme.
@@ -122,12 +124,12 @@ export function page({ title, body, ctx, path, closed = false }) {
 
 export function behaviourList(list, repo, evidence = [], ctx = null, key = '') {
   if (!list.length) return '<p class="empty">No behaviours yet.</p>';
-  return `<ul class="behaviours">${list.map((b) => {
+  return grows(`<ul class="behaviours">${list.map((b) => {
     const ev = ctx ? evidence.filter((e) => e.behaviour === b.id) : [];
     return `<li data-a="${esc(`${key || "b"}-${b.id}`)}">${chip(b.status, b.status === 'unchecked' ? '' : b.status)} <b>${esc(b.id)}</b> ${linkify(b.text, repo)}`
       + `${b.evidence ? `<div class="bev">${linkify(b.evidence, repo)}</div>` : ''}`
       + `${ev.length ? evidenceList(ev, repo, ctx, `${key}-${b.id}`) : ''}</li>`;
-  }).join('')}</ul>`;
+  }).join('')}</ul>`);
 }
 
 const LONG = (t) => t.length > 1200 || t.split('\n').length > 12;
@@ -146,7 +148,7 @@ function evidenceItem(e, repo, ctx, key) {
   return `<li class="evidence" data-a="${esc(`${key}-${e.id}`)}"><div>${head} ${stamp(e.at, 'cause')}</div>${body}</li>`;
 }
 
-export const evidenceList = (list, repo, ctx, key) => (list.length ? `<ul class="evlist" data-ev-list>${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>` : '');
+export const evidenceList = (list, repo, ctx, key) => (list.length ? grows(`<ul class="evlist" data-ev-list>${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>`) : '');
 
 // ctx (optional): an evidence event links to the viewer, with a thumbnail for a screenshot.
 export function eventRow(e, repo, key, fin = false, ctx = null) {
