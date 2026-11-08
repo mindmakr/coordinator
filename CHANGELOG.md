@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.2.1 (2026-11-09)
+The two review fold-ins for #45 that missed 1.2.0.
+
+- **The critic brief calls detect allowances the lead's only when a decision records them (#45).** An allowance carried over from a rerun, with no decision note on the unit, was described as the lead's; now the critic is told to check those hits as findings.
+- **guardrails.md matches the late-integration rule:** after the time budget, the integration check may run when no other unit is still open and none was stopped by the time budget.
+
 ## 1.2.0 (2026-11-08)
 Checks follow what changed: impact-scoped tests, one full suite per unit head, delta reviews from round 2, visual checks only on touched screens, and older gaps filed as follow-ups instead of failing rounds. The time budget stops new work, not finished work. `ship` records a unit merged on the person's decision without a final verdict, early reviews of stacked units can be recorded, evidence is capped per round, and push names the setting it needs. Also: doctor reads app package.json files in monorepos, and the dashboard holds your place when a list grows above the screen.
 
