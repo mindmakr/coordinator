@@ -81,7 +81,8 @@ export function buildBrief(run, o) {
       'Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.',
       TESTS_CRITIC,
       'Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.',
-      ...(u.detect?.allow?.length && u.detect.round === u.rounds.length + 1 ? [`The lead allowed these detect hits for this round (decisions in the run): ${u.detect.allow.join(', ')}. detect.mjs keeps them when you rerun it on the same base and head without --allow.`] : []),
+      // Whoever ran detect last recorded them; only a decision note on the unit makes them the lead's (#45).
+      ...(u.detect?.allow?.length && u.detect.round === u.rounds.length + 1 ? [`${(run.notes ?? []).some((n) => n.kind === 'decision' && n.unit === u.id) ? 'The lead allowed these detect hits for this round (decisions in the run)' : 'These detect hits were allowed for this round, with no decision on the unit recorded; check them as findings'}: ${u.detect.allow.join(', ')}. detect.mjs keeps them when you rerun it on the same base and head without --allow.`] : []),
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your reply is lost when the worktree goes.`,
       `If your checks run long, run now and then: ${beatLine(run.id, u.id, o.env)}`,
       ...(u.rounds.length ? ['Reuse an earlier cause tag (quoted above) word for word when the root cause is the same, even if the symptom differs.'] : []),
