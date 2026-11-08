@@ -478,6 +478,11 @@ test('a detect rerun without --allow on the same round, base and head keeps the 
   ok('init', 'keep', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--paths', 'src');
   ok('add', 'keep', 'a', '--bar', 'b'); ok('freeze', 'keep'); build('keep', 'a');
   assert.equal(detect('--run', 'keep', '--unit', 'a', '--base', base, '--head', head, '--allow', 'outside-fence:docs').status, 0);
+  // Without a decision note on the unit the brief does not call them the lead's.
+  const before = ok('brief', 'keep', 'a', '--role', 'critic');
+  assert.match(before, /allowed for this round, with no decision on the unit recorded.*outside-fence:docs/);
+  assert.doesNotMatch(before, /The lead allowed/);
+  ok('note', 'keep', '--kind', 'decision', '--unit', 'a', '--text', 'allowed outside-fence:docs for a');
   assert.match(ok('brief', 'keep', 'a', '--role', 'critic'), /The lead allowed these detect hits for this round.*outside-fence:docs/);
   const r = detect('--run', 'keep', '--unit', 'a', '--base', base, '--head', head); // the critic's rerun
   assert.equal(r.status, 0, r.stdout + r.stderr);
