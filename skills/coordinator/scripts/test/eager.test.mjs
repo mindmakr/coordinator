@@ -378,3 +378,112 @@ test('escape rates leave shipped units out', () => {
   assert.deepEqual(escapes(run), { escapes: 0, passed: 1, rate: 0 });
   assert.deepEqual(bySetup([run]), [{ setup: 'c', passed: 1, escapes: 0, rate: 0 }]);
 });
+
+// #45, the rest: a late pass integrates and closes done; note --unit; repeated --allow; add-specialist.
+// Ages a run: started `ago` hours back with a 4 h budget, unit a judging since `judged` hours in.
+function age(run, ago, judged) {
+  const file = join(dir, 'runs', run, 'state.json');
+  const s = JSON.parse(readFileSync(file, 'utf8'));
+  const t0 = Date.now() - ago * 3600_000;
+  s.createdAt = new Date(t0).toISOString(); s.budget.maxMinutes = 240;
+  s.units[0].judgingAt = new Date(t0 + judged * 3600_000).toISOString();
+  writeFileSync(file, JSON.stringify(s, null, 2));
+}
+
+test('a pass from a critic started inside the time budget integrates and closes done after it (#45 B1)', () => {
+  setup('lateint'); build('lateint', 'a'); age('lateint', 5, 3);
+  ok('verdict', 'lateint', 'a', 'pass', '--score', '9', '--evidence', 'every behaviour passes');
+  assert.equal(ok('next', 'lateint').decision, 'integrate');
+  ok('integrate', 'lateint', 'pass', '--evidence', 'merged tree green');
+  assert.equal(ok('next', 'lateint').decision, 'done');
+  ok('close', 'lateint', '--outcome', 'done');
+  assert.equal(state('lateint').closed.outcome, 'done');
+  // One check only: a failed one after the budget ends the run with gaps, as before.
+  setup('lateint2'); build('lateint2', 'a'); age('lateint2', 5, 3);
+  ok('verdict', 'lateint2', 'a', 'pass', '--score', '9', '--evidence', 'e');
+  ok('integrate', 'lateint2', 'fail', '--evidence', 'e', '--gap', 'merged tree red');
+  assert.equal(ok('next', 'lateint2').decision, 'done-with-gaps');
+  // A unit that passed inside the budget gets no integration after it: the budget stops new critics.
+  setup('lateint3'); build('lateint3', 'a');
+  ok('verdict', 'lateint3', 'a', 'pass', '--score', '9', '--evidence', 'e');
+  const file = join(dir, 'runs', 'lateint3', 'state.json');
+  const s = JSON.parse(readFileSync(file, 'utf8'));
+  const t0 = Date.now() - 5 * 3600_000; s.createdAt = new Date(t0).toISOString(); s.budget.maxMinutes = 240;
+  s.units[0].rounds[0].at = new Date(t0 + 3600_000).toISOString();
+  writeFileSync(file, JSON.stringify(s, null, 2));
+  assert.equal(ok('next', 'lateint3').decision, 'done-with-gaps');
+  // The late pass was not the last open unit: the budget stopped b, never built, so the run has gaps.
+  setup('lateint4', ['a', 'b']); build('lateint4', 'a'); age('lateint4', 5, 3);
+  ok('verdict', 'lateint4', 'a', 'pass', '--score', '9', '--evidence', 'e');
+  assert.equal(ok('next', 'lateint4').decision, 'done-with-gaps');
+  assert.match(cli('integrate', 'lateint4', 'pass', '--evidence', 'e').err, /integrate refused: the run is at "done-with-gaps"/);
+  assert.match(cli('close', 'lateint4', '--outcome', 'done').err, /close --outcome done refused/);
+});
+
+test('note --unit scopes a decision, follow-up or info to the unit and shows it on its page (#45 B2)', () => {
+  setup('unote', ['a', 'b']);
+  ok('note', 'unote', '--kind', 'decision', '--unit', 'a', '--text', 'allowed snapshot-rewritten:src/ui for a');
+  ok('note', 'unote', '--kind', 'follow-up', '--unit', 'a', '--text', 'tidy the a helper later');
+  ok('note', 'unote', '--kind', 'info', '--unit', 'b', '--text', 'b waits on the API');
+  const notes = state('unote').notes;
+  assert.deepEqual(notes.filter((n) => n.unit).map((n) => [n.kind, n.unit]), [['decision', 'a'], ['follow-up', 'a'], ['info', 'b']]);
+  const page = readFileSync(join(dir, 'runs', 'unote', 'units', 'a.html'), 'utf8');
+  assert.match(page, /<b>decision:<\/b> allowed snapshot-rewritten:src\/ui for a/);
+  assert.match(page, /<b>follow-up:<\/b> tidy the a helper later/);
+  assert.doesNotMatch(page, /b waits on the API/);
+  assert.match(cli('note', 'unote', '--kind', 'situation', '--unit', 'a', '--text', 't').err, /--unit goes with --kind person, escape, decision, follow-up, info/);
+  assert.match(cli('note', 'unote', '--kind', 'decision', '--unit', 'zz', '--text', 't').err, /no unit zz/);
+});
+
+test('detect.mjs takes --allow more than once (#45 B3)', () => {
+  const base = commitFiles({ 'src/k.js': '1\n' }, 'k base');
+  const head = commitFiles({ 'docs/one.md': '1\n', 'notes/two.md': '2\n' }, 'two outside');
+  ok('init', 'allow2', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--paths', 'src');
+  ok('add', 'allow2', 'a', '--bar', 'b'); ok('freeze', 'allow2'); build('allow2', 'a');
+  assert.equal(detect('--run', 'allow2', '--base', base, '--head', head, '--allow', 'outside-fence:docs').status, 1);
+  const r = detect('--run', 'allow2', '--unit', 'a', '--base', base, '--head', head, '--allow', 'outside-fence:docs', '--allow', 'outside-fence:notes');
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(unit('allow2', 'a').detect.allow, ['outside-fence:docs', 'outside-fence:notes']);
+  assert.equal(unit('allow2', 'a').detect.clean, true);
+});
+
+test('add-specialist: required for the pass before the verdict, refused after it, logged as a decision (#45 B4)', () => {
+  setup('addsp', ['a', 'b']); build('addsp', 'a');
+  assert.match(cli('add-specialist', 'addsp', 'a', 'security').err, /missing --reason/);
+  ok('add-specialist', 'addsp', 'a', 'security', '--reason', 'touches the login route');
+  assert.match(cli('add-specialist', 'addsp', 'a', 'security', '--reason', 'r').err, /already has specialist security/);
+  assert.match(cli('verdict', 'addsp', 'a', 'pass', '--score', '9', '--evidence', 'e').err, /specialist security has not passed/);
+  ok('verdict', 'addsp', 'a', 'pass', '--evidence', 'no auth gaps', '--specialist', 'security');
+  ok('verdict', 'addsp', 'a', 'pass', '--score', '9', '--evidence', 'e');
+  assert.equal(unit('addsp', 'a').rounds[0].specialists.security.verdict, 'pass');
+  assert.match(cli('add-specialist', 'addsp', 'a', 'database', '--reason', 'r').err, /add-specialist refused: a is pass/);
+  const d = state('addsp').notes.find((n) => n.kind === 'decision' && n.unit === 'a');
+  assert.match(d.text, /a: specialist security added, required from round 1: touches the login route/);
+  // Added after a failed round: that round never waits on its mark; the next build needs it.
+  build('addsp', 'b');
+  ok('verdict', 'addsp', 'b', 'fail', '--score', '5', '--gap', 'g', '--evidence', 'e', '--severity', 'high');
+  ok('add-specialist', 'addsp', 'b', 'security', '--reason', 'r');
+  assert.equal(nextOf('addsp', 'b').action, 'build');
+  assert.match(cli('verdict', 'addsp', 'b', 'pass', '--evidence', 'e', '--specialist', 'security').err, /verdict refused: unit b is open/);
+  build('addsp', 'b');
+  assert.match(cli('verdict', 'addsp', 'b', 'pass', '--score', '9', '--evidence', 'e').err, /specialist security has not passed/);
+  // The time budget stops new critics: no specialist joins once it is spent.
+  setup('addsp2'); build('addsp2', 'a'); age('addsp2', 5, 3);
+  assert.match(cli('add-specialist', 'addsp2', 'a', 'security', '--reason', 'r').err, /the time budget is spent/);
+});
+
+test('a detect rerun without --allow on the same round, base and head keeps the lead’s allowances (#45)', () => {
+  const base = commitFiles({ 'src/m.js': '1\n' }, 'm base');
+  const head = commitFiles({ 'docs/m.md': '1\n' }, 'm outside');
+  ok('init', 'keep', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--paths', 'src');
+  ok('add', 'keep', 'a', '--bar', 'b'); ok('freeze', 'keep'); build('keep', 'a');
+  assert.equal(detect('--run', 'keep', '--unit', 'a', '--base', base, '--head', head, '--allow', 'outside-fence:docs').status, 0);
+  assert.match(ok('brief', 'keep', 'a', '--role', 'critic'), /The lead allowed these detect hits for this round.*outside-fence:docs/);
+  const r = detect('--run', 'keep', '--unit', 'a', '--base', base, '--head', head); // the critic's rerun
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).allowed, ['outside-fence:docs']);
+  assert.deepEqual([unit('keep', 'a').detect.allow, unit('keep', 'a').detect.clean], [['outside-fence:docs'], true]);
+  // Another base or head is another check: nothing carries over.
+  assert.equal(detect('--run', 'keep', '--unit', 'a', '--base', `${base}~1`, '--head', head).status, 1);
+  assert.deepEqual(unit('keep', 'a').detect.allow, []);
+});

@@ -14,6 +14,8 @@
 //   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--continues <run>:<unit>] this unit, under its own id, continues that unit of an earlier run
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
+//   run.mjs add-specialist <run> <unit> <name> --reason R   a critic that must also pass, added after add: required from the
+//                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link [--label L]
@@ -57,7 +59,8 @@
 //   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person|escape --text T
 //                  escape: --unit U, a passed unit where a defect turned up later (a later review, verify, test, a person); counted by stats
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
-//                  [--unit U] (person: a note from the person about one unit) [--confirm] (person: their words, pasted)
+//                  [--unit U] (person: a note from the person about one unit; decision, follow-up, info: scoped to that unit,
+//                  shown on its page) [--confirm] (person: their words, pasted)
 //   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P]
 //                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
@@ -140,7 +143,7 @@ import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mj
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
-import { allows, decide, decideUnit, FAILING, finishQuestion, openFindings, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
+import { allows, decide, decideUnit, FAILING, finishQuestion, openFindings, requiredOn, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
 import { COST_FLAGS, costEntry, costStats } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
@@ -183,7 +186,7 @@ import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAtt
 
 const FLAGS = {
   init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
-  extend: ['rounds', 'reason', 'answer'],
+  extend: ['rounds', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', 'head', ...COST_FLAGS], strategy: ['text'],
@@ -194,6 +197,8 @@ const FLAGS = {
   brief: ['role', 'quote', 'source', 'where', 'playbook'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'],
 };
+// Notes about one unit (#45): scoped with --unit, shown on its page.
+const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
@@ -492,6 +497,21 @@ const commands = {
     if (cont) markParent(cont, run);
     return warning ? Object.assign(out, { warning }) : out;
   },
+  // A required second critic for a unit added without it (#45): it judges the build being judged now,
+  // or the next one; a round that closed before it was added never waits on its mark.
+  'add-specialist'([run, unit, name], o) {
+    const who = safeId(name, 'specialist');
+    const reason = text(o.reason, 'reason', 300);
+    return change(run, 'unit.specialist', (s) => {
+      const u = unitOf(s, unit);
+      if (['pass', 'stopped'].includes(u.status)) throw new Error(`add-specialist refused: ${u.id} is ${u.status}; a specialist joins before the unit's verdict`);
+      if ((Date.now() - Date.parse(s.createdAt)) / 60_000 > s.budget.maxMinutes) throw new Error('add-specialist refused: the time budget is spent; it stops new critics');
+      if ((u.specialists ?? []).includes(who)) throw new Error(`${u.id} already has specialist ${who}`);
+      u.specialists = [...(u.specialists ?? []), who];
+      (u.specialistFrom ??= {})[who] = u.rounds.length + 1;
+      s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: specialist ${who} added, required from round ${u.rounds.length + 1}: ${reason}`, at: now() });
+    }, { unit });
+  },
   freeze([run]) {
     return change(run, 'run.freeze', (s) => {
       if (!s.units.length) throw new Error('add units first');
@@ -611,7 +631,8 @@ const commands = {
       // A required specialist whose mark arrives after the general critic's fail closed the round:
       // recorded on that round (its high must count), once, before a new build starts (#51 round 3).
       const closed = u.rounds.at(-1);
-      const late = o.specialist !== undefined && ['open', 'stopped'].includes(u.status) && closed?.verdict === 'fail' && !closed.specialists?.[String(o.specialist)];
+      const late = o.specialist !== undefined && ['open', 'stopped'].includes(u.status) && closed?.verdict === 'fail' && !closed.specialists?.[String(o.specialist)]
+        && requiredOn(u, u.rounds.length).includes(String(o.specialist));
       if (u.status !== 'judging' && !late) throw new Error(`verdict refused: unit ${unit} is ${u.status}; record built first`);
       if (!late) expect(s, u, 'verdict');
       oneOf(v, ['pass', 'fail'], 'verdict');
@@ -641,7 +662,7 @@ const commands = {
       const judgedBy = judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {});
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
-        if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (add --specialist)`);
+        if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (run.mjs add-specialist ${s.id} ${u.id} ${name} --reason …)`);
         const mark = { verdict, score: score(o.score), gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
         if (late) { (closed.specialists ??= {})[name] = { ...mark, late: true }; log(u, 'verdict', `${name}: ${verdict} on round ${closed.n ?? u.rounds.length}, after the round closed`); }
         else (u.specialistMarks ??= {})[name] = mark;
@@ -801,11 +822,11 @@ const commands = {
         s.notes.push({ kind: 'escape', unit: u.id, round: passed + 1, text: text(o.text, 'text', 1000), at: now() });
       }, { closedOk: true, unit: typeof o.unit === 'string' ? o.unit : null });
     }
-    if (o.unit !== undefined) throw new Error('--unit goes with --kind person or escape (or ask)');
+    if (o.unit !== undefined && !UNIT_NOTES.includes(kind)) throw new Error(`--unit goes with --kind ${['person', 'escape', ...UNIT_NOTES].join(', ')} (or ask)`);
     if (o.recommend !== undefined && kind !== 'question') throw new Error('--recommend goes with --kind question');
     if (o.answers !== undefined && kind !== 'decision') throw new Error('--answers goes with --kind decision');
     return change(run, kind === 'question' ? 'question' : 'note', (s) => {
-      const note = { kind, text: text(o.text, 'text', kind === 'situation' ? 400 : 1000), at: now() };
+      const note = { kind, ...(o.unit !== undefined ? { unit: unitOf(s, String(o.unit)).id } : {}), text: text(o.text, 'text', kind === 'situation' ? 400 : 1000), at: now() };
       if (o.recommend !== undefined) note.recommend = text(o.recommend, 'recommend', 300);
       if (o.answers !== undefined) {
         const asked = s.notes.filter((n) => n.kind === 'question').length;
@@ -814,7 +835,7 @@ const commands = {
         note.answers = o.answers;
       }
       s.notes.push(note);
-    }, { closedOk: ['follow-up', 'retro'].includes(kind) });
+    }, { closedOk: ['follow-up', 'retro'].includes(kind), unit: typeof o.unit === 'string' ? safeId(o.unit, 'unit') : null });
   },
   study([run], o) { let id; const s = change(run, 'study', (st) => { id = addStudy(st, o); }); return { ...s, study: id }; },
   self(_, o) {
@@ -1222,7 +1243,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 let BY = null;
 try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = commands[cmd](pos, opt);

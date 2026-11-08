@@ -95,7 +95,7 @@ test('questions and person notes are global or per unit', () => {
   assert.deepEqual(run('questions', 'a3').out.map((q) => q.unit), ['u1', null]);
   assert.equal(run('note', 'a3', '--kind', 'person', '--text', 'Use the staging data', '--unit', 'u2').code, 0);
   assert.equal(run('note', 'a3', '--kind', 'person', '--text', 'Lunch until 2').code, 0);
-  assert.equal(run('note', 'a3', '--kind', 'info', '--text', 'x', '--unit', 'u1').code, 1, '--unit is for person notes');
+  assert.equal(run('note', 'a3', '--kind', 'situation', '--text', 'x', '--unit', 'u1').code, 1, '--unit is for unit notes (person, escape, decision, follow-up, info)');
   assert.equal(run('note', 'a3', '--kind', 'person', '--text', 'x', '--unit', 'nope').code, 1);
   const notes = state('a3').notes.filter((n) => n.kind === 'person');
   assert.deepEqual(notes.map((n) => n.unit), ['u2', null]);
