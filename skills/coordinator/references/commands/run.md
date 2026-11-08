@@ -8,6 +8,9 @@
 4. **Research now, not mid-run.** For anything people will see, collect references: the person's own (Mobbin, screenshots, a design system) first, then web research (`references/craft.md`). For unknowns in the code or the domain, send a researcher with `references/sub-skills/investigate.md`. Put what you find into the bar.
 5. **Staff the team** from the harness's agents and skills (`references/team.md`), and pick each role's playbook (`references/sub-skills.md`).
 6. List every question whose answer would change what gets built or what you may do:
+   - **the goal, made specific for the kind of task.** A vague goal gives a vague bar, and the run then builds the wrong thing well.
+     - New work or a new project: ask what the person expects at the end: who it is for, what it must do first, what "done" looks like to them, and what is out of scope.
+     - Bug fix, feature or refactor: find the specific goal yourself first, in the task, the issue and its comments, the code and the person's own words. For a bug that is the wrong behaviour and the right one; for a feature, what a person can do afterwards that they cannot do now; for a refactor, what must not change and what gets simpler. Ask only for what is still missing or unclear, and offer the goal you found as the recommended option.
    - open product decisions, unclear acceptance, scope edges;
    - every "needs a person" action this run will reach (merge, push, migration, message);
    - whether the run may open issues or PRs upstream for skill improvements (`references/upstream.md`).
