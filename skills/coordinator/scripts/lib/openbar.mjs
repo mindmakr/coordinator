@@ -10,7 +10,12 @@
 //      "every 'we notified' message";
 //   2. a quantifier a few words before a wording noun: message(s), claim(s), phrasing,
 //      wording, mention(s), variant(s), way(s) of saying;
-//   3. "catch" before every, all or any; "never … anywhere"; "any phrasing/wording/form".
+//   3. "catch" before every, all or any; "never … anywhere"; "any phrasing/wording/form";
+//   4. a guarantee with no edge (#65): "no way to/for …" (also path, route, means) and
+//      "nothing … unseen" (unnoticed, unreviewed, unchecked, unrecorded, unverified, slips,
+//      escapes, gets past). A run's goal said "no way for an operator to approve on something
+//      they did not see"; each round fixed the reported gap and the next critic found an
+//      adjacent, older one.
 // …unless the same clause (up to ; or .) names its closed list: "listed", "below", "these",
 // "the following", "in the issue", "named in", an inventory, registry or manifest, or a file.
 // It only notes; `--accept-open` silences it and is recorded. Pure.
@@ -23,6 +28,8 @@ const OPEN = [
   { word: 'catch every', re: /\bcatch(?:es|ing)?\s+(?:every|all|any)\b/i },
   { word: 'never … anywhere', re: /\bnever\b[^.;]*?\banywhere\b/i },
   { word: 'any phrasing', re: /\bany\s+(?:phrasing|wording|form|variant|language)\b/i },
+  { word: 'no way to …', re: /\bno\s+(?:way|path|route|means)\s+(?:for|to)\b/i },
+  { word: 'nothing … unseen', re: /\bnothing\b[^.;]*?\b(?:unseen|unnoticed|unreviewed|unchecked|unrecorded|unverified|slips|escapes|gets\s+(?:through|past))\b/i },
 ];
 const CLOSED = /\b(?:listed|below|these|the following|in the issue|named in|inventory|registry|manifest|allow-?list)\b|\.(?:json|md|ya?ml|tsx?|jsx?|csv)\b/i;
 

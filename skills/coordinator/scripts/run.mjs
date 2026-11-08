@@ -27,7 +27,7 @@
 //   run.mjs freeze <run>
 //   Cost (start, built, verdict, foldin): [--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"], what the harness
 //                  reported for that launch; stats, show and the HUD sum them per unit, model and run ("not recorded" when missing)
-//   --accept-open (init, add, behave): keep a bar or behaviour line that reads open-ended (lib/openbar.mjs), recorded as a bar note
+//   --accept-open (init, add, behave): keep a goal, bar or behaviour line that reads open-ended (lib/openbar.mjs), recorded as a bar note
 //   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
 //                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
 //                  after a try failed on a model below strong, a model below strong needs [--force-model "reason"]
@@ -226,7 +226,7 @@ function applyStops(st) {
   return stopped;
 }
 
-// An open-ended bar or behaviour line warns (lib/openbar.mjs); --accept-open keeps it and records that.
+// An open-ended goal, bar or behaviour line warns (lib/openbar.mjs); --accept-open keeps it and records that.
 function openCheck(lines, accept, notes) {
   const warning = openWarning(lines);
   if (!warning) return null;
@@ -459,7 +459,7 @@ const commands = {
       if (!f || extname(f).toLowerCase() !== '.css' || !existsSync(f) || !statSync(f).isFile()) throw new Error('--theme must be an existing .css file');
       fresh.theme = f;
     }
-    const warning = openCheck([{ what: 'the bar', text: fresh.bar }], o['accept-open'], fresh.notes);
+    const warning = openCheck([{ what: 'the goal', text: fresh.goal }, { what: 'the bar', text: fresh.bar }], o['accept-open'], fresh.notes);
     const made = updateRun(runDir(run), { kind: 'run.init', by: BY }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
     for (const c of parents) markParent(c, run);
@@ -664,7 +664,8 @@ const commands = {
       // The head the critic reviewed, from the detect run of this round: a fold-in must build on it.
       // The head the critic judged (--head), else this round's detect head, else the builder's reported head.
       const reviewedHead = typeof o.head === 'string' ? o.head.toLowerCase() : (u.detect?.round === round && u.detect.head) ? u.detect.head : (u.builtHead ?? null);
-      if (verdict === 'pass' && reviewedHead) extra.reviewedHead = reviewedHead;
+      // Kept on a fail too: the next critic reviews the delta since this head (sub-skills/review.md, Delta review).
+      if (reviewedHead) extra.reviewedHead = reviewedHead;
       u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...extra, ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
       u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt; delete u.builtHead;
       u.status = verdict === 'pass' ? 'pass' : 'open';

@@ -3,6 +3,7 @@
 
 import { chainUnits } from './chain.mjs';
 import { doubtful, fromPerson } from './approval.mjs';
+import { strategyHint } from './strategy.mjs';
 
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
@@ -164,7 +165,7 @@ export function decideUnit(unit, run, nowMs) {
   if (rounds.length >= roundCap(unit, run)) return stop('budget: rounds');
   if (same) {
     if (newStrategy) return { action: 'build', reason: 'new strategy recorded', gap: last.gap };
-    return stuck ? stop('stuck: same gap after a change of strategy') : { action: 'change-strategy', gap: last.gap };
+    return stuck ? stop('stuck: same gap after a change of strategy') : { action: 'change-strategy', gap: last.gap, ...strategyHint(prev, last) };
   }
   if (flat) return stop(noProgress(unit));
   return { action: 'build', gap: last.gap };
