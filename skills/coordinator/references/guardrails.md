@@ -14,6 +14,9 @@ Pass these to `run.mjs init`. They are written into the run and enforced by `run
 | `--max-added` | 2 | units added after `freeze` (scope creep) |
 | `--stale-minutes` | 45 | marks an in-progress unit with no heartbeat as stale |
 | `--fold-max-files`, `--fold-max-lines` | 10, 200 | a fold-in bigger than this since the reviewed head (a new round instead) |
+| `--max-launch-minutes`, `--max-launch-cost` | off | one agent launch (builder, critic, fold-in check) past this time or money, e.g. `10` and `"0.50 USD"` |
+
+The launch caps are passed on, not enforced live: `next` lists them as `launch` on each build, judge and fold-in step, and the brief tells the agent to stop and report near them. The harness reports a launch's figures afterwards (`--minutes`, `--cost` on `start`, `built`, `verdict`, `foldin`), and one over a cap is noted on its unit for the retro. Set them in `budgets.launchMinutes` and `budgets.launchCost` to apply to every run.
 
 Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run.
 

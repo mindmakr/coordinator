@@ -45,6 +45,10 @@ export function buildBrief(run, o) {
     if (causes.length) quotes.unshift({ source: 'earlier critics\' cause tags', text: causes.join('\n') });
   }
   const playbook = o.playbook ? [`Playbook: read and follow ${o.playbook} (or the project's own skill for this step).`] : [];
+  // Per-launch caps (guardrails.md, Budget): the agent stops and reports at the cap rather than run on.
+  const b = run.budget ?? {};
+  const caps = [b.launchMinutes ? `${b.launchMinutes} minutes` : null, b.launchCost ? `${b.launchCost.amount} ${b.launchCost.currency}` : null].filter(Boolean);
+  const budget = caps.length ? [`Budget for this launch: ${caps.join(' and ')}. Near the cap, stop and report what is done and what is left.`] : [];
   if (o.role === 'builder') {
     return [
       `You are the builder for unit ${u.id} of run ${run.id}.`,
@@ -59,6 +63,7 @@ export function buildBrief(run, o) {
       ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.'] : []),
       'Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.',
       TESTS_BUILDER,
+      ...budget,
       `At each milestone (pushed, tests ran, PR opened) run: ${beatLine(run.id, u.id, o.env)} --text "<the milestone>"`,
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your report is lost when the worktree goes.`,
       'Never merge, deploy, push to a protected branch, delete data or contact anyone. Never ask the person: report blockers to the lead.',
@@ -80,6 +85,7 @@ export function buildBrief(run, o) {
       ...playbook,
       'Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.',
       TESTS_CRITIC,
+      ...budget,
       'Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.',
       // Whoever ran detect last recorded them; only a decision note on the unit makes them the lead's (#45).
       ...(u.detect?.allow?.length && u.detect.round === u.rounds.length + 1 ? [`${(run.notes ?? []).some((n) => n.kind === 'decision' && n.unit === u.id) ? 'The lead allowed these detect hits for this round (decisions in the run)' : 'These detect hits were allowed for this round, with no decision on the unit recorded; check them as findings'}: ${u.detect.allow.join(', ')}. detect.mjs keeps them when you rerun it on the same base and head without --allow.`] : []),

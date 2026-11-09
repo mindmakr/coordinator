@@ -126,9 +126,9 @@ export function landing() {
     + '<ul class="lx-points">'
     + '<li><b>Only what you can read</b>You see the runs of repos you can read on GitHub where the Coordinator App is installed, and nothing else.</li>'
     + '<li><b>Answer and get alerts</b>Answer questions and add notes here or in an issue comment; web push, email or a GitHub mention when a run needs you.</li>'
-    + '<li><b>Work stays on your machine</b>Builders and critics run where you started them. This site reads the run state your lead pushes at pit stops.</li>'
+    + '<li><b>Work stays on your machine</b>Builders and critics run where you started them (and drive web and Expo apps locally with <a href="https://mindmakr.github.io/reins/">reins</a>). This site reads the run state your lead pushes at pit stops.</li>'
     + '</ul>'
-    + `<p class="lx-foot"><a href="${SITE}/">What Coordinator is</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">What this service keeps</a> · Author: Asif Raja, by Mindmakr</p>`
+    + `<p class="lx-foot"><a href="${SITE}/">What Coordinator is</a> · <a href="https://mindmakr.github.io/reins/">Companion: reins</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">What this service keeps</a> · Author: Asif Raja, by Mindmakr</p>`
     + '</section>');
   return page({ title: 'Sign in', body, ctx: plainCtx(), path: '/' });
 }
