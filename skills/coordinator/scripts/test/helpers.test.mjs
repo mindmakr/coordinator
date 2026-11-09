@@ -105,6 +105,8 @@ test('summarize and look', () => {
   assert.equal(s.summary, 'Ran vitest on totals.test.ts: 12 passed.');
   assert.equal(s.escalate, false);
   assert.throws(() => buildRequest('summarize', cfg, { text: ' ' }), /needs text/);
+  const cut = readAnswer('summarize', cfg, { maxWords: 5 }, reply('{\n  "summary": "Updated 18 files, added 701 lines, 18 deletions, 8 additions, 18 deletions, 8 additions'));
+  assert.deepEqual([cut.summary, cut.cut, cut.escalate], ['Updated 18 files, added 701', true, false], 'a looping reply cut off by max_tokens keeps its first words');
   const look = buildRequest('look', cfg, { image: { mime: 'image/png', base64: 'iVBORw0KGgo=' }, context: 'checkout, ar, 390px' });
   assert.equal(look.body.model, 'qwen2.5vl:7b');
   assert.match(look.body.messages[1].content[1].image_url.url, /^data:image\/png;base64,/);

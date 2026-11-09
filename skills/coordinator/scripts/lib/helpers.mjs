@@ -156,7 +156,7 @@ export function buildRequest(job, cfg, input) {
     ];
     format = schema('look', { problems: { type: 'array', items: { type: 'string' } }, confidence: { type: 'number' } }, ['problems', 'confidence']);
   }
-  return { url: `${cfg.endpoint}/chat/completions`, body: { model, messages, temperature: 0, max_tokens: job === 'summarize' ? 300 : 600, stream: false, response_format: format } };
+  return { url: `${cfg.endpoint}/chat/completions`, body: { model, messages, temperature: 0, max_tokens: job === 'summarize' ? 300 : 600, ...(job === 'summarize' ? { frequency_penalty: 0.6 } : {}), stream: false, response_format: format } };
 }
 
 // The first JSON object in a model's reply (some local servers wrap it in prose or a code fence).
@@ -177,7 +177,14 @@ export function readAnswer(job, cfg, input, response) {
   const content = response?.choices?.[0]?.message?.content;
   const usage = response?.usage ? { tokensIn: response.usage.prompt_tokens ?? null, tokensOut: response.usage.completion_tokens ?? null } : null;
   const base = { job, model: response?.model ?? cfg.models?.[job] ?? null, provider: cfg.provider, local: cfg.local, ...(usage ? { usage } : {}) };
-  const o = firstObject(typeof content === 'string' ? content : Array.isArray(content) ? content.map((c) => c?.text ?? '').join('') : '');
+  const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((c) => c?.text ?? '').join('') : '';
+  const o = firstObject(text);
+  if (job === 'summarize' && (!o || typeof o !== 'object')) {
+    // A small model that loops runs out of tokens mid-string: keep the words it gave, up to the limit.
+    const part = /"summary"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(text)?.[1];
+    const words = part ? clean(part.replace(/\\n/g, ' ').replace(/\\(.)/g, '$1'), 600).trim().split(/\s+/).slice(0, Math.min(Math.max(Number(input?.maxWords) || 25, 5), 120)).join(' ') : '';
+    return words ? { ...base, summary: words, cut: true, escalate: false } : { ...base, escalate: true, why: 'the helper reply was not JSON' };
+  }
   if (!o || typeof o !== 'object') return { ...base, escalate: true, why: 'the helper reply was not JSON' };
   if (job === 'summarize') {
     const summary = clean(o.summary, 600).trim();
