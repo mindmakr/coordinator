@@ -140,6 +140,10 @@ Mechanical builder work (docs, copy, translations, renames, fixtures) can go to 
 
 Summaries of what an agent did, picks from a fixed list, and a first look at screenshots can go to a small model on your own machine (Ollama, LM Studio, another PC on your network) or through a router (OpenRouter, OpenAI, any OpenAI-compatible gateway). One command sets it up: `node <skill-dir>/scripts/helper.mjs setup ollama`. Answers are typed; anything unsure is handed back to the strong model, and a helper never judges. Off by default, and nothing depends on it ([helpers.md](skills/coordinator/references/helpers.md)).
 
+## Companion: reins
+
+[**reins**](https://github.com/mindmakr/reins) ([site](https://mindmakr.github.io/reins/)) is the companion tool for web (Vite, Next.js, React) and Expo apps. While Coordinator runs the builder and blind-critic loop, **reins** sits inside your app during development (< 5 KB core, stripped from production builds and checked by `reins-verify-bundle`) and gives builders and visual critics MCP and WebMCP tools to trigger typed actions (`login-as-tester`, `set-locale`), read store snapshots, inspect network calls and console errors, and snap exact panel screenshots by id instead of clicking by pixels. Its own agent skill (`/reins:setup`) wires an existing or new app automatically.
+
 ## Safe by default
 
 - Network calls only where you ask for them: `run.mjs push` and `pull` run git against your own remotes at pit stops; `run.mjs watch --remote` pulls the state branch on a timer and can hold one connection to a coordinator service you name; doctor asks `gh` and checks the latest release tag unless `--offline`; `helper.mjs` calls the helper-model server you set up (on your machine, your network, or the router you chose), with the key read from an environment variable. Nothing else connects anywhere.

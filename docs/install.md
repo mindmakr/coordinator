@@ -54,5 +54,6 @@ It prints the state folder. Nothing has been written yet.
 
 ## Next
 
+- For web (Vite, Next.js, React) and Expo apps, install the companion [**reins**](https://github.com/mindmakr/reins) skill (`/plugin marketplace add mindmakr/reins` then `/plugin install reins@reins`, or copy its `skills/` folder) and run `/reins:setup` so builders and visual critics can drive actions, read state and snap panels by id without clicking by pixels.
 - [Connect a repo](connect.md) to follow runs from a phone (optional).
 - [Privacy](privacy.md): what stays on your machine.

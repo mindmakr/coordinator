@@ -9,7 +9,7 @@ Learn the project once, so that every later run starts informed and asks only ab
    - Which branch work goes into, and which branches are protected.
    - Whether a run may merge into the working branch when the review passes, or only open the PR.
    - Which checks prove a change: the exact commands, and whether any need a database or service. Which tests cover which files or sides (backend, frontend, shared contract, migration), so builders and critics run only those, and the one full-suite command (`guardrails.md`, Test runs).
-   - Which screen widths each surface needs (for example, admin desktop only, end-user phone and desktop).
+   - Which screen widths each surface needs (for example, admin desktop only, end-user phone and desktop), and for web or Expo apps whether the project uses [reins](https://github.com/mindmakr/reins) (or wants the `reins` skill to set it up) so builders and visual critics can drive actions, read state and snap panels without pixel clicking.
    - Risk areas the critic must always check, such as money, auth, migrations, time zones, or a simulated clock.
    - The review skill or reviewer to use, if any.
    - How the person wants to be told: only at the end, or also when a unit stops.
