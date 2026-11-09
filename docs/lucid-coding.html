@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Lucid Coding Manifesto</title>
-<meta name="description" content="Vibe coding is a feeling. Lucid Coding is knowing. Seven principles for engineering with AI agents, by Asif Raja.">
+<meta name="description" content="Vibe coding is a feeling. Lucid Coding is knowing. Eight principles for engineering with AI agents, by Asif Raja.">
 <meta name="author" content="Asif Raja">
 <meta name="color-scheme" content="light dark">
 <meta property="og:title" content="The Lucid Coding Manifesto">
-<meta property="og:description" content="Vibe coding is a feeling. Lucid Coding is knowing. Seven principles for engineering with AI agents, by Asif Raja.">
+<meta property="og:description" content="Vibe coding is a feeling. Lucid Coding is knowing. Eight principles for engineering with AI agents, by Asif Raja.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://mindmakr.github.io/coordinator/lucid-coding.html">
 <meta property="og:image" content="https://mindmakr.github.io/coordinator/img/og-manifesto.jpg">
@@ -48,6 +48,10 @@
       <h2><a href="#know-your-system">Know your system.</a></h2>
       <p>If you cannot say what your agents changed, why, and what proved it, you don't know your system yet. Every other principle serves this one.</p>
     </li>
+    <li id="instrument-the-runtime">
+      <h2><a href="#instrument-the-runtime">Give agents instruments, not just screenshots.</a></h2>
+      <p>A screenshot shows pixels; it hides why they are slow, broken or clipped. Let your app report its own actions, state, network calls, lifecycle timings and DOM and CSS layout in development, and strip that instrumentation from production.</p>
+    </li>
     <li id="agree-the-bar">
       <h2><a href="#agree-the-bar">Agree the bar before the build.</a></h2>
       <p>Write down what done means, as behaviours someone else can check, before anyone starts. A bar written after the work describes the work; it cannot judge it.</p>
@@ -58,7 +62,7 @@
     </li>
     <li id="evidence">
       <h2><a href="#evidence">Evidence or it didn't happen.</a></h2>
-      <p>A pass carries its proof: test output, a screenshot, a log, a link. A claim with nothing attached counts as a fail.</p>
+      <p>A pass carries its proof: test output, a screenshot, a lifecycle or API timing, a log, a link. A claim with nothing attached counts as a fail.</p>
     </li>
     <li id="visible">
       <h2><a href="#visible">Every run is visible.</a></h2>
@@ -69,13 +73,13 @@
       <p>Repeated gaps become lessons for the next brief, and past runs set the next budgets. The process improves on the record, where you can check it.</p>
     </li>
     <li id="get-it-done">
-      <h2><a href="#get-it-done">Get the work done; performance comes with experience.</a></h2>
-      <p>Finish the work to the bar first. Speed and cost improve with time, and the record of every run is where that experience comes from.</p>
+      <h2><a href="#get-it-done">Get the work done; performance comes with experience and measurement.</a></h2>
+      <p>Finish the work to the bar first. Then measure what actually happened: when the page painted, when each component mounted, how long each API call took, and where the layout clipped. Speed and token cost improve from numbers on the record, not guesses.</p>
     </li>
   </ol>
 
   <footer class="mf-end">
-    <p><a href="./">Coordinator</a> and <a href="https://mindmakr.github.io/reins/">reins</a> are companion tools that practise <span data-term>Lucid Coding</span>: Coordinator runs the builder and blind-critic loop, and reins gives agents typed actions, state and panel snapshots inside your web and Expo apps.</p>
+    <p><a href="./">Coordinator</a> and <a href="https://mindmakr.github.io/reins/">reins</a> are companion tools that practise <span data-term>Lucid Coding</span>: Coordinator runs the builder and blind-critic loop, and reins gives agents typed actions, state, lifecycle timings, DOM and CSS diagnostics, and panel snapshots inside your web and Expo apps (<a href="https://github.com/mindmakr/reins-examples">see the examples</a>).</p>
     <p class="mf-sign">Author: <a href="https://github.com/mindmakr">Asif Raja, by Mindmakr</a></p>
   </footer>
 </main>

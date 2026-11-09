@@ -142,7 +142,7 @@ Summaries of what an agent did, picks from a fixed list, and a first look at scr
 
 ## Companion: reins
 
-[**reins**](https://github.com/mindmakr/reins) ([site](https://mindmakr.github.io/reins/)) is the companion tool for web (Vite, Next.js, React) and Expo apps. While Coordinator runs the builder and blind-critic loop, **reins** sits inside your app during development (< 5 KB core, stripped from production builds and checked by `reins-verify-bundle`) and gives builders and visual critics MCP and WebMCP tools to trigger typed actions (`login-as-tester`, `set-locale`), read store snapshots, inspect network calls and console errors, and snap exact panel screenshots by id instead of clicking by pixels. Its own agent skill (`/reins:setup`) wires an existing or new app automatically.
+[**reins**](https://github.com/mindmakr/reins) ([site](https://mindmakr.github.io/reins/) · [examples](https://github.com/mindmakr/reins-examples)) is the companion tool for web (Vite, Next.js, React) and Expo apps. While Coordinator runs the builder and blind-critic loop, **reins** sits inside your app during development (< 5 KB core, stripped from production builds and checked by `reins-verify-bundle`) and gives builders and visual critics 9 MCP tools (plus WebMCP) to trigger typed actions (`login-as-tester`, `set-locale`), read store snapshots, inspect network calls and console errors, measure page lifecycle, component mount/render and API latency (`reins_perf`), inspect DOM subtrees with computed CSS and overflow/clipping flags (`reins_dom`), and snap exact panel screenshots by id (`reins_snap`) instead of clicking by pixels. Its own agent skill (`/reins:setup`) wires an existing or new app automatically.
 
 ## Safe by default
 
