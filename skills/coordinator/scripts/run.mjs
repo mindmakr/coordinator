@@ -4,6 +4,8 @@
 //
 //   run.mjs init <run> --goal G --bar B --fence F [--alias "the name you use"] [--paths a,b] [--tag T] [--max-rounds 4]
 //                      [--max-minutes 240] [--max-units 6] [--max-added 2] [--stale-minutes 45]
+//                      [--max-launch-minutes N] [--max-launch-cost "0.50 USD"] caps for one agent launch: next passes
+//                      them on (launch), and a launch reported over one is noted on its unit (guardrails.md)
 //                      [--repo owner/name] (resolves #123 and shas; else the project's git remote) [--theme file.css]
 //                      [--study-budget 2] (side studies allowed while waiting, 0-10)
 //                      [--models on|off] model routing for this project (.coordinator/coordinator.json "models");
@@ -153,7 +155,7 @@ import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
 import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
-import { COST_FLAGS, costEntry, costStats } from './lib/cost.mjs';
+import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
@@ -194,7 +196,7 @@ import { render } from './lib/workbench.mjs';
 import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
 
 const FLAGS = {
-  init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
+  init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'max-launch-minutes', 'max-launch-cost', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
   extend: ['rounds', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
@@ -249,7 +251,14 @@ function openCheck(lines, accept, notes) {
   notes.push({ kind: 'bar', text: `kept an open-ended line on purpose: ${lines.map((l) => `${l.what}: "${String(l.text).slice(0, 160)}"`).join('; ')}`, at: now() });
   return null;
 }
-const addCost = (u, entry) => { if (entry) (u.costs ??= []).push(entry); };
+// A launch over the run's per-launch cap (init --max-launch-minutes / --max-launch-cost) is noted on the unit, not refused.
+const launchCaps = (s) => (s.budget?.launchMinutes || s.budget?.launchCost ? { minutes: s.budget.launchMinutes ?? null, cost: s.budget.launchCost ?? null } : null);
+const addCost = (s, u, entry) => {
+  if (!entry) return;
+  (u.costs ??= []).push(entry);
+  const over = overLaunch(entry, launchCaps(s));
+  if (over.length) s.notes.push({ kind: 'info', unit: u.id, text: `${u.id}: the ${entry.role} launch (${entry.step}) took ${over.join(' and ')}`, at: entry.at });
+};
 
 const runsDir = () => join(baseDir('project'), 'runs');
 const stateFile = (run) => join(runsDir(), safeId(run, 'run'), 'state.json');
@@ -473,6 +482,11 @@ const commands = {
       },
       createdAt: now(), frozen: false, addedAfterFreeze: 0, units: [], notes: [], integration: { rounds: [] }, closed: null,
     };
+    // Caps for one agent launch (guardrails.md): off unless given here or in budgets.launchMinutes / launchCost.
+    const launchMin = o['max-launch-minutes'] ?? asArg(b.launchMinutes);
+    if (launchMin !== undefined) fresh.budget.launchMinutes = num(launchMin, undefined, 1, 600);
+    const launchMoney = o['max-launch-cost'] ?? (typeof b.launchCost === 'string' ? b.launchCost : undefined);
+    if (launchMoney !== undefined) fresh.budget.launchCost = launchCost(launchMoney);
     const parents = (o.continues ?? []).map((raw) => parentOf(raw, run));
     if (new Set(parents.map((c) => c.unit)).size < parents.length) throw new Error('--continues: one earlier run per unit id (continue a second one with add <run> <unit> --continues)');
     if (parents.length) fresh.continues = parents;
@@ -572,7 +586,7 @@ const commands = {
       // With routing on, an unnamed model is recorded as such, so pass rates stay honest.
       const builtBy = model ?? (cfg.on ? UNSPECIFIED : null);
       if (builtBy) { u.builtBy = builtBy; if (why) u.builtWhy = why; }
-      addCost(u, costEntry(o, { step: 'start', role: 'builder', model, at: now() }));
+      addCost(s, u, costEntry(o, { step: 'start', role: 'builder', model, at: now() }));
       log(u, 'start', `try ${u.rounds.length + 1}${model ? ` on ${model}${why ? ` (${why})` : ''}` : ''}`);
     }, { unit });
   },
@@ -595,7 +609,7 @@ const commands = {
       if (o.head !== undefined && (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head))) throw new Error('--head takes the commit the builder reported');
       u.status = 'judging'; u.heartbeatAt = now(); u.judgingAt = now(); u.report = optText(o.report, 2000); log(u, 'built', u.report ?? '');
       if (o.head !== undefined) u.builtHead = o.head.toLowerCase(); else delete u.builtHead;
-      addCost(u, costEntry(o, { step: 'built', role: 'builder', model: u.builtBy && u.builtBy !== UNSPECIFIED ? u.builtBy : null, at: now() }));
+      addCost(s, u, costEntry(o, { step: 'built', role: 'builder', model: u.builtBy && u.builtBy !== UNSPECIFIED ? u.builtBy : null, at: now() }));
       delete u.specialistMarks; // a new build is judged again by every specialist
     }, { unit });
   },
@@ -706,7 +720,7 @@ const commands = {
         const by = o.specialist === undefined ? 'critic' : safeId(String(o.specialist), 'specialist');
         const head = typeof o.head === 'string' ? { head: o.head.toLowerCase() } : {};
         (u.early ??= []).push({ n: u.early.length + 1, before: u.rounds.length + 1, by, verdict, score: score(o.score), gap, cause, evidence, ...extra, ...head, ...(critic ? { critic } : {}), ...judgedBy, at: now() });
-        addCost(u, costEntry(o, { step: 'verdict', role: by === 'critic' ? 'critic' : `critic:${by}`, model: judge, at: now() }));
+        addCost(s, u, costEntry(o, { step: 'verdict', role: by === 'critic' ? 'critic' : `critic:${by}`, model: judge, at: now() }));
         log(u, 'early', `early review ${u.early.length} by ${by}: ${verdict} ${score(o.score)}${gap ? `: ${clip(gap, 120)}` : ''} (not a round)`);
         return;
       }
@@ -716,7 +730,7 @@ const commands = {
         const mark = { verdict, score: score(o.score), gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
         if (late) { (closed.specialists ??= {})[name] = { ...mark, late: true }; log(u, 'verdict', `${name}: ${verdict} on round ${closed.n ?? u.rounds.length}, after the round closed`); }
         else (u.specialistMarks ??= {})[name] = mark;
-        addCost(u, costEntry(o, { step: 'verdict', role: `critic:${name}`, model: judge, at: now() }));
+        addCost(s, u, costEntry(o, { step: 'verdict', role: `critic:${name}`, model: judge, at: now() }));
         return;
       }
       if (late) throw new Error('unreachable');
@@ -731,7 +745,7 @@ const commands = {
       const marks = mark(u.behaviours ?? [], o.behaviour, verdict);
       // A specialist's fold-ins ride on the pass too.
       if (verdict === 'pass') for (const [n, m] of Object.entries(u.specialistMarks ?? {})) for (const f of m.folds ?? []) extra.folds = [...(extra.folds ?? []), `${f} (${n})`];
-      addCost(u, costEntry(o, { step: 'verdict', role: 'critic', model: judge, at: now() }));
+      addCost(s, u, costEntry(o, { step: 'verdict', role: 'critic', model: judge, at: now() }));
       // The head the critic reviewed, from the detect run of this round: a fold-in must build on it.
       // The head the critic judged (--head), else this round's detect head, else the builder's reported head.
       const reviewedHead = typeof o.head === 'string' ? o.head.toLowerCase() : (u.detect?.round === round && u.detect.head) ? u.detect.head : (u.builtHead ?? null);
@@ -761,7 +775,7 @@ const commands = {
       if (!(u.detect?.fold && u.detect.head === d.head && u.detect.base === d.reviewed)) throw new Error(`foldin refused: no detect result for this fold; run detect.mjs --run ${s.id} --unit ${u.id} --base ${d.reviewed.slice(0, 12)} --head ${d.head.slice(0, 12)} first`);
       if (!u.detect.clean) throw new Error(`foldin refused: detect found ${u.detect.hits} hit(s) on the fold (fence or gaming); that needs a new round`);
       last.foldin = { head: d.head, reviewed: d.reviewed, files: d.files, lines: d.lines, detect: { clean: true, files: u.detect.files }, evidence, at: now() };
-      addCost(u, costEntry(o, { step: 'foldin', role: 'fold-in check', at: now() }));
+      addCost(s, u, costEntry(o, { step: 'foldin', role: 'fold-in check', at: now() }));
       log(u, 'foldin', `${last.folds.length} fold-in${last.folds.length === 1 ? '' : 's'} checked at ${d.head.slice(0, 12)}: ${d.files} files, ${d.lines} lines since the reviewed head`);
     }, { unit });
   },
@@ -1150,7 +1164,10 @@ const commands = {
     };
     // Early reviews since the last round (verdict --early, #66): shown and counted, never a round.
     const early = (u) => { const e = earlySummary(unitOf(s, u.id)); return e ? { ...u, early: e } : u; };
-    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? early(how(sync(suggest(u))))) };
+    // The per-launch caps the lead passes to the agent it launches for this step (guardrails.md).
+    const caps = launchCaps(s);
+    const launch = (u) => (caps && ['build', 'judge', 'fold-in'].includes(u.action) ? { ...u, launch: { ...(caps.minutes ? { minutes: caps.minutes } : {}), ...(caps.cost ? { cost: `${caps.cost.amount} ${caps.cost.currency}` } : {}) } } : u);
+    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? launch(early(how(sync(suggest(u)))))) };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];

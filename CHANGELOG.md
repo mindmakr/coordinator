@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Helper models (`references/helpers.md`, `scripts/helper.mjs`):** small, cheap models for small jobs, so the strong model is not paid for them. One command sets them up: `helper.mjs setup ollama` (or `lmstudio`, `openrouter`, `openai`, `custom --endpoint URL`), and `helper.mjs ping` names the models to pull. Three jobs, each with typed JSON output: `decide` (a pick from a fixed list), `summarize` (tool summaries the lead reads instead of raw agent logs) and `look` (a first look at a screenshot that flags screens for the visual critic, never passes one). An answer that does not parse, is off the list or is under `minConfidence` (0.8) says `escalate: true`, and the lead does the step itself. Off by default; nothing depends on it. Keys stay in an environment variable named in `helpers.keyEnv`; a key in the settings fails doctor. Plain http only on this machine or a private network. `/coordinator:init` asks once.
+- **Caps for one agent launch:** `run.mjs init --max-launch-minutes N --max-launch-cost "0.50 USD"` (or `budgets.launchMinutes` / `launchCost`). `next` passes them on as `launch`, the builder and critic briefs name them, and a launch reported over one is noted on its unit.
+
 ## 1.2.1 (2026-11-09)
 The two review fold-ins for #45 that missed 1.2.0.
 

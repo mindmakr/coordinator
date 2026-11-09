@@ -16,6 +16,8 @@ A class is pinned when any word of it (split on anything but letters and digits)
 
 Ask the script instead of working it out: `S/run.mjs models --role builder --class docs` prints `{ model, why }`. `model: null` means "pass no model, use the default".
 
+Jobs smaller than a role (a one-line summary, a pick from a list, a first look at a screenshot) can go to a helper model, local or through a router, when the person set one up (`helpers.md`). A helper never takes a role in this table.
+
 ## Naming models per harness
 
 - **Claude Code:** the Agent tool's `model` parameter: `opus`, `sonnet` or `haiku`. Full ids count as their family when they hold exactly one family word and only version or date parts (`claude-sonnet-4-5`, `claude-3-5-haiku-20241022`); anything else (`claude-opus-4-5-haiku`) is unranked. Case does not matter, and `stats` groups a family into one row. Provider wrappers are stripped first: Bedrock `us.` / `eu.` / `apac.` / `global.` and `anthropic.` prefixes and `-v1:0` suffixes, and Vertex `@20250805` dates, so `us.anthropic.claude-opus-4-1-20250805-v1:0` and `claude-opus-4-1@20250805` count as opus.

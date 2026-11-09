@@ -8,12 +8,16 @@
 //   theme       the dashboard's CSS theme file (COORDINATOR.md `Theme:` wins)
 //   budgets     { rounds 1-8, minutes 5-10080 }: defaults for `run.mjs init`
 //   merge       branches a run may merge into when the review passes ([] = PR only)
+//               (also launchMinutes 1-600, launchCost "0.50 USD": caps for one agent launch)
 //   models      false (routing off) or { strong, critic, specialist, visual-critic, integrator,
 //               builder, researcher, mechanical, or a task class: model name }
+//   helpers     small models for small jobs (lib/helpers.mjs, references/helpers.md)
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, isAbsolute, join, resolve } from 'node:path';
+import { launchCostProblem } from './cost.mjs';
+import { checkHelpers } from './helpers.mjs';
 
-export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'service', 'theme', 'budgets', 'merge', 'models'];
+export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'service', 'theme', 'budgets', 'merge', 'models', 'helpers'];
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 const name = (v) => typeof v === 'string' && v.trim() !== '' && !v.startsWith('-');
 const BRANCH = /^[A-Za-z0-9._/-]{1,100}$/;
@@ -66,8 +70,11 @@ export function checkSettings(s, project) {
       const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
       if (s.budgets.rounds !== undefined && !whole(s.budgets.rounds, 1, 8)) bad('budgets', 'budgets.rounds must be a whole number 1-8');
       if (s.budgets.minutes !== undefined && !whole(s.budgets.minutes, 5, 10_080)) bad('budgets', 'budgets.minutes must be a whole number 5-10080');
+      if (s.budgets.launchMinutes !== undefined && !whole(s.budgets.launchMinutes, 1, 600)) bad('budgets', 'budgets.launchMinutes must be a whole number 1-600');
+      if (s.budgets.launchCost !== undefined && (typeof s.budgets.launchCost !== 'string' || launchCostProblem(s.budgets.launchCost))) bad('budgets', `budgets.launchCost ${typeof s.budgets.launchCost === 'string' ? launchCostProblem(s.budgets.launchCost) : 'must be an amount and a currency, like "0.50 USD"'}`);
     }
   }
+  if (s.helpers !== undefined) for (const p of checkHelpers(s.helpers)) bad('helpers', p.text, p.level);
   if (s.merge !== undefined) {
     if (!Array.isArray(s.merge) || !s.merge.every((b) => typeof b === 'string' && BRANCH.test(b) && !b.startsWith('-'))) bad('merge', 'merge must be a list of branch names ([] = open the PR only)');
     else for (const b of s.merge) if (['main', 'master', 'production', 'prod'].includes(b)) bad('merge', `merge allows "${b}": a release branch usually needs a person`, 'warn');

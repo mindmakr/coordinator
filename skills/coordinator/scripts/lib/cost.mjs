@@ -35,6 +35,23 @@ function money(v) {
   return { amount: Math.round(Number(amount) * 10_000) / 10_000, currency: currency.toUpperCase() };
 }
 
+// The caps for one agent launch (guardrails.md, "Budget"): minutes (1-600) and money ("0.50 USD").
+// The harness reports the figures after the launch, so a cap is checked then: an entry over it
+// is flagged and noted, never refused (the work is already done).
+export function launchCostProblem(v) {
+  try { money(v); return null; } catch (e) { return e.message.replace('--cost', 'the launch cost'); }
+}
+export const launchCost = (v) => { const p = launchCostProblem(v); if (p) throw new Error(p.replace('the launch cost', '--max-launch-cost')); return money(v); };
+
+// Plain words for each cap this entry went over; [] when none (or nothing comparable was recorded).
+export function overLaunch(entry, caps) {
+  if (!entry || !caps) return [];
+  const out = [];
+  if (Number.isFinite(caps.minutes) && Number.isFinite(entry.minutes) && entry.minutes > caps.minutes) out.push(`${entry.minutes} min, over the ${caps.minutes} min cap for one launch`);
+  if (caps.cost && entry.cost && entry.cost.currency === caps.cost.currency && entry.cost.amount > caps.cost.amount) out.push(`${entry.cost.amount} ${entry.cost.currency}, over the ${caps.cost.amount} ${caps.cost.currency} cap for one launch`);
+  return out;
+}
+
 // The cost entry from a command's options, or null when none was given.
 export function costEntry(o, { step, role, model = null, at }) {
   if (!COST_FLAGS.some((k) => o[k] !== undefined)) return null;
