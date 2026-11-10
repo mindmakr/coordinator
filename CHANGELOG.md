@@ -1,6 +1,7 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 (2026-11-11)
+reins reports as evidence, lessons in every brief, helper models, and a security fix for committed settings files.
 
 - **reins reports are evidence the coordinator can read (`evidence --kind reins`).** `run.mjs evidence <run> <unit> --kind reins --file <report.md>` takes the Markdown that `reins_report` or `npx reins report --compare` saves, keeps the file, and reads its Findings into the item: a session's warnings and errors, or a compare's resolved, new and still-open findings. The unit's page shows them without opening the file. Other Markdown is refused with a pointer to `--kind log`. `doctor` has a `reins` line: skipped when the project does not use reins, a warning with the fix when it is installed but `.mcp.json` does not register its bridge.
 - **Lessons ride along in every brief.** `run.mjs brief` adds the top lessons for the run's tag, and the general ones, to builder and critic briefs as fenced hints (five by default, `--lessons N`, `--lessons 0` for none). A lesson counts as used once per run, so the ranking no longer depends on the lead running `lessons.mjs use` by hand.
