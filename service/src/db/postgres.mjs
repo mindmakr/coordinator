@@ -31,6 +31,10 @@ export async function migrate(pool) {
 
 const repoRow = (r) => (r ? { installationId: Number(r.installation_id), id: Number(r.id), fullName: r.full_name, headSha: r.head_sha, syncedAt: iso(r.synced_at), error: r.sync_error, lessons: r.lessons, config: r.config ?? null, private: r.private ?? null, reread: r.reread === true } : null);
 const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.seq, state: r.state, error: r.error, updatedAt: iso(r.updated_at), mapSha: r.map_sha ?? null, map: r.map ?? null, mapError: r.map_error ?? null, trailPending: r.trail_pending === true, trailSeq: Number(r.trail_seq ?? 0) } : null);
+// runSummaries: every column but the two heavy ones (state, map); a run is open when it has a state that is not closed.
+const RUN_LIGHT = 'run_id, events_sha, seq, error, updated_at, map_sha, map_error, trail_pending, trail_seq';
+const RUN_OPEN = `state IS NOT NULL AND COALESCE(state->'closed', 'null'::jsonb) IN ('null'::jsonb, 'false'::jsonb, '0'::jsonb, '""'::jsonb)`;
+const runLight = (r, withState) => { const { state, map, ...rest } = runRow(r); return withState ? { ...rest, state } : rest; };
 
 // schema (tests): a throwaway schema of its own, dropped on close.
 export async function postgresDb(url, { max = 10, schema = null } = {}) {
@@ -114,6 +118,11 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     },
 
     async runs(installationId, repoId) { return (await q('SELECT * FROM runs WHERE installation_id = $1 AND repo_id = $2 ORDER BY run_id', [installationId, repoId])).rows.map(runRow); },
+    // The same rows as runs(), in the same order, without the heavy columns: never the map, and the state only
+    // when asked (state: true). open: true keeps only the runs that have a state and are not closed.
+    async runSummaries(installationId, repoId, { state = false, open = false } = {}) {
+      return (await q(`SELECT ${RUN_LIGHT}${state ? ', state' : ''} FROM runs WHERE installation_id = $1 AND repo_id = $2${open ? ` AND ${RUN_OPEN}` : ''} ORDER BY run_id`, [installationId, repoId])).rows.map((r) => runLight(r, state));
+    },
     async run(installationId, repoId, runId) { return runRow((await q('SELECT * FROM runs WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3', [installationId, repoId, runId])).rows[0]); },
     async putRun(installationId, repoId, { runId, eventsSha, seq, state, error }) {
       await q(`INSERT INTO runs (installation_id, repo_id, run_id, events_sha, seq, state, error) VALUES ($1, $2, $3, $4, $5, $6, $7)

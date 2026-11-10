@@ -179,7 +179,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     }
     const current = (await db.repos(installationId)).find((r) => r.id === repo.id);
     if (current?.headSha === head && !current?.reread) {
-      const owed = (await db.runs(installationId, repo.id)).some((r) => r.trailPending);
+      const owed = (await db.runSummaries(installationId, repo.id)).some((r) => r.trailPending);
       return { out: { repo: repo.fullName, head, unchanged: true }, trail: owed ? { changed: [] } : null };
     }
     const tree = await gh.tree(token, repo.fullName, head);
@@ -191,7 +191,8 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     }
     const logs = entries.filter((e) => e.type === 'blob' && RUN_LOG.test(e.path)).map((e) => ({ ...e, runId: RUN_LOG.exec(e.path)[1] }))
       .filter((e) => isSafeId(e.runId)).slice(0, LIMITS.runs);
-    const have = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
+    // Which runs are held and from which blob: the light rows. A run's last state is read only when its log changed.
+    const have = new Map((await db.runSummaries(installationId, repo.id)).map((r) => [r.runId, r]));
     const out = { repo: repo.fullName, head, runs: logs.length, updated: [], failed: [] };
     const changes = [];
     // A log left for later (the sync's byte cap, or the installation's reading budget) keeps its last
@@ -202,12 +203,13 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     const late = () => { if (now() <= deadline) return false; reasons.add(OUT_OF_TIME); return true; };
     const fits = (size) => { if (bytes && bytes + size > LIMITS.syncBytes) { reasons.add(`this sync read its ${LIMITS.syncBytes / MB} MB`); return false; } bytes += size; return true; };
     for (const e of logs) {
-      const prev = have.get(e.runId);
-      if (same(prev?.eventsSha, e)) continue; // same bytes, same result
+      const held = have.get(e.runId);
+      if (same(held?.eventsSha, e)) continue; // same bytes, same result
       if (late() || (e.size <= LIMITS.logBytes && !fits(e.size))) { later.push(e.runId); continue; }
       const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : await readBlob(token, repo, e, (buf) => reader.readLog(e.runId, buf, installationId));
       if (r.deferred) { later.push(e.runId); reasons.add(DEFERRED); continue; }
       live(installationId);
+      const prev = held ? await db.run(installationId, repo.id, e.runId) : null;
       if (r.error) {
         // Keep the last good state; record the failure against this blob.
         await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: prev?.seq ?? null, state: prev?.state ?? null, error: r.error });
@@ -224,7 +226,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
     await db.dropRunsExcept(installationId, repo.id, logs.map((e) => e.runId));
     // Each run's project map, when it pushed one: same rules, keyed by its own blob.
     const runIds = new Set(logs.map((e) => e.runId));
-    const rows = new Map((await db.runs(installationId, repo.id)).map((r) => [r.runId, r]));
+    const rows = new Map((await db.runSummaries(installationId, repo.id)).map((r) => [r.runId, r]));
     for (const e of entries.filter((x) => x.type === 'blob' && MAP_LOG.test(x.path))) {
       const runId = MAP_LOG.exec(e.path)[1];
       const prev = rows.get(runId);
@@ -233,7 +235,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
       const r = e.size > LIMITS.mapBytes ? { error: `the map log is larger than ${LIMITS.mapBytes} bytes` } : await readBlob(token, repo, e, (buf) => reader.readMap(buf, installationId));
       if (r.deferred) { later.push(`${runId} (map)`); reasons.add(DEFERRED); continue; }
       live(installationId);
-      await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? prev.map ?? null, mapError: r.error ?? null });
+      await db.putRunMap(installationId, repo.id, runId, { mapSha: e.sha, map: r.map ?? (await db.run(installationId, repo.id, runId))?.map ?? null, mapError: r.error ?? null });
       if (r.error) log?.warn('map log rejected', { repo: repo.fullName, run: runId, reason: r.error });
     }
     // Lessons and coordinator.json are optional: one that cannot be read is left out and named in the sync error.
@@ -262,7 +264,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
   // and then only if no deferral was recorded since (trailSeq still the one this refresh set).
   async function retrail(installationId, repo, changed, { owedToo = true } = {}) {
     if (!trail || !repo) return [];
-    const owed = (await db.runs(installationId, repo.id)).filter((r) => r.trailPending).map((r) => r.runId);
+    const owed = (await db.runSummaries(installationId, repo.id)).filter((r) => r.trailPending).map((r) => r.runId);
     const retried = owedToo ? owed.filter((id) => !changed.includes(id)) : [];
     const deadline = now() + settings.jobMs;
     for (const runId of [...changed, ...retried]) {

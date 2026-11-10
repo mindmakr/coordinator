@@ -75,6 +75,12 @@ export function memoryDb() {
     async runs(installationId, repoId) {
       return [...runs.values()].filter((r) => r.installationId === installationId && r.repoId === repoId).sort((a, b) => a.runId.localeCompare(b.runId)).map(clone);
     },
+    // The same rows as runs(), in the same order, without the heavy columns: never the map, and the state only
+    // when asked (state: true). open: true keeps only the runs that have a state and are not closed.
+    async runSummaries(installationId, repoId, { state = false, open = false } = {}) {
+      return [...runs.values()].filter((r) => r.installationId === installationId && r.repoId === repoId && (!open || (r.state && !r.state.closed)))
+        .sort((a, b) => a.runId.localeCompare(b.runId)).map(({ state: s, map: _, ...rest }) => clone(state ? { ...rest, state: s } : rest));
+    },
     async run(installationId, repoId, runId) { return clone(runs.get(key(installationId, repoId, runId))) ?? null; },
     async putRun(installationId, repoId, row) {
       const prev = runs.get(key(installationId, repoId, row.runId));
