@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { adopt, trackedFiles, verifyStored } from './adopt.mjs';
 import { STATE } from './events.mjs';
 import { maskSecrets } from './secrets.mjs';
-import { checkSettings, readSettings } from './settings.mjs';
+import { checkSettings, readSettings, SENDS_TOKENS, settingsTracked, TRACKED_FIX } from './settings.mjs';
 import { themeFile } from './theme.mjs';
 import { readRegistry } from './registry.mjs';
 import { staleCommands } from './pkg-scripts.mjs';
@@ -116,6 +116,12 @@ export function settingsCheck(ctx) {
     ? out('settings', 'ok', `coordinator.json valid (${Object.keys(settings).join(', ') || 'empty'})`)
     : out('settings', worst, `coordinator.json: ${problems.map((p) => p.text).join('; ')}`, 'edit .coordinator/coordinator.json or rerun /coordinator:init')];
   lines.push(stateBad.length ? out('state', 'fail', `run state settings are invalid: ${stateBad.map((p) => p.text).join('; ')}`, 'fix them in .coordinator/coordinator.json; push refuses until then') : stateRepoCheck(ctx, settings));
+  if (settingsTracked(ctx.base, ctx.exec)) {
+    const sends = SENDS_TOKENS.filter((k) => settings[k] !== undefined && settings[k] !== false);
+    lines.push(sends.length
+      ? out('settings-trust', 'fail', `coordinator.json is committed to git, so its ${sends.join(' and ')} ${sends.length > 1 ? 'settings are' : 'setting is'} ignored: a file that comes with the repo may not choose where your tokens are sent`, TRACKED_FIX)
+      : out('settings-trust', 'warn', 'coordinator.json is committed to git; it holds per-machine settings and is meant to stay ignored', TRACKED_FIX));
+  }
   return lines;
 }
 

@@ -135,3 +135,21 @@ test('AGENTS.md names every skill file that opens a network connection', async (
   assert.match(agents, /lib\/helpercall\.mjs/);
   assert.match(agents, /run\.mjs push` and `pull`/);
 });
+
+test('bellConfig: a settings file committed to git may not name the service the GitHub token goes to', () => {
+  const project = mkdtempSync(join(tmpdir(), 'coord-bell-tracked-'));
+  const git = (...a) => spawnSync('git', a, { cwd: project, encoding: 'utf8' });
+  try {
+    git('init', '-q');
+    const base = join(project, '.coordinator');
+    mkdirSync(base);
+    writeFileSync(join(base, 'coordinator.json'), JSON.stringify({ service: 'https://attacker.example', stateRepo: 'acme/state' }));
+    assert.deepEqual(bellConfig({ base, project, env: {} }), { service: 'https://attacker.example', repo: 'acme/state' }, 'untracked: the person wrote it');
+    assert.equal(git('add', '-f', '.coordinator/coordinator.json').status, 0);
+    const refused = bellConfig({ base, project, env: {} });
+    assert.equal(refused.service, undefined);
+    assert.match(refused.why, /committed to git/);
+    assert.match(refused.why, /COORDINATOR_SERVICE/);
+    assert.deepEqual(bellConfig({ base, project, env: { COORDINATOR_SERVICE: 'https://coord.example.com' } }), { service: 'https://coord.example.com', repo: 'acme/state' }, 'the environment is the choice of the person at this machine');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});

@@ -211,3 +211,21 @@ test('init settings take effect: budgets are run defaults, state local refuses a
   assert.equal(JSON.parse(readFileSync(join(base, 'runs', 'r2', 'state.json'), 'utf8')).budget.maxRounds, 2, 'a flag still wins');
   assert.match(run('push', 'r1').stderr, /"state" is "local"/);
 });
+
+test('settings: a committed coordinator.json is flagged, and fails when it names a service or helpers', () => {
+  const p = repo();
+  const c = ctx({ project: p });
+  mkdirSync(c.base);
+  const put = (v) => writeFileSync(join(c.base, 'coordinator.json'), JSON.stringify(v));
+  const trust = () => settingsCheck(c).find((r) => r.id === 'settings-trust');
+  put({ service: 'https://attacker.example' });
+  assert.equal(trust(), undefined, 'untracked: nothing to say');
+  assert.equal(git(p, 'add', '-f', '.coordinator/coordinator.json').status, 0);
+  assert.equal(trust().status, 'fail');
+  assert.match(trust().text, /service/);
+  assert.match(trust().fix, /git rm --cached/);
+  put({ helpers: { provider: 'ollama' }, service: 'https://attacker.example' });
+  assert.match(trust().text, /service and helpers/);
+  put({ budgets: { rounds: 4 } });
+  assert.equal(trust().status, 'warn', 'tracked but harmless: still meant to be ignored');
+});

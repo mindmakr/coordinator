@@ -19,6 +19,8 @@ Change a model with `--decide M`, `--summarize M` or `--look M`, and the confide
 
 Defaults per provider are in `scripts/lib/helpers.mjs` (`PROVIDERS`). For Ollama: `gemma3:4b` decides, `gemma3:1b` summarizes, `qwen2.5vl:7b` looks. With 12 GB of GPU memory or more, `qwen3-vl:8b` looks better at dense screens. Pick models with thinking off, or a fast one: these jobs want a quick answer, not reasoning.
 
+**A committed settings file cannot turn helpers on.** If git tracks `.coordinator/coordinator.json`, its `helpers` are ignored and `setup` refuses to write to it, because that file would then decide where your key is sent for everyone who clones the repo. Keep `.coordinator/` git-ignored.
+
 **Keys are never stored.** `helpers.keyEnv` holds the *name* of an environment variable; the key stays in the environment. A key, token or password anywhere in `helpers` fails doctor, and `setup` refuses a `--key-env` that looks like a key.
 
 ## The jobs

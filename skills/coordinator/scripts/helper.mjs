@@ -16,10 +16,10 @@
 // not parse, or its confidence is under minConfidence. A look never passes a screen on its own.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
-import { parse } from './lib/args.mjs';
+import { helpAndExit, parse } from './lib/args.mjs';
 import { buildRequest, helperConfig, missingModels, PROVIDERS, readAnswer, setupHelpers } from './lib/helpers.mjs';
 import { complete, listModels } from './lib/helpercall.mjs';
-import { readSettings, settingsFile } from './lib/settings.mjs';
+import { readSettings, settingsFile, settingsTracked, TRACKED_FIX, trackedRefusal } from './lib/settings.mjs';
 import { baseDir, withLock, writeAtomic } from './lib/store.mjs';
 
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -33,19 +33,23 @@ const readText = (f, what) => {
 const str = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw new Error(`missing --${name}`); return v; };
 
 function config() {
-  const { settings, error } = readSettings(baseDir('project'));
-  if (error) throw new Error(`${settingsFile(baseDir('project'))}: ${error}`);
+  const base = baseDir('project');
+  const { settings, error } = readSettings(base);
+  if (error) throw new Error(`${settingsFile(base)}: ${error}`);
+  // The helper endpoint is sent the key named in keyEnv, so a committed settings file may not turn helpers on.
+  if (settings.helpers !== undefined && settings.helpers !== false && settingsTracked(base)) return { on: false, tracked: true, why: trackedRefusal('helpers') };
   return helperConfig(settings);
 }
 function needOn() {
   const cfg = config();
-  if (!cfg.on) throw new Error(`helpers are off: ${cfg.why}. Set them up with: helper.mjs setup ollama (or lmstudio, openrouter, openai, custom)`);
+  if (!cfg.on) throw new Error(cfg.tracked ? `helpers are off: ${cfg.why}` : `helpers are off: ${cfg.why}. Set them up with: helper.mjs setup ollama (or lmstudio, openrouter, openai, custom)`);
   return cfg;
 }
 const shown = (cfg) => (cfg.on ? { on: true, provider: cfg.provider, endpoint: cfg.endpoint, local: cfg.local, keyEnv: cfg.keyEnv, keySet: cfg.keyEnv ? Boolean(process.env[cfg.keyEnv]) : null, models: cfg.models, minConfidence: cfg.minConfidence } : cfg);
 
 function writeHelpers(value) {
   const base = baseDir('project'); const file = settingsFile(base);
+  if (value !== undefined && settingsTracked(base)) throw new Error(`${file} is committed to git, so helpers set in it would be ignored; ${TRACKED_FIX}`);
   return withLock(file, () => {
     const { settings, error } = readSettings(base);
     if (error) throw new Error(`${file}: ${error}; fix it first`);
@@ -96,6 +100,7 @@ const commands = {
   },
 };
 
+helpAndExit(import.meta.url);
 try {
   const [cmd, ...argv] = process.argv.slice(2);
   if (!Object.hasOwn(commands, cmd ?? '')) throw new Error(`usage: helper.mjs ${Object.keys(commands).join('|')} …`);
