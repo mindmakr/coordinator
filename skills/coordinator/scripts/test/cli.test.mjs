@@ -297,3 +297,66 @@ test('--help and -h print the usage of each script and exit 0', () => {
     }
   }
 });
+
+test('evidence --kind reins stores a reins report and its findings; other Markdown is refused', async () => {
+  const { parseReinsReport } = await import('../lib/reinsreport.mjs');
+  const { evidenceList } = await import('../lib/parts.mjs');
+  const session = ['# reins session: checkout before fix', '', '## Summary', '', '| Metric | Value |', '', '## Findings', '', '- ⚠️ Slow API: `GET /api/invoices` took 597 ms (over 500 ms).', '- ❌ Failed API call: `POST /api/pay` returned 500.', '', '## Timeline', '', '- not a finding'].join('\n');
+  const clean = ['# reins session: after', '', '## Findings', '', '- ✅ Nothing crossed the thresholds.', ''].join('\n');
+  const compare = ['# reins compare: before → after', '', '## Metrics', '', '## Findings', '', '### Resolved', '', '- Slow API: `GET /api/invoices` took 597 ms (over 500 ms).', '', '### New', '', '- None.', '', '### Still open', '', '- None.', ''].join('\n');
+  assert.deepEqual(parseReinsReport(session).findings, [{ level: 'warn', text: 'Slow API: `GET /api/invoices` took 597 ms (over 500 ms).' }, { level: 'error', text: 'Failed API call: `POST /api/pay` returned 500.' }]);
+  assert.deepEqual(parseReinsReport(clean).findings, []);
+  assert.equal(parseReinsReport('# Something else\n\n## Findings\n\n- x'), null);
+  assert.equal(parseReinsReport('# reins session: no findings section'), null);
+  const c = parseReinsReport(compare);
+  assert.deepEqual([c.type, c.title, c.resolved.length, c.added.length, c.open.length], ['compare', 'before → after', 1, 0, 0]);
+
+  writeFileSync(join(dir, 'session.md'), session); writeFileSync(join(dir, 'compare.md'), compare); writeFileSync(join(dir, 'notes.md'), '# Notes\n');
+  run('init', 'rn1', '--goal', 'faster invoices', '--bar', 'no slow calls', '--fence', 'backend/');
+  run('add', 'rn1', 'api', '--bar', 'invoices under 500 ms');
+  const added = run('evidence', 'rn1', 'api', '--kind', 'reins', '--file', join(dir, 'session.md'), '--label', 'before');
+  assert.equal(added.code, 0, added.err);
+  assert.equal(run('evidence', 'rn1', 'api', '--kind', 'reins', '--file', join(dir, 'compare.md')).code, 0);
+  const refused = run('evidence', 'rn1', 'api', '--kind', 'reins', '--file', join(dir, 'notes.md'));
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.err, /not a reins session report/);
+  assert.notEqual(run('evidence', 'rn1', 'api', '--kind', 'reins', '--text', 'slow').code, 0, 'a reins item is a file');
+
+  const items = JSON.parse(readFileSync(join(dir, 'runs', 'rn1', 'state.json'), 'utf8')).units[0].evidence;
+  assert.deepEqual(items.map((e) => [e.kind, e.reins.type]), [['reins', 'session'], ['reins', 'compare']]);
+  assert.equal(items[0].reins.findings.length, 2);
+  assert.ok(existsSync(join(dir, 'runs', 'rn1', 'artifacts', 'api', 'E1-session.md')), 'the report itself is kept too');
+  const hostile = { id: 'E9', kind: 'reins', at: '2026-01-01T00:00:00.000Z', reins: { type: 'session', title: '<b>x</b>', findings: [{ level: 'error', text: '<script>alert(1)</script>' }, 7, null] } };
+  const html = evidenceList([...items, hostile], null, { artHref: () => null }, 'k');
+  assert.match(html, /reins session: checkout before fix/);
+  assert.match(html, /<span class="chip s-fail">error<\/span> Failed API call/);
+  assert.match(html, /<span class="chip s-pass">resolved<\/span> Slow API/);
+  assert.ok(!html.includes('<script>') && !html.includes('<b>x</b>'), 'a hand-edited summary is escaped');
+});
+
+test('brief carries the top lessons for the run tag as fenced hints, and counts each once per run', () => {
+  const base = mkdtempSync(join(tmpdir(), 'coordinator-lessons-'));
+  try {
+    const env = { ...process.env, COORDINATOR_DIR: base };
+    const sh = (script, ...args) => spawnSync(process.execPath, [join(scripts, script), ...args], { env, encoding: 'utf8' });
+    const add = (tag, text) => JSON.parse(sh('lessons.mjs', 'add', '--tag', tag, '--text', text, '--scope', 'project').stdout).id;
+    const billing = add('billing', 'Round money once, at the end, never per line');
+    add('design', 'Check every screen at 360 px wide');
+    add('general', 'Run the migration on a copy of real data first');
+    sh('run.mjs', 'init', 'ls1', '--goal', 'totals', '--bar', 'b', '--fence', 'backend/', '--tag', 'billing');
+    sh('run.mjs', 'add', 'ls1', 'api', '--bar', 'totals add up');
+    const brief = sh('run.mjs', 'brief', 'ls1', 'api', '--role', 'builder');
+    assert.equal(brief.status, 0, brief.stderr);
+    assert.match(brief.stdout, /source="lessons from past runs \(hints\)"/);
+    assert.match(brief.stdout, /- Round money once, at the end, never per line/);
+    assert.match(brief.stdout, /- Run the migration on a copy of real data first/, 'general lessons ride along');
+    assert.doesNotMatch(brief.stdout, /360 px/, 'another tag stays out');
+    assert.ok(brief.stdout.indexOf('Round money once') < brief.stdout.indexOf('From the lead'), 'hints come before the lead, who has the last word');
+    sh('run.mjs', 'brief', 'ls1', 'api', '--role', 'critic');
+    const used = (id) => JSON.parse(readFileSync(join(base, 'lessons.json'), 'utf8')).find((l) => l.id === id);
+    assert.equal(used(billing).used, 1, 'two briefs of one run count once');
+    assert.deepEqual(used(billing).usedIn, ['ls1']);
+    assert.doesNotMatch(sh('run.mjs', 'brief', 'ls1', 'api', '--role', 'builder', '--lessons', '0').stdout, /lessons from past runs/);
+    assert.equal(sh('run.mjs', 'brief', 'ls1', 'api', '--role', 'builder', '--lessons', '99').status, 1, 'the count is capped');
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});

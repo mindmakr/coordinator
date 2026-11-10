@@ -168,6 +168,10 @@ test('helper.mjs: off by default, setup writes only the provider, and a call rea
     assert.equal(d.out.sentTo, undefined, 'nothing left this machine');
     writeFileSync(join(dir, 'log.txt'), 'git diff README.md\n+ new heading');
     assert.equal((await cliAsync('helper.mjs', ['summarize', '--file', join(dir, 'log.txt')])).out.summary, 'Edited README.');
+    const stats = cli('helper.mjs', ['stats']).out;
+    assert.deepEqual([stats.calls, stats.jobs.decide.calls, stats.jobs.decide.escalated, stats.jobs.decide.escalationRate, stats.jobs.summarize.calls], [2, 1, 0, 0, 1]);
+    assert.equal(stats.jobs.decide.advice, undefined, 'no advice on two calls');
+    assert.ok(!JSON.stringify(stats).includes('pick'), 'counts only, never the prompt');
     const p = await cliAsync('helper.mjs', ['ping']);
     assert.deepEqual([p.out.ok, p.out.missing], [false, ['gemma3:1b', 'qwen2.5vl:7b']]);
     assert.match(p.out.fix, /ollama pull gemma3:1b/);

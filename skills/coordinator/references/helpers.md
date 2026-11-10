@@ -49,7 +49,7 @@ Before the visual critic (`sub-skills/visual.md`) judges, run `look` on every sc
 
 ## Recording
 
-Pass a helper's `usage` and `ms` on with the step it served when it matters (`--tokens-in`, `--tokens-out`, `--minutes`), so `stats` keeps counting the run's whole cost. In the retro, a helper whose answers escalate often for a job is a lesson: change its model or drop the job (`learning.md`).
+Pass a helper's `usage` and `ms` on with the step it served when it matters (`--tokens-in`, `--tokens-out`, `--minutes`), so `stats` keeps counting the run's whole cost. `helper.mjs stats` shows calls, escalations, time and tokens per job in this project (counts only, never a prompt or an answer), and says so when a job hands back 30% or more of at least ten answers. In the retro, such a job is a lesson: change its model or drop the job (`learning.md`).
 
 ## Network
 

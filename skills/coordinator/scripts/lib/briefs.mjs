@@ -24,7 +24,7 @@ function quoted(quotes) {
 
 const behaviourLines = (bs) => (bs?.length ? bs.map((b) => `  ${b.id}: ${b.text}`) : ['  (none recorded)']);
 const beatLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs beat ${run} ${unit}`;
-const evidenceLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs evidence ${run} ${unit} --kind screenshot|log --file <png, pdf, log, md or json>`;
+const evidenceLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs evidence ${run} ${unit} --kind screenshot|log --file <png, pdf, log, md or json> (a reins report: --kind reins --file <its .md>)`;
 const NO_ASK = 'Never ask the person: report blockers to the lead.';
 // The test-run budget (references/guardrails.md, Test runs): full suites rerun under load caused the flakes that
 // failed rounds (#51), and checks run whatever changed took most of a 14-hour run (#65).

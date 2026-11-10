@@ -20,7 +20,7 @@
 //                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
-//   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link [--label L]
+//   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link|reins [--label L]
 //   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL [--same-tree T]] [--url U --label L]   GitHub issues, PRs and merges;
 //                  --same-tree: the merged tree is the reviewed head merged with the target, so no post-merge re-check (recorded)
 //                  [--continues <run>:<unit>]  record afterwards that this unit continues that one (any id; closed runs too)
@@ -72,7 +72,9 @@
 //                  [--unit U] (person: a note from the person about one unit; decision, follow-up, info: scoped to that unit,
 //                  shown on its page) [--confirm] (person: their words, pasted)
 //   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P]
-//                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it
+//                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it.
+//                  [--lessons N] the top N lessons for the run's tag ride along as hints (default 5, 0 for none),
+//                  fenced as data too; a lesson counts as used once per run
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
 //                  [--approves <label>] the option that approves a step only the person may approve (extend)
 //   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready finish-line question (ship with follow-ups,
@@ -154,6 +156,7 @@ import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mj
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
+import { markUsed, topLessons } from './lib/lessonstore.mjs';
 import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
@@ -205,7 +208,7 @@ const FLAGS = {
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
-  brief: ['role', 'quote', 'source', 'where', 'playbook'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
+  brief: ['role', 'quote', 'source', 'where', 'playbook', 'lessons'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'],
 };
 // Notes about one unit (#45): scoped with --unit, shown on its page.
@@ -1177,6 +1180,15 @@ const commands = {
       return { source: labels[i] ?? basename(f), text: readFileSync(f, 'utf8') };
     });
     const env = process.env.COORDINATOR_DIR ? commands.where().env : '';
+    // What past runs taught rides along in every builder and critic brief (references/learning.md).
+    const top = num(o.lessons, 5, 0, 20);
+    if (top && o.role !== 'integrator') {
+      const lessons = topLessons([baseDir('project'), baseDir('global')], load(run).tag, top);
+      if (lessons.length) {
+        quotes.push({ source: 'lessons from past runs (hints)', text: lessons.map((l) => `- ${l.text}`).join('\n') });
+        try { markUsed(lessons, run); } catch { /* a locked or read-only lessons file never blocks a brief */ }
+      }
+    }
     process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: optText(o.where, 500), playbook: optText(o.playbook, 300), env })}\n`);
     return null;
   },

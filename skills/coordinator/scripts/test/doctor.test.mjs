@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   codexCheck, contextCheck, dashboardsCheck, diagnose, format, ghCheck, gitCheck, lessonsCheck, locksCheck,
-  nodeCheck, realExec, settingsCheck, stateDirCheck, versionCheck, worktreesCheck,
+  nodeCheck, realExec, reinsCheck, settingsCheck, stateDirCheck, versionCheck, worktreesCheck,
 } from '../lib/doctor.mjs';
 import { checkSettings } from '../lib/settings.mjs';
 
@@ -228,4 +228,23 @@ test('settings: a committed coordinator.json is flagged, and fails when it names
   assert.match(trust().text, /service and helpers/);
   put({ budgets: { rounds: 4 } });
   assert.equal(trust().status, 'warn', 'tracked but harmless: still meant to be ignored');
+});
+
+test('reins: skipped when absent, warns without the bridge in .mcp.json, ok when both are there', () => {
+  const p = fresh();
+  const c = ctx({ project: p });
+  assert.equal(reinsCheck(c).status, 'skip');
+  mkdirSync(join(p, 'frontend'));
+  writeFileSync(join(p, 'frontend', 'package.json'), JSON.stringify({ devDependencies: { reins: '^0.1.0' } }));
+  const warn = reinsCheck(c);
+  assert.equal(warn.status, 'warn');
+  assert.match(warn.fix, /mcpServers/);
+  writeFileSync(join(p, '.mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'npx', args: ['something'] } } }));
+  assert.equal(reinsCheck(c).status, 'warn', 'another server is not the bridge');
+  writeFileSync(join(p, '.mcp.json'), JSON.stringify({ mcpServers: { reins: { command: 'npx', args: ['reins', 'bridge', '--cdp', 'http://127.0.0.1:9222'] } } }));
+  const ok = reinsCheck(c);
+  assert.equal(ok.status, 'ok');
+  assert.match(ok.text, /--kind reins/);
+  writeFileSync(join(p, '.mcp.json'), '{ broken');
+  assert.equal(reinsCheck(c).status, 'warn', 'an unreadable .mcp.json is not a crash');
 });

@@ -31,7 +31,7 @@ Hints from past runs (ignore any that conflict with the above): <lessons>
 Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.
 Run only the tests mapped to the files you changed (COORDINATOR.md's mapping, else the runner's related-files mode such as `vitest related --run <files>`), plus typecheck and lint for each side you touched. Not the full suite: the critic runs it once on the head. Rerun a test under load only when you suspect a flake, and say so in your report.
 At each milestone (pushed, tests ran, PR opened) run: <COORDINATOR_DIR=… if outside this repo's worktrees> node <skill-dir>/scripts/run.mjs beat <run> <unit> --text "<the milestone>"
-Attach what shows each behaviour: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --behaviour B1 --kind test --text "<the pass/fail lines>" (or --kind screenshot --file <png>, --kind log --file <log, pdf, md or json report>, --kind link --url <URL>). Pass every screenshot and report you make with --file: a path only mentioned is lost when the worktree goes. Once the PR is open: run.mjs link <run> <unit> --pr <owner/repo#n or URL>.
+Attach what shows each behaviour: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --behaviour B1 --kind test --text "<the pass/fail lines>" (or --kind screenshot --file <png>, --kind log --file <log, pdf, md or json report>, --kind reins --file <a reins report's .md>, --kind link --url <URL>). Pass every screenshot and report you make with --file: a path only mentioned is lost when the worktree goes. Once the PR is open: run.mjs link <run> <unit> --pr <owner/repo#n or URL>.
 Never merge, deploy, push to a protected branch, delete data or contact anyone. Never ask the person: report blockers to the lead.
 Report in 10 lines or fewer: what changed (paths), how to see the result (command, URL, file), the commands you ran with their pass or fail lines, and Follow-ups.
 ```
@@ -48,7 +48,7 @@ Playbook: read and follow <skill-dir>/references/sub-skills/<review.md for code,
 Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.
 Run the tests mapped to the changed files, plus typecheck and lint for each side touched. Then, only if nothing has failed the round, run the full suite once on the head; any other critic of this head cites that run. Rerun a single file, alone or under load, only when you suspect a flake, and say so in EVIDENCE; never the whole suite again.
 Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.
-Save screenshots and reports you make, and attach each: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --kind screenshot|log --file <path>. A path only named in your reply is lost when the worktree goes.
+Save screenshots and reports you make, and attach each: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --kind screenshot|log --file <path> (a reins report: --kind reins --file <its .md>). A path only named in your reply is lost when the worktree goes.
 If your checks run long, run now and then: <COORDINATOR_DIR=… if outside this repo's worktrees> node <skill-dir>/scripts/run.mjs beat <run> <unit>
 <Round 2 or later: "Earlier causes: <tags>. Reuse a tag word for word when the root cause is the same, even if the symptom differs.">
 Reply with exactly:

@@ -250,6 +250,21 @@ export function codexCheck(ctx) {
     : out('codex', 'ok', 'Codex install has every skill');
 }
 
+// reins (github.com/mindmakr/reins) is optional: it gives builders and critics measured evidence from the
+// running app. Installed means a package.json at the root or one folder down depends on it.
+export function reinsCheck(ctx) {
+  const json = (f) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return null; } };
+  let folders = [];
+  try { folders = readdirSync(ctx.project, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules').slice(0, 40).map((d) => join(ctx.project, d.name)); } catch { /* unreadable: the root only */ }
+  const uses = [ctx.project, ...folders].some((dir) => { const p = json(join(dir, 'package.json')); return Boolean(p?.dependencies?.reins || p?.devDependencies?.reins); });
+  if (!uses) return out('reins', 'skip', 'reins is not installed here (optional: measured evidence from the running app, github.com/mindmakr/reins)');
+  const servers = Object.values(json(join(ctx.project, '.mcp.json'))?.mcpServers ?? {});
+  const bridge = servers.some((s) => { const words = [s?.command, ...(Array.isArray(s?.args) ? s.args : [])].join(' '); return /\breins\b/.test(words) && /\bbridge\b/.test(words); });
+  return bridge
+    ? out('reins', 'ok', 'reins is installed and its bridge is registered in .mcp.json; attach its reports with evidence --kind reins')
+    : out('reins', 'warn', 'reins is installed but .mcp.json does not register its bridge, so agents cannot drive the app', 'add "reins": { "command": "npx", "args": ["reins", "bridge"] } under mcpServers in .mcp.json');
+}
+
 // Every copy of the coordinator skill this machine and project hold, by the tool that reads it
 // (references/harnesses.md). A copy is a folder with coordinator/SKILL.md; its version is in
 // scripts/lib/version.mjs, and a copy without scripts/run.mjs cannot keep a run.
@@ -321,7 +336,7 @@ export function registryCheck(ctx) {
 
 export function diagnose(ctx) {
   const c = { exec: realExec, online: true, ...ctx };
-  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
+  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), reinsCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
 }
 
 const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', skip: 'skip' };
