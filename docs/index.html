@@ -220,7 +220,7 @@
       <div class="group">
         <h3>Proof</h3>
         <dl>
-          <dt>Evidence and screenshots</dt><dd>Test output, screenshots, PDFs and links attach to the behaviour they prove, stored in the run with a checksum that doctor verifies. In web and Expo apps, pair with <a href="https://mindmakr.github.io/reins/">reins</a> so builders and visual critics trigger typed actions, read app state, check lifecycle, component and API timings (<code>reins_perf</code>), inspect DOM and CSS layout (<code>reins_dom</code>) and snap panels by id instead of clicking by pixels.</dd>
+          <dt>Evidence and screenshots</dt><dd>Test output, screenshots, PDFs and links attach to the behaviour they prove, stored in the run with a checksum that doctor verifies. In web and Expo apps, pair with <a href="https://mindmakr.github.io/reins/">reins</a> so builders and visual critics trigger typed actions, read app state, check lifecycle, component and API timings (<code>reins_perf</code>), inspect DOM and CSS layout (<code>reins_dom</code>) and snap panels by id instead of clicking by pixels. A <code>reins_report</code> in Markdown, attached to the unit, shows the critic what was slow, duplicated or clipped, front end and back end, and a before/after compare proves a speed-up with numbers.</dd>
           <dt>Quality and compliance signals</dt><dd>The bar-gaming detector on every diff, a security pass in every code review, a specialist critic for risk areas, and <code>run.mjs quality</code>: duplication, long functions, nesting, naming, security and PDPL/GDPR privacy signals, each with the file and line to review. Signals for a person, not a certification.</dd>
           <dt>A report for testers and operators</dt><dd>Each run gets a report page: what changed, with its PRs; for testers, steps and expected results; for whoever deploys, migrations, environment variables, scripts and jobs read from git; and the quality signals.</dd>
         </dl>
@@ -313,7 +313,7 @@
       </div>
       <div class="inst">
         <h3>Companion: reins for web &amp; Expo</h3>
-        <p>Give your agents hands and eyes inside your app: typed actions, state snapshots, lifecycle &amp; API timings, DOM/CSS diagnostics and panel screenshots over MCP and WebMCP, stripped from production builds.</p>
+        <p>Give your agents hands and eyes inside your app: typed actions, state, DOM/CSS diagnostics and panel screenshots, and one timeline from the click through the server and database back to the screen. Session reports in Markdown become a critic's evidence; testers can export theirs for an agent to analyse. Stripped from production builds.</p>
         <a class="btn ghost" href="https://mindmakr.github.io/reins/">Explore reins</a>
       </div>
     </div>
