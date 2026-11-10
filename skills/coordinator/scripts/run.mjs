@@ -148,7 +148,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync } fr
 import { spawn as spawnProcess } from 'node:child_process';
 import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
-import { num, oneOf, optText, parse, score, text } from './lib/args.mjs';
+import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
 import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { adopt, table } from './lib/adopt.mjs';
@@ -1356,6 +1356,7 @@ function openBrowser(url) {
 }
 
 // --harness works on every command: it names the tool that runs this one (lib/harness.mjs).
+helpAndExit(import.meta.url);
 const [cmd, ...argv] = process.argv.slice(2);
 const rest = []; let harnessFlag;
 for (let i = 0; i < argv.length; i++) {

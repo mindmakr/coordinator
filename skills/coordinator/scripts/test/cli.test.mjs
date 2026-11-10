@@ -285,3 +285,15 @@ test('add takes --title and an http(s) --link; note takes situation, --recommend
   html = readFileSync(join(dir, 'runs', 'r50', 'hud.html'), 'utf8');
   assert.match(html, /Nothing needs you\./);
 });
+
+test('--help and -h print the usage of each script and exit 0', () => {
+  for (const script of ['run.mjs', 'doctor.mjs', 'detect.mjs', 'helper.mjs', 'lessons.mjs']) {
+    for (const flag of ['--help', '-h']) {
+      const r = spawnSync(process.execPath, [join(scripts, script), flag], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+      assert.equal(r.status, 0, `${script} ${flag}`);
+      assert.ok(r.stdout.includes(script), `${script} ${flag} names itself in its usage`);
+      assert.ok(!r.stdout.startsWith('//'), 'comment markers are stripped');
+      assert.equal(r.stderr, '');
+    }
+  }
+});

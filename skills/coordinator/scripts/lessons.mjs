@@ -9,7 +9,7 @@
 //   lessons.mjs prune [--keep 60] [--scope …]
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { num, oneOf, optText, parse, text } from './lib/args.mjs';
+import { helpAndExit, num, oneOf, optText, parse, text } from './lib/args.mjs';
 import { webUrl } from './lib/links.mjs';
 import { tokens } from './lib/rules.mjs';
 import { findSecret } from './lib/secrets.mjs';
@@ -94,6 +94,7 @@ function main(cmd, pos, opt) {
   }
 }
 
+helpAndExit(import.meta.url);
 const [cmd, ...rest] = process.argv.slice(2);
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], cmd === 'add' ? ['source'] : []);
