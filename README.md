@@ -13,6 +13,39 @@ Author: Asif Raja, by [Mindmakr](https://github.com/mindmakr) · Homepage: [mind
   <img src="docs/img/needs-light.webp" alt="The live dashboard of a run: the situation in one line, the goal, and a Needs you box with one question and the lead's recommended answer.">
 </picture>
 
+## New here? Let your agent set it up
+
+You don't need to read the rest of this page first. Paste this into your coding agent (Claude Code, Codex, Antigravity, Cursor, Gemini CLI):
+
+```text
+Install the Coordinator skill from https://github.com/mindmakr/coordinator
+(in Claude Code: /plugin marketplace add mindmakr/coordinator, then /plugin install coordinator@coordinator).
+Then run its init command on this project, ask me only what you cannot work out,
+and run the doctor. If this is a web or Expo app, also install reins from
+https://github.com/mindmakr/reins and run its setup, so you can drive and measure the app.
+```
+
+Then ask for what you want, in your own words:
+
+```text
+/coordinator:run Build a booking page where customers pick a time and pay. Merge into dev when the review says ready.
+```
+
+The agent asks its questions once, up front, then works without you. You get a dashboard that shows what it built, how a separate critic checked it, and why it passed.
+
+### Why bother, if my agent already writes working code?
+
+Agents are very good at code that **looks right and works in the demo**. What they miss, when nobody checks, is what you can't see on screen:
+
+- **Performance:** a page that loads in 4 seconds, a list that re-renders 40 times, an API call made in a loop.
+- **Security:** a key in the frontend, an endpoint anyone can call, missing permission checks.
+- **Scale:** a query that is fine with 10 rows and dies at 10,000; no limits, no pagination.
+- **Drift:** each new feature quietly breaks an older one, and nobody notices until a customer does.
+
+Coordinator puts a second agent on every change whose only job is to check it against a bar you agreed up front, with evidence. That matters most **after** the first version: when you refactor, fix bugs, or hand the app to someone else, the record of what was built, why, and how it was proven is what lets the next agent (or person) change it safely.
+
+Vibe code the first version if you like. Use Coordinator when it has to keep working.
+
 ## Lucid Coding
 
 Vibe coding is a feeling. Lucid Coding is knowing. Agentic engineering is how a lot of software is built now; Lucid Coding is the practice of doing it with your eyes open: you know your system, your agents' thinking, and how each piece was built and judged.
