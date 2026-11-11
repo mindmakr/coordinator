@@ -289,7 +289,8 @@ test('alerts page: subscribe needs read access; settings save; an email is used 
     assert.equal(s.email ?? null, null, 'not used until confirmed');
     assert.deepEqual([s.tz, s.quiet, s.channels.github], ['Europe/London', { start: 22, end: 7 }, false]);
     const link = /confirm\?t=([A-Za-z0-9_-]+)/.exec(t.sent.email[0].text)[1];
-    assert.equal((await fetch(`${t.base}/alerts/confirm?t=x${link.slice(1)}`)).status, 400, 'a wrong token');
+    const wrong = (link[0] === 'x' ? 'y' : 'x') + link.slice(1); // never equal to the real one
+    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${wrong}`)).status, 400, 'a wrong token');
     const opened = await fetch(`${t.base}/alerts/confirm?t=${link}`); // what a mail scanner does
     assert.equal(opened.status, 200);
     assert.match(await opened.text(), /<form method="post" action="\/alerts\/confirm">.*Confirm this address/s);
