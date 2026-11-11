@@ -64,6 +64,7 @@ export function webhooks({ db, ingest, branch = 'coordinator-state', log, comman
 
   async function pushEvent(p) {
     if (p.ref !== `refs/heads/${branch}`) return { status: 202, body: 'ignored: not the state branch' };
+    if (!p.repository?.id || !p.repository.full_name) return { status: 202, body: 'ignored: no repository' };
     const id = Number(p.installation?.id);
     if (!(await db.installation(id))) return { status: 202, body: 'ignored: unknown installation' }; // c14: see installationEvent
     const repo = repoOf(p.repository);

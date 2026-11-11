@@ -76,11 +76,12 @@ test('c14: six addresses of one IPv6 /64 hold one share of the budget; GitHub ke
     const M = MAX_WEBHOOK_PER_IP;
     const first = stall(t, '2001:db8::1', M, M - 1); open.push(first);
     await wait(200);
-    for (let i = 2; i <= 6; i++) open.push(stall(t, `2001:db8::${i}`, M, M - 1));
+    // These are refused on the declared length. They send no body: a socket closed with unread data is reset on Windows, and the 429 is lost.
+    for (let i = 2; i <= 6; i++) open.push(stall(t, `2001:db8::${i}`, M, 0));
     const codes = await Promise.all(open.slice(1).map((x) => x.status));
     assert.ok(codes.every((c) => c === 429), String(codes));
     assert.ok(t.app.webhookBytes().used < M, 'one share held, not six');
-    const big = stall(t, '2001:db8:1::1', M + 1, 10); open.push(big);
+    const big = stall(t, '2001:db8:1::1', M + 1, 0); open.push(big);
     assert.equal(await big.status, 413, 'a body larger than a share is refused before it is read');
     assert.equal(await post(t, '140.82.115.1', { pad: 'x'.repeat(6000) }), 200);
   } finally { for (const x of open) x.socket.destroy(); await t.close(); }

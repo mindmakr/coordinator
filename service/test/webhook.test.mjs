@@ -147,3 +147,13 @@ test('rate limits: sign-in is refused with 429 after 30 tries from one address',
     assert.ok(Number(last.headers.get('retry-after')) > 0);
   } finally { await t.close(); }
 });
+
+test('webhook: a signed push that names no repository is ignored, not an error', async () => {
+  const t = await startApp();
+  try {
+    const r = await post(t, pushPayload({ repository: undefined }), { delivery: 'norepo' });
+    assert.equal(r.status, 202);
+    assert.match(await r.text(), /no repository/);
+    assert.equal((await t.db.repos(7)).length, 0, 'nothing stored');
+  } finally { await t.close(); }
+});

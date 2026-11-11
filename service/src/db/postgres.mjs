@@ -123,7 +123,8 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     async runSummaries(installationId, repoId, { state = false, open = false } = {}) {
       return (await q(`SELECT ${RUN_LIGHT}${state ? ', state' : ''} FROM runs WHERE installation_id = $1 AND repo_id = $2${open ? ` AND ${RUN_OPEN}` : ''} ORDER BY run_id`, [installationId, repoId])).rows.map((r) => runLight(r, state));
     },
-    async run(installationId, repoId, runId) { return runRow((await q('SELECT * FROM runs WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3', [installationId, repoId, runId])).rows[0]); },
+    // map: false leaves the project map unread (it can be megabytes); the row then has map: null.
+    async run(installationId, repoId, runId, { map = true } = {}) { return runRow((await q(`SELECT ${map ? '*' : `${RUN_LIGHT}, state`} FROM runs WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3`, [installationId, repoId, runId])).rows[0]); },
     async putRun(installationId, repoId, { runId, eventsSha, seq, state, error }) {
       await q(`INSERT INTO runs (installation_id, repo_id, run_id, events_sha, seq, state, error) VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (installation_id, repo_id, run_id) DO UPDATE SET events_sha = $4, seq = $5, state = $6, error = $7, updated_at = now()`,

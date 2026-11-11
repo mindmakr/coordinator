@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A sign-in survives two requests at once.** A GitHub refresh token works once. Two requests arriving with an expired token each tried to use it, and the second failed and signed the person out. They now share one refresh, and a refresh lost to another instance of the service uses the tokens that instance stored. Tests: `test/session.test.mjs`.
+
+- **A signed push that names no repository is ignored** (202), where it used to fail with a 500.
+
+- **Less read per sweep and per run:** the alert sweep reads only repos that someone watches (`store.watchedRepos`). `db.run(…, { map: false })` leaves the project map unread, and alerts, comment commands, the trail and the sync use it. Migration `010_alerts_repo_index.sql` indexes `alerts (installation_id, repo_id)`, which removing a repo deletes by.
+
+- **Two tests no longer fail by chance:** the wrong confirm token could equal the right one (1 run in 64), and on Windows a refused upload could lose its 429 to a connection reset.
+
 - **Lighter run reads, indexed clean-up:** the alert sweep, the home and run-list pages, the sync and the trail no longer load every run's full state and project map to look at a few fields. `db.runSummaries` (both adapters) lists a repo's runs without the map, with the state only when asked, and can keep to open runs; the sweep and security alerts read open runs only, the sync reads a run's last state only when its log changed, and the alerts page reads an installation's repos once per view. Pages and alerts show what they did before. Migration `009_retention_indexes.sql` indexes the timestamps the routine clean-up deletes by (`deliveries.at`, `gh_events.at`, `comment_commands.at`, `alerts.created_at`). Tests: `test/db.test.mjs`, `test/render.test.mjs`, `test/alerts.test.mjs`.
 
 - **Local demo:** `npm run demo -- --runs <run folder> …` runs the real service on 127.0.0.1 with copies of real run folders, a pretend GitHub and two pretend people (one who can answer, one who can only read), controls for a push, a PR merge, a check result and a question from the lead, and an outbox page for alerts. It refuses to start off loopback, when `APP_ENV` or `NODE_ENV` names anything but `local`, `demo`, `test` or `development`, or beside a real deployment's settings (App keys, `SESSION_SECRET`, `DATABASE_URL`), and never reaches the network. Every push, merge and check it sends is a new delivery (the branch head and a delivery id in the body), so the service's replay guard never drops one. Its copies are removed on exit and on a crash, and copies left by a killed demo are removed at the next start; logs over the 8 MB cap are listed rather than copied. The fake GitHub moved from the tests to `src/demo/fakegithub.mjs`. README: "See it locally". Tests: `test/demo.test.mjs`.

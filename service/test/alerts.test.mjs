@@ -229,6 +229,7 @@ test('a recipient who lost access hears nothing more, and is unsubscribed; queue
     assert.deepEqual(out, [['ana', 'no access']]);
     assert.equal(t.sent.push.length, 1, 'nothing sent, so no question text either');
     assert.deepEqual(await t.store.subscribers(INST, REPO), [], 'unsubscribed');
+    assert.deepEqual(await t.store.watchedRepos(), [], 'so the sweep has no repo to read');
   } finally { await t.close(); }
 
   const h = new Date().getUTCHours();
@@ -283,13 +284,15 @@ test('alerts page: subscribe needs read access; settings save; an email is used 
     r = await form(t, cookie, '/alerts/watch', { csrf: p.csrf, repo: 'acme/web', on: '1' });
     assert.equal(r.status, 303);
     assert.equal((await t.store.subscribers(INST, REPO)).length, 1);
+    assert.deepEqual(await t.store.watchedRepos(), [{ installationId: INST, repoId: REPO }]);
     r = await form(t, cookie, '/alerts/settings', { csrf: p.csrf, email: 'ana@example.com', tz: 'Europe/London', quiet_start: '22', quiet_end: '7', ch_push: '1', ch_email: '1' });
     assert.match(await r.text(), /We sent a link to ana@example.com/);
     let s = await t.store.settings(5);
     assert.equal(s.email ?? null, null, 'not used until confirmed');
     assert.deepEqual([s.tz, s.quiet, s.channels.github], ['Europe/London', { start: 22, end: 7 }, false]);
     const link = /confirm\?t=([A-Za-z0-9_-]+)/.exec(t.sent.email[0].text)[1];
-    assert.equal((await fetch(`${t.base}/alerts/confirm?t=x${link.slice(1)}`)).status, 400, 'a wrong token');
+    const wrong = (link[0] === 'x' ? 'y' : 'x') + link.slice(1); // never equal to the real one
+    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${wrong}`)).status, 400, 'a wrong token');
     const opened = await fetch(`${t.base}/alerts/confirm?t=${link}`); // what a mail scanner does
     assert.equal(opened.status, 200);
     assert.match(await opened.text(), /<form method="post" action="\/alerts\/confirm">.*Confirm this address/s);

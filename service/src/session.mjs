@@ -65,13 +65,32 @@ export function sessions({ db, gh, config, log, now = Date.now }) {
   async function token(s) {
     if (!s.tokenExpiresAt || s.tokenExpiresAt > now() + 60_000) return box.open(s.tokenEnc);
     if (!s.refreshEnc || (s.refreshExpiresAt && s.refreshExpiresAt <= now())) { await db.dropSession(s.idHash); return null; }
+    // A refresh token works once. Requests that arrive together share one refresh, so the second does not fail and sign the person out.
+    let job = refreshing.get(s.idHash);
+    if (!job) {
+      job = refresh(s).finally(() => refreshing.delete(s.idHash));
+      refreshing.set(s.idHash, job);
+    }
+    const sealed = await job;
+    if (!sealed) return null;
+    Object.assign(s, sealed);
+    return box.open(sealed.tokenEnc);
+  }
+
+  const refreshing = new Map(); // session id hash → the refresh in flight
+  const tokensOf = (x) => ({ tokenEnc: x.tokenEnc, refreshEnc: x.refreshEnc, tokenExpiresAt: x.tokenExpiresAt, refreshExpiresAt: x.refreshExpiresAt });
+
+  // The new sealed tokens, stored; or null after signing the session out.
+  async function refresh(s) {
     try {
       const t = await gh.refresh(box.open(s.refreshEnc));
       const sealed = { tokenEnc: box.seal(t.token), refreshEnc: box.seal(t.refresh), tokenExpiresAt: t.expiresAt, refreshExpiresAt: t.refreshExpiresAt };
       await db.updateSessionTokens(s.idHash, sealed);
-      Object.assign(s, sealed);
-      return t.token;
+      return sealed;
     } catch (e) {
+      // Another instance of the service may have refreshed first: then the stored tokens are newer than ours and still good.
+      const latest = await db.session(s.idHash).catch(() => null);
+      if (latest && latest.tokenEnc !== s.tokenEnc && latest.tokenExpiresAt > now() + 60_000) return tokensOf(latest);
       log?.warn('token refresh failed; signing out', { login: s.login, error: e });
       await db.dropSession(s.idHash);
       return null;

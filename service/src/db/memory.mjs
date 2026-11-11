@@ -81,7 +81,11 @@ export function memoryDb() {
       return [...runs.values()].filter((r) => r.installationId === installationId && r.repoId === repoId && (!open || (r.state && !r.state.closed)))
         .sort((a, b) => a.runId.localeCompare(b.runId)).map(({ state: s, map: _, ...rest }) => clone(state ? { ...rest, state: s } : rest));
     },
-    async run(installationId, repoId, runId) { return clone(runs.get(key(installationId, repoId, runId))) ?? null; },
+    // map: false leaves the project map unread; the row then has map: null.
+    async run(installationId, repoId, runId, { map = true } = {}) {
+      const r = runs.get(key(installationId, repoId, runId));
+      return r ? clone(map ? r : { ...r, map: null }) : null;
+    },
     async putRun(installationId, repoId, row) {
       const prev = runs.get(key(installationId, repoId, row.runId));
       runs.set(key(installationId, repoId, row.runId), { mapSha: null, map: null, mapError: null, trailPending: false, trailSeq: 0, ...(prev && { mapSha: prev.mapSha, map: prev.map, mapError: prev.mapError, trailPending: prev.trailPending, trailSeq: prev.trailSeq }), ...clone(row), installationId, repoId, updatedAt: new Date().toISOString() });

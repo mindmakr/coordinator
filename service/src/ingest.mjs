@@ -209,7 +209,7 @@ export function ingester({ db, gh, branch = 'coordinator-state', log, trail = nu
       const r = e.size > LIMITS.logBytes ? { error: `the event log is larger than ${LIMITS.logBytes} bytes` } : await readBlob(token, repo, e, (buf) => reader.readLog(e.runId, buf, installationId));
       if (r.deferred) { later.push(e.runId); reasons.add(DEFERRED); continue; }
       live(installationId);
-      const prev = held ? await db.run(installationId, repo.id, e.runId) : null;
+      const prev = held ? await db.run(installationId, repo.id, e.runId, { map: false }) : null;
       if (r.error) {
         // Keep the last good state; record the failure against this blob.
         await db.putRun(installationId, repo.id, { runId: e.runId, eventsSha: e.sha, seq: prev?.seq ?? null, state: prev?.state ?? null, error: r.error });
