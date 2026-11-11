@@ -12,8 +12,9 @@
 //   models      false (routing off) or { strong, critic, specialist, visual-critic, integrator,
 //               builder, researcher, mechanical, or a task class: model name }
 //   helpers     small models for small jobs (lib/helpers.mjs, references/helpers.md)
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { launchCostProblem } from './cost.mjs';
 import { checkHelpers } from './helpers.mjs';
 
@@ -37,6 +38,23 @@ export function readSettings(base) {
     const s = JSON.parse(readFileSync(file, 'utf8'));
     return isObj(s) ? { settings: s } : { settings: {}, error: 'expected a JSON object' };
   } catch (e) { return { settings: {}, error: `not valid JSON (${e.message.split('\n')[0]})` }; }
+}
+
+// The settings that decide where a token is sent: `service` gets the person's GitHub token (lib/doorbell.mjs),
+// `helpers` gets the key named in helpers.keyEnv (lib/helpercall.mjs).
+export const SENDS_TOKENS = ['service', 'helpers'];
+export const TRACKED_FIX = 'stop tracking it: git rm --cached .coordinator/coordinator.json, and add .coordinator/ to .gitignore';
+export const trackedRefusal = (key) =>
+  `"${key}" is ignored: .coordinator/coordinator.json is committed to git, and a file that comes with the repo may not choose where your tokens are sent (${TRACKED_FIX}${key === 'service' ? ', or set COORDINATOR_SERVICE in your environment' : ''})`;
+
+const gitStatus = (cmd, args, opts) => spawnSync(cmd, args, { ...opts, stdio: 'ignore', windowsHide: true });
+
+// True when git tracks the settings file. The file is meant to be per-machine and ignored; a committed one was
+// written by whoever wrote the repo, not by the person running it. Not a repo, or no git: false.
+export function settingsTracked(base, exec = gitStatus) {
+  const file = settingsFile(base);
+  if (!existsSync(file)) return false;
+  try { return exec('git', ['ls-files', '--error-unmatch', '--', basename(file)], { cwd: base, timeout: 10_000 })?.status === 0; } catch { return false; }
 }
 
 export const serviceProblem = (service) => {

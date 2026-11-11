@@ -194,7 +194,7 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
       const name = repoName.toLowerCase();
       const out = [];
       for (const repo of await db.repos(installationId)) {
-        for (const row of await db.runs(installationId, repo.id)) {
+        for (const row of await db.runSummaries(installationId, repo.id, { state: true, open: true })) {
           const st = row.state;
           if (!st || st.closed) continue;
           const linked = refsOf(st).find((x) => x.key.startsWith(`${name}#`));
@@ -211,7 +211,8 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
       const out = { quiet: [], digests: [] };
       for (const inst of await db.installationIds()) {
         for (const repo of await db.repos(inst)) {
-          for (const row of await db.runs(inst, repo.id)) {
+          // Only an open run can have gone quiet (quietSince): closed and unreadable ones are not read.
+          for (const row of await db.runSummaries(inst, repo.id, { state: true, open: true })) {
             const since = quietSince(row.state, n);
             if (since) out.quiet.push(...await dispatch(inst, repo, { runId: row.runId, trigger: 'lead-quiet', key: String(since), once: true, state: row.state }));
           }

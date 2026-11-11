@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { adopt, trackedFiles, verifyStored } from './adopt.mjs';
 import { STATE } from './events.mjs';
 import { maskSecrets } from './secrets.mjs';
-import { checkSettings, readSettings } from './settings.mjs';
+import { checkSettings, readSettings, SENDS_TOKENS, settingsTracked, TRACKED_FIX } from './settings.mjs';
 import { themeFile } from './theme.mjs';
 import { readRegistry } from './registry.mjs';
 import { staleCommands } from './pkg-scripts.mjs';
@@ -116,6 +116,12 @@ export function settingsCheck(ctx) {
     ? out('settings', 'ok', `coordinator.json valid (${Object.keys(settings).join(', ') || 'empty'})`)
     : out('settings', worst, `coordinator.json: ${problems.map((p) => p.text).join('; ')}`, 'edit .coordinator/coordinator.json or rerun /coordinator:init')];
   lines.push(stateBad.length ? out('state', 'fail', `run state settings are invalid: ${stateBad.map((p) => p.text).join('; ')}`, 'fix them in .coordinator/coordinator.json; push refuses until then') : stateRepoCheck(ctx, settings));
+  if (settingsTracked(ctx.base, ctx.exec)) {
+    const sends = SENDS_TOKENS.filter((k) => settings[k] !== undefined && settings[k] !== false);
+    lines.push(sends.length
+      ? out('settings-trust', 'fail', `coordinator.json is committed to git, so its ${sends.join(' and ')} ${sends.length > 1 ? 'settings are' : 'setting is'} ignored: a file that comes with the repo may not choose where your tokens are sent`, TRACKED_FIX)
+      : out('settings-trust', 'warn', 'coordinator.json is committed to git; it holds per-machine settings and is meant to stay ignored', TRACKED_FIX));
+  }
   return lines;
 }
 
@@ -244,6 +250,21 @@ export function codexCheck(ctx) {
     : out('codex', 'ok', 'Codex install has every skill');
 }
 
+// reins (github.com/mindmakr/reins) is optional: it gives builders and critics measured evidence from the
+// running app. Installed means a package.json at the root or one folder down depends on it.
+export function reinsCheck(ctx) {
+  const json = (f) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return null; } };
+  let folders = [];
+  try { folders = readdirSync(ctx.project, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules').slice(0, 40).map((d) => join(ctx.project, d.name)); } catch { /* unreadable: the root only */ }
+  const uses = [ctx.project, ...folders].some((dir) => { const p = json(join(dir, 'package.json')); return Boolean(p?.dependencies?.reins || p?.devDependencies?.reins); });
+  if (!uses) return out('reins', 'skip', 'reins is not installed here (optional: measured evidence from the running app, github.com/mindmakr/reins)');
+  const servers = Object.values(json(join(ctx.project, '.mcp.json'))?.mcpServers ?? {});
+  const bridge = servers.some((s) => { const words = [s?.command, ...(Array.isArray(s?.args) ? s.args : [])].join(' '); return /\breins\b/.test(words) && /\bbridge\b/.test(words); });
+  return bridge
+    ? out('reins', 'ok', 'reins is installed and its bridge is registered in .mcp.json; attach its reports with evidence --kind reins')
+    : out('reins', 'warn', 'reins is installed but .mcp.json does not register its bridge, so agents cannot drive the app', 'add "reins": { "command": "npx", "args": ["reins", "bridge"] } under mcpServers in .mcp.json');
+}
+
 // Every copy of the coordinator skill this machine and project hold, by the tool that reads it
 // (references/harnesses.md). A copy is a folder with coordinator/SKILL.md; its version is in
 // scripts/lib/version.mjs, and a copy without scripts/run.mjs cannot keep a run.
@@ -315,7 +336,7 @@ export function registryCheck(ctx) {
 
 export function diagnose(ctx) {
   const c = { exec: realExec, online: true, ...ctx };
-  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
+  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), reinsCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
 }
 
 const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', skip: 'skip' };

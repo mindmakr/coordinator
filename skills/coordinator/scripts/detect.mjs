@@ -13,7 +13,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parse } from './lib/args.mjs';
+import { helpAndExit, parse } from './lib/args.mjs';
 import { allowed, detect, parseDiff } from './lib/gaming.mjs';
 import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
 import { baseDir, safeId } from './lib/store.mjs';
@@ -30,6 +30,7 @@ function commit(ref, name) {
   return git(['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`]).trim();
 }
 
+helpAndExit(import.meta.url);
 try {
   const { opt } = parse(process.argv.slice(2), ['base', 'head', 'run', 'unit', 'fence', 'allow', 'diff-file'], ['allow']);
   if (opt.unit && !opt.run) throw new Error('--unit needs --run');

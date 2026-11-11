@@ -279,8 +279,9 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     if (run !== null && WRITE_ROUTES.has(runKind)) return writeRoute(req, res, user, repo, run, runKind);
     if (req.method !== 'GET') return notFound(res, user);
     const n = now();
-    if (kind) return html(res, 200, REPO_PAGES[kind].render(user, repo, await db.runs(repo.installationId, repo.id), n));
-    if (run === null) return html(res, 200, runsPage(user, repo, await db.runs(repo.installationId, repo.id), n));
+    // Both list pages draw every run from its state; neither uses a run's project map, so it is not read.
+    if (kind) return html(res, 200, REPO_PAGES[kind].render(user, repo, await db.runSummaries(repo.installationId, repo.id, { state: true }), n));
+    if (run === null) return html(res, 200, runsPage(user, repo, await db.runSummaries(repo.installationId, repo.id, { state: true }), n));
     const row = await db.run(repo.installationId, repo.id, run);
     if (!row?.state) return notFound(res, user);
     if (runKind) return REPO_PAGES[runKind].has(row) ? html(res, 200, REPO_PAGES[runKind].render(user, repo, row, n)) : notFound(res, user);
@@ -338,8 +339,9 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     const repos = await acl.projects(user);
     const counts = new Map();
     for (const r of repos) {
-      const rows = await db.runs(r.installationId, r.id);
-      const open = rows.filter((x) => x.state && !x.state.closed);
+      // The count needs no state; the open questions need the state of the open runs only.
+      const rows = await db.runSummaries(r.installationId, r.id);
+      const open = await db.runSummaries(r.installationId, r.id, { state: true, open: true });
       const needs = open.reduce((k, x) => k + questions(x.state).filter((q) => q.open).length, 0);
       counts.set(`${r.installationId}:${r.id}`, { runs: rows.length, open: open.length, needs });
     }

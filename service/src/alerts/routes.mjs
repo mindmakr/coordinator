@@ -100,8 +100,10 @@ export function alertRoutes({ alerts, acl, db, config, send, now = Date.now, log
   // the rest are stamped, which keeps question text (opt-in) flowing for a week.
   async function recheck(user) {
     const t = now();
+    const repos = new Map(); // installation id → its repos, read once per view
     for (const s of (await store.subscriptions(user.userId)).slice(0, MAX_WATCHED)) {
-      const repo = (await db.repos(s.installationId)).find((r) => r.id === s.repoId);
+      if (!repos.has(s.installationId)) repos.set(s.installationId, await db.repos(s.installationId));
+      const repo = repos.get(s.installationId).find((r) => r.id === s.repoId);
       if (repo && await acl.readable(user, repo.fullName)) await store.subscribe(user.userId, user.login, s.installationId, s.repoId, t);
       else await store.unsubscribe(user.userId, s.installationId, s.repoId);
     }

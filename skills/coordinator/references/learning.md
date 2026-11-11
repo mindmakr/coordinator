@@ -24,8 +24,8 @@ A lesson that was added before only has its count raised, never duplicated. Less
 
 ## Using lessons
 
-- At framing, the lead loads `lessons.mjs list --tag <domain> --top 8` and quotes the relevant ones into the briefs as hints.
-- Run `lessons.mjs use <id>` for each lesson the lead used, so the ranking learns which lessons matter.
+- `run.mjs brief` puts the top lessons for the run's tag (and the general ones) into every builder and critic brief as fenced hints: five by default, `--lessons N` for more or fewer, `--lessons 0` for none. A lesson counts as used once per run, so the ranking learns which lessons keep mattering.
+- At framing, the lead may still read `lessons.mjs list --tag <domain> --top 8` to shape the units, and run `lessons.mjs use <id>` for a lesson that changed the plan.
 - `lessons.mjs prune --keep 60` runs during the retro and drops the least-seen, least-used lessons. The file stays small and the loading stays cheap.
 
 ## Promoting a lesson

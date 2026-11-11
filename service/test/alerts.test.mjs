@@ -399,3 +399,38 @@ test('with no senders configured, the GitHub mention still goes, as the App, wit
     assert.ok(t.gh.calls.some((c) => c[0] === 'deleteComment' && c[2] === mention.id));
   } finally { await t.close(); }
 });
+
+test('alerts page: two watched repos in one installation are re-checked on a view; the one no longer readable is dropped', async () => {
+  const t = await setup();
+  t.gh.addRepo('acme/app', { id: 72, installationId: INST, files: null });
+  await t.db.upsertRepo({ installationId: INST, id: 72, fullName: 'acme/app', private: true });
+  t.gh.users.get('tok-c1').read.add('acme/app');
+  await t.store.subscribe(5, 'ana', INST, 72, 1000);
+  await t.store.subscribe(5, 'ana', INST, REPO, 1000);
+  try {
+    const cookie = await signIn(t, 'c1');
+    t.gh.revoke('tok-c1', 'acme/app');
+    const r = await fetch(`${t.base}/alerts`, { headers: { Cookie: cookie } });
+    assert.equal(r.status, 200);
+    const subs = await t.store.subscriptions(5);
+    assert.deepEqual(subs.map((s) => s.repoId), [REPO], 'the repo ana can no longer read is unsubscribed');
+    assert.ok(subs[0].checkedAt > 1000, 'the other is stamped as checked now');
+  } finally { await t.close(); }
+});
+
+test('the sweep and a security alert pass over closed and unreadable runs', async () => {
+  let open = makeRun('r1', { issues: ['acme/web#12'] });
+  open = appendEvent(open, 'unit.start', { ops: [{ op: 'set', path: ['units', { id: 'u1' }, 'status'], value: 'building' }] }, 'u1');
+  let offset = 0;
+  const t = await setup({ runs: { r1: open, r2: makeRun('r2', { closed: true }), bad: Buffer.from('{"v":1}\n') }, now: () => Date.now() + offset });
+  try {
+    await t.sync();
+    assert.deepEqual((await t.db.runSummaries(INST, REPO)).map((r) => r.runId), ['bad', 'r1', 'r2']);
+    offset = 3 * 3600_000;
+    const s = await t.app.alerts.sweep();
+    assert.deepEqual(s.quiet.map((x) => x[1]), ['sent'], 'only the open run went quiet');
+    assert.match(t.sent.push.at(-1)[1].body, /run r1/);
+    const sec = await t.app.alerts.security(INST, 'acme/web', { kind: 'secret', number: 4 });
+    assert.deepEqual(sec.map((x) => x[1]), ['sent'], 'one security alert, for the open run');
+  } finally { await t.close(); }
+});

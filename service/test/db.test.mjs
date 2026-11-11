@@ -83,4 +83,45 @@ for (const kind of ['memory', 'postgres']) {
       assert.equal((await db.repos(8)).length, 1, 'other installations stay');
     } finally { await db.close(); }
   });
+
+  // The light listing: what the alert sweep, the home page and the sync read instead of runs().
+  test(`${kind}: runSummaries lists the same runs as runs(), without the map and (unless asked) the state`, { skip: kind === 'postgres' && !PG && 'set TEST_DATABASE_URL to run against Postgres' }, async () => {
+    const db = await fresh(kind);
+    try {
+      await db.upsertInstallation({ id: 7, account: 'acme' });
+      await db.upsertInstallation({ id: 8, account: 'other' });
+      await db.upsertRepo({ installationId: 7, id: 70, fullName: 'acme/web' });
+      await db.upsertRepo({ installationId: 7, id: 71, fullName: 'acme/app' });
+      await db.upsertRepo({ installationId: 8, id: 70, fullName: 'other/web' });
+      const state = (id, closed) => ({ id, units: [{ id: 'u1', status: 'building' }], notes: [], ...(closed === undefined ? {} : { closed }) });
+      await db.putRun(7, 70, { runId: 'c-closed', eventsSha: 's3', seq: 9, state: state('c-closed', { outcome: 'done', at: '2026-11-06T11:00:00.000Z' }), error: null });
+      await db.putRun(7, 70, { runId: 'a-open', eventsSha: 's1', seq: 3, state: state('a-open', null), error: null });
+      await db.putRun(7, 70, { runId: 'b-nokey', eventsSha: 's2', seq: 4, state: state('b-nokey'), error: 'the latest log was refused' });
+      await db.putRun(7, 70, { runId: 'd-unreadable', eventsSha: 's4', seq: null, state: null, error: 'unknown event kind' });
+      await db.putRun(7, 71, { runId: 'z-elsewhere', eventsSha: 's5', seq: 1, state: state('z-elsewhere', null), error: null });
+      await db.putRunMap(7, 70, 'a-open', { mapSha: 'm1', map: { files: ['x'.repeat(2000)] }, mapError: null });
+      await db.putRunMap(7, 70, 'c-closed', { mapSha: 'm2', map: null, mapError: 'the map log is not readable' });
+      await db.markTrailPending(7, 70, 'c-closed');
+
+      const full = await db.runs(7, 70);
+      assert.deepEqual(full.map((r) => r.runId), ['a-open', 'b-nokey', 'c-closed', 'd-unreadable']);
+      assert.ok(full[0].map && full[0].state, 'runs() still carries both heavy columns');
+      const light = await db.runSummaries(7, 70);
+      assert.deepEqual(light, full.map(({ state: _s, map: _m, ...rest }) => rest), 'the same rows, in the same order, minus state and map');
+      assert.equal(light.some((r) => 'state' in r || 'map' in r), false);
+      assert.deepEqual([light[2].trailPending, light[2].mapSha, light[2].mapError, light[1].error, light[0].eventsSha, light[0].seq], [true, 'm2', 'the map log is not readable', 'the latest log was refused', 's1', 3]);
+
+      const withState = await db.runSummaries(7, 70, { state: true });
+      assert.deepEqual(withState, full.map(({ map: _m, ...rest }) => rest), 'state on request, never the map');
+
+      const open = full.filter((r) => r.state && !r.state.closed);
+      assert.deepEqual(open.map((r) => r.runId), ['a-open', 'b-nokey'], 'closed: null and no closed key are both open');
+      assert.deepEqual(await db.runSummaries(7, 70, { state: true, open: true }), open.map(({ map: _m, ...rest }) => rest), 'open: only runs with a state that is not closed');
+      assert.deepEqual(await db.runSummaries(7, 70, { open: true }), open.map(({ state: _s, map: _m, ...rest }) => rest));
+
+      assert.deepEqual((await db.runSummaries(7, 71)).map((r) => r.runId), ['z-elsewhere'], 'scoped to the repo');
+      assert.deepEqual(await db.runSummaries(8, 70), [], 'and to the installation');
+      assert.throws(() => db.runSummaries(undefined, 70), /an installation id is required/);
+    } finally { await db.close(); }
+  });
 }

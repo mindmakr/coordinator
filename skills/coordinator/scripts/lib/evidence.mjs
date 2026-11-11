@@ -8,10 +8,12 @@ import { basename, dirname, extname, join } from 'node:path';
 import { STORED_FILE } from './eventschema.mjs';
 import { oneOf, optText, text } from './args.mjs';
 import { maskSecrets } from './secrets.mjs';
+import { parseReinsReport } from './reinsreport.mjs';
 import { webUrl } from './links.mjs';
 import { writeAtomic } from './store.mjs';
 
-export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link'];
+// reins: the Markdown a reins session report or compare is saved as; its findings are read into the item (lib/reinsreport.mjs).
+export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link', 'reins'];
 // perRound: pieces per unit (or the goal) in one round, so a long unit never runs out (#66); a piece records the
 // round it came in (pieces from before, with none, count toward no round). total: what an id (E1-E999) can number.
 export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perRound: 60, total: 999 };
@@ -76,6 +78,14 @@ export function addEvidence(s, unit, o, runDir) {
   const kind = oneOf(o.kind, KINDS, '--kind');
   const given = ['text', 'file', 'url'].filter((k) => typeof o[k] === 'string');
   if (given.length !== 1) throw new Error('give exactly one of --text, --file or --url');
+  let reins = null;
+  if (kind === 'reins') {
+    if (typeof o.file !== 'string' || extname(o.file).toLowerCase() !== '.md') throw new Error('--kind reins takes --file <the .md that reins_report or "reins report --compare" saved>');
+    let md;
+    try { if (lstatSync(o.file).size > LIMITS.textFile) throw new Error('big'); md = readFileSync(o.file, 'utf8'); } catch (e) { throw new Error(e.message === 'big' ? `--file is over the cap of ${LIMITS.textFile / 1024} KB` : `no file: ${o.file}`); }
+    reins = parseReinsReport(maskSecrets(md));
+    if (!reins) throw new Error('--kind reins: the file is not a reins session report or compare (its first heading is "# reins session: …" or "# reins compare: …"); attach other files with --kind log');
+  }
   const list = listOf(s, unit);
   // The round this piece belongs to: the unit's try under way (or next), or the goal's integration round.
   const round = (unit ? unit.rounds?.length ?? 0 : s.integration?.rounds?.length ?? 0) + 1;
@@ -96,6 +106,7 @@ export function addEvidence(s, unit, o, runDir) {
   } else {
     Object.assign(item, copyIn(o.file, runDir, unit ? unit.id : GOAL_DIR, eid));
     if (typeof o.source === 'string') item.source = o.source;
+    if (reins) item.reins = reins;
   }
   list.push(item);
   return eid;

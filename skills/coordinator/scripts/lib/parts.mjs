@@ -134,6 +134,20 @@ export function behaviourList(list, repo, evidence = [], ctx = null, key = '') {
 
 const LONG = (t) => t.length > 1200 || t.split('\n').length > 12;
 
+// What a reins report found (lib/reinsreport.mjs), shown on the item so nobody has to open the file.
+// The values come from the state, which may be hand-edited: only strings are shown, all escaped.
+function reinsSummary(r) {
+  if (r === null || typeof r !== 'object') return '';
+  const texts = (x) => (Array.isArray(x) ? x.filter((t) => typeof t === 'string') : []);
+  const li = (cls, word, t) => `<li><span class="chip${cls ? ` ${cls}` : ''}">${word}</span> ${esc(t)}</li>`;
+  let rows;
+  if (r.type === 'compare') rows = [...texts(r.added).map((t) => li('s-fail', 'new', t)), ...texts(r.open).map((t) => li('', 'still open', t)), ...texts(r.resolved).map((t) => li('s-pass', 'resolved', t))];
+  else rows = (Array.isArray(r.findings) ? r.findings : []).filter((f) => f && typeof f.text === 'string').map((f) => li(f.level === 'error' ? 's-fail' : '', f.level === 'error' ? 'error' : 'warning', f.text));
+  const title = `<p class="cause">reins ${r.type === 'compare' ? 'before/after' : 'session'}${typeof r.title === 'string' ? `: ${esc(r.title)}` : ''}</p>`;
+  const more = Number.isInteger(r.more) && r.more > 0 ? `<p class="cause">${r.more} more in the file</p>` : '';
+  return rows.length ? `${title}<ul class="reins-findings">${rows.join('')}</ul>${more}` : `${title}<p><span class="chip s-pass">clean</span> nothing crossed the thresholds</p>`;
+}
+
 function evidenceItem(e, repo, ctx, key) {
   const head = `${badge('evidence', e.kind)}${e.behaviour ? ` <b>${esc(e.behaviour)}</b>` : ''} ${esc(e.label ?? '')}`;
   let body = '';
@@ -145,7 +159,7 @@ function evidenceItem(e, repo, ctx, key) {
   // A missing stored copy says so; screenshots and text files open in the viewer (lib/evview.mjs).
   else if (e.file && (ctx.has && !ctx.has(e.file) || ctx.artHref(e.file))) body = itemBody(e, e.file.split('/')[0], ctx) ?? '';
   else if (e.file) body = `<p class="cause">${esc(e.file.split('/').pop())}: file kept locally</p>`;
-  return `<li class="evidence" data-a="${esc(`${key}-${e.id}`)}"><div>${head} ${stamp(e.at, 'cause')}</div>${body}</li>`;
+  return `<li class="evidence" data-a="${esc(`${key}-${e.id}`)}"><div>${head} ${stamp(e.at, 'cause')}</div>${e.reins ? reinsSummary(e.reins) : ''}${body}</li>`;
 }
 
 export const evidenceList = (list, repo, ctx, key) => (list.length ? grows(`<ul class="evlist" data-ev-list>${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>`) : '');

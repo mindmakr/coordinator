@@ -11,16 +11,19 @@
 //   helper.mjs decide --question Q --choice A --choice B [...] [--context T | --context-file F]
 //   helper.mjs summarize (--text T | --file F) [--max-words 25]
 //   helper.mjs look --image shot.png [--question Q] [--context "screen, locale, width"]
+//   helper.mjs stats                        calls, escalations, time and tokens per job in this project,
+//                                           with advice when a job escalates too often to be worth it
 //
 // Every answer is JSON. escalate: true means "do not use this; ask the strong model": the reply did
 // not parse, or its confidence is under minConfidence. A look never passes a screen on its own.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
-import { parse } from './lib/args.mjs';
+import { helpAndExit, parse } from './lib/args.mjs';
 import { buildRequest, helperConfig, missingModels, PROVIDERS, readAnswer, setupHelpers } from './lib/helpers.mjs';
 import { complete, listModels } from './lib/helpercall.mjs';
-import { readSettings, settingsFile } from './lib/settings.mjs';
-import { baseDir, withLock, writeAtomic } from './lib/store.mjs';
+import { readSettings, settingsFile, settingsTracked, TRACKED_FIX, trackedRefusal } from './lib/settings.mjs';
+import { join } from 'node:path';
+import { baseDir, readJson, update, withLock, writeAtomic } from './lib/store.mjs';
 
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 const MAX_IMAGE = 8 * 1024 * 1024;
@@ -33,19 +36,23 @@ const readText = (f, what) => {
 const str = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw new Error(`missing --${name}`); return v; };
 
 function config() {
-  const { settings, error } = readSettings(baseDir('project'));
-  if (error) throw new Error(`${settingsFile(baseDir('project'))}: ${error}`);
+  const base = baseDir('project');
+  const { settings, error } = readSettings(base);
+  if (error) throw new Error(`${settingsFile(base)}: ${error}`);
+  // The helper endpoint is sent the key named in keyEnv, so a committed settings file may not turn helpers on.
+  if (settings.helpers !== undefined && settings.helpers !== false && settingsTracked(base)) return { on: false, tracked: true, why: trackedRefusal('helpers') };
   return helperConfig(settings);
 }
 function needOn() {
   const cfg = config();
-  if (!cfg.on) throw new Error(`helpers are off: ${cfg.why}. Set them up with: helper.mjs setup ollama (or lmstudio, openrouter, openai, custom)`);
+  if (!cfg.on) throw new Error(cfg.tracked ? `helpers are off: ${cfg.why}` : `helpers are off: ${cfg.why}. Set them up with: helper.mjs setup ollama (or lmstudio, openrouter, openai, custom)`);
   return cfg;
 }
 const shown = (cfg) => (cfg.on ? { on: true, provider: cfg.provider, endpoint: cfg.endpoint, local: cfg.local, keyEnv: cfg.keyEnv, keySet: cfg.keyEnv ? Boolean(process.env[cfg.keyEnv]) : null, models: cfg.models, minConfidence: cfg.minConfidence } : cfg);
 
 function writeHelpers(value) {
   const base = baseDir('project'); const file = settingsFile(base);
+  if (value !== undefined && settingsTracked(base)) throw new Error(`${file} is committed to git, so helpers set in it would be ignored; ${TRACKED_FIX}`);
   return withLock(file, () => {
     const { settings, error } = readSettings(base);
     if (error) throw new Error(`${file}: ${error}; fix it first`);
@@ -55,16 +62,39 @@ function writeHelpers(value) {
   });
 }
 
+// Counts per job, kept in the project's state folder: numbers only, never a prompt or an answer.
+const usageFile = () => join(baseDir('project'), 'helpers-usage.json');
+const OFTEN = { calls: 10, rate: 0.3 };
+function record(job, out) {
+  update(usageFile(), {}, (all) => {
+    const j = (all[job] ??= { calls: 0, escalated: 0, ms: 0, tokensIn: 0, tokensOut: 0 });
+    j.calls++; if (out.escalate) j.escalated++;
+    j.ms += out.ms; j.tokensIn += out.usage?.tokensIn ?? 0; j.tokensOut += out.usage?.tokensOut ?? 0;
+    j.lastAt = new Date().toISOString();
+  });
+}
+
 async function ask(job, input) {
   const cfg = needOn();
   const req = buildRequest(job, cfg, input);
   const started = Date.now();
   const res = await complete(cfg, req);
-  return { ...readAnswer(job, cfg, input, res), ms: Date.now() - started, ...(cfg.local ? {} : { sentTo: cfg.host }) };
+  const out = { ...readAnswer(job, cfg, input, res), ms: Date.now() - started, ...(cfg.local ? {} : { sentTo: cfg.host }) };
+  try { record(job, out); } catch { /* counting never fails a call */ }
+  return out;
 }
 
 const commands = {
   status: () => shown(config()),
+  stats() {
+    const all = readJson(usageFile(), {});
+    const jobs = Object.fromEntries(Object.entries(all).filter(([, j]) => j && typeof j === 'object' && j.calls > 0).map(([job, j]) => {
+      const rate = Math.round((j.escalated / j.calls) * 100) / 100;
+      const often = j.calls >= OFTEN.calls && rate >= OFTEN.rate;
+      return [job, { ...j, escalationRate: rate, ...(often ? { advice: `${job} hands back ${Math.round(rate * 100)}% of its answers: give it a stronger model (helper.mjs setup <provider> --${job} <model>) or stop using it for this job` } : {}) }];
+    }));
+    return { jobs, calls: Object.values(jobs).reduce((n, j) => n + j.calls, 0) };
+  },
   setup([provider], o) {
     if (provider === 'off') return { helpers: 'off', file: writeHelpers(undefined) };
     if (!provider) throw new Error(`setup needs a provider: ${Object.keys(PROVIDERS).join(', ')}, or off`);
@@ -96,6 +126,7 @@ const commands = {
   },
 };
 
+helpAndExit(import.meta.url);
 try {
   const [cmd, ...argv] = process.argv.slice(2);
   if (!Object.hasOwn(commands, cmd ?? '')) throw new Error(`usage: helper.mjs ${Object.keys(commands).join('|')} …`);
