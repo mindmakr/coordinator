@@ -34,6 +34,7 @@ const runRow = (r) => (r ? { runId: r.run_id, eventsSha: r.events_sha, seq: r.se
 // runSummaries: every column but the two heavy ones (state, map); a run is open when it has a state that is not closed.
 const RUN_LIGHT = 'run_id, events_sha, seq, error, updated_at, map_sha, map_error, trail_pending, trail_seq';
 const RUN_OPEN = `state IS NOT NULL AND COALESCE(state->'closed', 'null'::jsonb) IN ('null'::jsonb, 'false'::jsonb, '0'::jsonb, '""'::jsonb)`;
+const RUN_FINISHED = `state IS NOT NULL AND NOT (COALESCE(state->'closed', 'null'::jsonb) IN ('null'::jsonb, 'false'::jsonb, '0'::jsonb, '""'::jsonb))`;
 const runLight = (r, withState) => { const { state, map, ...rest } = runRow(r); return withState ? { ...rest, state } : rest; };
 
 // schema (tests): a throwaway schema of its own, dropped on close.
@@ -120,8 +121,16 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     async runs(installationId, repoId) { return (await q('SELECT * FROM runs WHERE installation_id = $1 AND repo_id = $2 ORDER BY run_id', [installationId, repoId])).rows.map(runRow); },
     // The same rows as runs(), in the same order, without the heavy columns: never the map, and the state only
     // when asked (state: true). open: true keeps only the runs that have a state and are not closed.
-    async runSummaries(installationId, repoId, { state = false, open = false } = {}) {
-      return (await q(`SELECT ${RUN_LIGHT}${state ? ', state' : ''} FROM runs WHERE installation_id = $1 AND repo_id = $2${open ? ` AND ${RUN_OPEN}` : ''} ORDER BY run_id`, [installationId, repoId])).rows.map((r) => runLight(r, state));
+    // finished: false leaves out the finished runs (open and unreadable ones stay).
+    async runSummaries(installationId, repoId, { state = false, open = false, finished = true } = {}) {
+      return (await q(`SELECT ${RUN_LIGHT}${state ? ', state' : ''} FROM runs WHERE installation_id = $1 AND repo_id = $2${open ? ` AND ${RUN_OPEN}` : ''}${finished ? '' : ` AND NOT (${RUN_FINISHED})`} ORDER BY run_id`, [installationId, repoId])).rows.map((r) => runLight(r, state));
+    },
+    // One page of a repo's finished runs with their state, the most recently changed first, and how many there are in all.
+    async finishedRuns(installationId, repoId, { limit = 30, offset = 0 } = {}) {
+      const where = `installation_id = $1 AND repo_id = $2 AND ${RUN_FINISHED}`;
+      const total = Number((await q(`SELECT count(*) AS n FROM runs WHERE ${where}`, [installationId, repoId])).rows[0].n);
+      const rows = (await q(`SELECT ${RUN_LIGHT}, state FROM runs WHERE ${where} ORDER BY updated_at DESC, run_id DESC LIMIT $3 OFFSET $4`, [installationId, repoId, limit, offset])).rows.map((r) => runLight(r, true));
+      return { total, rows };
     },
     // map: false leaves the project map unread (it can be megabytes); the row then has map: null.
     async run(installationId, repoId, runId, { map = true } = {}) { return runRow((await q(`SELECT ${map ? '*' : `${RUN_LIGHT}, state`} FROM runs WHERE installation_id = $1 AND repo_id = $2 AND run_id = $3`, [installationId, repoId, runId])).rows[0]); },

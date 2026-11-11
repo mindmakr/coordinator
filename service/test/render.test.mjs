@@ -139,6 +139,13 @@ test('the home page counts runs, open runs and open questions; the list pages sh
     assert.deepEqual([...part('<h2>Open</h2>', '<h2>Finished</h2>').matchAll(/data-a="run-(\w+)"/g)].map((m) => m[1]), ['r1', 'r3']);
     assert.deepEqual([...part('<h2>Finished</h2>', '<h2>Unreadable</h2>').matchAll(/data-a="run-(\w+)"/g)].map((m) => m[1]), ['r2']);
     assert.match(part('<h2>Unreadable</h2>'), /bad/);
+    assert.doesNotMatch(list, /\?finished=/, 'one page of finished runs: no pager');
+    const past = await get('/r/acme/web?finished=2');
+    assert.match(past, /4 runs · /, 'the count is of every run, whatever the page');
+    assert.match(past, /No finished runs on this page; there are 1\./);
+    assert.match(past, /<a href="\/r\/acme\/web\?finished=1">Newer<\/a>/);
+    assert.match(past, /data-a="run-r1"/, 'open runs are on every page');
+    assert.match(await get('/r/acme/web?finished=nonsense'), /data-a="run-r2"/, 'a bad page number is page 1');
     assert.match(list, /<b>1 need you<\/b>/);
     assert.equal((await fetch(`${t.base}/r/acme/web/coordinator`, { headers: { Cookie: cookie } })).status, 200);
     assert.match(await get('/r/acme/web/run/r1/map'), /src\/a\.ts/, 'the map page still has its map');

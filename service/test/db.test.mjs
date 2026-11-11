@@ -125,6 +125,16 @@ for (const kind of ['memory', 'postgres']) {
       assert.deepEqual(await db.run(7, 70, 'a-open', { map: false }), { ...full[0], map: null }, 'run() without the map: the same row, map unread');
       assert.ok((await db.run(7, 70, 'a-open')).map, 'and with it by default');
       assert.equal(await db.run(7, 70, 'nope', { map: false }), null);
+
+      assert.deepEqual((await db.runSummaries(7, 70, { finished: false })).map((r) => r.runId), ['a-open', 'b-nokey', 'd-unreadable'], 'finished: false keeps open and unreadable runs');
+      await db.putRun(7, 70, { runId: 'e-closed', eventsSha: 's6', seq: 2, state: state('e-closed', { outcome: 'done', at: '2026-11-07T11:00:00.000Z' }), error: null });
+      const page1 = await db.finishedRuns(7, 70, { limit: 1 });
+      assert.equal(page1.total, 2, 'the total is of every finished run');
+      assert.deepEqual(page1.rows.map((r) => r.runId), ['e-closed'], 'the most recently changed first');
+      assert.ok(page1.rows[0].state.closed && !('map' in page1.rows[0]), 'with the state, without the map');
+      assert.deepEqual((await db.finishedRuns(7, 70, { limit: 1, offset: 1 })).rows.map((r) => r.runId), ['c-closed']);
+      assert.deepEqual(await db.finishedRuns(7, 70, { limit: 1, offset: 2 }), { total: 2, rows: [] });
+      assert.deepEqual(await db.finishedRuns(7, 71), { total: 0, rows: [] }, 'scoped to the repo');
       assert.throws(() => db.runSummaries(undefined, 70), /an installation id is required/);
     } finally { await db.close(); }
   });
