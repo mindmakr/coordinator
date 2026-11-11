@@ -8,7 +8,7 @@ import { REPO, isSafeId, questions } from './core.mjs';
 import { access as makeAccess } from './access.mjs';
 import { ingester } from './ingest.mjs';
 import { trail } from './trail.mjs';
-import { REPO_PAGES, landing, mapsView, messagePage, projectsPage, repoBase, runPage, runsPage, unitView } from './pages.mjs';
+import { REPO_PAGES, RUNS_PAGE, landing, mapsView, messagePage, projectsPage, repoBase, runPage, runsPage, unitView } from './pages.mjs';
 import { refsOf } from './ingest.mjs';
 import { limiter } from './ratelimit.mjs';
 import { parseCookies, sessions as makeSessions } from './session.mjs';
@@ -281,7 +281,15 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     const n = now();
     // Both list pages draw every run from its state; neither uses a run's project map, so it is not read.
     if (kind) return html(res, 200, REPO_PAGES[kind].render(user, repo, await db.runSummaries(repo.installationId, repo.id, { state: true }), n));
-    if (run === null) return html(res, 200, runsPage(user, repo, await db.runSummaries(repo.installationId, repo.id, { state: true }), n));
+    if (run === null) {
+      // Every open and unreadable run, and one page of the finished ones: a repo with years of runs still draws quickly.
+      const page = Math.min(Math.max(Number.parseInt(url.searchParams.get('finished') ?? '1', 10) || 1, 1), 1_000_000);
+      const [live, fin] = await Promise.all([
+        db.runSummaries(repo.installationId, repo.id, { state: true, finished: false }),
+        db.finishedRuns(repo.installationId, repo.id, { limit: RUNS_PAGE, offset: (page - 1) * RUNS_PAGE }),
+      ]);
+      return html(res, 200, runsPage(user, repo, [...live, ...fin.rows], n, { page, size: RUNS_PAGE, total: fin.total }));
+    }
     const row = await db.run(repo.installationId, repo.id, run);
     if (!row?.state) return notFound(res, user);
     if (runKind) return REPO_PAGES[runKind].has(row) ? html(res, 200, REPO_PAGES[runKind].render(user, repo, row, n)) : notFound(res, user);

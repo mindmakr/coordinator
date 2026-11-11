@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The run list pages its finished runs.** A repo's page shows every open and unreadable run and 30 finished runs at a time, the most recently changed first, with Older and Newer links (`?finished=2`). It used to load the full state of every run the repo ever had. `db.finishedRuns` reads one page and the total; `db.runSummaries(…, { finished: false })` reads the rest. Finished runs were listed by id before.
+
 - **A sign-in survives two requests at once.** A GitHub refresh token works once. Two requests arriving with an expired token each tried to use it, and the second failed and signed the person out. They now share one refresh, and a refresh lost to another instance of the service uses the tokens that instance stored. Tests: `test/session.test.mjs`.
 
 - **A signed push that names no repository is ignored** (202), where it used to fail with a 500.

@@ -145,7 +145,10 @@ export function projectsPage(user, repos, { counts = new Map(), installUrl = nul
   return withBar(page({ title: 'Projects', body, ctx: plainCtx(user), path: '/' }), user);
 }
 
-export function runsPage(user, repo, rows, nowMs = Date.now()) {
+export const RUNS_PAGE = 30; // finished runs on one page of a repo's run list
+
+// paging ({ page, size, total }): `rows` holds every open and unreadable run and one page of the finished ones.
+export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null) {
   const ctx = ctxFor(repo.fullName);
   const cards = rows.map((row) => {
     if (!row.state) return `<div class="card"><h3>${esc(row.runId)}${chip('unreadable', 'fail')}</h3><p class="meta">${esc(row.error ?? '')}</p></div>`;
@@ -159,10 +162,19 @@ export function runsPage(user, repo, rows, nowMs = Date.now()) {
   });
   const pick = (test) => cards.filter((_, i) => test(rows[i].state));
   const unreadable = pick((s) => !s);
-  const body = blk('head', `<header class="run"><h1>${esc(repo.fullName)}</h1><span class="meta">${rows.length} run${rows.length === 1 ? '' : 's'} · ${repo.syncedAt ? `synced ${stamp(repo.syncedAt)}` : 'not synced yet'}</span></header>`)
+  const finished = pick((s) => s?.closed);
+  const count = paging ? rows.length - finished.length + paging.total : rows.length;
+  let pager = '';
+  if (paging && (paging.total > paging.size || paging.page > 1)) {
+    const first = (paging.page - 1) * paging.size;
+    const link = (p, text) => `<a href="${esc(`${ctx.base}?finished=${p}`)}">${text}</a>`;
+    pager = `<p class="meta">${finished.length ? `Showing ${first + 1} to ${first + finished.length} of ${paging.total} finished runs, the most recently changed first.` : `No finished runs on this page; there are ${paging.total}.`}`
+      + (paging.page > 1 ? ` ${link(paging.page - 1, 'Newer')}` : '') + (first + finished.length < paging.total ? ` ${link(paging.page + 1, 'Older')}` : '') + '</p>';
+  }
+  const body = blk('head', `<header class="run"><h1>${esc(repo.fullName)}</h1><span class="meta">${count} run${count === 1 ? '' : 's'} · ${repo.syncedAt ? `synced ${stamp(repo.syncedAt)}` : 'not synced yet'}</span></header>`)
     + syncNote(repo)
     + '<h2>Open</h2>' + blk('open', pick((s) => s && !s.closed).join('') || '<p class="empty">No open runs.</p>', 'div', ' class="grid"')
-    + '<h2>Finished</h2>' + blk('closed', pick((s) => s?.closed).join('') || '<p class="empty">None yet.</p>', 'div', ' class="grid"')
+    + '<h2>Finished</h2>' + blk('closed', finished.join('') || '<p class="empty">None yet.</p>', 'div', ' class="grid"') + pager
     + (unreadable.length ? `<h2>Unreadable</h2>${blk('bad', unreadable.join(''), 'div', ' class="grid"')}` : '');
   return withBar(page({ title: repo.fullName, body, ctx, path: ctx.base }), user, repo.fullName);
 }
