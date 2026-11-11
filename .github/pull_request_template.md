@@ -9,3 +9,4 @@
 - [ ] A behaviour change has a test that fails without it
 - [ ] SKILL.md is still under 500 words (`wc -w skills/coordinator/SKILL.md`)
 - [ ] No project-specific facts, secrets or network calls
+- [ ] I have read [CLA.md](../blob/main/CLA.md) and I agree to it

@@ -45,4 +45,6 @@ Don't open a public issue. Use GitHub's private vulnerability reporting on this 
 
 ## Licence
 
-By contributing you agree that your work is released under the MIT licence of this project, or, for anything under `service/`, under its AGPL-3.0 licence.
+Your work is released under the MIT licence of this project, or, for anything under `service/`, under its AGPL-3.0 licence. Code under `service/ee/` is under the [enterprise licence](service/ee/LICENSE.md).
+
+Before your first pull request is merged, agree to the [contributor agreement](CLA.md) by ticking its box in the pull request. You keep ownership of your work. The agreement lets the project also offer the service under commercial terms, which is how it pays for its own development. The names are covered by the [trademark policy](TRADEMARKS.md).
