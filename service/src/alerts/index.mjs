@@ -180,7 +180,7 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
       const repos = await db.repos(installationId);
       for (const r of await db.runsReferencing(installationId, refKey)) {
         const repo = repos.find((x) => x.id === r.repoId);
-        const state = (await db.run(installationId, r.repoId, r.runId))?.state;
+        const state = (await db.run(installationId, r.repoId, r.runId, { map: false }))?.state;
         if (!repo || !state || state.closed) continue;
         for (const unit of new Set(refsOf(state).filter((x) => x.key === refKey).map((x) => x.unit))) {
           out.push(...await dispatch(installationId, repo, { runId: r.runId, unit, trigger, key: refKey, state }));
@@ -209,8 +209,11 @@ export function alerts({ db, gh = null, config, log, now = Date.now, send, audit
     sweep: () => safely('sweep', async () => {
       const n = now();
       const out = { quiet: [], digests: [] };
-      for (const inst of await db.installationIds()) {
-        for (const repo of await db.repos(inst)) {
+      // Only a repo someone watches can alert anyone: the others are not read.
+      const watched = new Map();
+      for (const w of await store.watchedRepos()) watched.set(w.installationId, (watched.get(w.installationId) ?? new Set()).add(w.repoId));
+      for (const [inst, ids] of watched) {
+        for (const repo of (await db.repos(inst)).filter((r) => ids.has(r.id))) {
           // Only an open run can have gone quiet (quietSince): closed and unreadable ones are not read.
           for (const row of await db.runSummaries(inst, repo.id, { state: true, open: true })) {
             const since = quietSince(row.state, n);

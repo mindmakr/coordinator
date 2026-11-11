@@ -121,6 +121,10 @@ for (const kind of ['memory', 'postgres']) {
 
       assert.deepEqual((await db.runSummaries(7, 71)).map((r) => r.runId), ['z-elsewhere'], 'scoped to the repo');
       assert.deepEqual(await db.runSummaries(8, 70), [], 'and to the installation');
+
+      assert.deepEqual(await db.run(7, 70, 'a-open', { map: false }), { ...full[0], map: null }, 'run() without the map: the same row, map unread');
+      assert.ok((await db.run(7, 70, 'a-open')).map, 'and with it by default');
+      assert.equal(await db.run(7, 70, 'nope', { map: false }), null);
       assert.throws(() => db.runSummaries(undefined, 70), /an installation id is required/);
     } finally { await db.close(); }
   });

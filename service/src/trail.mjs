@@ -99,7 +99,7 @@ export function trail({ db, gh, config, log, now = Date.now }) {
   async function refreshRun(installationId, repo, runId, { late = () => false, gone = () => false } = {}) {
     const out = { comments: [], board: [] };
     try {
-      const row = await db.run(installationId, repo.id, runId);
+      const row = await db.run(installationId, repo.id, runId, { map: false });
       const state = row?.state;
       if (!state) return out;
       const board = on.board ? boardConfig(repo.config) : null;

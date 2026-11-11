@@ -106,7 +106,7 @@ export function commands({ db, gh, writes, log, now = Date.now }) {
     const open = [];
     for (const r of await db.runsReferencing(inst, key)) {
       const repo = repos.find((x) => x.id === r.repoId);
-      const row = repo && await db.run(inst, repo.id, r.runId);
+      const row = repo && await db.run(inst, repo.id, r.runId, { map: false });
       if (row?.state && !row.state.closed) open.push({ repo, runId: r.runId, units: [...new Set(refsOf(row.state).filter((x) => x.key === key).map((x) => x.unit))] });
     }
     if (!open.length) return { refuse: 'This issue or pull request is not linked to an open coordinator run.' };

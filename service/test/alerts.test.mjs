@@ -229,6 +229,7 @@ test('a recipient who lost access hears nothing more, and is unsubscribed; queue
     assert.deepEqual(out, [['ana', 'no access']]);
     assert.equal(t.sent.push.length, 1, 'nothing sent, so no question text either');
     assert.deepEqual(await t.store.subscribers(INST, REPO), [], 'unsubscribed');
+    assert.deepEqual(await t.store.watchedRepos(), [], 'so the sweep has no repo to read');
   } finally { await t.close(); }
 
   const h = new Date().getUTCHours();
@@ -283,6 +284,7 @@ test('alerts page: subscribe needs read access; settings save; an email is used 
     r = await form(t, cookie, '/alerts/watch', { csrf: p.csrf, repo: 'acme/web', on: '1' });
     assert.equal(r.status, 303);
     assert.equal((await t.store.subscribers(INST, REPO)).length, 1);
+    assert.deepEqual(await t.store.watchedRepos(), [{ installationId: INST, repoId: REPO }]);
     r = await form(t, cookie, '/alerts/settings', { csrf: p.csrf, email: 'ana@example.com', tz: 'Europe/London', quiet_start: '22', quiet_end: '7', ch_push: '1', ch_email: '1' });
     assert.match(await r.text(), /We sent a link to ana@example.com/);
     let s = await t.store.settings(5);
