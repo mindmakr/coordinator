@@ -247,4 +247,13 @@ Coordinator is maintained by one author. It needs contributors, people who write
 
 ## License
 
-The skill, its scripts and the shared code are [MIT](LICENSE). The hosted service in `service/` is [AGPL-3.0](service/LICENSE): you may run and change it, and if you offer a changed version to others over a network, you share your changes.
+| Part | Licence | What it means |
+|---|---|---|
+| The skill, its scripts and the shared code | [MIT](LICENSE) | Use it, change it and ship with it, in personal and commercial work. |
+| The service in `service/` | [AGPL-3.0](service/LICENSE) | Build it, host it and deploy it. If you offer a changed version to others over a network, you share your changes. |
+| Team and enterprise features in `service/ee/` | [Enterprise licence](service/ee/LICENSE.md) | Read and test freely. Production use needs a subscription. |
+| The Lucid Coding manifesto and whitepaper | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Share and quote them with credit to Asif Raja. |
+
+Solo developers get everything outside `service/ee/` free, with no time limit. If your company cannot use AGPL software, a commercial licence for the service is available: ask through the [sponsor or partner form](https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml).
+
+The names "Lucid Coding", "Coordinator" and "reins" are covered by the [trademark policy](TRADEMARKS.md). Contributions come in under the [contributor agreement](CLA.md).
