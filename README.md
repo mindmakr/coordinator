@@ -213,7 +213,7 @@ skills/doctor/                   /coordinator:doctor (runs scripts/doctor.mjs)
 skills/coordinator/
 ├── SKILL.md                    the router and the rules every command shares (<500 words)
 ├── references/                 one playbook per command, the bar, briefs, craft, team, routing,
-│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains
+│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains, ceb-manifest
 └── scripts/                    Node 18+, zero dependencies
     ├── run.mjs                 run state and the loop's decisions
     ├── doctor.mjs              the setup check
@@ -223,7 +223,7 @@ skills/coordinator/
     ├── lib/                    pure modules with tests in test/
     └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
 docs/                           the homepage, the manifesto, and install · connect · self-host · permissions · privacy
-tools/                          codex-e2e.mjs and make-old-runs.mjs
+tools/                          codex-e2e.mjs, make-old-runs.mjs and ceb-sign.mjs (signs a CEB suite manifest)
 service/                        the GitHub App and web dashboard (AGPL-3.0, its own dependencies; imports scripts/lib)
 ```
 
