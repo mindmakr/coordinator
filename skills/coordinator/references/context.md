@@ -30,7 +30,7 @@ Do not send a fix round to the builder that did the work. The fix goes to a fres
 
 Why: a builder at 600k tokens re-reads 600k on every turn of the fix. The 26 resumes in the run above were about half of all builder cost, and a fresh agent did the same job for under half as much.
 
-Check: `run.mjs show` lists each unit's builds and rounds. `S/context.mjs` counts the agents. Fewer agents than builds plus rounds means one was resumed.
+Check: `resumedAgents` in `S/context.mjs` counts the agents that were given a second brief. It should be 0, or each one small and inside the cache lifetime.
 
 ### 2. Every agent has a context budget
 
@@ -82,9 +82,11 @@ Check: `subAgents.firstContextMedian` in `S/context.mjs` is roughly the prefix p
 
 ### 8. Measure, and write the numbers in the retro
 
-After a run, run `node S/context.mjs <the session's transcript folder>` and put the output's figures in the retro note: tokens by kind, cost share by agent type, the largest contexts, cache rewrites, wake-ups, big tool results (`learning.md`). The next run sets its budgets from them. A lesson that a rule here saved or missed is added the usual way.
+After a run, run `node S/context.mjs <the session's transcript folder>` and put the output's figures in the retro note: tokens by kind, cost share by agent type and by role, what each round cost, the largest contexts, cache rewrites, wake-ups, big tool results (`learning.md`). The next run sets its budgets from them. A lesson that a rule here saved or missed is added the usual way.
 
-The script reads Claude Code transcripts (`~/.claude/projects/<project>/<session>.jsonl` and the `<session>/subagents/` folder). It prints counts only, never transcript text, and it calls no network. Cost shares use relative weights (input 1, cache write 1.25, cache read 0.1, output 5), so they rank agents; they are not a bill. A sub-agent's type comes from its `.meta.json`; builders and critics that share one agent type show as one group, so name them apart in the run's own `show`.
+The script reads Claude Code transcripts (`~/.claude/projects/<project>/<session>.jsonl` and the `<session>/subagents/` folder). It prints counts only, never transcript text, and it calls no network. Cost shares use relative weights (input 1, cache write 1.25, cache read 0.1, output 5), so they rank agents; they are not a bill. A sub-agent's type comes from its `.meta.json`.
+
+Rounds come from the marker line that starts every brief `run.mjs brief` prints: `[coordinator-brief run=<run> unit=<unit> round=<n> role=builder|critic|integrator]`. The script reads that one line from what the lead sent the agent (never from tool results) and prints the ids in it: `costShareByRole` splits builders from critics even when they share an agent type, and `rounds` has one row per run, unit, round and role. An agent launched without a printed brief (an investigator, a researcher, a hand-written brief) counts as `unmarked`.
 
 ## Why these numbers
 

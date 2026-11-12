@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { briefMark } from '../lib/briefs.mjs';
 import { AgentSummary, report, WEIGHTS } from '../lib/context.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -110,4 +111,54 @@ test('the CLI refuses a missing path, a folder with no transcripts and a bad opt
   const h = run2('--help');
   assert.equal(h.status, 0);
   assert.match(h.stdout, /Where a run's tokens went/);
+});
+
+// Rounds: the marker line that starts every brief (lib/briefs.mjs) says which round an agent's turns belong to.
+const brief = (unit, round, role, extra = '') => ({ type: 'user', message: { content: `${briefMark({ run: 'r1', unit, round, role })}\nYou are the ${role}.${extra}` } });
+
+test('turns after a brief marker are that round\'s; a second marker in one transcript is a resumed agent', () => {
+  const r = run([
+    brief('web', 1, 'builder'), asst('a', 0, { write: 80_000 }), asst('b', 1, { read: 80_000, write: 10_000 }),
+    { type: 'user', message: { content: [{ type: 'text', text: `${briefMark({ run: 'r1', unit: 'web', round: 2, role: 'builder' })}\nfix it` }] } },
+    asst('c', 2, { read: 300_000 }),
+  ], { id: 'b-1' });
+  assert.deepEqual(r.rounds.map((s) => [s.unit, s.round, s.role, s.turns, s.maxContext]), [['web', 1, 'builder', 2, 90_002], ['web', 2, 'builder', 1, 300_002]]);
+  assert.equal(r.rounds[0].weighted + r.rounds[1].weighted, r.weighted);
+});
+
+test('a marker inside a tool result, or in the lead\'s own transcript, starts no round', () => {
+  const inResult = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: briefMark({ run: 'r1', unit: 'web', round: 3, role: 'critic' }) }] } };
+  assert.deepEqual(run([asst('a', 0), inResult, asst('b', 1)], { id: 's' }).rounds, []);
+  assert.deepEqual(run([brief('web', 1, 'builder'), asst('a', 0)], { id: 'lead', main: true }).rounds, []);
+  assert.deepEqual(run([{ type: 'user', message: { content: 'see [coordinator-brief run=r1 unit=web round=1 role=builder] above' } }, asst('a', 0)], { id: 's' }).rounds, []);
+});
+
+test('report: cost share by role, one row per run, unit, round and role, and the resumed agents', () => {
+  const lead = run([asst('l1', 0, { read: 500_000 })], { id: 'lead', main: true });
+  const b1 = run([brief('web', 1, 'builder'), asst('a', 0, { write: 80_000 }), brief('web', 2, 'builder'), asst('b', 1, { read: 80_000 })], { id: 'b-1', agentType: 'general-purpose' });
+  const c1 = run([brief('web', 1, 'critic'), asst('c', 0, { write: 40_000 })], { id: 'c-1', agentType: 'general-purpose' });
+  const c2 = run([brief('web', 2, 'critic'), asst('d', 0, { write: 20_000 })], { id: 'c-2', agentType: 'general-purpose' });
+  const integ = run([{ type: 'user', message: { content: briefMark({ run: 'r1', role: 'integrator' }) } }, asst('e', 0, { write: 30_000 })], { id: 'i-1' });
+  const scout = run([asst('f', 0, { write: 10_000 })], { id: 'x-1', agentType: 'Explore' });
+  const rep = report([lead, b1, c1, c2, integ, scout]);
+  assert.deepEqual(rep.costShareByRole.map((g) => g.role).sort(), ['builder', 'critic', 'integrator', 'lead', 'unmarked']);
+  assert.equal(rep.costShareByRole.find((g) => g.role === 'critic').agents, 2);
+  assert.ok(Math.abs(rep.costShareByRole.reduce((n, g) => n + g.weightedPct, 0) - 100) < 0.5);
+  assert.deepEqual(rep.rounds.map((g) => `${g.unit}/${g.round}/${g.role}/${g.agents}/${g.turns}`), ['web/1/builder/1/1', 'web/1/critic/1/1', 'web/2/builder/1/1', 'web/2/critic/1/1', 'null/null/integrator/1/1']);
+  assert.equal(rep.resumedAgents, 1);
+  assert.deepEqual(report([lead, scout]).rounds, []);
+});
+
+test('the CLI prints a brief\'s run, unit, round and role, and nothing else from the prompt', () => {
+  const dir = join(root, 'marked');
+  mkdirSync(join(dir, 'subagents'), { recursive: true });
+  const SECRET = 'PRIVATE-BRIEF-TEXT';
+  const jl = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  writeFileSync(join(dir, 'main.jsonl'), jl([asst('l1', 0, { write: 5000 })]));
+  writeFileSync(join(dir, 'subagents', 'agent-b1.jsonl'), jl([brief('u45', 2, 'critic', ` ${SECRET}`), asst('s1', 0, { write: 3000 })]));
+  const r = spawnSync(process.execPath, [join(scripts, 'context.mjs'), dir], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!r.stdout.includes(SECRET));
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.rounds.map(({ run: id, unit, round, role, turns }) => ({ id, unit, round, role, turns })), [{ id: 'r1', unit: 'u45', round: 2, role: 'critic', turns: 1 }]);
 });

@@ -39,6 +39,16 @@ export const CONTEXT_LINE = 'Keep your context small (references/context.md). Re
 export const FIX_ROUND_LINE = 'This is a fix round and you are a new agent: the quoted gap is the whole task. Read the unit\'s diff and only the files the gap names.';
 export const SUITE_CITE_LINE = 'When this brief quotes a full-suite run on this head, cite it and do not run the suite again.';
 
+// The first line of every brief: which run, unit, round and role the agent works for. context.mjs reads it back
+// from the agent's transcript, so a retro can say what each round cost (references/context.md, rule 8).
+// Ids only (the store's id pattern), so nothing else from a transcript can pass through it.
+const MARK = /^\[coordinator-brief run=([A-Za-z0-9][A-Za-z0-9._-]{0,63})(?: unit=([A-Za-z0-9][A-Za-z0-9._-]{0,63}) round=(\d{1,3}))? role=(builder|critic|integrator)\][ \t]*$/m;
+export const briefMark = ({ run, unit = null, round = null, role }) => `[coordinator-brief run=${run}${unit ? ` unit=${unit} round=${round}` : ''} role=${role}]`;
+export function parseBriefMark(text) {
+  const m = MARK.exec(String(text ?? ''));
+  return m ? { run: m[1], unit: m[2] ?? null, round: m[3] ? Number(m[3]) : null, role: m[4] } : null;
+}
+
 // run: the state; o: { role, unit, quotes: [{ source, text }], where, playbook, env }.
 export function buildBrief(run, o) {
   const quotes = [...(o.quotes ?? [])];
@@ -55,8 +65,11 @@ export function buildBrief(run, o) {
   const b = run.budget ?? {};
   const caps = [b.launchMinutes ? `${b.launchMinutes} minutes` : null, b.launchCost ? `${b.launchCost.amount} ${b.launchCost.currency}` : null].filter(Boolean);
   const budget = caps.length ? [`Budget for this launch: ${caps.join(' and ')}. Near the cap, stop and report what is done and what is left.`] : [];
+  // The round this agent works in: one more than the rounds already judged.
+  const mark = briefMark({ run: run.id, unit: u?.id, round: u ? u.rounds.length + 1 : null, role: o.role });
   if (o.role === 'builder') {
     return [
+      mark,
       `You are the builder for unit ${u.id} of run ${run.id}.`,
       ...quoted(quotes),
       AUTHORITY_LINE,
@@ -79,6 +92,7 @@ export function buildBrief(run, o) {
   }
   if (o.role === 'critic') {
     return [
+      mark,
       `You are a harsh, independent critic for unit ${u.id} of run ${run.id}. You have not seen how it was built, and you must not ask how. ${NO_ASK}`,
       ...quoted(quotes),
       AUTHORITY_LINE,
@@ -117,6 +131,7 @@ export function buildBrief(run, o) {
   }
   if (o.role === 'integrator') {
     return [
+      briefMark({ run: run.id, role: 'integrator' }),
       `Fresh eyes on the whole result of run ${run.id} after every unit has passed. ${NO_ASK}`,
       ...quoted(quotes),
       AUTHORITY_LINE,
