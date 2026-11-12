@@ -169,6 +169,10 @@ The service in [`service/`](service/README.md) is a GitHub App and a web dashboa
 
 Mechanical builder work (docs, copy, translations, renames, fixtures) can go to a cheaper model. Critics, the integrator, and builders on security, money, migrations or auth never go below the strong model. Each round records which model built it and which judged it, and `stats` gives a pass rate per builder model. On by default; off or a custom table in `.coordinator/coordinator.json` ([routing.md](skills/coordinator/references/routing.md)).
 
+## Context: where the tokens go
+
+In one measured run, 97% of tokens were context being re-read, and fix rounds sent back to a large builder were about half of builder cost. So a builder is closed when it reports and a fix round goes to a fresh agent; every agent has a token budget; a round has one critic; the lead runs test suites itself; and the lead trims the fixed prefix before a long run. After a run, `node <skill-dir>/scripts/context.mjs <transcript folder>` prints the aggregates for the retro: counts only, never transcript text ([context.md](skills/coordinator/references/context.md)).
+
 ## Helper models: small jobs off the expensive model
 
 Summaries of what an agent did, picks from a fixed list, and a first look at screenshots can go to a small model on your own machine (Ollama, LM Studio, another PC on your network) or through a router (OpenRouter, OpenAI, any OpenAI-compatible gateway). One command sets it up: `node <skill-dir>/scripts/helper.mjs setup ollama`. Answers are typed; anything unsure is handed back to the strong model, and a helper never judges. Off by default, and nothing depends on it ([helpers.md](skills/coordinator/references/helpers.md)).
@@ -209,12 +213,13 @@ skills/doctor/                   /coordinator:doctor (runs scripts/doctor.mjs)
 skills/coordinator/
 ├── SKILL.md                    the router and the rules every command shares (<500 words)
 ├── references/                 one playbook per command, the bar, briefs, craft, team, routing,
-│                               guardrails, durability, hud, map, quality, learning, codex, sub-skills, domains
+│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains
 └── scripts/                    Node 18+, zero dependencies
     ├── run.mjs                 run state and the loop's decisions
     ├── doctor.mjs              the setup check
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
+    ├── context.mjs             where a run's tokens went, from transcripts (counts only)
     ├── lib/                    pure modules with tests in test/
     └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
 docs/                           the homepage, the manifesto, and install · connect · self-host · permissions · privacy

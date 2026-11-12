@@ -33,6 +33,12 @@ export const TESTS_CRITIC = 'Run the tests mapped to the changed files, plus typ
 // From round 2 the critic reviews what changed since the head the last critic judged (sub-skills/review.md, Delta review).
 export const deltaLine = (head) => `This is a later round: review the delta, \`git diff ${head} <head>\`, plus the code that calls what it changed. A behaviour the delta does not touch passes by reference to the last round's evidence. Review the whole unit again only when the delta touches most of it.`;
 
+// Context is what costs (references/context.md): one run spent 97% of its tokens re-reading context, and fix rounds
+// sent back to a large builder were about half of builder cost.
+export const CONTEXT_LINE = 'Keep your context small (references/context.md). Read file ranges and search results, not whole files over about 10k characters. Pipe long command output through a filter (`| tail -40`, `| grep -n FAIL`) and never read a saved log twice. At about 250k tokens of context, stop, write a handover note (done, left, the files that matter, the commands that work) and report.';
+export const FIX_ROUND_LINE = 'This is a fix round and you are a new agent: the quoted gap is the whole task. Read the unit\'s diff and only the files the gap names.';
+export const SUITE_CITE_LINE = 'When this brief quotes a full-suite run on this head, cite it and do not run the suite again.';
+
 // run: the state; o: { role, unit, quotes: [{ source, text }], where, playbook, env }.
 export function buildBrief(run, o) {
   const quotes = [...(o.quotes ?? [])];
@@ -60,9 +66,10 @@ export function buildBrief(run, o) {
       `Fence: ${run.fence}. Anything outside the fence goes in "Follow-ups" in your report; don't do it.`,
       `Where: ${o.where ?? '<worktree or branch, or the output path>'}. Work only there.`,
       ...playbook,
-      ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.'] : []),
+      ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.', FIX_ROUND_LINE] : []),
       'Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.',
       TESTS_BUILDER,
+      CONTEXT_LINE,
       ...budget,
       `At each milestone (pushed, tests ran, PR opened) run: ${beatLine(run.id, u.id, o.env)} --text "<the milestone>"`,
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your report is lost when the worktree goes.`,
@@ -85,6 +92,8 @@ export function buildBrief(run, o) {
       ...playbook,
       'Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.',
       TESTS_CRITIC,
+      SUITE_CITE_LINE,
+      CONTEXT_LINE,
       ...budget,
       'Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.',
       // Whoever ran detect last recorded them; only a decision note on the unit makes them the lead's (#45).

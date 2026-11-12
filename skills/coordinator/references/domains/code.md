@@ -6,7 +6,7 @@
 2. **The checks for what changed:** typecheck, lint and the tests mapped to the changed files for each side touched, and the full suite once per head (`guardrails.md`, Test runs). The critic runs them itself or reads the logged output for the exact commit.
 3. **The acceptance list** from the issue, plus every decision the owner recorded on it.
 4. **A blind review of the diff.** If the project has a review skill, the critic runs it at its thorough level. Otherwise it follows `sub-skills/review.md`: correctness, a security pass and the project's rules, at full depth every round.
-5. **Visible changes:** screenshots of the changed screens in each language, at the widths the project declares for that surface (`sub-skills/visual.md`).
+5. **Visible changes:** screenshots of the changed screens in each language, at the widths the project declares for that surface (`sub-skills/visual.md`), taken once per unit after the code review has passed.
 
 ## Split
 

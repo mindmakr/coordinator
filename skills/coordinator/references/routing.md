@@ -10,11 +10,13 @@ Mechanical builder work goes to a cheaper model. Judgement stays on the strong o
 | Builder: security, money, migrations, auth, payments, billing, invoicing, authentication, authorization, permissions, secrets, crypto, PII, personal data | `strong` | Pinned: the table cannot route them down |
 | Builder, `mechanical` work: docs, copy, translations, renames, test fixtures, small mirror changes | cheap (`sonnet`) | The bar and the critic catch a slip; the work needs care, not judgement |
 | Builder, anything else | the harness's default | Logic, data and UI need the full model |
-| Researcher | the harness's default | |
+| Researcher, investigator | cheap (`sonnet`) where the harness lets you name a model | Read-only, and the lead checks what it finds. The script does not route or record this role (`models --role researcher` prints `model: null`): pass the model yourself |
 
 A class is pinned when any word of it (split on anything but letters and digits) is one of `auth`, `authn`, `authz`, `money`, `pay`, `fee`, `fees`, `role`, `pii`, `token`, `login`, `bill`, `kyc`, or starts with one of these stems: `secur`, `migrat`, `oauth`, `payment`, `payout`, `payroll`, `salar`, `ledger`, `refund`, `wallet`, `disburs`, `kyc`, `session`, `csrf`, `rbac`, `role`, `permission`, `iban`, `schema`, `authent`, `authori`, `billing`, `invoic`, `secret`, `crypt`, `encrypt`, `password`, `credential`, `otp`, `mfa`, `2fa`, `jwt`, `xss`, `inject`, `ssrf`, `acl`, `sanitiz`, `sanitis`, `cors`, `csp`, `tls`, `cookie`, `audit`, `gdpr`, `pdpl`; or it names personal data or access control. So `invoice-pdf`, `db-migration`, `salary-slip`, `user-permissions` and `personal_data_export` are all pinned. Pinning too much costs money, not safety. A rename or mirror change that touches a pinned area counts as that class too: give both (`--class renames,auth`). A unit in several classes gets the strongest of their choices.
 
 Ask the script instead of working it out: `S/run.mjs models --role builder --class docs` prints `{ model, why }`. `model: null` means "pass no model, use the default".
+
+Critics stay on `strong` today, though they were 16% of the cost in the run measured in `context.md`. A cheaper critic for changes that touch no money, stored amounts or security would need a change here and in `review.md` (Depth is fixed), and is the person's decision at intake. One critic per round and delta reviews (`context.md`, rule 3) save most of that cost without it.
 
 Jobs smaller than a role (a one-line summary, a pick from a list, a first look at a screenshot) can go to a helper model, local or through a router, when the person set one up (`helpers.md`). A helper never takes a role in this table.
 
