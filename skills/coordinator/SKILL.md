@@ -18,21 +18,21 @@ Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare skill).
 | `init` | Learn the project once and write `COORDINATOR.md` | `references/commands/init.md` |
 | `run <task>` | Ask everything up front, then loop until the bar is met | `references/commands/run.md` |
 | `status [run]` | See where a run stands, or resume it | `references/commands/status.md` |
-| `retro <run>` | Before closing: turn the run into lessons, budgets and upstream fixes | `references/learning.md` |
+| `retro <run>` | Turn a finished run into lessons and budgets | `references/learning.md` |
 | `dashboard` | See every run on this PC, live | `references/hud.md` |
 
 ## The core
 
-- **Ask once, through the question tool.** One batch before the run, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Then decide within the answers, log each decision, and stop only for an unapproved gated action (`references/guardrails.md`).
-- **The dashboard takes answers.** Mirror questions with `run.mjs ask`; `run.mjs watch` wakes you (`references/hud.md`).
-- **Short replies.** Outcome first (`references/craft.md`).
-- **The bar decides.** Behaviours make up the bar, written before building. A fresh critic, never the builder, marks each against the real artifact, with evidence (`references/bar.md`).
-- **No slop.** Everything people read meets the craft bar; UI starts from references (`references/craft.md`).
-- **The harness is the team.** Staff roles from its agents, skills and tools (`references/team.md`), cheap models on mechanical builds only (`references/routing.md`); sub-skills cover gaps (`references/sub-skills.md`).
-- **The log decides.** `.coordinator/runs/<run>/events.jsonl`, written only by `run.mjs`, says what happens next; memory only caches it (`references/durability.md`).
-- **The fence holds.** Out-of-scope work becomes a follow-up, never built.
-- **Evidence or it didn't happen.** A PASS without evidence is a FAIL. Record evidence per behaviour (`run.mjs evidence`). `detect.mjs` flags bar-gaming.
-- **It gets better.** A retro ends every run: lessons, budgets (`references/learning.md`) and upstream fixes (`references/upstream.md`).
+- **Ask once, through the question tool.** One batch before the run, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Then decide within the answers, log each decision, stop only for an unapproved gated action (`references/guardrails.md`).
+- **The dashboard takes answers.** Mirror questions with `run.mjs ask`; `watch` wakes you (`references/hud.md`).
+- **The bar decides.** Behaviours make up the bar, written first. A fresh critic, never the builder, marks each against the real artifact (`references/bar.md`).
+- **Short, no slop.** Outcome first; everything people read meets the craft bar (`references/craft.md`).
+- **Spend context well.** A fresh agent per fix round, a budget per agent, one critic per round (`references/context.md`).
+- **The harness is the team.** Staff roles from its agents and skills (`references/team.md`), cheap models on mechanical builds only (`references/routing.md`); sub-skills cover gaps (`references/sub-skills.md`).
+- **The log decides.** `.coordinator/runs/<run>/events.jsonl`, written only by `run.mjs`, says what happens next; memory caches it (`references/durability.md`).
+- **The fence holds.** Out-of-scope work is a follow-up.
+- **Evidence or it didn't happen.** A PASS without evidence is a FAIL: attach it with `run.mjs evidence`. `detect.mjs` flags bar-gaming.
+- **It gets better.** A retro ends every run: lessons, budgets, upstream fixes (`references/learning.md`, `references/upstream.md`).
 
 ## Hard rules
 

@@ -16,7 +16,7 @@ The loop needs no other skill installed. Each step has a short playbook here, in
 | `build`, strings changed | Builder | `sub-skills/translations.md` (with `fix.md`) |
 | `judge`, code | Critic | `sub-skills/review.md`, with its security pass |
 | `judge`, risk area | Second critic | `sub-skills/review.md`, specialist section |
-| `judge`, UI | Visual critic | `sub-skills/visual.md` |
+| `judge`, UI | Visual critic, once per unit after the code critic passes | `sub-skills/visual.md` |
 | `judge`, strings | Critic | `sub-skills/translations.md`, check mode |
 | After a merge; release checks | Critic | `sub-skills/verify.md` |
 | `integrate`, and on request | Integrator | `sub-skills/release-notes.md` |

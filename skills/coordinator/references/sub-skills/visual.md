@@ -1,10 +1,10 @@
 # visual: screens in every language, direction and width
 
-**When:** every `judge` on a unit with a visible change, as the visual critic. Builders also use it to take their own screenshots as pointers.
+**When:** once per unit with a visible change, as the visual critic, after the code critic has passed the head. Not on every round: if it fails and the builder fixes, it runs again, on the screens the delta touches (step 3). Builders also use it to take their own screenshots as pointers.
 
 **Inputs:** the changed screens (from the brief, or the diff's files mapped to routes), the local run steps, seeded logins, locales and screen widths per surface from `COORDINATOR.md`, and the references the bar names (`craft.md`).
 
-**In the loop:** the lead sends it as a second critic beside `review.md` on UI units (`team.md`, Visual critic); both must pass.
+**In the loop:** the lead sends it once the code critic (`review.md`) has passed, on UI units (`team.md`, Visual critic); both must pass. It costs screenshots and tokens, so it does not repeat on rounds the code critic fails (`context.md`, rule 6).
 
 ## Steps
 
