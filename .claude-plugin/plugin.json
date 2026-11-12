@@ -1,7 +1,7 @@
 {
   "name": "coordinator",
   "description": "Ask everything up front, then run work unattended through builders and blind critics until it meets a bar you can check, with hard stops, durable state and lessons that improve each run.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": { "name": "Asif Raja, by mindmakr", "url": "https://github.com/mindmakr" },
   "homepage": "https://github.com/mindmakr/coordinator",
   "repository": "https://github.com/mindmakr/coordinator",
