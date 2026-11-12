@@ -9,8 +9,9 @@
 //   lessons.mjs prune [--keep 60] [--scope …]
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { num, oneOf, optText, parse, text } from './lib/args.mjs';
+import { helpAndExit, num, oneOf, optText, parse, text } from './lib/args.mjs';
 import { webUrl } from './lib/links.mjs';
+import { byRank } from './lib/lessonstore.mjs';
 import { tokens } from './lib/rules.mjs';
 import { findSecret } from './lib/secrets.mjs';
 import { baseDir, readJson, safeId, update } from './lib/store.mjs';
@@ -18,7 +19,6 @@ import { baseDir, readJson, safeId, update } from './lib/store.mjs';
 const FLAGS = { add: ['tag', 'text', 'from', 'source', 'scope'], list: ['tag', 'top', 'scope'], use: ['scope'], drop: ['scope'], prune: ['keep', 'scope'] };
 const norm = (s) => tokens(s).join(' ');
 const idOf = (s) => createHash('sha256').update(norm(s)).digest('hex').slice(0, 10);
-const rank = (l) => l.seen * 2 + l.used;
 
 // Near-duplicates must say the same thing in the same order: "migrations before
 // seed" and "seed before migrations" share every word but are opposite lessons.
@@ -38,7 +38,6 @@ function similar(a, b) {
   }
   return dp[x.length][y.length] / Math.max(x.length, y.length) >= 0.8;
 }
-const byRank = (a, b) => rank(b) - rank(a) || b.lastAt.localeCompare(a.lastAt);
 
 function main(cmd, pos, opt) {
   const file = join(baseDir(oneOf(opt.scope ?? 'global', ['global', 'project'], '--scope')), 'lessons.json');
@@ -94,6 +93,7 @@ function main(cmd, pos, opt) {
   }
 }
 
+helpAndExit(import.meta.url);
 const [cmd, ...rest] = process.argv.slice(2);
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], cmd === 'add' ? ['source'] : []);

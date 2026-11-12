@@ -10,12 +10,46 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
-import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
+import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, grows, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
+import { viewer, viewerEntries } from './evview.mjs';
+import { readStored, storedPath } from './evidence.mjs';
 import { escapeLine } from './view.mjs';
 import { pendingBanner } from './retro.mjs';
 
 export { esc };
+
+// Where the run came from (lib/harness.mjs): the tool and skill version that started it, the name
+// the person uses for it, and a warning when another version of the skill last wrote it.
+export function originLine(o) {
+  const alias = o.alias ? `<b>${esc(o.alias)}</b> · ` : '';
+  return `<p class="meta origin">${alias}${esc(o.line)}${o.later ? ` · ${esc(o.later)}` : ''}</p>`
+    + (o.warning ? `<p class="hint origin-warn" role="note">${badge('stop', 'version')} ${esc(o.warning)}</p>` : '');
+}
+
+// The run's status word as a chip, coloured by kind (lib/progress.mjs runStatus).
+const STATUS_CLS = { running: 's-working', waiting: 's-needs-you', finishing: 's-finishing' };
+export const statusChip = (st) => chip(st.word, st.concluded ? cls(st.outcome) : STATUS_CLS[st.kind]);
+// Units done out of total as a compact bar with its words; a screen reader hears the words.
+export function progressBar(st, small = false) {
+  return `<div class="bar progress${small ? ' small' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${st.pct}" aria-label="${esc(st.progress)}"><i class="${st.concluded ? 'calm' : ''}" style="width:${st.pct}%"></i></div>`;
+}
+// Where the Gaps list is: the coordinator page when served (static snapshots name it).
+const gapsHref = (ctx) => { const c = ctx?.pages?.find((p) => p.path === '/coordinator'); return c ? `${c.href}#self-gaps` : null; };
+
+// The header's status: running runs say how far and how long; a concluded run says it is finished and what it delivered.
+export function statusBlock(st, ctx = null) {
+  if (st.concluded) {
+    const g = gapsHref(ctx);
+    const gaps = `${st.followUps} ${st.followUps === 1 ? 'follow-up' : 'follow-ups'} in ${g ? `<a href="${esc(g)}">Gaps</a>` : 'Gaps'}`;
+    return `<section class="status concluded out-${esc(st.outcome)}" aria-label="Run status"><p class="status-head"><b>This run is finished.</b> ${esc(st.reason[0].toUpperCase() + st.reason.slice(1))}.</p>`
+      + `<p><b>Delivered:</b> ${st.delivered.length ? st.delivered.map(esc).join('; ') : 'nothing'}</p>`
+      + `<p class="meta">${esc(st.progress)} · ${gaps} · closed ${stamp(st.closedAt)}</p>${progressBar(st)}</section>`;
+  }
+  const needs = st.needsYou.length ? ` · <b>needs you:</b> ${st.needsYou.map((q) => esc(q.id)).join(', ')}` : '';
+  return `<section class="status s-kind-${esc(st.kind)}" aria-label="Run status"><p class="status-head"><b>${esc(st.progress)}</b> · ${esc(st.doing)}${needs}</p>`
+    + `${progressBar(st)}<p class="meta">${esc(st.eta.text[0].toUpperCase() + st.eta.text.slice(1))}.</p></section>`;
+}
 const pct = (used, max) => (max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0);
 const TIMELINE_MAX = 300;
 const EMBED_MAX = 150 * 1024;
@@ -24,16 +58,20 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
+    live: null, theme, run: null, artifacts: !!runDir, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
     artHref: (file) => `${up}artifacts/${file.split('/').map(encodeURIComponent).join('/')}`,
-    has: (file) => !runDir || existsSync(join(runDir, 'artifacts', ...file.split('/'))),
+    // Every read goes through storedPath: the state's file names are checked, links never followed.
+    has: (file) => !runDir || storedPath(runDir, file) !== null,
+    // A stored text file's words, for the viewer (lib/evview.mjs caps them).
+    readText: (file) => readStored(runDir, file, 'utf8'),
     // Small screenshots go inline, so the snapshot shows them without loading anything.
     embed: (file) => {
       if (!runDir) return null;
-      try { const b = readFileSync(join(runDir, 'artifacts', file)); return b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null; } catch { return null; }
+      const b = readStored(runDir, file);
+      return b && b.length <= EMBED_MAX ? `data:${mime(file)};base64,${b.toString('base64')}` : null;
     },
   };
 }
@@ -197,23 +235,25 @@ export function goalBlock(v, ctx) {
 }
 
 function list(title, items, repo) {
-  const body = items.length ? `<ul>${keyed(items, (t) => `l-${title}-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None.</p>';
+  const body = items.length ? grows(`<ul>${keyed(items, (t) => `l-${title}-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None.</p>';
   return `<section class="card" data-a="list-${esc(title)}"><h3>${esc(title)} <span class="chip">${items.length}</span></h3>${body}</section>`;
 }
 
 // Open questions only, counted; answered ones in a dimmed, collapsed group with the answer first.
 function questionsCard(v, repo) {
-  const open = v.questions.length ? `<ul>${keyed(v.questions, (t) => `l-Questions-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>` : '<p class="empty">None open.</p>';
+  const open = v.questions.length ? grows(`<ul>${keyed(v.questions, (t) => `l-Questions-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None open.</p>';
   const done = v.answeredQuestions.map((q) => `<li data-a="aq-${esc(q.id)}"><b>${esc(q.id)}</b> ${esc(q.title)}`
     + `<p class="ans"><b>Answered:</b> ${linkify(q.answer, repo)} <span class="cause">— by ${q.by === 'person' ? 'you' : esc(q.by)}${q.at ? `, ${stamp(q.at)}` : ''}</span></p>`
     + `${q.decision ? `<p class="cause">Decision: ${linkify(q.decision, repo)}</p>` : ''}</li>`).join('');
   return `<section class="card" data-a="list-Questions"><h3>Questions <span class="chip" title="open questions">${v.questions.length}</span></h3>${open}`
-    + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, `<ul class="answered">${done}</ul>`) : '') + '</section>';
+    + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, grows(`<ul class="answered">${done}</ul>`)) : '') + '</section>';
 }
 
-export function timelineList(events, repo, finished = new Set()) {
+// The timeline's list; its block is a .list-anchor container (issue #23).
+export const timelineOl = (rows) => `<ol class="timeline" data-tl-list data-ev-list>${rows}</ol>`;
+export function timelineList(events, repo, finished = new Set(), ctx = null) {
   // Each row's key holds its time, kind, who, a hash of its text, and a number if two still match.
-  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit))).join('') : '<li class="empty">Nothing yet.</li>';
+  return events.length ? keyed(events.slice(0, TIMELINE_MAX), (e) => `ev|${e.at}|${e.label}|${e.who}|${hash(`${e.text}|${e.cause ?? ''}|${e.score ?? ''}`)}`).map(([e, k]) => eventRow(e, repo, k, finished.has(e.unit), ctx)).join('') : '<li class="empty">Nothing yet.</li>';
 }
 
 export function hud(v, nowMs = Date.now(), ctx = null) {
@@ -223,16 +263,18 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const form = live && v.open && !ctx.readOnly ? live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
+    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${v.status ? statusChip(v.status) : chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · ${v.status ? `phase ${esc(v.phase)} · ` : ''}started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
+    v.status ? blk('status', statusBlock(v.status, ctx)) : '',
+    v.origin ? blk('origin', originLine(v.origin)) : '',
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
-    v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open)) : '',
+    v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open, ctx.project)) : '',
     blk('goal', goalBlock(v, ctx)),
     blk('needs', needsYou(v, form, ctx)),
     form ? blk('note', noteForm(form)) : '',
     blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
     blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),
     '<h2 data-a="h-Budget">Budget</h2>',
-    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes) + modelCard(v.models, v.modelsUnrecorded), 'div', ' class="budget"'),
+    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes) + modelCard(v.models, v.modelsUnrecorded) + costCard(v.cost), 'div', ' class="budget"'),
     '<h2 data-a="h-Units">Units</h2>',
     `<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <span class="key">${dot('needs-you')} <b>Needs you</b> = only you can unblock it;</span> <span class="key">${dot('blocked')} <b>Waiting for A</b> = blocked on another unit (A);</span> <span class="key">${dot('queued')} <b>Up next</b> = ready, not started;</span> <span class="key">${dot('working')} working;</span> <span class="key">${dot('retrying')} <b>Retrying</b> = the lead is on it;</span> <span class="key">${dot('stale')} <b>Quiet</b> = the lead is checking on a silent agent;</span> <span class="key">${dot('passed')} passed;</span> <span class="key">${dot('stopped')} stopped.</span> Score dots: red = failed try, green = passed try.</p>`,
     blk('units', v.units.length ? [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)].map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
@@ -242,7 +284,8 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
       list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
     '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
     ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
-    blk('timeline', timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id))), 'ol', ' class="timeline" data-tl-list'),
+    blk('timeline', timelineOl(timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id)), ctx)), 'div', ' class="list-anchor"'),
+    blk('evv', viewer(viewerEntries(v), ctx, r)),
   ].join('\n');
   return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
 }
@@ -252,6 +295,13 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
 function modelCard(m, none = 0) {
   if (!m?.length && !none) return '';
   return `<div class="card" data-a="budget-models" title="Rounds built on each model, and how many the critic passed"><div class="row" style="margin:0"><span>builder models</span><b>${esc(modelLine(m ?? [], none))}</b></div></div>`;
+}
+
+// Cost: tokens, minutes and money per run, unit and model, as the lead recorded them (lib/cost.mjs).
+function costCard(c) {
+  if (!c) return '';
+  const items = [...c.byUnit.map((u) => `<li>${esc(u.id)}: ${esc(u.line)}</li>`), ...c.byModel.map((m) => `<li>model ${esc(m.model)}: ${esc(m.line)}</li>`)].join('');
+  return `<div class="card" data-a="budget-cost" title="Tokens, minutes and cost each launch reported, as the lead recorded them"><div class="row" style="margin:0"><span>cost</span><b>${esc(c.run)}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
 }
 
 // Escapes: defects found after a unit passed, from note --kind escape. Shown once there is a pass.

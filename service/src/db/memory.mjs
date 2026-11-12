@@ -75,7 +75,24 @@ export function memoryDb() {
     async runs(installationId, repoId) {
       return [...runs.values()].filter((r) => r.installationId === installationId && r.repoId === repoId).sort((a, b) => a.runId.localeCompare(b.runId)).map(clone);
     },
-    async run(installationId, repoId, runId) { return clone(runs.get(key(installationId, repoId, runId))) ?? null; },
+    // The same rows as runs(), in the same order, without the heavy columns: never the map, and the state only
+    // when asked (state: true). open: true keeps only the runs that have a state and are not closed.
+    // finished: false leaves out the finished runs (open and unreadable ones stay).
+    async runSummaries(installationId, repoId, { state = false, open = false, finished = true } = {}) {
+      return [...runs.values()].filter((r) => r.installationId === installationId && r.repoId === repoId && (!open || (r.state && !r.state.closed)) && (finished || !(r.state && r.state.closed)))
+        .sort((a, b) => a.runId.localeCompare(b.runId)).map(({ state: s, map: _, ...rest }) => clone(state ? { ...rest, state: s } : rest));
+    },
+    // One page of a repo's finished runs with their state, the most recently changed first, and how many there are in all.
+    async finishedRuns(installationId, repoId, { limit = 30, offset = 0 } = {}) {
+      const all = [...runs.values()].filter((r) => r.installationId === installationId && r.repoId === repoId && r.state && r.state.closed)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.runId.localeCompare(a.runId));
+      return { total: all.length, rows: all.slice(offset, offset + limit).map(({ map: _, ...rest }) => clone(rest)) };
+    },
+    // map: false leaves the project map unread; the row then has map: null.
+    async run(installationId, repoId, runId, { map = true } = {}) {
+      const r = runs.get(key(installationId, repoId, runId));
+      return r ? clone(map ? r : { ...r, map: null }) : null;
+    },
     async putRun(installationId, repoId, row) {
       const prev = runs.get(key(installationId, repoId, row.runId));
       runs.set(key(installationId, repoId, row.runId), { mapSha: null, map: null, mapError: null, trailPending: false, trailSeq: 0, ...(prev && { mapSha: prev.mapSha, map: prev.map, mapError: prev.mapError, trailPending: prev.trailPending, trailSeq: prev.trailSeq }), ...clone(row), installationId, repoId, updatedAt: new Date().toISOString() });

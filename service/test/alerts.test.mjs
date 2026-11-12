@@ -229,6 +229,7 @@ test('a recipient who lost access hears nothing more, and is unsubscribed; queue
     assert.deepEqual(out, [['ana', 'no access']]);
     assert.equal(t.sent.push.length, 1, 'nothing sent, so no question text either');
     assert.deepEqual(await t.store.subscribers(INST, REPO), [], 'unsubscribed');
+    assert.deepEqual(await t.store.watchedRepos(), [], 'so the sweep has no repo to read');
   } finally { await t.close(); }
 
   const h = new Date().getUTCHours();
@@ -283,13 +284,15 @@ test('alerts page: subscribe needs read access; settings save; an email is used 
     r = await form(t, cookie, '/alerts/watch', { csrf: p.csrf, repo: 'acme/web', on: '1' });
     assert.equal(r.status, 303);
     assert.equal((await t.store.subscribers(INST, REPO)).length, 1);
+    assert.deepEqual(await t.store.watchedRepos(), [{ installationId: INST, repoId: REPO }]);
     r = await form(t, cookie, '/alerts/settings', { csrf: p.csrf, email: 'ana@example.com', tz: 'Europe/London', quiet_start: '22', quiet_end: '7', ch_push: '1', ch_email: '1' });
     assert.match(await r.text(), /We sent a link to ana@example.com/);
     let s = await t.store.settings(5);
     assert.equal(s.email ?? null, null, 'not used until confirmed');
     assert.deepEqual([s.tz, s.quiet, s.channels.github], ['Europe/London', { start: 22, end: 7 }, false]);
     const link = /confirm\?t=([A-Za-z0-9_-]+)/.exec(t.sent.email[0].text)[1];
-    assert.equal((await fetch(`${t.base}/alerts/confirm?t=x${link.slice(1)}`)).status, 400, 'a wrong token');
+    const wrong = (link[0] === 'x' ? 'y' : 'x') + link.slice(1); // never equal to the real one
+    assert.equal((await fetch(`${t.base}/alerts/confirm?t=${wrong}`)).status, 400, 'a wrong token');
     const opened = await fetch(`${t.base}/alerts/confirm?t=${link}`); // what a mail scanner does
     assert.equal(opened.status, 200);
     assert.match(await opened.text(), /<form method="post" action="\/alerts\/confirm">.*Confirm this address/s);
@@ -397,5 +400,40 @@ test('with no senders configured, the GitHub mention still goes, as the App, wit
     assert.equal(mine.length, 1);
     assert.notEqual(mine[0].id, mention.id);
     assert.ok(t.gh.calls.some((c) => c[0] === 'deleteComment' && c[2] === mention.id));
+  } finally { await t.close(); }
+});
+
+test('alerts page: two watched repos in one installation are re-checked on a view; the one no longer readable is dropped', async () => {
+  const t = await setup();
+  t.gh.addRepo('acme/app', { id: 72, installationId: INST, files: null });
+  await t.db.upsertRepo({ installationId: INST, id: 72, fullName: 'acme/app', private: true });
+  t.gh.users.get('tok-c1').read.add('acme/app');
+  await t.store.subscribe(5, 'ana', INST, 72, 1000);
+  await t.store.subscribe(5, 'ana', INST, REPO, 1000);
+  try {
+    const cookie = await signIn(t, 'c1');
+    t.gh.revoke('tok-c1', 'acme/app');
+    const r = await fetch(`${t.base}/alerts`, { headers: { Cookie: cookie } });
+    assert.equal(r.status, 200);
+    const subs = await t.store.subscriptions(5);
+    assert.deepEqual(subs.map((s) => s.repoId), [REPO], 'the repo ana can no longer read is unsubscribed');
+    assert.ok(subs[0].checkedAt > 1000, 'the other is stamped as checked now');
+  } finally { await t.close(); }
+});
+
+test('the sweep and a security alert pass over closed and unreadable runs', async () => {
+  let open = makeRun('r1', { issues: ['acme/web#12'] });
+  open = appendEvent(open, 'unit.start', { ops: [{ op: 'set', path: ['units', { id: 'u1' }, 'status'], value: 'building' }] }, 'u1');
+  let offset = 0;
+  const t = await setup({ runs: { r1: open, r2: makeRun('r2', { closed: true }), bad: Buffer.from('{"v":1}\n') }, now: () => Date.now() + offset });
+  try {
+    await t.sync();
+    assert.deepEqual((await t.db.runSummaries(INST, REPO)).map((r) => r.runId), ['bad', 'r1', 'r2']);
+    offset = 3 * 3600_000;
+    const s = await t.app.alerts.sweep();
+    assert.deepEqual(s.quiet.map((x) => x[1]), ['sent'], 'only the open run went quiet');
+    assert.match(t.sent.push.at(-1)[1].body, /run r1/);
+    const sec = await t.app.alerts.security(INST, 'acme/web', { kind: 'secret', number: 4 });
+    assert.deepEqual(sec.map((x) => x[1]), ['sent'], 'one security alert, for the open run');
   } finally { await t.close(); }
 });

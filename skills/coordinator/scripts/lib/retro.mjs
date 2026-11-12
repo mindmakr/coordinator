@@ -48,8 +48,10 @@ const list = (xs, fn, none) => (xs.length ? `<ul class="plain">${xs.map((x) => `
 const card = (title, n, body) => `<section class="card"><h3>${esc(title)} <span class="chip">${n}</span></h3>${body}</section>`;
 
 // closed: the run was closed without a retro; the retro can still be written.
-export function pendingBanner(run, closed = false) {
-  return `<div class="needs" data-a="retro-pending"><b>Retro pending.</b> ${closed ? 'The run closed without a retro' : 'Every unit is decided'}: run <code>${esc(retroCommand(run))}</code> to turn this run into lessons, budgets and upstream fixes${closed ? '' : ', then close it'}. <span class="cause">references/learning.md</span></div>`;
+// where: the project the run belongs to, when the page shows a run of another project.
+const inProject = (where) => (where ? ` in ${esc(where)}` : '');
+export function pendingBanner(run, closed = false, where = null) {
+  return `<div class="needs" data-a="retro-pending"><b>Retro pending.</b> ${closed ? 'The run closed without a retro' : 'Every unit is decided'}: run <code>${esc(retroCommand(run))}</code>${inProject(where)} to turn this run into lessons, budgets and upstream fixes${closed ? '' : ', then close it'}. <span class="cause">references/learning.md</span></div>`;
 }
 
 export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false) {
@@ -62,9 +64,9 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
     + list(b.stopped, (s) => `<b>${esc(s.id)}</b> ${linkify(s.reason, r)}`, 'No unit stopped.');
   const body = [
     `<a class="back" href="${esc(ctx.home)}">← ${esc(v.id)} dashboard</a>`,
-    blk('head', `<header class="run"><h1>Retro · ${esc(v.id)}</h1>${chip(m.has ? 'written' : 'not written', m.has ? 'pass' : 'not-yet')}<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.report ? `<a class="open" href="${esc(ctx.report)}">Report →</a>` : ''}</header>`),
-    pending ? blk('retro-pending', pendingBanner({ id: v.id }, !v.open)) : '',
-    !m.has && !pending ? `<p class="hint">No retro yet. It runs once every unit is decided: <code>${esc(retroCommand({ id: v.id }))}</code>.</p>` : '',
+    blk('head', `<header class="run"><h1>Retro · ${esc(v.id)}</h1>${chip(m.has ? 'written' : 'not written', m.has ? 'pass' : 'not-yet')}<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.report && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.report)}">Report →</a>` : ''}</header>`),
+    pending ? blk('retro-pending', pendingBanner({ id: v.id }, !v.open, ctx.project)) : '',
+    !m.has && !pending ? `<p class="hint">No retro yet. It runs once every unit is decided: <code>${esc(retroCommand({ id: v.id }))}</code>${inProject(ctx.project)}.</p>` : '',
     '<h2>Budget</h2>', blk('retro-budget', budget),
     '<h2>What the run taught</h2>',
     blk('retro-lists', '<div class="lists">'

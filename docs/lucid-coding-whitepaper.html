@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucid Coding: a whitepaper</title>
+<meta name="description" content="Lucid Coding is a way to build software with AI agents and still know your system. The principles, the working loop, what to measure and how to adopt it, by Asif Raja.">
+<meta name="author" content="Asif Raja">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="Lucid Coding: a whitepaper">
+<meta property="og:description" content="How to build software with AI agents and still know your system. By Asif Raja.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mindmakr.github.io/coordinator/lucid-coding-whitepaper.html">
+<meta property="og:image" content="https://mindmakr.github.io/coordinator/img/og-manifesto.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20style%3D%22color%3A%236b6b66%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M10%2010%204.5%204.5M10%2010l5.5-5.5M10%2010v6%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22currentColor%22%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2210%22%20r%3D%222.8%22%2F%3E%3Ccircle%20cx%3D%224.5%22%20cy%3D%224.5%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%2215.5%22%20cy%3D%224.5%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2216.5%22%20r%3D%222%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400;0,500;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="term.js"></script>
+<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="manifesto.css">
+<style>
+  .wp-title { font-size: clamp(2.1rem, 5.2vw, 3.6rem); }
+  .wp-meta { color: var(--ink-2); font-size: .95rem; margin-top: .8rem; }
+  .wp { margin-top: 3.5rem; max-width: 42rem; }
+  .wp section { padding: 2.2rem 0; border-top: 1px solid var(--line); }
+  .wp h2 { font-size: clamp(1.5rem, 3.2vw, 2.1rem); font-weight: 800; letter-spacing: -.02em; line-height: 1.15; margin: 0 0 1rem; }
+  .wp h3 { font-size: 1.2rem; font-weight: 700; margin: 1.8rem 0 .4rem; }
+  .wp p, .wp li { font-size: 1.1rem; color: var(--ink-2); }
+  .wp p { margin: .8rem 0 0; }
+  .wp ul, .wp ol { margin: .8rem 0 0; padding-left: 1.3rem; }
+  .wp li { margin-top: .45rem; }
+  .wp strong { color: var(--ink); }
+  .wp .lead { font-size: 1.25rem; color: var(--ink); }
+  .wp dl { margin: .5rem 0 0; }
+  .wp dt { font-weight: 700; color: var(--ink); margin-top: .7rem; font-size: 1rem; }
+  .wp dd { margin: .1rem 0 0; color: var(--ink-2); font-size: 1.1rem; }
+  .wp-table { overflow-x: auto; margin-top: 1rem; }
+  .wp table { border-collapse: collapse; width: 100%; font-size: 1rem; }
+  .wp th, .wp td { text-align: left; vertical-align: top; padding: .6rem .8rem .6rem 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+  .wp th { color: var(--ink); font-weight: 700; }
+  .wp-toc { columns: 2; column-gap: 2rem; }
+  @media (max-width: 600px) { .wp-toc { columns: 1; } }
+  @media print { .nav { display: none; } .wp section { break-inside: avoid; } }
+</style>
+</head>
+<body class="mf">
+<a class="skip" href="#main">Skip to the whitepaper</a>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="./" aria-label="Coordinator home">
+      <svg class="mark" width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 10 4.5 4.5M10 10l5.5-5.5M10 10v6"/></g><g fill="currentColor"><circle cx="10" cy="10" r="2.8"/><circle cx="4.5" cy="4.5" r="2"/><circle cx="15.5" cy="4.5" r="2"/><circle cx="10" cy="16.5" r="2"/></g></svg>
+      Coordinator
+    </a>
+  </div>
+</header>
+
+<main id="main" class="wrap mf-main">
+  <header class="mf-head">
+    <p class="mf-kicker">The <span data-term>Lucid Coding</span> Whitepaper</p>
+    <h1 class="mf-title wp-title">Build with agents. Still know your system.</h1>
+    <p class="mf-intro">Agents now write much of the code. The risk is no longer that the code does not get written. The risk is that nobody can say what was built, why, or what proved it works. <span data-term>Lucid Coding</span> is a way of working that keeps that knowledge.</p>
+    <p class="mf-by">Asif Raja</p>
+    <p class="wp-meta">Version 0.1, draft for comment · 11 November 2026 · <a href="lucid-coding.html">The manifesto</a> is the short form of this paper.</p>
+  </header>
+
+  <article class="wp">
+
+    <section id="summary">
+      <h2>Summary</h2>
+      <p class="lead">Lucid Coding is the practice of building software with AI agents so that you always know what your agents changed, why they changed it, and what proved it works.</p>
+      <p>It rests on eight principles and one working loop. People agree what "done" means before the build. One agent builds. A second agent, who never sees the first one's reasoning, checks the real result. Every pass carries proof. Every run stays on the record, and what went wrong becomes a lesson for the next run.</p>
+      <p>This paper explains the problem, the principles and the reasons behind them, the loop, what a running app should report about itself, how a team can read a system it did not type, what to measure, and how to adopt the practice in steps.</p>
+      <ol class="wp-toc">
+        <li><a href="#problem">The problem</a></li>
+        <li><a href="#definition">What Lucid Coding is</a></li>
+        <li><a href="#principles">The eight principles</a></li>
+        <li><a href="#loop">The working loop</a></li>
+        <li><a href="#instruments">Instruments</a></li>
+        <li><a href="#seeing">Seeing the system you deployed</a></li>
+        <li><a href="#adopting">Adopting it in steps</a></li>
+        <li><a href="#measure">What to measure</a></li>
+        <li><a href="#limits">Limits and open questions</a></li>
+        <li><a href="#future">Where this is going</a></li>
+      </ol>
+    </section>
+
+    <section id="problem">
+      <h2>1. The problem</h2>
+      <p>When a person writes code, understanding comes with the typing. They know why each part is there because they put it there. When an agent writes the code, the work arrives without the understanding.</p>
+      <p>Vibe coding accepts that trade. You describe what you want, the agent produces something, it looks right, and you move on. That is a fair way to explore an idea. It is a poor way to run a product, for three reasons.</p>
+      <ul>
+        <li><strong>The builder grades its own work.</strong> An agent that says "done, all tests pass" is reporting on itself. It can be wrong, and it has no reason to look for the case it missed.</li>
+        <li><strong>Looking right is not being right.</strong> A screen can look finished while it is slow, makes fifty database queries, or breaks in another language or screen size.</li>
+        <li><strong>The reasons disappear.</strong> The conversation that produced the change ends. A week later, nobody can say why the system is the way it is, including the agent.</li>
+      </ul>
+      <p>The cost shows up later, as an incident nobody can explain, or as a codebase the team is afraid to change.</p>
+    </section>
+
+    <section id="definition">
+      <h2>2. What Lucid Coding is</h2>
+      <p>Lucid means clear and aware. In Lucid Coding the agents do the building, and you stay aware of what is being built. Vibe coding is a feeling; Lucid Coding is knowing.</p>
+      <p>A piece of work is lucid when someone who was not there can answer four questions from the record alone:</p>
+      <ol>
+        <li>What was asked for, in terms that can be checked?</li>
+        <li>What was changed?</li>
+        <li>Who judged it, and were they independent of the builder?</li>
+        <li>What evidence shows it works?</li>
+      </ol>
+      <p>Lucid Coding is not a rule that people must read every line. It is not a ban on fast, exploratory work. It is a standard for work you intend to keep.</p>
+    </section>
+
+    <section id="principles">
+      <h2>3. The eight principles</h2>
+
+      <h3>1. Know your system.</h3>
+      <p>If you cannot say what your agents changed, why, and what proved it, you do not know your system yet. Every other principle serves this one.</p>
+      <dl><dt>In practice</dt><dd>Each unit of work has a written goal, a diff, a verdict and its evidence, kept together.</dd>
+      <dt>Sign it is missing</dt><dd>"I think the agent changed that last week" is the best answer anyone has.</dd></dl>
+
+      <h3>2. Give agents instruments, not just screenshots.</h3>
+      <p>A screenshot shows pixels. It hides why they are slow, broken or clipped. An agent that can only look at the screen guesses at causes.</p>
+      <dl><dt>In practice</dt><dd>In development, the app reports its own actions, state, network calls, timings and layout. That instrumentation is removed from production builds, and the build checks that it is gone.</dd>
+      <dt>Sign it is missing</dt><dd>The agent fixes a slow page by changing things until the screenshot loads faster.</dd></dl>
+
+      <h3>3. Agree the bar before the build.</h3>
+      <p>Write down what done means, as behaviours someone else can check, before anyone starts. A bar written after the work describes the work. It cannot judge it.</p>
+      <dl><dt>In practice</dt><dd>Each behaviour is a short "given, when, then" statement that names what will be checked and how.</dd>
+      <dt>Sign it is missing</dt><dd>The acceptance criteria match the implementation word for word.</dd></dl>
+
+      <h3>4. A blind critic, never the builder, grades the work.</h3>
+      <p>The one who made a thing is the worst judge of it. If the critic reads the builder's reasoning, it inherits the builder's blind spots.</p>
+      <dl><dt>In practice</dt><dd>A separate agent receives the bar and the real result. It does not receive the builder's notes or explanation.</dd>
+      <dt>Sign it is missing</dt><dd>Review comments repeat the builder's own summary.</dd></dl>
+
+      <h3>5. Evidence or it didn't happen.</h3>
+      <p>A pass carries its proof: test output, a screenshot, a timing, a log, a link. A claim with nothing attached counts as a fail.</p>
+      <dl><dt>In practice</dt><dd>Evidence is stored with the unit, in a form another person can open.</dd>
+      <dt>Sign it is missing</dt><dd>The record says "verified manually".</dd></dl>
+
+      <h3>6. Every run is visible.</h3>
+      <p>What the agent saw, what it built, and why it passed or failed stay on the record, during the run and after it. Anyone on the team can read it without asking the agent.</p>
+      <dl><dt>In practice</dt><dd>A run has a page: its units, their state, the critic's findings and the evidence.</dd>
+      <dt>Sign it is missing</dt><dd>The only history is a chat window that has been closed.</dd></dl>
+
+      <h3>7. Every run teaches the next.</h3>
+      <p>Repeated gaps become lessons for the next brief, and past runs set the next budgets. The process improves on the record, where it can be checked.</p>
+      <dl><dt>In practice</dt><dd>After a run, the gaps the critic found are written as short lessons, and the most useful ones are given to the next builder and critic.</dd>
+      <dt>Sign it is missing</dt><dd>The critic finds the same kind of gap every week.</dd></dl>
+
+      <h3>8. Get the work done; performance comes with experience and measurement.</h3>
+      <p>Finish the work to the bar first. Then measure what happened: when the page painted, how long each call took, how many tokens it cost. Speed and cost improve from numbers on the record, not from guesses. Context is a cost a run must budget and measure: most of a run's tokens are context read again, not new work. So a run closes a builder when it reports, sends a fix round to a fresh agent with the findings and the diff, gives every agent a context budget, and records its token totals in the retro. In one measured run, 97% of tokens were context read again, builders were 61% of the cost, and fix rounds sent back to the same builder were about half of the builder cost (<a href="https://github.com/mindmakr/coordinator/blob/main/skills/coordinator/references/context.md">the figures and the rules</a>).</p>
+      <dl><dt>In practice</dt><dd>Before and after measurements are attached to the unit that claims an improvement.</dd>
+      <dt>Sign it is missing</dt><dd>"It feels faster."</dd></dl>
+    </section>
+
+    <section id="loop">
+      <h2>4. The working loop</h2>
+      <p>The principles turn into one loop, run once per unit of work.</p>
+      <ol>
+        <li><strong>Intake.</strong> Ask every question up front, so the run does not stop halfway to ask.</li>
+        <li><strong>Bar.</strong> Agree the checkable behaviours. A person approves the bar; this is the main human decision.</li>
+        <li><strong>Build.</strong> A builder agent works in its own isolated copy of the code and runs the tests.</li>
+        <li><strong>Blind critique.</strong> A critic agent checks the real result against the bar, without the builder's reasoning.</li>
+        <li><strong>Evidence.</strong> Each behaviour gets a pass with proof, or a fail with the gap described.</li>
+        <li><strong>Repeat or stop.</strong> Fails go back to the builder. The loop ends when the bar is met or the budget of time, money or rounds is spent. Running out of budget is reported as that, not as a pass.</li>
+        <li><strong>Record and learn.</strong> The run stays readable, and its gaps become lessons.</li>
+      </ol>
+      <p>People are in the loop where their judgement matters most: setting the bar, and deciding what to do when the loop cannot meet it.</p>
+    </section>
+
+    <section id="instruments">
+      <h2>5. Instruments</h2>
+      <p>An agent can only judge what it can observe. A running app should be able to tell an agent, in development:</p>
+      <div class="wp-table"><table>
+        <thead><tr><th>Question</th><th>What the app reports</th></tr></thead>
+        <tbody>
+          <tr><td>What can I do here?</td><td>Named actions with typed inputs, such as "log in as tester" or "set language".</td></tr>
+          <tr><td>What is true now?</td><td>Named snapshots of state, with secrets redacted.</td></tr>
+          <tr><td>What happened on the network?</td><td>Calls, statuses and timings.</td></tr>
+          <tr><td>Why is it slow?</td><td>Paint and mount timings in the browser; request, query and outbound call timings on the server.</td></tr>
+          <tr><td>Why does it look wrong?</td><td>The actual layout: sizes, overflow, clipped text, computed styles.</td></tr>
+          <tr><td>What did it look like?</td><td>A snapshot of a named screen, for comparison with the design.</td></tr>
+        </tbody>
+      </table></div>
+      <p>Two rules keep instruments safe. They do nothing until a local, authenticated tool connects. And they are stripped from production builds, with a build step that fails if any trace remains.</p>
+    </section>
+
+    <section id="seeing">
+      <h2>6. Seeing the system you deployed</h2>
+      <p>As agents write more of the code, fewer people will learn a system by reading its source. They will need another way to know what they have deployed. The record of lucid work is that way. It gives four views of the same system.</p>
+      <ul>
+        <li><strong>The intent view:</strong> the bars. Read together, they are a plain-language description of what the system is meant to do, kept current because every change starts by writing one.</li>
+        <li><strong>The change view:</strong> the runs. For any part of the system you can see which units touched it, what they changed and why.</li>
+        <li><strong>The proof view:</strong> the evidence. For any behaviour you can open what showed it working, and when.</li>
+        <li><strong>The runtime view:</strong> the instruments. For any screen or request you can see what it does when it runs, not what the code suggests it does.</li>
+      </ul>
+      <p>Together these let a founder, a new engineer or an auditor understand a deployed product by asking questions of its record. Understanding stops depending on who typed the code, which matters most when nobody did.</p>
+    </section>
+
+    <section id="adopting">
+      <h2>7. Adopting it in steps</h2>
+      <p>Nobody needs all of this on the first day. Each step is useful alone.</p>
+      <div class="wp-table"><table>
+        <thead><tr><th>Step</th><th>What you add</th><th>What you gain</th></tr></thead>
+        <tbody>
+          <tr><td>1. Write the bar</td><td>Checkable behaviours before each task.</td><td>You can tell done from not done.</td></tr>
+          <tr><td>2. Separate the critic</td><td>A second agent that sees only the bar and the result.</td><td>Gaps are found before you find them in production.</td></tr>
+          <tr><td>3. Require evidence</td><td>Proof attached to every pass.</td><td>Claims you can check later.</td></tr>
+          <tr><td>4. Instrument the app</td><td>Actions, state, timings and layout in development.</td><td>Critics that judge causes, not pixels.</td></tr>
+          <tr><td>5. Keep the record and the lessons</td><td>Run pages, lessons, budgets from past runs.</td><td>A system the whole team can read, and a process that improves.</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>For a solo developer,</strong> steps 1 to 3 fit in a single session and cost little more than the build itself. <strong>For a team,</strong> the shared record is the point: reviews, handovers and incident reviews start from it. <strong>For an organisation,</strong> the same record answers who approved what, and on what evidence.</p>
+    </section>
+
+    <section id="measure">
+      <h2>8. What to measure</h2>
+      <p>These numbers come from the record, so they cost nothing extra to collect.</p>
+      <ul>
+        <li><strong>First-pass rate:</strong> the share of units that meet the bar on the first critique. Low means the briefs or the bars need work.</li>
+        <li><strong>Rounds per unit:</strong> how many build and critique rounds a unit takes.</li>
+        <li><strong>Evidence coverage:</strong> the share of passed behaviours with proof attached. The target is all of them.</li>
+        <li><strong>Repeat gaps:</strong> how often the critic finds a gap that an existing lesson already covers.</li>
+        <li><strong>Cost and time per accepted unit:</strong> counted only for units that met the bar.</li>
+        <li><strong>Escapes:</strong> defects found after a unit passed. Each one is a question about the bar, the critic or the instruments.</li>
+      </ul>
+    </section>
+
+    <section id="limits">
+      <h2>9. Limits and open questions</h2>
+      <ul>
+        <li><strong>A critic can be wrong too.</strong> Independence removes shared blind spots; it does not make the critic correct. Escapes should be traced back and turned into lessons.</li>
+        <li><strong>A weak bar passes weak work.</strong> The practice moves the hard thinking to the start. It does not remove it.</li>
+        <li><strong>It costs more per task.</strong> A second agent and stored evidence take time and tokens. The claim is that this is cheaper than the rework and incidents it prevents; each team should check that against its own numbers.</li>
+        <li><strong>Not everything is checkable.</strong> Taste, product judgement and ethics stay with people.</li>
+        <li><strong>Open questions.</strong> How blind should a critic be on very large changes? How long should lessons live before they are retired? How should records from many repositories be read as one system?</li>
+      </ul>
+    </section>
+
+    <section id="future">
+      <h2>10. Where this is going</h2>
+      <p>Agents will get faster and cheaper, and they will be trusted with larger pieces of work. The amount of software one person is responsible for will grow with them. The scarce skill will be knowing: being able to stand behind a system you directed and did not type.</p>
+      <p>Teams that keep the bar, the independent judgement, the evidence and the record will be able to move quickly and still explain themselves to users, to colleagues and to regulators. That is what Lucid Coding is for.</p>
+    </section>
+
+    <section id="use">
+      <h2>Using and citing this paper</h2>
+      <p>This paper is published under <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0</a>. You may share and adapt it, with credit.</p>
+      <p>Cite it as: Asif Raja, "Lucid Coding: a whitepaper", version 0.1, November 2026, https://mindmakr.github.io/coordinator/lucid-coding-whitepaper.html</p>
+      <p>"Lucid Coding" is a trademark of Asif Raja (Mindmakr); see the <a href="https://github.com/mindmakr/coordinator/blob/main/TRADEMARKS.md">trademark policy</a>. Comments and corrections are welcome as <a href="https://github.com/mindmakr/coordinator/issues">issues</a>.</p>
+    </section>
+
+  </article>
+
+  <footer class="mf-end">
+    <p><a href="./">Coordinator</a> and <a href="https://mindmakr.github.io/reins/">reins</a> are open-source tools that practise <span data-term>Lucid Coding</span>: Coordinator runs the builder and blind-critic loop and keeps the record, and reins gives agents instruments inside web, Expo and Node apps.</p>
+    <p class="mf-sign">Author: <a href="https://github.com/mindmakr">Asif Raja, by Mindmakr</a></p>
+  </footer>
+</main>
+
+<script src="site.js" defer></script>
+</body>
+</html>

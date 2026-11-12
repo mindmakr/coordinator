@@ -1,64 +1,80 @@
 # Coordinator
 
-**Coordinator by [mindmakr](https://github.com/mindmakr)**
+**Lucid Coding for your agents.** Coordinator is an open-source agent skill for Claude Code and OpenAI Codex CLI. It runs your coding agents as a team and keeps a record you can open in a browser: how each agent read the problem, what it built, how a blind critic judged it and why, and what is running now.
 
-**Give your coding agent a lead.** Coordinator is an agent skill that runs a task the way a good engineering lead would. It agrees everything with you up front, staffs the work from your harness's own agents, and keeps sending the work back to independent critics until it meets a bar you can check. Then it reports, and remembers what it learned for next time.
-
-Author: Asif Raja, by [mindmakr](https://github.com/mindmakr) · Homepage: [mindmakr.github.io/coordinator](https://mindmakr.github.io/coordinator/)
+Author: Asif Raja, by [Mindmakr](https://github.com/mindmakr) · Homepage: [mindmakr.github.io/coordinator](https://mindmakr.github.io/coordinator/) · [The Lucid Coding manifesto](https://mindmakr.github.io/coordinator/lucid-coding.html)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen)
 ![No dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 
-## What it is, and why
+<picture>
+  <source srcset="docs/img/needs-dark.webp" media="(prefers-color-scheme: dark)">
+  <img src="docs/img/needs-light.webp" alt="The live dashboard of a run: the situation in one line, the goal, and a Needs you box with one question and the lead's recommended answer.">
+</picture>
 
-One person can run a team of agents, if something keeps that team honest. Coordinator does that job:
+## New here? Let your agent set it up
+
+You don't need to read the rest of this page first. Paste this into your coding agent (Claude Code, Codex, Antigravity, Cursor, Gemini CLI):
+
+```text
+Install the Coordinator skill from https://github.com/mindmakr/coordinator
+(in Claude Code: /plugin marketplace add mindmakr/coordinator, then /plugin install coordinator@coordinator).
+Then run its init command on this project, ask me only what you cannot work out,
+and run the doctor. If this is a web or Expo app, also install reins from
+https://github.com/mindmakr/reins and run its setup, so you can drive and measure the app.
+```
+
+Then ask for what you want, in your own words:
+
+```text
+/coordinator:run Build a booking page where customers pick a time and pay. Merge into dev when the review says ready.
+```
+
+The agent asks its questions once, up front, then works without you. You get a dashboard that shows what it built, how a separate critic checked it, and why it passed.
+
+### Why bother, if my agent already writes working code?
+
+Agents are very good at code that **looks right and works in the demo**. What they miss, when nobody checks, is what you can't see on screen:
+
+- **Performance:** a page that loads in 4 seconds, a list that re-renders 40 times, an API call made in a loop.
+- **Security:** a key in the frontend, an endpoint anyone can call, missing permission checks.
+- **Scale:** a query that is fine with 10 rows and dies at 10,000; no limits, no pagination.
+- **Drift:** each new feature quietly breaks an older one, and nobody notices until a customer does.
+
+Coordinator puts a second agent on every change whose only job is to check it against a bar you agreed up front, with evidence. That matters most **after** the first version: when you refactor, fix bugs, or hand the app to someone else, the record of what was built, why, and how it was proven is what lets the next agent (or person) change it safely.
+
+Vibe code the first version if you like. Use Coordinator when it has to keep working.
+
+## Lucid Coding
+
+Vibe coding is a feeling. Lucid Coding is knowing. Agentic engineering is how a lot of software is built now; Lucid Coding is the practice of doing it with your eyes open: you know your system, your agents' thinking, and how each piece was built and judged.
+
+Coordinator brings the process, not opinions about your stack:
 
 - **Questions first.** Every open question is asked once, before the work starts, with a recommendation. Then the run goes on without you.
-- **Nobody marks their own work.** Builders build; a separate critic, blind to the builder's reasoning, checks the real result against a bar written in advance. A pass needs evidence.
-- **Hard stops.** Budgets, no-progress and same-cause detection, and a scope cap are enforced in code, not left to the agent's judgement.
-- **Durable state.** Every run is a locked JSON file. A crash or a context reset resumes from it.
-- **Lessons.** Each run ends with a retro that carries lessons and tuned budgets into the next one.
-- **A dashboard in your browser.** Each run writes its own page, and can serve it locally with answer forms. No separate GUI app to install.
+- **A bar before the build.** Each unit of work gets behaviours a critic can check (`Given … when … then …`), a failing test, or a reference to match.
+- **A blind critic.** Builders build. A separate critic, who never sees the builder's reasoning, checks the real result and marks each behaviour with evidence. A pass needs evidence for all of them.
+- **Stops in code.** Round and time budgets, no-progress and same-cause detection, and a cap on scope added mid-run are enforced by a script.
+- **Everything on the record.** Every step is an append-only event log. The dashboard, the maps and the text view are drawn from it, and a crash resumes from it.
+- **It learns.** Each run ends with a retro that carries lessons and tuned budgets into the next one.
 
----
-
-## With and without it
-
-A single agent pass grades its own homework. It decides the work is "fine", stops early, drifts into side quests, and asks you questions halfway through, while you're away. Coordinator separates the roles and makes the loop strict:
-
-| Without it | With Coordinator |
-|---|---|
-| The builder decides it's done | A fresh critic, blind to the builder's reasoning, checks the real result (tests, screens, diffs) against a written bar |
-| "Make it better" | A bar set before building: a failing test that must pass, a reference to match, an acceptance list |
-| Questions mid-task | Every question asked once, up front. Then it runs unattended |
-| Loops forever, or quits early | Stop rules enforced in code: round and time budgets, no-progress and same-root-cause detection, a cap on scope creep |
-| Tests quietly skipped to go green | A deterministic detector flags focused, skipped or deleted tests, removed assertions, rewritten snapshots and suppressed checks |
-| Generic, template-looking output | A craft bar: no slop in copy, titles, navigation or prompts, and UI built from researched references (or yours, such as Mobbin) |
-| Forgets everything | Lessons and budgets carried from run to run; general improvements sent back to this repo |
+Get the work done first. Speed and cost improve with time and experience, and each run's record is where that experience comes from.
 
 ## How a run works
 
 ```
- intake ─────► split ─────► build ─────► judge ─────► next
- ask once,      units you    one fresh    one blind     ├─ build again: fix the biggest gap
- research,      can judge    builder      critic        ├─ change strategy: the same gap came back
- staff team     separately   per unit     per round     ├─ stop: budget spent, no progress, stuck
-                                                         └─ integrate ─► report ─► retro (learn)
+ intake ─────► bar ─────► build ─────► judge ─────► next
+ ask once,     behaviours   one fresh    one blind     ├─ build again: fix the biggest gap
+ research,     a critic     builder      critic        ├─ change strategy: the same gap came back
+ staff team    can check    per unit     per round     ├─ stop: budget spent, no progress, stuck
+                                                        └─ integrate ─► report ─► retro (learn)
 ```
 
-1. **Intake.** It reads the project and the task, researches references, picks agents for each role, and asks you every open question in one batch, through your harness's question tool, with its recommendation first. It records your answers, including any standing permission such as "merge when the review says ready".
-2. **Loop.** Builders work in parallel where the units are independent, each in its own worktree. Critics judge the real artifact. `run.mjs next` decides what happens to each unit, and refuses any step taken out of order.
-3. **Finish.** An integrator checks that the parts fit together. You get a short report: the outcome, the evidence, what stopped and why, and the decisions it made for you.
-4. **Retro.** Repeated gaps become lessons, past runs tune the budgets, and gaps in the skill itself become issues or PRs here, with your approval.
-
-## Works with
-
-Coordinator brings no team of its own: it staffs builders, critics and researchers from the agents, skills and tools your harness already has. It is designed for any harness that can delegate to sub-agents, run a script and ask you a question.
-
-- **Claude Code:** as a plugin or a copied skill folder.
-- **OpenAI Codex CLI:** the skill folders in `.agents/skills/` and a short block in `AGENTS.md`. Codex has no question tool, so questions go to the dashboard ([what differs](skills/coordinator/references/codex.md)).
-- **Other skills-capable harnesses:** copy the skill folders into the harness's skills folder. Fallbacks are built in (a numbered list where there is no question tool, a file path where there are no Artifacts). Adapters are welcome.
+1. **Intake.** The lead reads the project and the task, researches references, picks agents for each role from the ones your harness already has, and asks every open question in one batch, recommendation first. Your answers, including standing permissions such as "merge when the review says ready", go on the record.
+2. **Loop.** Builders work in parallel where units are independent, each in its own git worktree. Critics judge the real artifact. `run.mjs next` decides what happens to each unit and refuses any step taken out of order.
+3. **Finish.** An integrator checks that the parts fit. You get a short report: the outcome, the evidence, what stopped and why, and the decisions made for you.
+4. **Retro.** Repeated gaps become lessons, past runs tune the budgets, and gaps in the skill itself become proposals here, with your approval.
 
 ## Install
 
@@ -69,17 +85,77 @@ Coordinator brings no team of its own: it staffs builders, critics and researche
 /plugin install coordinator@coordinator
 ```
 
-**OpenAI Codex CLI:** copy every folder under `skills/` into the project's `.agents/skills/`, add the [AGENTS.md block](skills/coordinator/references/codex.md#agentsmd-block), and ask for the coordinator skill by name.
+Then, in a project:
 
-**Any skills-capable harness:** copy every folder under `skills/` into your skills folder (for Claude Code, `~/.claude/skills/`). Installed this way, the commands are `/coordinator init`, `/coordinator run <task>` and so on.
+```
+/coordinator:init
+/coordinator:run Fix issue #142 (wrong totals on the dashboard). Merge into dev when the review says ready.
+```
 
-**Needs:** Node 18+ and git. No other dependencies.
+**Google Antigravity and Gemini CLI:** copy the same folders where that tool reads skills and add its rule; runs go only through `run.mjs` ([harnesses.md](skills/coordinator/references/harnesses.md)). Several tools can run leads on one project at once; each run records which tool and skill version wrote it.
 
-Then add `.coordinator/` to your project's `.gitignore`. The full guide is [docs/install.md](docs/install.md).
+**OpenAI Codex CLI:** copy every folder under `skills/` into the project's `.agents/skills/`, add the [AGENTS.md block](skills/coordinator/references/codex.md#agentsmd-block), and ask for the coordinator skill by name. Codex has no question tool, so questions go to the dashboard ([what differs](skills/coordinator/references/codex.md)).
 
-## Follow runs from anywhere (hosted beta)
+**Any skills-capable harness:** copy every folder under `skills/` into your skills folder. Installed this way, the commands are `/coordinator init`, `/coordinator run <task>` and so on.
 
-Install the Coordinator GitHub App from [app.coordinator.mindmakr.com](https://app.coordinator.mindmakr.com) and every run the lead pushes to your repo's `coordinator-state` branch shows on the web, to the people who can read that repo. Answer the lead's questions and add notes there or in an issue comment (`/coordinator answer q3 b`), and get web push, email or GitHub alerts when a run needs you. Each issue and PR a run works on gets one tracker comment, kept current. Builders and critics still run on your machine. Free during the beta.
+**Needs:** Node 18+ and git. No other dependencies. Add `.coordinator/` to your project's `.gitignore`. The full guide is [docs/install.md](docs/install.md).
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/coordinator:init` | Learns the project once: checks, protected branches, risk areas, standing rules. Asks where run state goes, the theme, budgets, the merge rule and the hosted app. Writes `COORDINATOR.md` and `.coordinator/coordinator.json`, then runs doctor |
+| `/coordinator:dashboard` | Every run on this PC, live: across projects and tools (Claude Code, Codex, Antigravity, Gemini CLI), grouped by project, each linked. One per machine on port 7480; run it again and it prints the link. `stop` stops it |
+| `/coordinator:doctor` | Checks the setup, one line per item with a fix: Node, plugin version, `gh` login and scopes, git remote, `COORDINATOR.md`, settings, stale locks and dashboards, stored evidence, worktree links, lessons, Codex. `--json`, `--offline` |
+| `/coordinator:run <task>` | Intake, then the loop until the bar is met. Takes an issue, a PR, or a plain description |
+| `/coordinator:status [run]` | Where a run stands, in a compact text view, or picks it up after a break or a crash |
+| `/coordinator:retro <run>` | Lessons, budgets and proposals from a finished run |
+
+Each step also has its own playbook you can run alone: `/coordinator:investigate`, `plan`, `fix`, `review` (with a security pass and a project-rule pass every round), `verify`, `visual`, `translations`, `release-notes` (for testers, operators and users) and `board`. If your project has its own skill for a step, that one is used instead.
+
+## Picking up a run
+
+A run survives a crash, a closed session or days away. Everything is in `.coordinator/runs/<run>/`: the event log (`events.jsonl`), a snapshot derived from it (`state.json`), a readable `workbench.md`, and the evidence the run adopted.
+
+1. **Check the setup first:** `/coordinator:doctor`. It finds stale locks, dashboards that are no longer running, and stored evidence that went missing.
+2. **See where things stand:** `/coordinator:status`. With no run named, it takes the most recent open one and prints what is done, what is running, what stopped and why, and whether anything needs you.
+3. **Carry on.** The lead checks each unit that was building against its branch, worktree or output, sends a unit with nothing to show back to build (`run.mjs reset`), and continues with `run.mjs next`. Your answers from intake are in the run's notes, so it does not ask them again.
+
+**What survives:** your answers and notes, the goal, bar and fence, every round with the builder's report and the critic's verdict, decisions, follow-ups and evidence files. Before a worktree is removed, `run.mjs adopt <run>` copies the screenshots and reports the run mentions into the run folder, so deleting the worktree loses nothing.
+
+**A new run or `--continues`?** Start a new run for new work. When a new run finishes a unit an earlier run left open, link it: `run.mjs init <new-run> … --continues <run>:<unit>`. Both runs record the link, the dashboard and maps show the chain, and the stats count it as one unit.
+
+**On another machine:** the lead pushes the run to the repo's `coordinator-state` branch at pit stops (a unit merged, a decision, the run closed), and `run.mjs pull <run>` restores it elsewhere. A public repo never holds run state: set `stateRepo` in `.coordinator/coordinator.json` to a private companion repo ([durability](skills/coordinator/references/durability.md), [connect](docs/connect.md)). Evidence files stay on the machine that made them.
+
+## See it
+
+<picture>
+  <source srcset="docs/img/walk-dark.webp" media="(prefers-color-scheme: dark)">
+  <img src="docs/img/walk-light.webp" alt="The flow map of a release run with one unit selected: its links lit, the rest dimmed, and a panel to open the unit or walk to its children.">
+</picture>
+
+**Local or hosted?** `/coordinator:dashboard` is for one developer: every run on this PC, served from your machine. The hosted app (below) is for a team or the cloud: runs pushed to GitHub, readable by whoever can read the repo.
+
+`run.mjs serve <run>` serves a live dashboard on 127.0.0.1, behind a token made at each start. It updates in place over Server-Sent Events.
+
+- **Is it finished, and how near?** One status word (Running, Waiting on you, Finishing, or Concluded: done, partial or stopped, with its reason), units done with a percentage and a progress bar, the round in progress, and the time left with the clock time it should be ready. A concluded run says "This run is finished" and what it delivered. `run.mjs status-line <run>` prints the same as one line, which the lead posts in the chat at each milestone and at least every 30–45 minutes; `/coordinator:status` starts with one line per run.
+- **Situation, goal, Needs you.** One plain line on where the run stands, the goal with its behaviours and evidence, and the questions waiting for you with answer forms, recommended option first.
+- **Who waits on whom.** A unit waiting for another says **Waiting for A** and links to it; the waited-on unit says **Blocks: D**. Only a unit with an open question for you is amber and says **Needs you**.
+- **A page per unit.** Behaviours, evidence, every round (builder's report, critic's verdict, score, root cause), which model built and judged it, notes, issue and PR links, and its own timeline.
+- **Maps.** Flow (what waits on what, the critical path, linked issues, PRs and follow-on runs), goal relevance (work off the goal stands out), mind and heat (effort and churn per hour). Select a box, then walk the map with the arrow keys.
+- **A report per run** (`/report`, `report.html`): release notes for devops and testers that the lead stores with `run.mjs report <run> --file`, started from a draft read from the run and git (`--draft`: PRs, merges, migrations, env vars, scripts, jobs), and code quality and compliance signals from `run.mjs quality <run|--project>`: duplication, function length, nesting, naming, unused files, security (secrets, eval, SQL by concatenation, TLS off, open CORS, unguarded routes) and privacy for PDPL and GDPR. Each signal carries file:line evidence for a person to review; it is not a compliance certification ([quality.md](skills/coordinator/references/quality.md)).
+- **A retro page** (`/retro`, `retro.html`): retro notes, lessons added, budgets, upstream proposals and escapes. Once every unit is decided the dashboard shows **Retro pending** with `/coordinator:retro <run>`.
+- **The coordinator's own page.** **Active runs** at the top (each one's status, progress and ETA, and when the machine frees up), then across every run in the project: pass rate, rounds to pass and time per unit with the trend, work carried across runs, lessons with their sources, and proposals.
+- **Project map.** `run.mjs map <run>` maps modules and imports, shared helpers, settings keys, routes and screens, and functions with the same shape, with Node built-ins only. `run.mjs calls <run> <unit>` lists the JS/TS functions a unit's diff touched, what they call and what calls them, on the unit page and in the maps page's Calls view ([map.md](skills/coordinator/references/map.md)).
+- **Export PDF** on every page, and a script-free `hud.html` snapshot beside the state. `run.mjs show <run>` prints the same view as text.
+- **Looks like your project.** `init --theme app/globals.css` maps your design system's colours, fonts and radius onto it.
+
+## Follow runs from anywhere
+
+The service in [`service/`](service/README.md) is a GitHub App and a web dashboard. It reads the `coordinator-state` branch and shows each run, drawn by the same renderers, to the people who can read that repo on GitHub. Answer the lead and add notes there or in an issue comment (`/coordinator answer q3 b`), and get web push, email or GitHub alerts when a run needs you. Builders and critics still run on your machine.
+
+- **Self-host today:** one container and Postgres, with your own GitHub App ([self-host](docs/self-host.md)).
+- **Hosted:** app.coordinator.mindmakr.com is opening soon, free during the beta ([#42](https://github.com/mindmakr/coordinator/issues/42)).
 
 | Doc | What |
 |---|---|
@@ -89,116 +165,67 @@ Install the Coordinator GitHub App from [app.coordinator.mindmakr.com](https://a
 | [Permissions](docs/permissions.md) | Each App permission and why |
 | [Privacy](docs/privacy.md) | What the hosted service keeps, for how long, and what never leaves your machine |
 
-## Use
+## Model routing
 
-| Command | What it does |
+Mechanical builder work (docs, copy, translations, renames, fixtures) can go to a cheaper model. Critics, the integrator, and builders on security, money, migrations or auth never go below the strong model. Each round records which model built it and which judged it, and `stats` gives a pass rate per builder model. On by default; off or a custom table in `.coordinator/coordinator.json` ([routing.md](skills/coordinator/references/routing.md)).
+
+## Context: where the tokens go
+
+In one measured run, 97% of tokens were context being re-read, and fix rounds sent back to a large builder were about half of builder cost. So a builder is closed when it reports and a fix round goes to a fresh agent; every agent has a token budget; a round has one critic; the lead runs test suites itself; and the lead trims the fixed prefix before a long run. After a run, `node <skill-dir>/scripts/context.mjs <transcript folder>` prints the aggregates for the retro: counts only, never transcript text ([context.md](skills/coordinator/references/context.md)).
+
+## Helper models: small jobs off the expensive model
+
+Summaries of what an agent did, picks from a fixed list, and a first look at screenshots can go to a small model on your own machine (Ollama, LM Studio, another PC on your network) or through a router (OpenRouter, OpenAI, any OpenAI-compatible gateway). One command sets it up: `node <skill-dir>/scripts/helper.mjs setup ollama`. Answers are typed; anything unsure is handed back to the strong model, and a helper never judges. Off by default, and nothing depends on it ([helpers.md](skills/coordinator/references/helpers.md)).
+
+## Companion: reins
+
+[**reins**](https://github.com/mindmakr/reins) ([site](https://mindmakr.github.io/reins/) · [examples](https://github.com/mindmakr/reins-examples)) is the companion tool for web (Vite, Next.js, React) and Expo apps. While Coordinator runs the builder and blind-critic loop, **reins** sits inside your app during development (< 5 KB core, stripped from production builds and checked by `reins-verify-bundle`) and gives builders and visual critics 11 MCP tools (plus WebMCP) to trigger typed actions (`login-as-tester`, `set-locale`), read store snapshots, inspect network calls and console errors, measure page lifecycle, component mount/render and API latency (`reins_perf`), inspect DOM subtrees with computed CSS and overflow/clipping flags (`reins_dom`), and snap exact panel screenshots by id (`reins_snap`) instead of clicking by pixels. With `reins/node` on the backend, one timeline runs from the click through the fetch, the server route and its database spans, back to the panel's re-render (`reins_server`). `reins_report` turns a session into a Markdown report that a Coordinator critic attaches as evidence, `npx reins report --compare` shows what a change made faster or slower, and testers can record a session on a staging build and export it for an agent to analyse. Its own agent skill (`/reins:setup`) wires an existing or new app automatically.
+
+## Safe by default
+
+- Network calls only where you ask for them: `run.mjs push` and `pull` run git against your own remotes at pit stops; `run.mjs watch --remote` pulls the state branch on a timer and can hold one connection to a coordinator service you name; doctor asks `gh` and checks the latest release tag unless `--offline`; `helper.mjs` calls the helper-model server you set up (on your machine, your network, or the router you chose), with the key read from an environment variable. Nothing else connects anywhere.
+- No shell strings; ids are checked against path traversal.
+- Secrets are refused in lessons and masked in run state.
+- Merging, deploying, deleting, spending or posting needs your approval, given up front.
+- A detector reads each diff for the usual ways to fake a green run: focused, skipped or deleted tests, removed assertions, rewritten snapshots and suppressed checks.
+
+## 1.1: shipped so far, and coming
+
+| Add-on | Status |
 |---|---|
-| `/coordinator:init` | Learns the project once: checks, protected branches, risk areas, standing rules. Asks the setup questions (where run state goes, theme, budgets, merge rule, hosted app). Writes `COORDINATOR.md` and `.coordinator/coordinator.json`, then runs doctor |
-| `/coordinator:doctor` | Checks the setup, one line each with a fix: Node, plugin version, `gh` login and scopes, git remote, `COORDINATOR.md`, settings, stale locks and dashboards, stored artifacts, worktree links, lessons, Codex. `--json`, `--offline` |
-| `/coordinator:run <task>` | Intake, then the loop until the bar is met. Takes an issue, a PR, or a plain description |
-| `/coordinator:status [run]` | Where a run stands (a compact text HUD), or picks it up after a break or a crash |
-| `/coordinator:retro <run>` | Lessons, budgets and upstream improvements from a finished run |
-
-Screenshots and reports a run mentions in a worktree are copied into the run with `run.mjs adopt <run>` before the worktree goes, so the dashboard keeps them (`references/durability.md`).
-
-Example:
-
-```
-/coordinator:run Fix issue #142 (wrong totals on the dashboard). Merge into dev when the review says ready.
-```
-
-You can also describe the goal ("coordinate this…") and the agent picks the command itself.
-
-**Built-in sub-skills.** The loop needs no other skill installed. Each step has its own playbook, and the plugin lists each one so you can run a step on its own: `/coordinator:investigate`, `plan`, `fix`, `review` (with a security pass and a project-rule pass, at full depth every round), `verify`, `visual`, `translations`, `release-notes` and `board`. If your project has its own skill for a step, that one is used instead.
-
-## Dashboard
-
-![The live dashboard: situation, goal, a question with its recommended answer](docs/dashboard.png)
-
-`run.mjs serve <run>` serves a live dashboard on 127.0.0.1, behind a token made at each start:
-
-- **Live:** it updates in place over Server-Sent Events as the run moves; open sections, scroll, theme and filters stay put, across updates and reloads.
-- **Goal: met / not yet** at the top, with the goal's behaviours and their evidence; then what needs you, with answer forms (recommended option first) and a note box.
-- **Behaviours make up each unit's bar** (`Given … when … then …`). The critic marks each pass or fail with evidence; a unit cannot pass while one is failing or unchecked. Test output, screenshots and links are attached per behaviour with `run.mjs evidence`.
-- **A page per unit:** behaviours, evidence, every round (builder's report, critic's verdict, score, cause), notes and questions, issue and PR links, and its own timeline.
-- **Timelines** with colour-coded, labelled badges, search, kind and unit filters, time ranges and sort.
-- **Links:** URLs, `owner/repo#12`, `#12`, commit shas and branch names open on GitHub in a new tab.
-- **A report per run** (`/report`, `report.html`): release notes for devops and testers that the lead stores with `run.mjs report <run> --file`, started from a draft read from the run and git (`--draft`: PRs, merges, migrations, env vars, scripts, jobs), and code quality and compliance signals from `run.mjs quality <run|--project>`: duplication, file and function length, nesting, naming, unused files, security (secrets, eval, SQL by concatenation, TLS off, open CORS, unguarded routes) and privacy for PDPL and GDPR (personal data in logs and URLs, unencrypted sensitive columns, no deletion path or consent text). Each signal carries file:line evidence for a person to review; it is not a compliance certification.
-- **A retro page** (`/retro`, `retro.html`): the run's retro notes, lessons added, budgets, upstream proposals and escapes. Once every unit is decided the dashboard shows **Retro pending** with `/coordinator:retro <run>`, and `close` warns while no retro exists.
-- **The coordinator's own page** (`/coordinator`, linked from the header; `run.mjs self` in text): across every run in the project, its age, lessons with their sources, memory (`COORDINATOR.md` and your past answers), pass rate, rounds to pass and time per unit with the trend, history, what each open run waits on, its proposals, and the side studies it ran while waiting (`init --study-budget`). Other runs open read-only at `/run/<run>`.
-- **Looks like your project:** `init --theme app/globals.css` (or `Theme:` in `COORDINATOR.md`) maps your design system's colours, fonts and radius onto it. Light, dark or system.
-
-**From anywhere (beta, self-host):** [`service/`](service/README.md) is a GitHub App and a web dashboard that takes answers, notes and alerts. It reads the `coordinator-state` branch that `run.mjs push` writes and shows each run, drawn by the same renderers, to the people who can read the repo on GitHub. One container plus Postgres; the App manifest and Dokploy notes are in its README.
-
-Each change also writes `hud.html` and a page per unit beside the state: a static, script-free snapshot you can open from disk or publish. `run.mjs show <run>` prints the same at a glance in text. `run.mjs watch <run>`, in the lead's background, prints each answer and note as it arrives, so the lead hears at once; with `--remote` it also pulls answers made on the web or by comment commands from the state branch (within a minute, or seconds with the service's doorbell).
-
-## Project map
-
-`run.mjs map <run>` maps the code the run works on, with Node built-ins only: modules and imports (tsconfig paths and workspace packages resolved), shared helpers and who uses them, env vars and settings keys with where they are read and written, routes, screens and message keys tied to the services behind them, and functions with the same shape that could be shared. Other languages get an import scan. The dashboard links to it as a filterable graph. `run.mjs touches <run> <path>` prints what one file touches, for a builder's brief. `run.mjs calls <run> <unit>` lists the JS/TS functions a unit's diff touched, what they call and what calls them, on the unit page and in the maps page's Calls view. It stays in the run's folder; `run.mjs map <run> --pit-stop` stages its log and summary for the state branch. Details and limits: [`references/map.md`](skills/coordinator/references/map.md).
+| Model routing with a record of which model did what | Shipped |
+| `/coordinator:doctor` and setup questions in init | Shipped |
+| Follow-on runs and chains (`--continues`) | Shipped |
+| Waiting for A, Up next and Needs you in words and links | Shipped |
+| Run report (release notes for devops and testers) and retro pages | Shipped |
+| Code-quality and compliance signals (`run.mjs quality`) | Shipped |
+| Function calls per unit (`run.mjs calls`, the Calls view) | Shipped |
+| Evidence viewer (screenshots in a scrollable popup) | Shipped |
+| Gaps view with search on the coordinator page | Shipped |
+| Runs that end eagerly: severity gates, fold-in checks, finish line, cost record | Shipped |
+| Local demo of the hosted app (`npm run demo`) | Shipped |
 
 ## What's inside
 
 ```
-skills/<sub-skill>/SKILL.md      thin plugin entries for the nine sub-skills, pointing at the playbooks
+skills/<sub-skill>/SKILL.md      thin plugin entries for the sub-skills, pointing at the playbooks
+skills/doctor/                   /coordinator:doctor (runs scripts/doctor.mjs)
 skills/coordinator/
 ├── SKILL.md                    the router and the rules every command shares (<500 words)
-├── references/
-│   ├── commands/               init · run · status: one playbook per command
-│   ├── bar.md                  choosing a bar a critic can check
-│   ├── briefs.md               builder, critic and integrator briefs
-│   ├── craft.md                the no-slop bar; UI from references
-│   ├── team.md                 staffing roles from your harness's agents
-│   ├── sub-skills.md           which built-in playbook runs at which step
-│   ├── sub-skills/             investigate · plan · fix · review · verify · visual · translations · release-notes · board
-│   ├── codex.md                the OpenAI Codex CLI adapter: install, what differs, what has been checked
-│   ├── guardrails.md           budgets, fence, stop rules, gated actions
-│   ├── durability.md           the event log and snapshot, pit-stop push/pull, heartbeats, resume
-│   ├── hud.md                  the text view, the live dashboard and the snapshot
-│   ├── map.md                  the project map: commands, storage, view, limits
-│   ├── quality.md              the run's report: release notes and quality and compliance signals
-│   ├── learning.md             retro, lessons, budget tuning
-│   ├── upstream.md             contributing improvements back
-│   └── domains/                code · content (writing, design, research, data, prompts)
+├── references/                 one playbook per command, the bar, briefs, craft, team, routing,
+│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains
 └── scripts/                    Node 18+, zero dependencies
     ├── run.mjs                 run state and the loop's decisions
+    ├── doctor.mjs              the setup check
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
-    ├── lib/                    pure modules: rules, store, events, eventschema, schema, statesync, gaming, secrets, args,
-    │                           workbench, view, plain, questions, hud, unitpage, parts, links, theme, timeline,
-    │                           behaviours, evidence, serve, live, self, selfpage, selfdata, study,
-    │                           maps, heat, mapsvg, mapspage, tracker
-    │   └── map/                the project map: scan, resolve, build, event log, page, touches, function calls
+    ├── context.mjs             where a run's tokens went, from transcripts (counts only)
+    ├── lib/                    pure modules with tests in test/
     └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
-docs/                           the homepage, and install · connect · self-host · permissions · privacy
-tools/                          codex-e2e.mjs (a headless run in Codex CLI) and make-old-runs.mjs (the migration fixtures)
+docs/                           the homepage, the manifesto, and install · connect · self-host · permissions · privacy
+tools/                          codex-e2e.mjs and make-old-runs.mjs
 service/                        the GitHub App and web dashboard (AGPL-3.0, its own dependencies; imports scripts/lib)
 ```
-
-## Design principles
-
-- **Short files, one job each.** Load only the playbook you need. Logic lives in pure, tested modules.
-- **State over memory.** Every run is an append-only event log (`events.jsonl`) with a snapshot derived from it (`state.json`), written atomically behind a lock, with a readable `workbench.md`. Crashes and context resets resume from it. At pit stops (a unit merged, a decision, the run closed) `run.mjs push` copies the run, masked, to a `coordinator-state` branch, and `run.mjs pull` picks it up on another machine.
-- **Safe by default.**
-  - Network calls only where you ask for them: `run.mjs push` and `pull` run git against your own remotes at pit stops (and `push` may ask `gh` whether the repo is public); `run.mjs watch --remote` pulls the state branch on a timer and, if you name a coordinator service, swaps your `gh` token there for a short doorbell token and keeps one connection open (`lib/remote.mjs`, `lib/doorbell.mjs`). Nothing else connects anywhere.
-  - No shell strings, and ids validated against path traversal.
-  - Secrets are refused in lessons and masked in run state.
-  - Merging, deploying, deleting, spending or posting needs your approval, given up front.
-- **Extensible.** New playbooks are commands or domain files that reuse the core. They never fork it.
-
-## Coming soon
-
-The road to 1.0 is [#15](https://github.com/mindmakr/coordinator/issues/15), in milestones [#9](https://github.com/mindmakr/coordinator/issues/9) to [#14](https://github.com/mindmakr/coordinator/issues/14). What shipped and what is next:
-
-| Add-on | Status |
-|---|---|
-| Follow and answer a run from a phone, with alerts | Built for 1.0, hosted beta ([#11](https://github.com/mindmakr/coordinator/issues/11), [#12](https://github.com/mindmakr/coordinator/issues/12)) |
-| OpenAI Codex CLI as a second harness | Built for 1.0; a full end-to-end run still to pass ([codex.md](skills/coordinator/references/codex.md)) |
-| Security pass as a second critic on every code change | Shipped in 0.6 ([#13](https://github.com/mindmakr/coordinator/issues/13)) |
-| Run maps: mind, flow, heat and goal relevance | Shipped in 0.6, labels and stats panels in 1.0 ([#20](https://github.com/mindmakr/coordinator/issues/20)) |
-| Project map: code, settings, surfaces and reuse | Shipped in 0.6 ([Project map](#project-map), [#21](https://github.com/mindmakr/coordinator/issues/21)) |
-| A short-lived doorbell token for this App alone (device login) | Next; today the doorbell uses your `gh` token ([permissions](docs/permissions.md#the-doorbell-and-your-gh-token)) |
-| Slack alerts | After 1.0 |
-| Compliance and audit trails, API flows, caller and callee graphs, function and external dependency maps | Proposed; [tell us what you need](https://github.com/mindmakr/coordinator/issues/new/choose) |
 
 ## Contributing
 
@@ -213,20 +240,27 @@ claude plugin validate .
 
 - **The Gauntlet Loop** by Matt Shumer ([write-up](https://somethingbig.ai/gauntlet-loop), [example repository](https://github.com/mshumer/Claude-of-Duty)): the build, blind-critic and repeat loop.
 - **[Impeccable](https://github.com/pbakaus/impeccable)** by Paul Bakaus: the command structure, the context file and the deterministic detector.
-- Wider work on long-term agent memory and graph-shaped workflows shaped the lessons store and the planned maps.
 
 Details are in [CREDITS.md](CREDITS.md).
 
 ## Support the project
 
-Coordinator is maintained by one author. It needs contributors, evangelists, sponsors and partners, especially people who build models, coding tools and open-source agents.
+Coordinator is maintained by one author. It needs contributors, people who write up their runs, sponsors and partners, especially people who build models, coding tools and open-source agents.
 
 - **Contribute:** report runs that went wrong, send fixes, or build an adapter for your harness ([CONTRIBUTING.md](CONTRIBUTING.md)).
-- **Spread the word:** write up a run, present it, or point a team at it.
 - **Sponsor or partner:** credits for test runs, an adapter built together, or sponsorship, through the [sponsor or partner form](https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml). It is a public issue, so leave out private contact and payment details.
-
-More on the [homepage](https://mindmakr.github.io/coordinator/).
 
 ## License
 
-The skill, its scripts and the shared code are [MIT](LICENSE). The hosted service in `service/` is [AGPL-3.0](service/LICENSE): you may run and change it, and if you offer a changed version to others over a network, you share your changes.
+| Part | Licence | What it means |
+|---|---|---|
+| The skill, its scripts and the shared code | [MIT](LICENSE) | Use it, change it and ship with it, in personal and commercial work. |
+| The service in `service/` | [AGPL-3.0](service/LICENSE) | Build it, host it and deploy it. If you offer a changed version to others over a network, you share your changes. |
+| Team and enterprise features in `service/ee/` | [Enterprise licence](service/ee/LICENSE.md) | Read and test freely. Production use needs a subscription. |
+| The Lucid Coding manifesto and whitepaper | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Share and quote them with credit to Asif Raja. |
+
+Solo developers get everything outside `service/ee/` free, with no time limit. If your company cannot use AGPL software, a commercial licence for the service is available: ask through the [sponsor or partner form](https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml).
+
+The names "Lucid Coding", "Coordinator" and "reins" are covered by the [trademark policy](TRADEMARKS.md). Contributions come in under the [contributor agreement](CLA.md).
+
+What you make with Coordinator is yours, and the software comes with no warranty or guarantee and no liability: read the [notice](DISCLAIMER.md) before you rely on it.

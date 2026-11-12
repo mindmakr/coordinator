@@ -84,10 +84,52 @@ const withBar = (html, user, repo) => html.replace('<main id="app">', () => `<ma
 const runState = (row) => row.state;
 const syncNote = (repo) => (repo.error ? `<p class="meta">Last sync: ${esc(repo.error)}</p>` : '');
 
+// The signed-out home: the homepage's message, short, inside this service's CSP (no script,
+// no external font or image; inline styles and inline SVG only). The term lives in TERM.
+const TERM = 'Lucid Coding';
+const SITE = 'https://mindmakr.github.io/coordinator';
+const LANDING_CSS = '<style>'
+  + '.lx{padding:28px 0 8px;max-width:980px}'
+  + '.lx-hero{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,4fr);gap:32px;align-items:center}'
+  + '.lx h1{font-size:clamp(40px,8vw,68px);line-height:1;letter-spacing:-.035em;margin:0 0 10px;font-weight:800}'
+  + '.lx-tag{font-size:clamp(20px,3.2vw,28px);margin:0 0 18px;color:var(--muted);font-weight:500;line-height:1.25}'
+  + '.lx-tag a{color:var(--ink);font-weight:700;text-decoration-color:var(--run);text-decoration-thickness:3px;text-underline-offset:5px}'
+  + '.lx-lede{font-size:18px;line-height:1.55;color:var(--muted);max-width:34em;margin:0 0 22px}'
+  + '.lx-ctas{display:flex;flex-wrap:wrap;gap:10px}'
+  + '.lx-btn{display:inline-block;background:var(--run);color:var(--card);font-weight:700;text-decoration:none;padding:12px 18px;border-radius:10px;white-space:nowrap}'
+  + '.lx-btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}'
+  + '.lx-btn:focus-visible,.lx a:focus-visible{outline:3px solid var(--run);outline-offset:3px}'
+  + '.lx-ring{width:100%;max-width:260px;justify-self:center;color:var(--run)}'
+  + '.lx-ring .t{fill:none;stroke:var(--line);stroke-width:3}'
+  + '.lx-ring .p{fill:none;stroke:currentColor;stroke-width:5;stroke-linecap:round;stroke-dasharray:6;stroke-dashoffset:0;transform:rotate(-90deg);transform-origin:100px 100px}'
+  + '.lx-ring circle.n{fill:var(--card);stroke:var(--line);stroke-width:2}'
+  + '.lx-ring text{font:700 13px system-ui,sans-serif;fill:var(--muted);text-anchor:middle}'
+  + '@media (prefers-reduced-motion:no-preference){.lx-ring .p{animation:lx-go 2.6s cubic-bezier(.22,.8,.2,1) .3s both}@keyframes lx-go{from{stroke-dashoffset:6}to{stroke-dashoffset:0}}}'
+  + '.lx-points{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:34px 0 0;padding:0;list-style:none}'
+  + '.lx-points li{border-top:2px solid var(--line);padding-top:10px;color:var(--muted);font-size:15px;line-height:1.5}'
+  + '.lx-points b{display:block;color:var(--ink);font-size:16px;margin-bottom:2px}'
+  + '.lx-foot{margin-top:28px;font-size:14px;color:var(--muted)}'
+  + '@media (max-width:720px){.lx-hero{grid-template-columns:minmax(0,1fr)}.lx-ring{max-width:180px;justify-self:start}.lx-points{grid-template-columns:minmax(0,1fr)}}'
+  + '</style>';
+const LANDING_RING = '<svg class="lx-ring" viewBox="0 0 200 200" aria-hidden="true"><circle class="t" cx="100" cy="100" r="76"/><circle class="p" cx="100" cy="100" r="76" pathLength="6"/>'
+  + [[100, 24], [166, 62], [166, 138], [100, 176], [34, 138], [34, 62]].map(([x, y], i) => `<circle class="n" cx="${x}" cy="${y}" r="12"/><text x="${x}" y="${y + 4.5}">${i + 1}</text>`).join('')
+  + '<text x="100" y="97">builder</text><text x="100" y="114">≠ critic</text></svg>';
+
 export function landing() {
-  const body = blk('head', '<header class="run"><h1>Coordinator</h1></header>')
-    + '<section class="card"><p>Follow your coordinator runs from anywhere. Sign in with GitHub: you see the runs of every repo you can read where the Coordinator App is installed, and nothing else.</p>'
-    + '<p><a href="/login">Sign in with GitHub</a></p></section>';
+  const body = LANDING_CSS + blk('head', '<section class="lx" aria-labelledby="lx-h">'
+    + '<div class="lx-hero"><div>'
+    + `<h1 id="lx-h">Coordinator</h1><p class="lx-tag"><a href="${SITE}/lucid-coding.html">${TERM}</a> for your agents</p>`
+    + '<p class="lx-lede">Follow your runs from anywhere: how each agent read the problem, what it built, how a blind critic judged it and why, and what is running now. Answer the lead from your phone.</p>'
+    + '<div class="lx-ctas"><a class="lx-btn" href="/login">Sign in with GitHub</a>'
+    + `<a class="lx-btn ghost" href="${SITE}/#install">Install the skill</a></div>`
+    + `</div>${LANDING_RING}</div>`
+    + '<ul class="lx-points">'
+    + '<li><b>Only what you can read</b>You see the runs of repos you can read on GitHub where the Coordinator App is installed, and nothing else.</li>'
+    + '<li><b>Answer and get alerts</b>Answer questions and add notes here or in an issue comment; web push, email or a GitHub mention when a run needs you.</li>'
+    + '<li><b>Work stays on your machine</b>Builders and critics run where you started them (and drive web and Expo apps locally with <a href="https://mindmakr.github.io/reins/">reins</a>). This site reads the run state your lead pushes at pit stops.</li>'
+    + '</ul>'
+    + `<p class="lx-foot"><a href="${SITE}/">What Coordinator is</a> · <a href="https://mindmakr.github.io/reins/">Companion: reins</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/privacy.md">What this service keeps</a> · Author: Asif Raja, by Mindmakr</p>`
+    + '</section>');
   return page({ title: 'Sign in', body, ctx: plainCtx(), path: '/' });
 }
 
@@ -103,7 +145,10 @@ export function projectsPage(user, repos, { counts = new Map(), installUrl = nul
   return withBar(page({ title: 'Projects', body, ctx: plainCtx(user), path: '/' }), user);
 }
 
-export function runsPage(user, repo, rows, nowMs = Date.now()) {
+export const RUNS_PAGE = 30; // finished runs on one page of a repo's run list
+
+// paging ({ page, size, total }): `rows` holds every open and unreadable run and one page of the finished ones.
+export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null) {
   const ctx = ctxFor(repo.fullName);
   const cards = rows.map((row) => {
     if (!row.state) return `<div class="card"><h3>${esc(row.runId)}${chip('unreadable', 'fail')}</h3><p class="meta">${esc(row.error ?? '')}</p></div>`;
@@ -117,10 +162,19 @@ export function runsPage(user, repo, rows, nowMs = Date.now()) {
   });
   const pick = (test) => cards.filter((_, i) => test(rows[i].state));
   const unreadable = pick((s) => !s);
-  const body = blk('head', `<header class="run"><h1>${esc(repo.fullName)}</h1><span class="meta">${rows.length} run${rows.length === 1 ? '' : 's'} · ${repo.syncedAt ? `synced ${stamp(repo.syncedAt)}` : 'not synced yet'}</span></header>`)
+  const finished = pick((s) => s?.closed);
+  const count = paging ? rows.length - finished.length + paging.total : rows.length;
+  let pager = '';
+  if (paging && (paging.total > paging.size || paging.page > 1)) {
+    const first = (paging.page - 1) * paging.size;
+    const link = (p, text) => `<a href="${esc(`${ctx.base}?finished=${p}`)}">${text}</a>`;
+    pager = `<p class="meta">${finished.length ? `Showing ${first + 1} to ${first + finished.length} of ${paging.total} finished runs, the most recently changed first.` : `No finished runs on this page; there are ${paging.total}.`}`
+      + (paging.page > 1 ? ` ${link(paging.page - 1, 'Newer')}` : '') + (first + finished.length < paging.total ? ` ${link(paging.page + 1, 'Older')}` : '') + '</p>';
+  }
+  const body = blk('head', `<header class="run"><h1>${esc(repo.fullName)}</h1><span class="meta">${count} run${count === 1 ? '' : 's'} · ${repo.syncedAt ? `synced ${stamp(repo.syncedAt)}` : 'not synced yet'}</span></header>`)
     + syncNote(repo)
     + '<h2>Open</h2>' + blk('open', pick((s) => s && !s.closed).join('') || '<p class="empty">No open runs.</p>', 'div', ' class="grid"')
-    + '<h2>Finished</h2>' + blk('closed', pick((s) => s?.closed).join('') || '<p class="empty">None yet.</p>', 'div', ' class="grid"')
+    + '<h2>Finished</h2>' + blk('closed', finished.join('') || '<p class="empty">None yet.</p>', 'div', ' class="grid"') + pager
     + (unreadable.length ? `<h2>Unreadable</h2>${blk('bad', unreadable.join(''), 'div', ' class="grid"')}` : '');
   return withBar(page({ title: repo.fullName, body, ctx, path: ctx.base }), user, repo.fullName);
 }

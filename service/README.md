@@ -38,6 +38,24 @@ Shared code: [src/core.mjs](src/core.mjs) imports the skill's `scripts/lib` (eve
 
 `"trackers": false` turns the comments off for that repo. Without `board`, no board is touched. Boards owned by a personal account are not reachable by an App; use an organisation board. `TRACKERS=off` or `BOARD=off` in the environment turns either off everywhere.
 
+## See it locally
+
+Before the hosted App is registered you can still see what it would show. The local demo runs the real service code on your machine with copies of your own run folders, a pretend GitHub and two pretend people.
+
+```bash
+cd service && npm ci
+npm run demo -- --runs D:/projects/mindmakr/payday-web-nextjs/.coordinator/runs/payday-wave2 --runs D:/projects/mindmakr/coordinator/.coordinator/runs/coordinator-1.1
+```
+
+It prints the address to open (`http://127.0.0.1:7480/`; `--port` picks another, `--host ::1` the IPv6 loopback). Every page carries a "Local demo — nothing here is real or shared" banner. Ctrl+C (or closing the terminal, or a crash) stops it and deletes the copies.
+
+- **Your runs, copied.** Each `--runs` folder (`<project>/.coordinator/runs/<run>`, repeatable) is copied at start into a temp folder: the log, its snapshot and the project map only, never evidence files or anything named `.env`. The folders you pass are only read. Runs of one project become one repo, named as a run records it, else `local/<folder>`. The copies go through the lead's own pit stop (masking included), then the service's normal ingest (parse worker, masking, caps), so you see what the hosted App would show.
+- **Demo sign in** stands in for GitHub's sign-in. **ana** can push: the answer and note forms work, and write to the demo's pretend state branch only. **ben** can only read: the forms show, disabled, with the reason.
+- **Demo controls** (`/demo`): a push (the lead pulls the web's answers into its copy, makes a pit stop, and GitHub's push event arrives), a pull request merged or closed, checks passing or failing, and the lead asking a question on an open run. Each is a signed webhook to the service's own `/webhook`.
+- **Alerts outbox** (`/demo/outbox`): both people watch every repo, and alerts that would go out by email, web push or a GitHub mention land here instead.
+
+The demo refuses to start unless it listens on 127.0.0.1 or ::1, when `APP_ENV` or `NODE_ENV` is set to anything but `local`, `demo`, `test` or `development`, and when a real deployment's setting (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `DATABASE_URL`, …) is set. A run whose log is over the service's 8 MB cap is not copied, and the start-up output lists it with any run the service refused. If the demo is killed hard, its copies are removed at the next start. It never contacts github.com or anything else off the machine (`test/demo.test.mjs` watches every connection), and its routes do not exist in the real service. Code: [src/demo/](src/demo).
+
 ## Run it locally
 
 Needs Node 20+ and Docker (for Postgres).
@@ -107,7 +125,7 @@ Syncs are queued (c14), so many pushes at once cannot fill the memory. A push fo
 | `SYNC_JOB_SECONDS` | 300 | One sync of one repo stops reading after this; the rest follow at the next sync. A job that waited more than 30 minutes mints a fresh token (10-1200) |
 | `TRAIL_CONCURRENCY` | 4 | Trail refreshes (tracker comments, board cards) at once. They run after the sync has given its slot back, so a slow trail never holds a sync slot (1-64) |
 | `TRAIL_PER_INSTALLATION` | 1 | Of those, how many one installation may run; installations take turns (1-64) |
-| `TRAIL_READS` | 300 | GitHub calls one installation's trail may make per 10 minutes, other than comment writes: each search for the App's own comment, each board query or field write, each read of a linked repo's `coordinator.json`. Past it the run stays owed and the next sync carries on, like comment writes past their 200. A card found not on the board is asked about again only when the unit's state changes (10-100000) |
+| `TRAIL_READS` | 300 | GitHub calls one installation's trail may make per 10 minutes, other than comment writes: each page of a search for the App's own comment (only when no comment id is recorded, at most 2 pages), each board query or field write, each read of a linked repo's `coordinator.json`. Past it the run stays owed and the next sync carries on, like comment writes past their 200. A card found not on the board is asked about again when the unit's state changes or a day later. One refresh also stops at 100 reads and at `SYNC_JOB_SECONDS`, whichever comes first, and leaves the rest owed (10-100000) |
 
 The periodic resync lists a few installations at a time and queues all their repos at once, so installations take turns in the queue. After an uninstall its queued syncs and trail refreshes are dropped, and a running one writes nothing more.
 

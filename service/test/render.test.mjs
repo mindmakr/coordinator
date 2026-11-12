@@ -117,3 +117,37 @@ test('a run whose log never validated is listed as unreadable, with the reason, 
     assert.equal((await fetch(`${t.base}/r/acme/web/run/bad`, { headers: { Cookie: cookie } })).status, 404);
   } finally { await t.close(); }
 });
+
+test('the home page counts runs, open runs and open questions; the list pages show every run without its map', async () => {
+  const t = await startApp();
+  const out = {};
+  const r1 = makeRun('r1', { mapOut: out });
+  t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: { ...stateFiles({ r1, r2: makeRun('r2', { closed: true }), r3: makeRun('r3'), bad: Buffer.from('{"v":1}\n') }), 'runs/r1/map/events.jsonl': out.map } });
+  t.gh.addUser('tok-reader', { id: 1, login: 'reader', read: ['acme/web'] });
+  await t.db.upsertInstallation({ id: 7, account: 'acme' });
+  await t.app.ingest.syncInstallation(7);
+  const cookie = await signIn(t, 'reader');
+  const get = async (path) => (await fetch(`${t.base}${path}`, { headers: { Cookie: cookie } })).text();
+  try {
+    assert.ok((await t.db.run(7, 70, 'r1')).map, 'r1 has a project map');
+    const home = await get('/');
+    assert.match(home, /<span>4 runs, 2 open<\/span>/, 'closed and unreadable runs count as runs, not as open');
+    assert.match(home, /2 need you/, 'one open question in each open run; a closed run adds none');
+    const list = await get('/r/acme/web');
+    assert.match(list, /4 runs · /);
+    const part = (from, to) => list.slice(list.indexOf(from), to ? list.indexOf(to) : undefined);
+    assert.deepEqual([...part('<h2>Open</h2>', '<h2>Finished</h2>').matchAll(/data-a="run-(\w+)"/g)].map((m) => m[1]), ['r1', 'r3']);
+    assert.deepEqual([...part('<h2>Finished</h2>', '<h2>Unreadable</h2>').matchAll(/data-a="run-(\w+)"/g)].map((m) => m[1]), ['r2']);
+    assert.match(part('<h2>Unreadable</h2>'), /bad/);
+    assert.doesNotMatch(list, /\?finished=/, 'one page of finished runs: no pager');
+    const past = await get('/r/acme/web?finished=2');
+    assert.match(past, /4 runs · /, 'the count is of every run, whatever the page');
+    assert.match(past, /No finished runs on this page; there are 1\./);
+    assert.match(past, /<a href="\/r\/acme\/web\?finished=1">Newer<\/a>/);
+    assert.match(past, /data-a="run-r1"/, 'open runs are on every page');
+    assert.match(await get('/r/acme/web?finished=nonsense'), /data-a="run-r2"/, 'a bad page number is page 1');
+    assert.match(list, /<b>1 need you<\/b>/);
+    assert.equal((await fetch(`${t.base}/r/acme/web/coordinator`, { headers: { Cookie: cookie } })).status, 200);
+    assert.match(await get('/r/acme/web/run/r1/map'), /src\/a\.ts/, 'the map page still has its map');
+  } finally { await t.close(); }
+});

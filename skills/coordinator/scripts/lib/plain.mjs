@@ -52,22 +52,35 @@ export function tryMinutes(run) {
   return out.sort((a, b) => a - b);
 }
 
-export function timeLeft(run, plan, nowMs) {
-  if (run.closed) return 'None: the run is closed.';
-  const left = run.budget.maxMinutes - (nowMs - Date.parse(run.createdAt)) / MINUTE;
-  if (left <= 0) return 'None: the time budget is spent.';
-  const budget = `the time budget has ${duration(left)} left`;
+// The rough estimate behind every "time left": minutes still to run (null before any try
+// finished), the time budget left, and the tries counted. lib/progress.mjs words it too.
+export function estimate(run, plan, nowMs) {
+  if (run.closed) return { state: 'closed' };
+  // A state with no time budget (hand-made or trimmed) has no end: the estimate alone counts.
+  const max = run.budget?.maxMinutes;
+  const left = typeof max === 'number' ? max - (nowMs - Date.parse(run.createdAt)) / MINUTE : Infinity;
+  if (left <= 0) return { state: 'spent' };
   const ds = tryMinutes(run);
-  if (!ds.length) return `No estimate yet: no try has finished. The time budget has ${duration(left)} left.`;
+  if (!ds.length) return { state: 'none', budgetLeft: left };
   const median = ds[Math.floor((ds.length - 1) / 2)];
   // Tries still ahead on the longest chain of unfinished units (units run side by side).
   const open = new Set(plan.units.filter((u) => !['done', 'stopped', 'stop'].includes(u.action)).map((u) => u.id));
   const depth = (id, seen = new Set()) => (seen.has(id) ? 0 : 1 + Math.max(0, ...run.units.filter((u) => u.after === id && open.has(u.id)).map((u) => depth(u.id, new Set([...seen, id])))));
   const roots = run.units.filter((u) => open.has(u.id) && !(u.after && open.has(u.after)));
   const tries = Math.max(0, ...roots.map((u) => depth(u.id))) + (plan.decision === 'integrate' || open.size ? 1 : 0); // + the integration check
-  if (!tries) return 'None: nothing is left to run.';
-  const est = duration(tries * median);
-  return `${est.startsWith('under') ? 'Under a minute' : `About ${est}`} (rough: ${tries} more ${tries === 1 ? 'try' : 'tries'} at a median ${duration(median)} each); ${budget}.`;
+  if (!tries) return { state: 'nothing', budgetLeft: left };
+  return { state: 'estimate', minutes: tries * median, tries, median, budgetLeft: left };
+}
+
+export function timeLeft(run, plan, nowMs) {
+  const e = estimate(run, plan, nowMs);
+  if (e.state === 'closed') return 'None: the run is closed.';
+  if (e.state === 'spent') return 'None: the time budget is spent.';
+  const budget = Number.isFinite(e.budgetLeft) ? `the time budget has ${duration(e.budgetLeft)} left` : 'no time budget';
+  if (e.state === 'none') return `No estimate yet: no try has finished. ${budget[0].toUpperCase()}${budget.slice(1)}.`;
+  if (e.state === 'nothing') return 'None: nothing is left to run.';
+  const est = duration(e.minutes);
+  return `${est.startsWith('under') ? 'Under a minute' : `About ${est}`} (rough: ${e.tries} more ${e.tries === 1 ? 'try' : 'tries'} at a median ${duration(e.median)} each); ${budget}.`;
 }
 
 const failStreak = (rounds) => { let k = 0; for (let i = rounds.length - 1; i >= 0 && rounds[i].verdict === 'fail'; i--) k++; return k; };
@@ -98,6 +111,7 @@ const WORDS = { working: 'Working', passed: 'Passed', stopped: 'Stopped', queued
 export function stateBadge(state, u, d) {
   const ids = waitIds(u);
   const make = (lead, list = [], title = DOTS[state]) => ({ kind: state, lead, ids: list, label: `${lead}${list.join(', ')}`, title });
+  if (state === 'passed' && u?.shipped) return make(shippedLabel(u), [], u.shipped.verdict === 'none' ? 'shipped without a final verdict: the person decided to merge it before a critic judged it; the missing verdict and its open findings are follow-ups' : 'shipped with follow-ups: the person chose to ship it at the finish line; its open findings are follow-ups');
   if (state === 'blocked') return ids.length ? make('Waiting for ', ids) : make('Waiting for another unit');
   if (state === 'needs-you') return isBlocked(d) && ids.length ? make('Needs you · waiting for ', ids) : make('Needs you');
   if (state === 'retrying' || state === 'stale') return make(WORDS[state], [], `The lead is on it: ${attention(u, d) ?? DOTS[state]}`);
@@ -109,6 +123,10 @@ export function dotWords(state, b) {
   const w = `waiting for ${b.ids.join(', ')}`;
   return state === 'blocked' ? w : `${DOTS[state] ?? state}; ${w}`;
 }
+
+// A unit the person shipped at the finish line: never shown as a clean pass.
+// A unit merged on their decision before any final verdict (run.mjs ship, #66) says so.
+export const shippedLabel = (u) => (u.shipped?.verdict === 'none' ? 'Shipped without a final verdict' : `Shipped with follow-ups (score ${u.shipped?.score ?? u.rounds?.at(-1)?.score ?? 'none'})`);
 
 // The badge's label: the lead is handling it. Only Needs you and question cards address the person.
 export const attentionLabel = (reason) => (reason ? (reason.startsWith('no word') ? 'Quiet' : 'Retrying') : null);
@@ -125,6 +143,8 @@ export const purpose = (u) => clip(u.title || String(u.bar ?? '').split(/[;\n]|\
 function how(u, d) {
   const n = u.rounds.length; const last = u.rounds.at(-1);
   const why = last ? clip(last.cause || last.gap, 70) : '';
+  if (u.status === 'pass' && u.shipped?.verdict === 'none') return `shipped without a final verdict on the person's decision${n ? ` after ${n} judged ${n === 1 ? 'try' : 'tries'}` : ''}`;
+  if (u.status === 'pass' && u.shipped) return `${shippedLabel(u).toLowerCase()} on try ${n}`;
   if (u.status === 'pass') return `passed on try ${n}`;
   if (u.status === 'stopped') return `stopped after ${n} ${n === 1 ? 'try' : 'tries'}: ${u.stopReason ?? 'stopped'}${why ? ` (last gap: ${why})` : ''}`;
   if (u.status === 'building') return `building, try ${n + 1}`;
@@ -138,7 +158,9 @@ function how(u, d) {
 
 function then(u, d) {
   switch (d?.action) {
-    case 'done': return 'nothing left to do';
+    case 'done': return d.step === 'merge' ? 'its fold-ins are checked; next it merges' : 'nothing left to do';
+    case 'fold-in': return 'next a quick check of its fold-ins, then it merges';
+    case 'ask-person': return 'next the person decides: ship, one more round, or stop';
     case 'stopped': case 'stop': return 'it goes in the report as stopped';
     case 'judge': return 'next a critic checks it';
     case 'check-stale': return 'next the lead checks on the silent agent';

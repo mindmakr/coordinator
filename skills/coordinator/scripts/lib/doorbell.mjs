@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import { join } from 'node:path';
+import { settingsTracked, trackedRefusal } from './settings.mjs';
 
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 
@@ -29,6 +30,8 @@ export function bellConfig({ base, project, env = process.env }) {
   let cfg = {};
   const file = join(base, 'coordinator.json');
   try { if (existsSync(file)) cfg = JSON.parse(readFileSync(file, 'utf8')) ?? {}; } catch { cfg = {}; }
+  // The service is sent the person's GitHub token, so a committed settings file may not name it.
+  if (!env.COORDINATOR_SERVICE && cfg.service && settingsTracked(base)) return { why: trackedRefusal('service') };
   const service = env.COORDINATOR_SERVICE || cfg.service || null;
   if (!service) return { why: 'no service configured (COORDINATOR_SERVICE)' };
   let url;

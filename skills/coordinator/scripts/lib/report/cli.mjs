@@ -81,19 +81,21 @@ export function reportFor(run, dir, { draft: wantDraft = false, quality: wantQua
   };
 }
 
-function lessonsOf() {
-  const { lessons } = loadSelf();
+function lessonsOf(src = null) {
+  const { lessons } = src ? { lessons: src.lessons() } : loadSelf();
   return [...(lessons.global ?? []).map((l) => ({ ...l, scope: 'global' })), ...(lessons.project ?? []).map((l) => ({ ...l, scope: 'project' }))];
 }
 
 // [[file name, html]] for report.html and retro.html, or just the one named ('report' | 'retro').
-export function reportPages(s, v, dir, ctx, only = null) {
+// src: { runs(), lessons() } of another state folder (a run of another project on the global dashboard);
+// by default the runs and lessons of this folder.
+export function reportPages(s, v, dir, ctx, only = null, src = null) {
   const out = [];
   if (only !== 'retro') out.push(['report.html', reportPage(v, Date.now(), ctx, { report: s.report ?? null, draft: tryJson(files(dir).draft), quality: tryJson(files(dir).quality) })]);
   if (only !== 'report') {
     // Other runs are read only once the retro matters (every unit decided, or closed): it keeps each change cheap.
-    const closed = v.retroPending || s.closed || (s.notes ?? []).some((n) => n.kind === 'retro') ? loadRuns().filter((r) => r.closed) : [];
-    out.push(['retro.html', retroPage(retroModel(s, { lessons: lessonsOf(), closed }), v, Date.now(), ctx, v.retroPending ?? false)]);
+    const closed = v.retroPending || s.closed || (s.notes ?? []).some((n) => n.kind === 'retro') ? (src ? src.runs() : loadRuns()).filter((r) => r.closed) : [];
+    out.push(['retro.html', retroPage(retroModel(s, { lessons: lessonsOf(src), closed }), v, Date.now(), ctx, v.retroPending ?? false)]);
   }
   return out;
 }

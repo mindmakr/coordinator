@@ -7,7 +7,7 @@
 // the state branch (masked again on the way in), repo names, installation ids.
 // Sessions hold encrypted tokens and a hash of the cookie, never the cookie.
 
-const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'run', 'putRun', 'dropRunsExcept', 'deleteInstallation',
+const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'runSummaries', 'finishedRuns', 'run', 'putRun', 'dropRunsExcept', 'deleteInstallation',
   'putRunMap', 'startReread', 'markTrailPending', 'clearTrailPending', 'repoByName', 'setUnitRefs', 'runsReferencing', 'addGhEvent', 'ghEvents', 'tracker', 'putTracker'];
 
 // c12 writes: comment commands, claimed once each.

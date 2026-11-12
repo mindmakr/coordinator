@@ -71,7 +71,7 @@ test('the model with nothing: no runs, no lessons, no COORDINATOR.md', () => {
   assert.match(selfText(m), /no closed run yet \(run\.mjs stats counts closed runs only\)/);
   const one = selfModel({ runs: [oldRun('r1', [unit('u1', 'pass', ['pass'])])], lessons: { global: [{ id: 'l1', tag: 'code', text: 't', seen: 1, used: 0 }] } });
   const page1 = selfPage(one, Date.now(), staticCtx('', 0));
-  assert.match(page1, /1 lesson ·/); assert.match(page1, /across 1 run in/); assert.match(page1, /1 of 1 unit finished/);
+  assert.match(page1, /1 lesson ·/); assert.match(page1, /across 1 run in/); assert.match(page1, /1 of 1 unit done \(100%\)/);
   assert.match(page1, /Counted over 1 finished unit in all runs, open included\. No closed run yet/);
   const t = selfText(one);
   assert.match(t, /1 run \(1 open\) · 1 unit ·/); assert.match(t, /1 lesson ·/); assert.match(t, /1 finished unit \(all runs/);

@@ -1,16 +1,19 @@
 // What a person sees of a run at a glance, computed once from the state. The
 // text view (`run.mjs show`) and hud.html both read this model, so they agree.
+import { origin } from './harness.mjs';
 import { byModel, modelLine, unrecorded, UNSPECIFIED, whoUnit } from './models.mjs';
 import { attention, attentionLabel, clip, dotState, sentence, situation, stateBadge, timeLeft, waitIds } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
 import { chainLine, chainOf } from './chain.mjs';
 import { pendingSyncs, syncStep } from './overlap.mjs';
-import { bySetup, escapes, roundCap, unmet } from './rules.mjs';
+import { bySetup, earlySummary, escapes, roundCap, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
+import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
+import { runStatus } from './progress.mjs';
 
 const MINUTE = 60_000;
-const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale'];
+const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'];
 
 const label = (d) => (d ? `${d.action}${d.reason ? `: ${d.reason}` : ''}${d.phase ? ` (${d.phase})` : ''}` : '');
 
@@ -45,13 +48,15 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
   const dots = new Map(run.units.map((u) => [u.id, dotState(u, next.get(u.id), run.closed ? [] : qs)]));
   const brief = (id) => { const x = run.units.find((y) => y.id === id); const st = dots.get(id); return { id, title: x?.title ?? null, status: x?.status ?? null, dot: st ?? null, badge: x ? stateBadge(st, x, next.get(id)) : null }; };
   return {
-    id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo,
+    id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo, origin: origin(run),
     continues: Array.isArray(run.continues) ? run.continues : [],
     goalCheck: {
       behaviours: goalBehaviours, evidence: run.goalEvidence ?? [],
       met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
     }, bar: run.bar, fence: run.fence,
     phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
+    // The plain status word, progress and ETA (lib/progress.mjs), the same everywhere.
+    status: runStatus(run, plan, { nowMs, runs: linked ? [...linked.values()].filter((r) => r && Array.isArray(r.units)) : [run] }),
     retroPending: retroPending(run, plan.decision), // every unit decided and no retro note yet (lib/retro.mjs)
     open: !run.closed, started: run.createdAt, closedAt: run.closed?.at ?? null,
     situation: situation(run, plan, run.closed ? [] : qs),
@@ -68,13 +73,15 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     // Rounds and pass rate per builder model, once any round recorded one (lib/models.mjs).
     models: byModel([run]).roundsByBuilderModel.filter((m) => !['(not recorded)', UNSPECIFIED].includes(m.model)),
     modelsUnrecorded: unrecorded(run),
+    // Tokens, minutes and money the lead recorded per launch (lib/cost.mjs); "not recorded" where none was.
+    cost: { run: costLine(runCost(run)), byModel: costByModel([run]).map((m) => ({ model: m.model, line: costLine(m) })), byUnit: run.units.map((u) => ({ id: u.id, line: costLine(unitCost(u)) })) },
     escapes: { ...escapes(run), bySetup: bySetup([run]), list: notes.filter((n) => n.kind === 'escape').map((n) => ({ unit: n.unit, round: n.round ?? null, text: n.text, at: n.at })) },
     units: run.units.map((u) => {
       const last = u.rounds.at(-1);
       const d = next.get(u.id);
       const chain = chainOf(linked ?? new Map([[run.id, run]]), run.id, u.id);
       return {
-        id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, after: u.after ?? null,
+        id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, shipped: u.shipped ?? null, after: u.after ?? null,
         sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
         dot: dots.get(u.id), badge: stateBadge(dots.get(u.id), u, d), finished: ['passed', 'stopped'].includes(dots.get(u.id)),
         // Depends on (its after) and blocks (units whose after names it), each with its state.
@@ -89,9 +96,13 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         evidence: last?.evidence ?? null,
         next: label(d),
         personNotes: personNotes.filter((n) => n.unit === u.id),
+        // The lead's decisions, follow-ups and info about this unit (note --unit, #45).
+        unitNotes: notes.filter((n) => n.unit === u.id && ['decision', 'follow-up', 'info'].includes(n.kind)).map((n) => ({ kind: n.kind, text: n.text, at: n.at })),
         bar: u.bar, behaviours: u.behaviours ?? [], evidenceItems: u.evidence ?? [], links: u.links ?? [],
         who: whoUnit(u), // which model built and judged (lib/models.mjs)
         roundList: u.rounds, stopReason: u.stopReason ?? null,
+        // Early reviews (verdict --early, #66): every one on the unit page, the ones since the last round counted.
+        earlyList: Array.isArray(u.early) ? u.early : [], early: earlySummary(u),
         // Files in the unit's last checked diff (the gaming check records the count); null before one.
         files: typeof u.detect?.files === 'number' ? u.detect.files : null,
         asks: qs.filter((q) => q.unit === u.id), timeline: unitTimeline(run, u.id),
@@ -128,7 +139,9 @@ export function text(v) {
     : ['needs you  nothing'];
   const answered = v.answered.map((q) => `answered   ${q.id}: ${clip(answerText(q.answer), 100)} (by ${q.answer.by}; the lead has not used it yet)`);
   const lines = [
-    `${v.id} [${v.tag}] · ${v.phase} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
+    `${v.id} [${v.tag}] · ${v.status.word} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
+    ...statusLines(v.status),
+    `phase      ${v.phase}`,
     `situation  ${clip(v.situation.text, 240)}`,
     ...needs,
     ...answered,
@@ -140,21 +153,42 @@ export function text(v) {
   ];
   for (const u of v.units) {
     const bs = u.behaviours.length ? ` · behaviours ${u.behaviours.filter((b) => b.status === 'pass').length}/${u.behaviours.length}` : '';
-    lines.push(`${u.id.padEnd(w)}${u.status.padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
+    lines.push(`${u.id.padEnd(w)}${(u.shipped ? 'shipped' : u.status).padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
+    if (u.early) lines.push(`${' '.repeat(w)}◦ ${clip(u.early.text, 200)}`);
     if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
     if (u.chainText) lines.push(`${' '.repeat(w)}↔ ${clip(u.chainText, 200)}`);
   }
   if (v.integration.length) lines.push(`integration  ${v.integration.join(' → ')}`);
   if (v.models?.length || v.modelsUnrecorded) lines.push(`models   ${modelLine(v.models, v.modelsUnrecorded)}`);
   if (v.escapes?.escapes) lines.push(`escapes  ${escapeLine(v.escapes)}`);
+  if (v.cost) {
+    lines.push(`cost     run: ${v.cost.run}`, `         by unit: ${v.cost.byUnit.map((u) => `${u.id}: ${u.line}`).join('; ') || 'no units'}`);
+    if (v.cost.byModel.length) lines.push(`         by model: ${v.cost.byModel.map((m) => `${m.model}: ${m.line}`).join('; ')}`);
+  }
   const setups = (v.escapes?.bySetup ?? []).filter((g) => g.setup !== '(not recorded)' || g.escapes);
   if (setups.length) lines.push(`critics  ${setups.map((g) => `${clip(g.setup, 50)}: ${g.escapes} escape${g.escapes === 1 ? '' : 's'} in ${g.passed} passed (rate ${g.rate})`).join(' · ')}`);
   const gb = v.goalCheck.behaviours;
   lines.push(`goal    ${v.goalCheck.met ? 'met' : 'not yet'}${gb.length ? ` (${gb.filter((b) => b.status === 'pass').length}/${gb.length} behaviours pass)` : ''}`);
   lines.push('', `next    ${v.next}`, `open    ${v.needsYou.length} questions · ${v.followUps.length} follow-ups · ${v.decisions.length} decisions`);
   return `${lines.join('\n')}\n`;
+}
+
+// The status block of `show`: the word, progress and ETA; a concluded run says it is finished.
+export function statusLines(st) {
+  if (st.concluded) {
+    return [
+      `status     ${st.word}. This run is finished: ${st.reason}.`,
+      `delivered  ${st.delivered.length ? st.delivered.join('; ') : 'nothing'}`,
+      `progress   ${st.progress} · follow-ups ${st.followUps} in Gaps`,
+    ];
+  }
+  return [
+    `status     ${st.word}${st.needsYou.length ? ` (${st.needsYou.map((q) => q.id).join(', ')})` : ''}`,
+    `progress   ${st.progress} · ${st.doing}`,
+    `eta        ${st.eta.text}`,
+  ];
 }
 
 // "2 of 5 passed units (rate 0.4)": defects found after a pass.

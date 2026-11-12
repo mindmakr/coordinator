@@ -18,14 +18,15 @@ When every unit has passed or stopped, the dashboard shows **Retro pending** wit
 4. **The skill itself.** If the run exposed a gap in this skill, not in the project, log it with `S/run.mjs note <run> --kind retro --text "upstream: <one line>"` and send it upstream (`upstream.md`). Other retro notes (`--kind retro`) and follow-ups show as proposals on the coordinator's page.
 5. **Staffing.** If a choice of agent clearly helped or hurt, add it as a lesson (`team.md`).
 6. **Adopt the run's files** with `S/run.mjs adopt <run>`, so screenshots and reports in worktrees survive their removal (`durability.md`). Remove worktrees only after this.
-7. **Close the run** with `S/run.mjs close <run> --outcome done|partial|stopped`; it warns if files are still unadopted. Its rounds, time and outcome feed `stats`.
+7. **Measure the spend (always; a retro without it is incomplete).** Run `node S/context.mjs <the session's transcript folder>` and put its figures in a retro note: tokens by kind, cost share by agent type and by role, what each round cost, the largest contexts, cache rewrites, wake-ups, tool results over 10k characters (`context.md`, rule 8). Set the next run's budgets from them.
+8. **Close the run** with `S/run.mjs close <run> --outcome done|partial|stopped`; it warns if files are still unadopted. Its rounds, time and outcome feed `stats`.
 
 A lesson that was added before only has its count raised, never duplicated. Lessons are stored in `~/.coordinator/lessons.json` with `--scope global` (the default), or in the project's `.coordinator/` with `--scope project`. Project facts belong in project scope.
 
 ## Using lessons
 
-- At framing, the lead loads `lessons.mjs list --tag <domain> --top 8` and quotes the relevant ones into the briefs as hints.
-- Run `lessons.mjs use <id>` for each lesson the lead used, so the ranking learns which lessons matter.
+- `run.mjs brief` puts the top lessons for the run's tag (and the general ones) into every builder and critic brief as fenced hints: five by default, `--lessons N` for more or fewer, `--lessons 0` for none. A lesson counts as used once per run, so the ranking learns which lessons keep mattering.
+- At framing, the lead may still read `lessons.mjs list --tag <domain> --top 8` to shape the units, and run `lessons.mjs use <id>` for a lesson that changed the plan.
 - `lessons.mjs prune --keep 60` runs during the retro and drops the least-seen, least-used lessons. The file stays small and the loading stays cheap.
 
 ## Promoting a lesson

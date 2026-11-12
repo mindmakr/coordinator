@@ -10,10 +10,21 @@ export const runsDir = () => join(baseDir('project'), 'runs');
 const stateOf = (id) => join(runsDir(), id, 'state.json');
 const lessonFiles = () => [...new Set([join(baseDir('global'), 'lessons.json'), join(baseDir('project'), 'lessons.json')])];
 const contextFile = () => join(projectDir(), 'COORDINATOR.md');
+// When `run.mjs gaps --check` last asked GitHub: { at, asked, closed }.
+export const gapsCheckFile = () => join(baseDir('project'), 'gaps-check.json');
 
 export function runIds() {
   if (!existsSync(runsDir())) return [];
   return readdirSync(runsDir()).filter((d) => isSafeId(d) && (existsSync(stateOf(d)) || existsSync(join(runsDir(), d, EVENTS))));
+}
+
+// Every readable run of another state folder (a registered project, lib/dashboard.mjs).
+export function loadRunsIn(stateDir) {
+  const dir = join(stateDir, 'runs'); const out = [];
+  let ids = [];
+  try { ids = readdirSync(dir).filter(isSafeId); } catch { return out; }
+  for (const id of ids) { try { const s = loadRun(join(dir, id)); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ } }
+  return out;
 }
 
 export function loadRuns() {
@@ -34,11 +45,12 @@ export function loadSelf() {
     runs: loadRuns(),
     lessons: { global: safeRead(global, []), project: global === project ? [] : safeRead(project, []) },
     context,
+    gapsCheck: safeRead(gapsCheckFile(), null),
   };
 }
 
 // Changes when any run, lesson file or COORDINATOR.md changes: the live page's cue to re-render.
 export function selfVersion() {
-  const files = [...runIds().map(stateOf), ...lessonFiles(), contextFile()];
+  const files = [...runIds().map(stateOf), ...lessonFiles(), contextFile(), gapsCheckFile()];
   return files.map((f) => { try { const st = statSync(f); return `${st.mtimeMs}:${st.size}`; } catch { return '-'; } }).join('|');
 }

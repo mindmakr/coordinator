@@ -25,3 +25,6 @@ export { isSafeId } from '../../skills/coordinator/scripts/lib/store.mjs';
 export { diff, snapshotText } from '../../skills/coordinator/scripts/lib/events.mjs';
 export { answer as answerQuestion, find as findQuestion, fromForm, personNote } from '../../skills/coordinator/scripts/lib/questions.mjs';
 export { render as workbench } from '../../skills/coordinator/scripts/lib/workbench.mjs';
+// The local demo (src/demo): a lead's pit stop to a folder, and its pull, run on copies.
+export { push as pushRun, pull as pullRun } from '../../skills/coordinator/scripts/lib/statesync.mjs';
+export { mapAttach, mapRestore } from '../../skills/coordinator/scripts/lib/map/index.mjs';

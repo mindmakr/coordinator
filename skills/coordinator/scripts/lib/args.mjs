@@ -2,7 +2,27 @@
 // Accepts `--key value`, `--key=value` and `--flag`. A value may start with
 // dashes (`--- FAIL: TestX`): only `--name` shaped words are treated as flags.
 // A flag listed in `repeat` may be given more than once and is read as a list.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { maskSecrets } from './secrets.mjs';
+
+// A script's usage is the comment block at its top. This returns it as plain text.
+export function headerText(metaUrl) {
+  const out = [];
+  for (const line of readFileSync(fileURLToPath(metaUrl), 'utf8').split(/\r?\n/)) {
+    if (line.startsWith('#!')) continue;
+    if (!line.startsWith('//')) break;
+    out.push(line.replace(/^\/\/ ?/, ''));
+  }
+  return out.join('\n');
+}
+
+// `--help` or `-h` as the first argument prints the script's header and exits 0. Call it before parsing.
+export function helpAndExit(metaUrl, argv = process.argv.slice(2)) {
+  if (argv[0] !== '--help' && argv[0] !== '-h') return;
+  console.log(headerText(metaUrl));
+  process.exit(0);
+}
 
 const FLAG = /^--([a-z][a-z0-9-]*)(?:=([\s\S]*))?$/;
 

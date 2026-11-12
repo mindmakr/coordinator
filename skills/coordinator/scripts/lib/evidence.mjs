@@ -3,15 +3,20 @@
 // masked for secrets and capped; a file must be a real image or a small text
 // file; nothing outside the run's artifacts folder is ever served.
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
+import { STORED_FILE } from './eventschema.mjs';
 import { oneOf, optText, text } from './args.mjs';
 import { maskSecrets } from './secrets.mjs';
+import { parseReinsReport } from './reinsreport.mjs';
 import { webUrl } from './links.mjs';
 import { writeAtomic } from './store.mjs';
 
-export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link'];
-export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perTarget: 60 };
+// reins: the Markdown a reins session report or compare is saved as; its findings are read into the item (lib/reinsreport.mjs).
+export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link', 'reins'];
+// perRound: pieces per unit (or the goal) in one round, so a long unit never runs out (#66); a piece records the
+// round it came in (pieces from before, with none, count toward no round). total: what an id (E1-E999) can number.
+export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perRound: 60, total: 999 };
 export const GOAL_DIR = '_goal'; // cannot clash with a unit id, which starts with a letter or digit
 export const IMAGE = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 export const TEXT = { '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.json': 'text/plain; charset=utf-8' };
@@ -73,13 +78,24 @@ export function addEvidence(s, unit, o, runDir) {
   const kind = oneOf(o.kind, KINDS, '--kind');
   const given = ['text', 'file', 'url'].filter((k) => typeof o[k] === 'string');
   if (given.length !== 1) throw new Error('give exactly one of --text, --file or --url');
+  let reins = null;
+  if (kind === 'reins') {
+    if (typeof o.file !== 'string' || extname(o.file).toLowerCase() !== '.md') throw new Error('--kind reins takes --file <the .md that reins_report or "reins report --compare" saved>');
+    let md;
+    try { if (lstatSync(o.file).size > LIMITS.textFile) throw new Error('big'); md = readFileSync(o.file, 'utf8'); } catch (e) { throw new Error(e.message === 'big' ? `--file is over the cap of ${LIMITS.textFile / 1024} KB` : `no file: ${o.file}`); }
+    reins = parseReinsReport(maskSecrets(md));
+    if (!reins) throw new Error('--kind reins: the file is not a reins session report or compare (its first heading is "# reins session: …" or "# reins compare: …"); attach other files with --kind log');
+  }
   const list = listOf(s, unit);
-  if (list.length >= LIMITS.perTarget) throw new Error(`${LIMITS.perTarget} pieces of evidence at most`);
+  // The round this piece belongs to: the unit's try under way (or next), or the goal's integration round.
+  const round = (unit ? unit.rounds?.length ?? 0 : s.integration?.rounds?.length ?? 0) + 1;
+  if (list.length >= LIMITS.total) throw new Error(`${LIMITS.total} pieces of evidence at most for ${unit ? unit.id : 'the goal'}`);
+  if (list.filter((e) => e.round === round).length >= LIMITS.perRound) throw new Error(`${LIMITS.perRound} pieces of evidence at most in one round (round ${round} of ${unit ? unit.id : 'the goal'})`);
   const behaviours = unit ? (unit.behaviours ?? []) : (s.goalBehaviours ?? []);
   const behaviour = o.behaviour === undefined ? null : String(o.behaviour).toUpperCase();
   if (behaviour && !behaviours.some((b) => b.id === behaviour)) throw new Error(`no behaviour ${o.behaviour}`);
   const eid = `E${list.length + 1}`;
-  const item = { id: eid, kind, label: optText(o.label, 120), behaviour, at: now() };
+  const item = { id: eid, kind, label: optText(o.label, 120), behaviour, round, at: now() };
   if (o.text !== undefined) {
     const t = text(o.text, 'text', LIMITS.text + 1);
     item.text = t.length > LIMITS.text ? `${t.slice(0, LIMITS.text)}\n… (cut at ${LIMITS.text} characters)` : t;
@@ -90,9 +106,48 @@ export function addEvidence(s, unit, o, runDir) {
   } else {
     Object.assign(item, copyIn(o.file, runDir, unit ? unit.id : GOAL_DIR, eid));
     if (typeof o.source === 'string') item.source = o.source;
+    if (reins) item.reins = reins;
   }
   list.push(item);
   return eid;
+}
+
+// The stored copy of `file` (<target>/<name>) on disk, or null. Every read under artifacts/ goes
+// through here: the name must be one `evidence` writes, nothing on the way may be a link, and the
+// real path must sit directly in artifacts/<target>/, and the file may have no other name (a
+// hard link to a file elsewhere counts as outside). Reads go through readStored/openStored.
+export function storedPath(runDir, file) { return checked(runDir, file)?.p ?? null; }
+function checked(runDir, file) {
+  if (!runDir || typeof file !== 'string' || !STORED_FILE.test(file) || file.includes('..')) return null;
+  const [target, name] = file.split('/');
+  const root = join(runDir, 'artifacts'); const dir = join(root, target); const p = join(dir, name);
+  try {
+    if (lstatSync(root).isSymbolicLink() || lstatSync(dir).isSymbolicLink()) return null;
+    const st = lstatSync(p);
+    if (st.isSymbolicLink() || !st.isFile() || st.nlink > 1) return null;
+    if (dirname(realpathSync(p)) !== realpathSync(dir) || dirname(realpathSync(dir)) !== realpathSync(root)) return null;
+    return { p, st };
+  } catch { return null; }
+}
+
+// The stored copy opened once, read-only and (where the platform has it) not through a link; the
+// open handle is checked again (a regular file, one name, the very file checked above), so nothing
+// can swap it between the check and the read. Returns the fd, or null; the caller closes it.
+export function openStored(runDir, file) {
+  const c = checked(runDir, file); if (!c) return null;
+  let fd;
+  try {
+    fd = openSync(c.p, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const st = fstatSync(fd);
+    if (st.isFile() && st.nlink === 1 && st.ino === c.st.ino && st.dev === c.st.dev) return fd;
+  } catch { /* gone, or refused */ }
+  if (fd !== undefined) closeSync(fd);
+  return null;
+}
+// The stored copy's bytes (or text with `enc`), read from that one handle; null when refused or gone.
+export function readStored(runDir, file, enc) {
+  const fd = openStored(runDir, file); if (fd === null) return null;
+  try { return readFileSync(fd, enc); } catch { return null; } finally { closeSync(fd); }
 }
 
 // The served artifact for a request path's two parts, only when the state names it.

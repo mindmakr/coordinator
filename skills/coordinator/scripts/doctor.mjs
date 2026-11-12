@@ -5,11 +5,12 @@
 //   doctor.mjs [--json] [--offline]   exit 1 when any check fails
 //   --offline skips the checks that reach GitHub (gh login, stateRepo, latest release)
 import { homedir } from 'node:os';
-import { parse } from './lib/args.mjs';
+import { helpAndExit, parse } from './lib/args.mjs';
 import { diagnose, format } from './lib/doctor.mjs';
 import { baseDir, projectDir } from './lib/store.mjs';
 import { VERSION } from './lib/version.mjs';
 
+helpAndExit(import.meta.url);
 try {
   const { pos, opt } = parse(process.argv.slice(2), ['json', 'offline']);
   if (pos.length) throw new Error(`unexpected argument: ${pos[0]}`);

@@ -4,7 +4,12 @@
 // render(model, ctx) }. Same shell, theme and escaping rules as the dashboard.
 import { anchor, linkify, webUrl } from './links.mjs';
 import { count } from './self.mjs';
+import { KIND_LABEL, gapHaystack } from './gaps.mjs';
+import { clip } from './plain.mjs';
 import { badge, blk, chip, esc, hash, keyed, page, stamp, stateChip, toggle, unitDot } from './parts.mjs';
+import { progressBar, statusChip } from './hud.mjs';
+import { pcSection } from './dashboard.mjs';
+import { clock } from './progress.mjs';
 
 const LESSONS_SHOWN = 12;
 const pct = (v) => (v === null || v === undefined ? '–' : `${v}%`);
@@ -24,6 +29,26 @@ const unitHrefIn = (ctx, run) => (id) => {
 const runLink = (id, ctx, m) => (m.runIds.includes(id) ? `<a href="${esc(ctx.runHref(id))}">${esc(id)}</a>` : esc(id));
 const stat = (label, value, help = '') => `<div class="card stat"${help ? ` title="${esc(help)}"` : ''}><span>${esc(label)}</span><b>${value}</b></div>`;
 const meter = (p) => `<div class="bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, p ?? 0))}%"></i></div>`;
+
+// Active runs: what is still running, how far along, and when the machine frees up (lib/progress.mjs).
+function runRow(st, ctx, m) {
+  const needs = st.needsYou.length ? `<p class="from"><b>Needs you:</b> ${st.needsYou.map((q) => `${esc(q.id)} ${esc(q.text)}`).join(' · ')}</p>` : '';
+  const body = st.concluded
+    ? `<p class="say">${esc(st.reason)}.</p><p class="cause">Delivered: ${st.delivered.length ? st.delivered.map(esc).join('; ') : 'nothing'} · ${st.followUps} ${st.followUps === 1 ? 'follow-up' : 'follow-ups'} in <a href="#self-gaps">Gaps</a> · closed ${stamp(st.closedAt)}</p>`
+    : `<p class="say"><b>${esc(st.progress)}</b> · ${esc(st.doing)}</p>${progressBar(st, true)}<p class="cause">${esc(st.eta.text[0].toUpperCase() + st.eta.text.slice(1))}</p>${needs}`;
+  return `<li class="card run-row${st.concluded ? ' fin' : ''}" data-a="run-${esc(st.run)}"><h3><span>${runLink(st.run, ctx, m)}${st.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${statusChip(st)}</h3>${body}</li>`;
+}
+function activeRuns(m, ctx) {
+  const a = m.active;
+  if (!a) return '';
+  const free = a.runs.length
+    ? (a.free.at ? `the machine frees up around <b>${esc(clock(Date.parse(a.free.at), Date.now()))}</b> local time${a.free.unknown ? ` (${a.free.unknown} with no estimate yet)` : ''}` : 'no estimate yet of when the machine frees up')
+    : 'the machine is free for the next run';
+  const head = `<p class="meta"><b>${a.runs.length ? `${count(a.runs.length, 'run')} active` : 'No active run'}</b> · ${free}.</p>`;
+  const act = a.runs.length ? `<ul class="plain run-rows">${a.runs.map((st) => runRow(st, ctx, m)).join('')}</ul>` : '';
+  const ended = a.concluded.length ? `<h3 class="sub">Recently concluded</h3><ul class="plain run-rows">${a.concluded.map((st) => runRow(st, ctx, m)).join('')}</ul>${a.older ? `<p class="cause">${count(a.older, 'older concluded run')} in <a href="#self-history">History</a>.</p>` : ''}` : '';
+  return head + act + ended;
+}
 
 function age(m, ctx) {
   const a = m.age;
@@ -85,7 +110,7 @@ function chains(m, ctx) {
 
 function history(m, ctx) {
   if (!m.history.length) return m.chains?.length ? chains(m, ctx) : empty('No closed run yet.');
-  const rows = m.history.map((h) => `<tr data-a="h-${esc(h.run)}"><th scope="row">${runLink(h.run, ctx, m)}<div class="cause">${esc(h.goal)}</div></th><td>${chip(h.outcome, h.outcome)}</td>`
+  const rows = m.history.map((h) => `<tr data-a="h-${esc(h.run)}"><th scope="row">${runLink(h.run, ctx, m)}<div class="cause">${esc(h.goal)}</div></th><td>${h.status ? statusChip(h.status) : chip(h.outcome, h.outcome)}</td>`
     + `<td>${h.passed}/${h.units}${h.stopped ? ` <span class="cause">${h.stopped} stopped</span>` : ''}</td><td>${stamp(h.started)}</td><td>${stamp(h.closed)}</td></tr>`).join('');
   return `<div class="scroll"><table><thead><tr><th scope="col">Run</th><th scope="col">Outcome</th><th scope="col">Units passed</th><th scope="col">Started</th><th scope="col">Closed</th></tr></thead><tbody>${rows}</tbody></table></div>${chains(m, ctx)}`;
 }
@@ -95,10 +120,51 @@ function plans(m, ctx) {
   return `<div class="grid">${m.plans.map((p) => {
     const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}">${u.dot ? `${unitDot(u)} ` : ''}<b>${esc(u.id)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${stateChip(u, m.runIds.includes(p.run) ? { unitHref: unitHrefIn(ctx, p.run) } : null)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
     const needs = p.needsYou.length ? `<p class="from"><b>Needs you:</b> ${p.needsYou.map((q) => `${esc(q.id)} ${esc(q.text)}`).join(' · ')}</p>` : '';
-    return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${chip(p.decision, p.decision)}</h3>`
-      + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.done} of ${count(p.total, 'unit')} finished</span></div>${meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
+    return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${p.status ? statusChip(p.status) : chip(p.decision, p.decision)}</h3>`
+      + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.status ? esc(p.status.progress) : `${p.done} of ${count(p.total, 'unit')} finished`}</span><span>phase ${esc(p.decision)}</span></div>${p.status ? progressBar(p.status, true) : meter(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
       + `<div class="unit-next"><b>Next:</b> ${p.next.length ? esc(p.next.join(' · ')) : 'wait for the running agents'}</div>${needs}${left}</section>`;
   }).join('')}</div>`;
+}
+
+// Gaps: everything left undone across runs, grouped by run. The filter and search need the live
+// page's script, so the snapshot has neither and lists them all. Resolved gaps stay listed, folded.
+const GAP_BADGE = { stopped: 'stop', unfinished: 'fail', run: 'stop', 'follow-up': 'link', 'out-of-fence': 'strategy', deferred: 'note', upstream: 'merge', question: 'question', escape: 'fail' };
+const GAP_CLIP = 220;
+const REASON_CLIP = 160;
+const gapsLine = (g) => `${count(g.openCount, 'open gap')} across ${count(g.openRuns, 'run')}`;
+function gapItem(g, ctx, m) {
+  const unit = g.unit ? (m.runIds.includes(g.run) ? ` · unit <a href="${esc(unitHrefIn(ctx, g.run)(g.unit))}">${esc(g.unit)}</a>` : ` · unit ${esc(g.unit)}`) : '';
+  const long = g.text.length > GAP_CLIP;
+  const text = long ? `${esc(clip(g.text, GAP_CLIP))}${toggle(`gap-${g.id}`, 'Full text', `<p class="say">${linkify(g.text, null)}</p>`)}` : linkify(g.text, null);
+  const r = g.resolution;
+  const why = r ? (r.reason.length > REASON_CLIP ? `<span title="${esc(r.reason)}">${esc(clip(r.reason, REASON_CLIP))}</span>` : linkify(r.reason, null)) : '';
+  const res = r ? `<div class="cause"><b>Resolved</b> ${r.derived ? '(from the state)' : r.checked ? `by ${esc(r.by)}, checked with gh` : `by ${esc(r.by)}${r.confirm ? `, their words: “${esc(clip(r.confirm, 120))}”` : ''}`}: ${why}${r.at ? ` · ${stamp(r.at)}` : ''}</div>` : '';
+  const unverified = g.unverified ? `<div class="cause"><b>tracked (unverified)</b>: ${g.unverified.map((u) => linkify(u, null)).join(', ')}, a repo the runs do not link; <code>run.mjs gaps --check</code> confirms it exists</div>` : '';
+  const carried = g.carried ? `<div class="cause"><b>carried → ${esc(g.carried)}</b>: open until that unit passes or its gap is resolved</div>` : '';
+  return `<li data-a="gap-${esc(g.id)}" data-gap data-run="${esc(g.run)}" data-kind="${esc(g.kind)}"${ctx.live ? ` data-q="${esc(gapHaystack(g))}"` : ''}>${badge(GAP_BADGE[g.kind] ?? 'info', KIND_LABEL[g.kind] ?? g.kind)} ${text}`
+    + `${g.cause ? `<div class="cause">cause: ${esc(g.cause)}</div>` : ''}`
+    + `<div class="cause">${runLink(g.run, ctx, m)}${unit}${g.at ? ` · ${stamp(g.at)}` : ''} · from ${esc(g.from)} · <code>${esc(g.id)}</code></div>${carried}${unverified}${res}</li>`;
+}
+const gapGroups = (groups, ctx, m, status) => groups.map((grp) => `<section class="card gap-run" data-gap-group data-run="${esc(grp.run)}" data-status="${status}" data-a="gaps-${status}-${esc(grp.run)}"><h3><span>${runLink(grp.run, ctx, m)}</span><span class="chip" data-gap-n>${grp.items.length}</span></h3>`
+  + `<ul class="plain">${grp.items.map((g) => gapItem(g, ctx, m)).join('')}</ul></section>`).join('');
+function gapTools(g) {
+  const opts = (vals, label) => vals.map((v) => `<option value="${esc(v)}">${esc(label(v))}</option>`).join('');
+  return '<form class="tl-tools gap-tools" data-gaps role="search">'
+    + '<label class="grow">Search gaps<input type="search" name="q" placeholder="text, run, unit, #123, PR…" autocomplete="off" spellcheck="false"></label>'
+    + `<label>Run<select name="run"><option value="">All runs</option>${opts(g.runs, (v) => v)}</select></label>`
+    + `<label>Kind<select name="kind"><option value="">All kinds</option>${opts(g.kinds, (v) => KIND_LABEL[v] ?? v)}</select></label>`
+    + '<label>Status<select name="status"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></label>'
+    + '<p class="cause gap-count" data-gaps-count aria-live="polite"></p></form>';
+}
+function gapsSection(m, ctx) {
+  const g = m.gaps;
+  if (!g.openCount && !g.resolvedCount) return empty('No gaps: no stopped or unfinished unit, open follow-up, question, escape or upstream proposal in any run.');
+  const head = `<p class="meta"><b>${gapsLine(g)}</b> · ${g.resolvedCount} resolved. Stopped and unfinished units, runs closed early, follow-ups, out-of-fence items, deferred work, questions for you, upstream proposals and escapes, from every run. `
+    + 'Close one with <code>run.mjs gap close &lt;run&gt; &lt;id&gt; --reason R</code>: a decision in that run’s log. '
+    + (g.lastCheck ? `Last checked against GitHub ${stamp(g.lastCheck.at)}: ${count(g.lastCheck.asked, 'reference')} asked, ${g.lastCheck.closed} closed.</p>` : 'Not checked against GitHub yet: <code>run.mjs gaps --check --dry-run</code>.</p>');
+  const open = g.openCount ? `<div class="lists gaps" data-gaps-open>${gapGroups(g.open, ctx, m, 'open')}</div>` : `<div data-gaps-open>${empty('No open gap.')}</div>`;
+  const resolved = g.resolvedCount ? `<div data-gaps-resolved>${toggle('self-gaps-resolved', `Resolved · ${g.resolvedCount}`, `<div class="lists gaps">${gapGroups(g.resolved, ctx, m, 'resolved')}</div>`)}</div>` : '';
+  return head + (ctx.live ? gapTools(g) : '') + open + resolved;
 }
 
 const PROPOSAL_BADGE = { upstream: 'merge', 'follow-up': 'link', retro: 'note', promote: 'pass' };
@@ -120,20 +186,25 @@ function study(m, ctx) {
 }
 
 export const SECTIONS = [
+  { id: 'active', title: 'Active runs', render: activeRuns },
   { id: 'age', title: 'Age', render: age },
   { id: 'plans', title: 'Plans', render: plans },
+  { id: 'gaps', title: 'Gaps', render: gapsSection },
   { id: 'stats', title: 'Working stats', render: stats },
   { id: 'learning', title: 'Learning', render: learning },
   { id: 'memory', title: 'Memory', render: memory },
   { id: 'history', title: 'History', render: history },
   { id: 'proposals', title: 'Proposals', render: proposals },
   { id: 'study', title: 'Side study', render: study },
+  // Every run on this PC, across projects and tools (lib/registry.mjs, lib/dashboard.mjs).
+  { id: 'pc', title: 'This PC', render: pcSection },
 ];
 
 export function selfPage(m, nowMs = Date.now(), ctx) {
-  const toc = `<nav class="toc" aria-label="Sections">${SECTIONS.map((s) => `<a href="#self-${s.id}">${esc(s.title)}</a>`).join('')}</nav>`;
+  const toc = `<nav class="toc" aria-label="Sections">${SECTIONS.map((s) => `<a href="#self-${s.id}">${esc(s.title)}${s.id === 'gaps' && m.gaps?.openCount ? ` · ${m.gaps.openCount}` : ''}</a>`).join('')}</nav>`;
   const body = [
-    blk('head', `<header class="run"><h1>Coordinator</h1><span class="meta">across ${count(m.age.runs, 'run')} in this project · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    blk('head', `<header class="run"><h1>Coordinator</h1><span class="meta">across ${count(m.age.runs, 'run')} in this project${m.gaps?.openCount ? ` · <a href="#self-gaps">${gapsLine(m.gaps)}</a>` : ''} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    ctx.live ? '' : blk('snapshot', `<p class="hint" role="note"><b>Snapshot written ${stamp(new Date(nowMs).toISOString())}.</b> It is rewritten when a run in this folder changes. For the live page, with every run on this PC, use <code>/coordinator:dashboard</code> (<code>run.mjs dashboard</code>).</p>`),
     toc,
     ...SECTIONS.map((s) => `<h2 id="self-${s.id}" data-a="h-${s.id}">${esc(s.title)}</h2>${blk(`self-${s.id}`, s.render(m, ctx), 'section', ` class="self" aria-labelledby="self-${s.id}"`)}`),
   ].join('\n');

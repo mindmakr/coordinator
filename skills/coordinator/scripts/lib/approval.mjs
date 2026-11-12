@@ -20,6 +20,8 @@ export const PERSON_SURFACES = ['dashboard', 'web'];
 const APPROVE = /\bapproved?\b/i;
 const DOUBT = /\b(no|not|don'?t|do not|never|refuse[ds]?|reject(ed)?|declined?|disapprove[ds]?|unapproved|wait|maybe|perhaps|unless|but|if|once|after|when|until)\b|n't\b|\?/i;
 
+// Words that refuse, hedge or ask: a person's confirmed words with any of these never count as a clear pick.
+export const doubtful = (t) => DOUBT.test(String(t ?? ''));
 export const fromPerson = (e) => !!e && e.by !== 'lead' && (PERSON_SURFACES.includes(e.via) || (e.via === 'cli' && !!e.confirm));
 export const noteApproves = (text) => APPROVE.test(String(text ?? '')) && !DOUBT.test(String(text ?? ''));
 
@@ -38,6 +40,17 @@ export function answerRefusal(q) {
 export function noteRefusal(n) {
   if (!fromPerson(n)) return 'the note was not added by the person on the dashboard or the web (a lead\'s `note --kind person` counts only with --confirm, pasting their words)';
   if (!noteApproves(n.text)) return `the note does not clearly approve: it must say "approve" or "approved", with no no, not, but, if, maybe or question`;
+  return null;
+}
+
+// Why a person's note does not clearly record their decision, or null when it does. For a step that
+// records what the person already decided rather than asking leave (today: `run.mjs ship`, a unit merged
+// on their word without a final verdict, #66): it must come from the person, as above, and carry no
+// refusing, hedging or asking word; "approve" itself is not needed ("Yes, merge; rest as issues").
+export function decisionRefusal(n) {
+  if (!fromPerson(n)) return 'the note was not added by the person on the dashboard or the web (a lead\'s `note --kind person` counts only with --confirm, pasting their words)';
+  if (!String(n.text ?? '').trim()) return 'the note is empty';
+  if (DOUBT.test(String(n.text))) return `their words do not clearly say it: "${String(n.text).slice(0, 120)}" (no, not, but, if, once, after, when, until, maybe or a question)`;
   return null;
 }
 

@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import { guard } from '../src/db/index.mjs';
 import { memoryDb } from '../src/db/memory.mjs';
 import { ingester, TOKEN_REUSE_MS } from '../src/ingest.mjs';
+import { trail } from '../src/trail.mjs';
 import { webhookBudget } from '../src/server.mjs';
 import { BLOB_HOLD } from '../src/syncqueue.mjs';
 import { fakeGitHub, makeRun, startApp, stateFiles } from './helpers.mjs';
@@ -29,7 +30,7 @@ async function hook(t, event, body) {
 const refsRun = (id, repo) => makeRun(id, { issues: Array.from({ length: 10 }, (_, i) => `${repo}#${i + 1}`) });
 let plain; const plainRun = () => (plain ??= makeRun('r1')); // one log, built once, for repos that need any run
 
-test('s5: a victim syncs while other installations\' trails are held on GitHub; the sync slots are free meanwhile', { timeout: 120_000 }, async () => {
+test('s5: a victim syncs while other installations\' trails are held on GitHub; the sync slots are free meanwhile', { timeout: 600_000 }, async () => {
   const g = gate(); let held = 0;
   const gh = fakeGitHub(); gh.makeBoard({ items: [] });
   const g0 = gh.graphql.bind(gh);
@@ -51,7 +52,7 @@ test('s5: a victim syncs while other installations\' trails are held on GitHub; 
     await t.db.upsertInstallation({ id: 9, account: 'victim' });
     gh.addRepo('v/web', { id: 900, installationId: 9, files: stateFiles({ r1: plainRun() }) });
     await t.db.upsertRepo({ installationId: 9, id: 900, fullName: 'v/web', private: true });
-    guarded = guardTimer(g);
+    guarded = guardTimer(g, 540_000); // a hang guard only: full-suite load must never fire it
     for (const inst of [66, 67]) for (let k = 0; k < 2; k++) attackers.push(t.app.ingest.syncRepo(inst, { id: inst * 100 + k, fullName: `m${inst}/r${k}` }));
     // Every attacker sync has read its log and given its slot back; their trails wait on GitHub, one
     // per installation (TRAIL_PER_INSTALLATION), the other two queued in the lane, none in a sync slot.
@@ -86,6 +87,12 @@ test('trail reads are budgeted per installation; a card not on the board is aske
     const before = graphql();
     await t.app.ingest.syncInstallation(7);
     assert.equal(graphql(), before, 'an unchanged run costs no GitHub read');
+    // #42: a "not on board" answer is trusted for a day; a refresh after that asks again.
+    await t.app.ingest.refreshRuns(7, 70, ['r1']);
+    assert.equal(items(), 10, 'a refresh within the day asks nothing');
+    clock += 24 * 3600_000 + 1;
+    await t.app.ingest.refreshRuns(7, 70, ['r1']);
+    assert.ok(items() > 10, 'a day later the board is asked again');
   } finally { await t.close(); }
 });
 
@@ -237,4 +244,106 @@ test('an unchanged repo with nothing owed does not touch the trail lane', async 
     assert.deepEqual(refreshed, ['r1'], 'refreshed once, when it changed');
     assert.equal(w.ingest.stats().trail.peak, 1);
   } finally { await w.close(); }
+});
+
+// #42 (round 5's t1 proof): a refresh charges every comment page it reads, searches at most
+// CAPS.searchPages of them, and stops at its own read cap, so a flood of fresh trackers holds a lane
+// slot for a few reads, not for hours. Each issue already holds 300 comments that are not ours.
+test('t1: a victim\'s tracker comment is written after a few attacker reads, not after their whole refreshes', { timeout: 600_000 }, async () => {
+  const g = gate(); const order = [];
+  const gh = fakeGitHub();
+  const i0 = gh.issueComments.bind(gh);
+  gh.issueComments = (token, full, n, opts = {}) => (async function* () {
+    if (full.startsWith('m')) await g.wait();
+    yield* i0(token, full, n, { ...opts, spend: () => { opts.spend?.(); order.push(full.startsWith('m') ? 'a' : 'v'); } });
+  })();
+  const c0 = gh.createComment.bind(gh);
+  gh.createComment = async (t, full, ...a) => { if (full === 'v/web') order.push('V'); return c0(t, full, ...a); };
+  const t = await startApp({ gh, over: { trailRefreshReads: 6 } });
+  const guarded = guardTimer(g, 540_000); // a hang guard only: full-suite load must never fire it
+  try {
+    const attackers = [];
+    for (const inst of [60, 61, 62, 63]) {
+      const full = `m${inst}/r0`;
+      await t.db.upsertInstallation({ id: inst, account: `m${inst}` });
+      gh.addRepo(full, { id: inst * 100, installationId: inst, files: stateFiles({ a1: refsRun('a1', full) }) });
+      await t.db.upsertRepo({ installationId: inst, id: inst * 100, fullName: full, private: true });
+      for (let n = 1; n <= 10; n++) gh.comments.set(`${full}#${n}`, Array.from({ length: 300 }, (_, i) => ({ id: inst * 10_000 + n * 1000 + i, body: 'not ours', performed_via_github_app: null })));
+      attackers.push(t.app.ingest.syncRepo(inst, { id: inst * 100, fullName: full }));
+    }
+    await until(() => t.app.ingest.stats().trail.running === 4, guarded); // every lane slot held by an attacker
+    await t.db.upsertInstallation({ id: 9, account: 'victim' });
+    gh.addRepo('v/web', { id: 900, installationId: 9, files: stateFiles({ r1: makeRun('r1', { issues: ['v/web#1'] }) }) });
+    await t.db.upsertRepo({ installationId: 9, id: 900, fullName: 'v/web', private: true });
+    const victim = t.app.ingest.syncRepo(9, { id: 900, fullName: 'v/web' });
+    await until(() => t.app.ingest.stats().trail.queued === 1, guarded);
+    g.open();
+    assert.deepEqual((await victim).updated, ['r1']);
+    const before = order.indexOf('V');
+    assert.ok(before > 0, 'the victim\'s tracker comment was posted');
+    const attackerReads = order.slice(0, before).filter((x) => x === 'a').length;
+    assert.ok(attackerReads <= 4 * 6, `attackers read ${attackerReads} pages before the victim's comment (at most 6 per refresh)`);
+    for (const a of await Promise.all(attackers)) assert.deepEqual(a.updated, ['a1']);
+    for (const inst of [60, 61, 62, 63]) assert.equal((await t.db.run(inst, inst * 100, 'a1')).trailPending, true, 'each attacker refresh stopped at its cap and stays owed');
+    assert.ok(gh.count('commentPage') <= 4 * 6 + 1);
+    assert.equal(guarded.fired, false);
+  } finally { clearTimeout(guarded.timer); g.open(); await t.close(); }
+});
+
+test('#42: a known comment id is edited without a search; a deleted one is re-posted without a search', async () => {
+  const t = await startApp();
+  try {
+    t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles({ r1: makeRun('r1', { issues: ['acme/web#1'] }) }) });
+    await t.db.upsertInstallation({ id: 7, account: 'acme' });
+    await t.app.ingest.syncInstallation(7);
+    assert.equal(t.gh.count('commentPage'), 1, 'one search, for the first comment');
+    const id = (await t.db.tracker(7, 'acme/web#1', 'r1', 'u1')).commentId;
+    await t.gh.deleteComment('x', 'acme/web', id);
+    await t.db.putTracker(7, { refKey: 'acme/web#1', runId: 'r1', unitId: 'u1', commentId: id, bodySha: 'stale' });
+    await t.app.ingest.syncInstallation(7, { force: true });
+    assert.equal(t.gh.count('commentPage'), 1, 'no search when the id is known');
+    assert.equal(t.gh.count('createComment'), 2);
+    assert.notEqual((await t.db.tracker(7, 'acme/web#1', 'r1', 'u1')).commentId, id);
+  } finally { await t.close(); }
+});
+
+test('#42: a trail refresh stops at the job\'s time limit between refs, and the run stays owed', async () => {
+  let clock = 0;
+  const gh = fakeGitHub();
+  const db0 = guard(memoryDb());
+  const tr = trail({ db: db0, gh, config: { github: { appId: 1 }, baseUrl: 'http://x' }, now: () => clock });
+  const c0 = gh.createComment.bind(gh);
+  gh.createComment = async (...a) => { clock += 600; return c0(...a); };
+  await db0.upsertInstallation({ id: 5, account: 'acme' });
+  const ingest = ingester({ db: db0, gh, log: null, trail: tr, limits: { jobMs: 1000 }, now: () => clock });
+  try {
+    gh.addRepo('acme/web', { id: 70, installationId: 5, files: stateFiles({ r1: refsRun('r1', 'acme/web') }) });
+    await db0.upsertRepo({ installationId: 5, id: 70, fullName: 'acme/web' });
+    await ingest.syncRepo(5, { id: 70, fullName: 'acme/web' });
+    assert.equal(gh.count('createComment'), 2, 'the third ref found the job out of time');
+    assert.equal((await db0.run(5, 70, 'r1')).trailPending, true);
+    for (let k = 0; k < 10 && (await db0.run(5, 70, 'r1')).trailPending; k++) await ingest.syncRepo(5, { id: 70, fullName: 'acme/web' }, { force: true });
+    assert.equal(gh.count('createComment'), 10, 'later syncs finish it, one comment per ref');
+    assert.equal((await db0.run(5, 70, 'r1')).trailPending, false);
+  } finally { await ingest.close(); await db0.close(); }
+});
+
+test('#42: a refresh stops writing once the installation is removed', async () => {
+  const gh = fakeGitHub();
+  const db0 = guard(memoryDb());
+  let gone = false;
+  const tr = trail({ db: db0, gh, config: { github: { appId: 1 }, baseUrl: 'http://x' } });
+  const c0 = gh.createComment.bind(gh);
+  gh.createComment = async (...a) => { gone = true; return c0(...a); };
+  await db0.upsertInstallation({ id: 5, account: 'acme' });
+  gh.addRepo('acme/web', { id: 70, installationId: 5, files: stateFiles({ r1: refsRun('r1', 'acme/web') }) });
+  await db0.upsertRepo({ installationId: 5, id: 70, fullName: 'acme/web' });
+  const ingest = ingester({ db: db0, gh, log: null, trail: null });
+  try {
+    await ingest.syncRepo(5, { id: 70, fullName: 'acme/web' });
+    const repo = (await db0.repos(5))[0];
+    const r = await tr.refreshRun(5, repo, 'r1', { gone: () => gone });
+    assert.equal(r.removed, true);
+    assert.equal(gh.count('createComment'), 1);
+  } finally { await ingest.close(); await db0.close(); }
 });

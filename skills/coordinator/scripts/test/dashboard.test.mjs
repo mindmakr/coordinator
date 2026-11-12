@@ -56,7 +56,7 @@ test('a unit cannot pass while a behaviour is failing or unchecked; a pass mark 
   r = run('verdict', 'b2', 'u1', 'pass', '--evidence', 'e', '--score', '9', '--behaviour', 'B1=pass:totals.test 3 passed', '--behaviour', 'B2=fail:rounds down');
   assert.match(r.err, /behaviour B2 \(fail\)/);
   assert.equal(state('b2').units[0].behaviours[0].status, 'unchecked', 'a refused verdict changes nothing');
-  assert.equal(run('verdict', 'b2', 'u1', 'fail', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down').code, 0);
+  assert.equal(run('verdict', 'b2', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down').code, 0);
   let u = state('b2').units[0];
   assert.deepEqual(u.behaviours.map((b) => b.status), ['pass', 'fail']);
   assert.deepEqual(u.rounds[0].behaviours.map((m) => m.status), ['pass', 'fail']);
@@ -164,7 +164,7 @@ test('timelines: a unit holds only its own events in order; filters, ranges and 
   run('built', 't1', 'u1'); run('note', 't1', '--kind', 'person', '--text', 'u2 note', '--unit', 'u2');
   run('ask', 't1', '--question', 'Merge?', '--header', 'Merge', '--option', 'Yes', '--option', 'No', '--unit', 'u1');
   run('answer', 't1', 'q1', '--choice', 'Yes');
-  run('verdict', 't1', 'u1', 'fail', '--evidence', 'e', '--gap', 'g', '--cause', 'off by one', '--score', '4');
+  run('verdict', 't1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--cause', 'off by one', '--score', '4');
   run('evidence', 't1', 'u1', '--kind', 'log', '--text', 'log');
   run('link', 't1', 'u1', '--merge', 'https://github.com/o/r/pull/1');
   const s = state('t1');
@@ -197,7 +197,7 @@ test('the drilldown page: behaviours, rounds, notes, links and its own timeline,
   setup('d1', '--repo', 'm/p');
   run('behave', 'd1', 'u1', '--text', 'It should total');
   run('start', 'd1', 'u1'); run('built', 'd1', 'u1', '--report', 'see 7f8ad63');
-  run('verdict', 'd1', 'u1', 'fail', '--evidence', 'e', '--gap', 'off by #3', '--cause', 'rounding', '--score', '4', '--behaviour', 'B1=fail:off');
+  run('verdict', 'd1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'off by #3', '--cause', 'rounding', '--score', '4', '--behaviour', 'B1=fail:off');
   run('note', 'd1', '--kind', 'person', '--text', 'check RTL', '--unit', 'u1');
   const file = readFileSync(join(runDir('d1'), 'units', 'u1.html'), 'utf8');
   assert.match(file, /<a class="back" href="\.\.\/hud\.html">← d1 dashboard<\/a>/);
@@ -265,7 +265,7 @@ test('every time is a <time> with an ISO datetime; the snapshot spells out UTC; 
   setup('ts1');
   run('note', 'ts1', '--kind', 'situation', '--text', 'busy');
   run('start', 'ts1', 'u1'); run('built', 'ts1', 'u1');
-  run('verdict', 'ts1', 'u1', 'fail', '--evidence', 'e', '--gap', 'g', '--score', '3');
+  run('verdict', 'ts1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'g', '--score', '3');
   run('evidence', 'ts1', 'u1', '--kind', 'log', '--text', 'x');
   run('note', 'ts1', '--kind', 'person', '--text', 'hi', '--unit', 'u1');
   const iso = /<time datetime="(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"(?: class="cause")? title="(\d{4}-\d\d-\d\d \d\d:\d\d UTC)">\2<\/time>/g;
@@ -302,6 +302,40 @@ test('row keys are stable across renders, so the morph keeps the nodes native sc
   assert.match(live, /if \(refused \|\| failures >= 5\) \{ status\('disconnected', DEAD\); return; \}/, 'no endless retries with a dead token');
 });
 
+test('every list that grows live sits in its own anchor container (#23)', () => {
+  setup('la1');
+  run('note', 'la1', '--kind', 'decision', '--text', 'first');
+  run('evidence', 'la1', 'u1', '--kind', 'log', '--text', 'ok');
+  run('note', 'la1', '--kind', 'person', '--text', 'hi', '--unit', 'u1');
+  const s = state('la1');
+  const v = view(s, decide(s));
+  const live = hud(v, Date.now(), { token: 't', nonce: 'n' });
+  assert.match(live, /<summary>Evidence · 1<\/summary><div class="list-anchor"><ul class="evlist" data-ev-list>/, 'a unit\'s Evidence');
+  assert.match(live, /<h3>Decisions <span class="chip">1<\/span><\/h3><div class="list-anchor"><ul>/, 'Decisions');
+  assert.match(live, /<div data-k="timeline"[^>]* class="list-anchor"><ol class="timeline" data-tl-list data-ev-list>/, 'the timeline');
+  const unit = unitPage(v, 'u1', Date.now(), { token: 't', nonce: 'n' });
+  assert.match(unit, /<section class="card"><div class="list-anchor"><ul class="evlist" data-ev-list>/, 'the unit page\'s Evidence');
+  assert.match(unit, /<div class="list-anchor"><ul><li data-a="n-/, 'the unit page\'s notes');
+  // The container's tail takes no room and covers the padding below the list; cards are no taller than their content.
+  assert.match(live, /\.list-anchor \{ margin-bottom: calc\(-1 \* var\(--list-tail\)\); \}/);
+  assert.match(live, /\.list-anchor::after \{ content: ""; display: block; height: var\(--list-tail\); pointer-events: none; \}/);
+  // The tail must cover at least the card's bottom padding and border, read from the template itself.
+  const tpl = readFileSync(join(scripts, 'lib', 'hud.template.html'), 'utf8');
+  const vars = Object.fromEntries([...tpl.matchAll(/(--[\w-]+): ([^;]+);/g)].map(([, k, x]) => [k, x.trim()]));
+  const px = (x) => {
+    for (let i = 0; i < 10 && x.includes('var('); i++) x = x.replace(/var\((--[\w-]+)\)/g, (_, k) => vars[k] ?? 'NaN');
+    const sum = /^calc\((.*)\)$/.exec(x)?.[1] ?? x;
+    return sum.split(' + ').reduce((t, part) => t + Number(/^(\d+(?:\.\d+)?)px$/.exec(part.trim())?.[1] ?? NaN), 0);
+  };
+  const card = /\n\.card \{([^}]*)\}/.exec(tpl)[1];
+  const pad = px(/padding: ([^;]+);/.exec(card)[1].trim().split(' ')[0]);
+  const border = px(/border: (\S+) solid/.exec(card)[1]);
+  const tail = px(/\.list-anchor::after \{[^}]*height: ([^;]+);/.exec(tpl)[1]);
+  assert.ok(Number.isFinite(pad) && Number.isFinite(border) && Number.isFinite(tail), `read ${pad}/${border}/${tail}`);
+  assert.ok(tail >= pad + border, `the tail (${tail}px) covers the card's padding and border (${pad + border}px)`);
+  assert.match(live, /\.grid, \.lists \{ align-items: start; \}/);
+});
+
 test('every data-a and data-k is unique on a rendered page', () => {
   setup('uk1', '--repo', 'm/p');
   run('add', 'uk1', 'u3', '--bar', 'b', '--reason', 'more', '--behaviour', 'It should total', '--behaviour', 'It should round');
@@ -333,7 +367,7 @@ test('after freeze a behaviour is removed or reworded only with a reason, never 
   run('start', 'br1', 'u1'); run('built', 'br1', 'u1');
   assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--remove', '--reason', 'x').err, /being judged/);
   assert.match(run('behave', 'br1', 'u1', '--text', 'new one').err, /being judged/);
-  run('verdict', 'br1', 'u1', 'fail', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down');
+  run('verdict', 'br1', 'u1', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'rounding', '--score', '5', '--behaviour', 'B1=pass:ok', '--behaviour', 'B2=fail:rounds down');
   assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--remove').err, /missing --reason/);
   assert.match(run('behave', 'br1', 'u1', '--id', 'B2', '--text', 'It should round, roughly').err, /missing --reason/);
   assert.equal(run('behave', 'br1', 'u1', '--text', 'It should log').code, 0, 'adding one tightens the bar: no reason needed');

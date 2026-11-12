@@ -27,6 +27,8 @@ function memoryStore({ settings, subs, push, alerts }) {
     async unsubscribe(userId, installationId, repoId) { subs.delete(subKey(userId, installationId, repoId)); },
     async subscriptions(userId) { return [...subs.values()].filter((s) => s.userId === userId).map(clone); },
     async subscribers(installationId, repoId) { return [...subs.values()].filter((s) => s.installationId === installationId && s.repoId === repoId).map(clone); },
+    // Every repo at least one person watches, once each.
+    async watchedRepos() { return [...new Map([...subs.values()].map((s) => [`${s.installationId}:${s.repoId}`, { installationId: s.installationId, repoId: s.repoId }])).values()]; },
     // false when the endpoint is another person's: a device is never moved from one person to another.
     async addPush(userId, sub) {
       const prev = push.get(sub.endpoint);
@@ -86,6 +88,7 @@ function pgStore(pool) {
     async unsubscribe(userId, installationId, repoId) { await q('DELETE FROM alert_subscriptions WHERE user_id = $1 AND installation_id = $2 AND repo_id = $3', [userId, installationId, repoId]); },
     async subscriptions(userId) { return (await q('SELECT * FROM alert_subscriptions WHERE user_id = $1', [userId])).rows.map(subRow); },
     async subscribers(installationId, repoId) { return (await q('SELECT * FROM alert_subscriptions WHERE installation_id = $1 AND repo_id = $2', [installationId, repoId])).rows.map(subRow); },
+    async watchedRepos() { return (await q('SELECT DISTINCT installation_id, repo_id FROM alert_subscriptions')).rows.map((r) => ({ installationId: Number(r.installation_id), repoId: Number(r.repo_id) })); },
     // false when the endpoint is another person's: a device is never moved from one person to another.
     async addPush(userId, sub) {
       return (await q(`INSERT INTO push_subscriptions (endpoint, user_id, keys) VALUES ($1, $2, $3)

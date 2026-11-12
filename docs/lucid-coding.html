@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Lucid Coding Manifesto</title>
+<meta name="description" content="Vibe coding is a feeling. Lucid Coding is knowing. Eight principles for engineering with AI agents, by Asif Raja.">
+<meta name="author" content="Asif Raja">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="The Lucid Coding Manifesto">
+<meta property="og:description" content="Vibe coding is a feeling. Lucid Coding is knowing. Eight principles for engineering with AI agents, by Asif Raja.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mindmakr.github.io/coordinator/lucid-coding.html">
+<meta property="og:image" content="https://mindmakr.github.io/coordinator/img/og-manifesto.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20style%3D%22color%3A%236b6b66%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M10%2010%204.5%204.5M10%2010l5.5-5.5M10%2010v6%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22currentColor%22%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2210%22%20r%3D%222.8%22%2F%3E%3Ccircle%20cx%3D%224.5%22%20cy%3D%224.5%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%2215.5%22%20cy%3D%224.5%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2216.5%22%20r%3D%222%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400;0,500;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="term.js"></script>
+<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="manifesto.css">
+</head>
+<body class="mf">
+<a class="skip" href="#main">Skip to the principles</a>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="./" aria-label="Coordinator home">
+      <svg class="mark" width="22" height="22" viewBox="0 0 20 20" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 10 4.5 4.5M10 10l5.5-5.5M10 10v6"/></g><g fill="currentColor"><circle cx="10" cy="10" r="2.8"/><circle cx="4.5" cy="4.5" r="2"/><circle cx="15.5" cy="4.5" r="2"/><circle cx="10" cy="16.5" r="2"/></g></svg>
+      Coordinator
+    </a>
+  </div>
+</header>
+
+<main id="main" class="wrap mf-main">
+  <header class="mf-head">
+    <p class="mf-kicker">The <span data-term>Lucid Coding</span> Manifesto</p>
+    <h1 class="mf-title">Vibe coding is a feeling. <span data-term>Lucid Coding</span> is knowing.</h1>
+    <p class="mf-intro">Agentic engineering is how a lot of software is built now: agents write the code, and people direct them. <span data-term>Lucid Coding</span> is a way to practise it with your eyes open. You know your system, your agents' thinking, and how each piece was built and judged.</p>
+    <p class="mf-by">Asif Raja</p>
+  </header>
+
+  <ol class="principles">
+    <li id="know-your-system">
+      <h2><a href="#know-your-system">Know your system.</a></h2>
+      <p>If you cannot say what your agents changed, why, and what proved it, you don't know your system yet. Every other principle serves this one.</p>
+    </li>
+    <li id="instrument-the-runtime">
+      <h2><a href="#instrument-the-runtime">Give agents instruments, not just screenshots.</a></h2>
+      <p>A screenshot shows pixels; it hides why they are slow, broken or clipped. Let your app report its own actions, state, network calls, lifecycle timings and DOM and CSS layout in development, and strip that instrumentation from production.</p>
+    </li>
+    <li id="agree-the-bar">
+      <h2><a href="#agree-the-bar">Agree the bar before the build.</a></h2>
+      <p>Write down what done means, as behaviours someone else can check, before anyone starts. A bar written after the work describes the work; it cannot judge it.</p>
+    </li>
+    <li id="blind-critic">
+      <h2><a href="#blind-critic">A blind critic, never the builder, grades the work.</a></h2>
+      <p>The one who made it is the worst judge of it. A separate critic, who never sees the builder's reasoning, checks the real result against the bar.</p>
+    </li>
+    <li id="evidence">
+      <h2><a href="#evidence">Evidence or it didn't happen.</a></h2>
+      <p>A pass carries its proof: test output, a screenshot, a lifecycle or API timing, a log, a link. A claim with nothing attached counts as a fail.</p>
+    </li>
+    <li id="visible">
+      <h2><a href="#visible">Every run is visible.</a></h2>
+      <p>What the agent saw, what it built, and why it passed or failed stay on the record, while the run is live and after it ends. Anyone on the team can read it without asking the agent.</p>
+    </li>
+    <li id="teaches">
+      <h2><a href="#teaches">Every run teaches the next.</a></h2>
+      <p>Repeated gaps become lessons for the next brief, and past runs set the next budgets. The process improves on the record, where you can check it.</p>
+    </li>
+    <li id="get-it-done">
+      <h2><a href="#get-it-done">Get the work done; performance comes with experience and measurement.</a></h2>
+      <p>Finish the work to the bar first. Then measure what actually happened: when the page painted, when each component mounted, how long each API call took, and where the layout clipped. Speed and token cost improve from numbers on the record, not guesses. Context is a cost a run must budget and measure: most of a run's tokens are context read again, not new work. So a run closes a builder when it reports, sends a fix round to a fresh agent with the findings and the diff, gives every agent a context budget, and records its token totals in the retro.</p>
+    </li>
+  </ol>
+
+  <footer class="mf-end">
+    <p><a href="./">Coordinator</a> and <a href="https://mindmakr.github.io/reins/">reins</a> are companion tools that practise <span data-term>Lucid Coding</span>: Coordinator runs the builder and blind-critic loop, and reins gives agents typed actions, state, lifecycle timings, DOM and CSS diagnostics, and panel snapshots inside your web and Expo apps (<a href="https://github.com/mindmakr/reins-examples">see the examples</a>).</p>
+    <p><a href="lucid-coding-whitepaper.html">Read the whitepaper</a> for the reasons behind each principle, the working loop, what to measure and how to adopt it.</p>
+    <p class="mf-sign">Author: <a href="https://github.com/mindmakr">Asif Raja, by Mindmakr</a></p>
+  </footer>
+</main>
+
+<script src="site.js" defer></script>
+</body>
+</html>

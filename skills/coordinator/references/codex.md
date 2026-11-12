@@ -1,6 +1,6 @@
 # Using the skill in OpenAI Codex CLI
 
-Codex CLI is the second harness for 1.0. The skill and its sub-skills are plain `SKILL.md` folders with no Claude-only syntax in their steps, so Codex loads them as they are. This page is the adapter: install, what differs, and what has been checked.
+Codex CLI is the second harness for 1.0. Antigravity, Gemini CLI and the rules for several tools on one project are in `harnesses.md`. The skill and its sub-skills are plain `SKILL.md` folders with no Claude-only syntax in their steps, so Codex loads them as they are. This page is the adapter: install, what differs, and what has been checked.
 
 ## Install
 

@@ -104,7 +104,7 @@ test('the view, the text HUD, the flow map and the coordinator page show the cha
 test('init --continues links both runs; freeze wants the unit; link --continues records it afterwards', () => {
   assert.equal(run('init', 'p', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1').code, 0);
   run('add', 'p', 'm1', '--bar', 'b'); run('add', 'p', 'm3', '--bar', 'b', '--after', 'm1'); run('freeze', 'p');
-  run('start', 'p', 'm1'); run('built', 'p', 'm1'); run('verdict', 'p', 'm1', 'fail', '--score', '5', '--gap', 'x');
+  run('start', 'p', 'm1'); run('built', 'p', 'm1'); run('verdict', 'p', 'm1', 'fail', '--severity', 'high', '--score', '5', '--gap', 'x');
   const stops = run('next', 'p').out.units;
   assert.deepEqual(stops.map((u) => u.reason), ['budget: rounds', 'blocked: m1 stopped']);
   assert.match(run('init', 'c', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--continues', 'p:nope').err, /no unit nope in run p/);
@@ -133,7 +133,7 @@ test('extend: more rounds only for a round-budget stop, only with the person\'s 
   run('init', 'e', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'e', 'm1', '--bar', 'b'); run('add', 'e', 'm2', '--bar', 'b'); run('freeze', 'e');
   for (const u of ['m1', 'm2']) { run('start', 'e', u); run('built', 'e', u); }
-  run('verdict', 'e', 'm1', 'fail', '--score', '7', '--gap', 'one more pass'); run('next', 'e');
+  run('verdict', 'e', 'm1', 'fail', '--severity', 'high', '--score', '7', '--gap', 'one more pass'); run('next', 'e');
   assert.match(run('extend', 'e', 'm2', '--rounds', '1', '--reason', 'r').err, /m2 is judging/);
   assert.match(run('extend', 'e', 'm1', '--rounds', '1', '--reason', 'r').err, /no approval from the person/);
   assert.match(run('extend', 'e', 'm1', '--rounds', '9', '--reason', 'r').err, /1-4/);
@@ -164,7 +164,7 @@ test('extend: more rounds only for a round-budget stop, only with the person\'s 
   assert.equal(run('verdict', 'e', 'm1', 'pass', '--evidence', 'suite green', '--score', '9').code, 0, 'the extended unit can pass');
   assert.equal(state('e').units[0].status, 'pass');
   // A person's note: only a clear "approved", and only from the person.
-  run('verdict', 'e', 'm2', 'fail', '--score', '6', '--gap', 'g'); run('next', 'e');
+  run('verdict', 'e', 'm2', 'fail', '--severity', 'high', '--score', '6', '--gap', 'g'); run('next', 'e');
   run('note', 'e', '--kind', 'person', '--unit', 'm2', '--text', 'Approved: one more round for m2');
   assert.match(run('extend', 'e', 'm2', '--rounds', '1', '--reason', 'r').err, /not added by the person on the dashboard or the web/);
   for (const t of ['No, not approved', 'ok, one more for m2', 'Approved?', 'Approved, but only if quick', "I don't approve"]) {
@@ -177,14 +177,14 @@ test('extend: more rounds only for a round-budget stop, only with the person\'s 
 });
 
 test('extend: one approval, one use; only after the last verdict; on the named unit; rounds only as many as their words name', () => {
-  const stop = (u) => { run('start', 'x', u); run('built', 'x', u); run('verdict', 'x', u, 'fail', '--score', '5', '--gap', `gap ${Math.random()}`); run('next', 'x'); };
+  const stop = (u) => { run('start', 'x', u); run('built', 'x', u); run('verdict', 'x', u, 'fail', '--severity', 'high', '--score', '5', '--gap', `gap ${Math.random()}`); run('next', 'x'); };
   run('init', 'x', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'x', 'm1', '--bar', 'b'); run('add', 'x', 'm2', '--bar', 'b'); run('freeze', 'x');
   // Answered before the unit's last verdict: stale.
   run('start', 'x', 'm1'); run('built', 'x', 'm1');
   run('ask', 'x', '--question', 'More for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Yes');
   run('answer', 'x', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes, one more');
-  run('verdict', 'x', 'm1', 'fail', '--score', '5', '--gap', 'g1'); run('next', 'x');
+  run('verdict', 'x', 'm1', 'fail', '--severity', 'high', '--score', '5', '--gap', 'g1'); run('next', 'x');
   assert.match(run('extend', 'x', 'm1', '--reason', 'r', '--answer', 'q1').err, /answered before m1's last verdict; ask again/);
   // A question that names no unit, or another unit, approves nothing here.
   run('ask', 'x', '--question', 'More rounds?', '--header', 'any', '--option', 'Yes|one more', '--option', 'No|stop', '--approves', 'Yes');
@@ -223,7 +223,7 @@ test('extend: a hand edit of state.json never approves', () => {
   const edit = (fn) => { const st = JSON.parse(readFileSync(file, 'utf8')); fn(st); writeFileSync(file, JSON.stringify(st)); };
   run('init', 'h', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'h', 'm1', '--bar', 'b'); run('freeze', 'h');
-  run('start', 'h', 'm1'); run('built', 'h', 'm1'); run('verdict', 'h', 'm1', 'fail', '--score', '5', '--gap', 'g'); run('next', 'h');
+  run('start', 'h', 'm1'); run('built', 'h', 'm1'); run('verdict', 'h', 'm1', 'fail', '--severity', 'high', '--score', '5', '--gap', 'g'); run('next', 'h');
   run('ask', 'h', '--question', 'One more for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Yes');
   run('answer', 'h', 'q1', '--choice', 'Yes'); // the lead's CLI answer: via cli, no confirm
   assert.match(run('extend', 'h', 'm1', '--reason', 'r', '--answer', 'q1').err, /not given by the person/);
@@ -246,7 +246,7 @@ test('extend: a hand edit of state.json never approves', () => {
 test('the --confirm words pass the same yes check as a note', () => {
   run('init', 'cf', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'cf', 'm1', '--bar', 'b'); run('freeze', 'cf');
-  run('start', 'cf', 'm1'); run('built', 'cf', 'm1'); run('verdict', 'cf', 'm1', 'fail', '--score', '5', '--gap', 'g'); run('next', 'cf');
+  run('start', 'cf', 'm1'); run('built', 'cf', 'm1'); run('verdict', 'cf', 'm1', 'fail', '--severity', 'high', '--score', '5', '--gap', 'g'); run('next', 'cf');
   run('ask', 'cf', '--question', 'One more for m1?', '--header', 'm1', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'm1', '--approves', 'Yes');
   for (const words of ['No, stop it', 'yes once PR 1234 lands', 'yes but later', 'yes?']) {
     run('answer', 'cf', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', words);
@@ -289,7 +289,7 @@ test('approval: from the dashboard or the web counts; a lead\'s entry without th
 test('a chain may change the unit id: both ids show, stats count it once, a parent is continued once', () => {
   run('init', 'w1', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'w1', 'u1213', '--bar', 'b'); run('freeze', 'w1');
-  run('start', 'w1', 'u1213'); run('built', 'w1', 'u1213'); run('verdict', 'w1', 'u1213', 'fail', '--score', '5', '--gap', 'x'); run('next', 'w1');
+  run('start', 'w1', 'u1213'); run('built', 'w1', 'u1213'); run('verdict', 'w1', 'u1213', 'fail', '--severity', 'high', '--score', '5', '--gap', 'x'); run('next', 'w1');
   run('close', 'w1', '--outcome', 'stopped', '--reason', 'finish in a follow-on run');
   run('init', 'fin', '--goal', 'g', '--bar', 'b', '--fence', 'f');
   assert.equal(run('add', 'fin', 'u1213b', '--bar', 'b', '--continues', 'w1:u1213').code, 0);

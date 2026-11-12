@@ -24,8 +24,30 @@ function quoted(quotes) {
 
 const behaviourLines = (bs) => (bs?.length ? bs.map((b) => `  ${b.id}: ${b.text}`) : ['  (none recorded)']);
 const beatLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs beat ${run} ${unit}`;
-const evidenceLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs evidence ${run} ${unit} --kind screenshot|log --file <png, pdf, log, md or json>`;
+const evidenceLine = (run, unit, env) => `${env ? `${env} ` : ''}node <skill-dir>/scripts/run.mjs evidence ${run} ${unit} --kind screenshot|log --file <png, pdf, log, md or json> (a reins report: --kind reins --file <its .md>)`;
 const NO_ASK = 'Never ask the person: report blockers to the lead.';
+// The test-run budget (references/guardrails.md, Test runs): full suites rerun under load caused the flakes that
+// failed rounds (#51), and checks run whatever changed took most of a 14-hour run (#65).
+export const TESTS_BUILDER = 'Run only the tests mapped to the files you changed (COORDINATOR.md\'s mapping, else the runner\'s related-files mode such as `vitest related --run <files>`), plus typecheck and lint for each side you touched. Not the full suite: the critic runs it once on the head. Rerun a test under load only when you suspect a flake, and say so in your report.';
+export const TESTS_CRITIC = 'Run the tests mapped to the changed files, plus typecheck and lint for each side touched. Then, only if nothing has failed the round, run the full suite once on the head; any other critic of this head cites that run. Rerun a single file, alone or under load, only when you suspect a flake, and say so in EVIDENCE; never the whole suite again.';
+// From round 2 the critic reviews what changed since the head the last critic judged (sub-skills/review.md, Delta review).
+export const deltaLine = (head) => `This is a later round: review the delta, \`git diff ${head} <head>\`, plus the code that calls what it changed. A behaviour the delta does not touch passes by reference to the last round's evidence. Review the whole unit again only when the delta touches most of it.`;
+
+// Context is what costs (references/context.md): one run spent 97% of its tokens re-reading context, and fix rounds
+// sent back to a large builder were about half of builder cost.
+export const CONTEXT_LINE = 'Keep your context small (references/context.md). Read file ranges and search results, not whole files over about 10k characters. Pipe long command output through a filter (`| tail -40`, `| grep -n FAIL`) and never read a saved log twice. At about 250k tokens of context, stop, write a handover note (done, left, the files that matter, the commands that work) and report.';
+export const FIX_ROUND_LINE = 'This is a fix round and you are a new agent: the quoted gap is the whole task. Read the unit\'s diff and only the files the gap names.';
+export const SUITE_CITE_LINE = 'When this brief quotes a full-suite run on this head, cite it and do not run the suite again.';
+
+// The first line of every brief: which run, unit, round and role the agent works for. context.mjs reads it back
+// from the agent's transcript, so a retro can say what each round cost (references/context.md, rule 8).
+// Ids only (the store's id pattern), so nothing else from a transcript can pass through it.
+const MARK = /^\[coordinator-brief run=([A-Za-z0-9][A-Za-z0-9._-]{0,63})(?: unit=([A-Za-z0-9][A-Za-z0-9._-]{0,63}) round=(\d{1,3}))? role=(builder|critic|integrator)\][ \t]*$/m;
+export const briefMark = ({ run, unit = null, round = null, role }) => `[coordinator-brief run=${run}${unit ? ` unit=${unit} round=${round}` : ''} role=${role}]`;
+export function parseBriefMark(text) {
+  const m = MARK.exec(String(text ?? ''));
+  return m ? { run: m[1], unit: m[2] ?? null, round: m[3] ? Number(m[3]) : null, role: m[4] } : null;
+}
 
 // run: the state; o: { role, unit, quotes: [{ source, text }], where, playbook, env }.
 export function buildBrief(run, o) {
@@ -39,8 +61,15 @@ export function buildBrief(run, o) {
     if (causes.length) quotes.unshift({ source: 'earlier critics\' cause tags', text: causes.join('\n') });
   }
   const playbook = o.playbook ? [`Playbook: read and follow ${o.playbook} (or the project's own skill for this step).`] : [];
+  // Per-launch caps (guardrails.md, Budget): the agent stops and reports at the cap rather than run on.
+  const b = run.budget ?? {};
+  const caps = [b.launchMinutes ? `${b.launchMinutes} minutes` : null, b.launchCost ? `${b.launchCost.amount} ${b.launchCost.currency}` : null].filter(Boolean);
+  const budget = caps.length ? [`Budget for this launch: ${caps.join(' and ')}. Near the cap, stop and report what is done and what is left.`] : [];
+  // The round this agent works in: one more than the rounds already judged.
+  const mark = briefMark({ run: run.id, unit: u?.id, round: u ? u.rounds.length + 1 : null, role: o.role });
   if (o.role === 'builder') {
     return [
+      mark,
       `You are the builder for unit ${u.id} of run ${run.id}.`,
       ...quoted(quotes),
       AUTHORITY_LINE,
@@ -50,8 +79,11 @@ export function buildBrief(run, o) {
       `Fence: ${run.fence}. Anything outside the fence goes in "Follow-ups" in your report; don't do it.`,
       `Where: ${o.where ?? '<worktree or branch, or the output path>'}. Work only there.`,
       ...playbook,
-      ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.'] : []),
+      ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.', FIX_ROUND_LINE] : []),
       'Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.',
+      TESTS_BUILDER,
+      CONTEXT_LINE,
+      ...budget,
       `At each milestone (pushed, tests ran, PR opened) run: ${beatLine(run.id, u.id, o.env)} --text "<the milestone>"`,
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your report is lost when the worktree goes.`,
       'Never merge, deploy, push to a protected branch, delete data or contact anyone. Never ask the person: report blockers to the lead.',
@@ -60,6 +92,7 @@ export function buildBrief(run, o) {
   }
   if (o.role === 'critic') {
     return [
+      mark,
       `You are a harsh, independent critic for unit ${u.id} of run ${run.id}. You have not seen how it was built, and you must not ask how. ${NO_ASK}`,
       ...quoted(quotes),
       AUTHORITY_LINE,
@@ -69,25 +102,36 @@ export function buildBrief(run, o) {
       `Fence: ${run.fence}`,
       'Behaviours:', ...behaviourLines(u.behaviours),
       'Check every behaviour yourself; the builder\'s evidence is a pointer, not proof.',
+      ...(last?.reviewedHead ? [deltaLine(last.reviewedHead)] : []),
       ...playbook,
       'Inspect the REAL artifact: run the tests, open the screen, read the diff and the output. Do not rely on any summary.',
+      TESTS_CRITIC,
+      SUITE_CITE_LINE,
+      CONTEXT_LINE,
+      ...budget,
       'Check for gaming: tests that were skipped, deleted or loosened; changed snapshots; edits outside the fence.',
+      // Whoever ran detect last recorded them; only a decision note on the unit makes them the lead's (#45).
+      ...(u.detect?.allow?.length && u.detect.round === u.rounds.length + 1 ? [`${(run.notes ?? []).some((n) => n.kind === 'decision' && n.unit === u.id) ? 'The lead allowed these detect hits for this round (decisions in the run)' : 'These detect hits were allowed for this round, with no decision on the unit recorded; check them as findings'}: ${u.detect.allow.join(', ')}. detect.mjs keeps them when you rerun it on the same base and head without --allow.`] : []),
       `Attach every screenshot and report you make: ${evidenceLine(run.id, u.id, o.env)}. A path only named in your reply is lost when the worktree goes.`,
       `If your checks run long, run now and then: ${beatLine(run.id, u.id, o.env)}`,
       ...(u.rounds.length ? ['Reuse an earlier cause tag (quoted above) word for word when the root cause is the same, even if the symptom differs.'] : []),
       'Reply with exactly:',
       'VERDICT: PASS | FAIL',
       'SCORE: 0-10 against the bar (always; decimals allowed)',
-      'GAP: the single biggest gap between the artifact and the bar (none if PASS)',
+      'SEVERITY: high | medium, the severity of that gap (none if PASS)',
+      'GAP: the single biggest high or medium gap between the artifact and the bar (none if PASS)',
       'CAUSE: the root cause of that gap as a 2-5 word tag, e.g. "hand-rolled ICU parser" (none if PASS)',
       'EVIDENCE: the command and output, the file:line, or the screenshot path that proves it',
       'BEHAVIOURS: one line each, B1 PASS|FAIL: <what shows it>',
-      'OUT-OF-FENCE: anything found outside scope (follow-ups, not failures)',
-      'Pass only when every behaviour passes and the evidence shows it.',
+      'FINDINGS: one line each, <high|medium|low|nit> <file:line> <what>. high: a wrong result, data loss, a security hole or a failing behaviour; medium: a real defect against the bar that has a workaround; low: small and safe to fix in passing; nit: wording or style',
+      'FOLDS: the low and nit findings to fold in before merge (none if none)',
+      'OUT-OF-FENCE: anything found outside scope, and gaps that predate this change and are none of its behaviours (follow-ups, not failures; bar.md, Severity)',
+      'Pass only when every behaviour passes and the evidence shows it. Fail only on a high or medium finding that this change causes or that fails one of its behaviours: an older gap goes under OUT-OF-FENCE, and lows and nits go under FOLDS on a pass.',
     ].join('\n');
   }
   if (o.role === 'integrator') {
     return [
+      briefMark({ run: run.id, role: 'integrator' }),
       `Fresh eyes on the whole result of run ${run.id} after every unit has passed. ${NO_ASK}`,
       ...quoted(quotes),
       AUTHORITY_LINE,
@@ -98,7 +142,7 @@ export function buildBrief(run, o) {
       'Goal behaviours:', ...behaviourLines(run.goalBehaviours),
       ...playbook,
       'Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.',
-      'Fix only inconsistencies; don\'t redesign. Run the full checks after.',
+      'Fix only inconsistencies; don\'t redesign. Run the full checks once after, on the merged result.',
       'Reply in the same format as the critic, marking the goal\'s behaviours (G1, G2, …), then list what you changed.',
     ].join('\n');
   }

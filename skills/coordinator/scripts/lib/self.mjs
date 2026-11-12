@@ -7,6 +7,8 @@ import { answerText, questions } from './questions.mjs';
 import { chainUnits } from './chain.mjs';
 import { decide, stats } from './rules.mjs';
 import { clip, dotState, stateBadge } from './plain.mjs';
+import { gapsModel, KIND_LABEL } from './gaps.mjs';
+import { clock, freeAt, ordered, runStatus } from './progress.mjs';
 
 const MINUTE = 60_000;
 export const STUDY_AREAS = ['security', 'design', 'stack', 'other'];
@@ -72,15 +74,15 @@ function waitsOn(d, u, openQs) {
   }
 }
 
-function plan(run, nowMs) {
+function plan(run, nowMs, status) {
   const p = decide(run, nowMs);
   const qs = questions(run).filter((q) => q.open);
   const left = run.units.filter((u) => !['pass', 'stopped'].includes(u.status));
   const byId = new Map(p.units.map((d) => [d.id, d]));
   return {
-    run: run.id, tag: run.tag, decision: p.decision, goal: clip(run.goal, 200),
+    run: run.id, tag: run.tag, decision: p.decision, goal: clip(run.goal, 200), status,
     done: run.units.length - left.length, total: run.units.length,
-    next: p.units.filter((d) => ['build', 'judge', 'change-strategy', 'check-stale'].includes(d.action)).map((d) => `${d.action} ${d.id}`),
+    next: p.units.filter((d) => ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'].includes(d.action)).map((d) => `${d.action} ${d.id}`),
     left: left.map((u) => { const d = byId.get(u.id) ?? {}; const dot = dotState(u, d, qs); return { id: u.id, title: u.title ?? null, status: u.status, dot, badge: stateBadge(dot, u, d), waitsOn: waitsOn(d, u, qs) }; }),
     needsYou: qs.map((q) => ({ id: q.id, text: clip(q.header || q.text, 140) })),
   };
@@ -144,7 +146,7 @@ function decisions(runs) {
  * runs: every readable state; lessons: { global, project }; context: COORDINATOR.md text or null;
  * current: the run being served (or null). Returns the page and text model.
  */
-export function selfModel({ runs, lessons = {}, context = null, current = null, nowMs = Date.now() }) {
+export function selfModel({ runs, lessons = {}, context = null, current = null, gapsCheck = null, nowMs = Date.now() }) {
   const sorted = [...runs].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const units = sorted.reduce((n, r) => n + r.units.length, 0);
   const minutes = sorted.reduce((n, r) => {
@@ -159,7 +161,12 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
   const finishedUnits = work.filter((u) => ['pass', 'stopped'].includes(u.status));
   const mins = sorted.flatMap((r) => r.units.map((u) => unitMinutes(r, u))).filter((m) => m !== null).sort((a, b) => a - b);
   const ids = new Set(sorted.map((r) => r.id));
+  // Each run's status word, progress and ETA (lib/progress.mjs), as show and the HUD say it.
+  const status = new Map(sorted.map((r) => [r.id, runStatus(r, r.closed ? null : decide(r, nowMs), { nowMs, runs: sorted })]));
+  const order = ordered([...status.values()], sorted);
   return {
+    // Capacity: what is still running and when the machine frees up.
+    active: { runs: order.active, concluded: order.concluded, older: order.older, free: freeAt(order.active) },
     current,
     runIds: [...ids],
     age: {
@@ -186,11 +193,13 @@ export function selfModel({ runs, lessons = {}, context = null, current = null, 
     // Work that ran across runs, oldest run first, with its rounds added up.
     chains: work.filter((c) => c.links.length > 1).map((c) => ({ unit: c.id, status: c.outcome, rounds: c.rounds, links: c.links })),
     history: sorted.filter((r) => r.closed).reverse().map((r) => ({
-      run: r.id, tag: r.tag, outcome: r.closed.outcome, started: r.createdAt, closed: r.closed.at, goal: clip(r.goal, 160),
+      run: r.id, tag: r.tag, outcome: r.closed.outcome, status: status.get(r.id), started: r.createdAt, closed: r.closed.at, goal: clip(r.goal, 160),
       passed: r.units.filter((u) => u.status === 'pass').length, stopped: r.units.filter((u) => u.status === 'stopped').length, units: r.units.length,
     })),
-    plans: sorted.filter((r) => !r.closed).reverse().map((r) => plan(r, nowMs)),
+    plans: sorted.filter((r) => !r.closed).reverse().map((r) => plan(r, nowMs, status.get(r.id))),
     proposals: proposals(sorted, all),
+    // Everything left undone across runs (lib/gaps.mjs), open and resolved.
+    gaps: { ...gapsModel(sorted), lastCheck: gapsCheck && typeof gapsCheck.at === 'string' ? { at: gapsCheck.at, asked: Number(gapsCheck.asked) || 0, closed: Number(gapsCheck.closed) || 0 } : null },
     study: {
       runs: sorted.filter((r) => (r.studies ?? []).length || !r.closed).map((r) => ({ run: r.id, used: (r.studies ?? []).length, cap: studyCap(r), open: !r.closed })),
       log: sorted.flatMap((r) => (r.studies ?? []).map((x) => ({ ...x, run: r.id }))).sort((a, b) => String(b.at).localeCompare(String(a.at))),
@@ -207,6 +216,9 @@ export function selfText(m) {
   const L = [];
   const a = m.age;
   L.push(`coordinator · ${count(a.runs, 'run')} (${a.open} open) · ${count(a.units, 'unit')} · ${a.hours} h · first run ${day(a.firstRun)}${a.firstRunId ? ` (${a.firstRunId})` : ''}`);
+  const act = m.active;
+  L.push('', `active    ${act.runs.length ? `${count(act.runs.length, 'run')} running${act.free.at ? ` · machine free around ${clock(Date.parse(act.free.at), Date.now())} local time${act.free.unknown ? ` (${act.free.unknown} with no estimate yet)` : ''}` : ' · no estimate yet'}` : 'no active run: the machine is free'}`);
+  for (const x of [...act.runs, ...act.concluded]) L.push(`  ${x.line}`);
   const st = m.stats;
   L.push('', `stats     pass rate ${n(st.passRate, '%')} · rounds to pass median ${n(st.medianRoundsToPass)}, p80 ${n(st.p80RoundsToPass)} · stopped ${n(st.stoppedShare, '%')} · ${n(st.minutesPerUnit, ' min')} per unit (median) · ${count(st.units, 'finished unit')} (${st.basis})`);
   const c = st.closed;
@@ -227,6 +239,9 @@ export function selfText(m) {
     L.push('', `chains    ${count(m.chains.length, 'unit')} worked across runs, each counted once in the stats`);
     for (const c of m.chains.slice(0, 10)) L.push(`  ${c.unit}: ${c.links.map((l) => `${l.run}${l.unit !== c.unit ? `:${l.unit}` : ''} (${l.rounds}, ${l.status})`).join(' → ')} · ${c.rounds} rounds, ${c.status}`);
   }
+  const g = m.gaps;
+  L.push('', `gaps      ${count(g.openCount, 'open gap')} across ${count(g.openRuns, 'run')} · ${g.resolvedCount} resolved (run.mjs gaps lists them; gap close <run> <id> --reason R closes one)`);
+  for (const grp of g.open.slice(0, 6)) for (const x of grp.items.slice(0, 4)) L.push(`  ${x.id} [${KIND_LABEL[x.kind]}] ${clip(x.text, 110)}`);
   L.push('', `proposals ${m.proposals.length}`);
   for (const p of m.proposals.slice(0, 8)) L.push(`  [${p.kind}] ${clip(p.text, 130)}${p.run ? ` (${p.run})` : ''}`);
   L.push('', `study     ${count(m.study.log.length, 'study', 'studies')}${m.study.runs.filter((r) => r.open).map((r) => ` · ${r.run} ${r.used}/${r.cap}`).join('')}`);
