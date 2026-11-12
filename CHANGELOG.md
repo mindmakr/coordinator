@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0 (2026-11-12)
+Context budgets for every run, a script that measures where a run's tokens went, and a notice on ownership, warranty and liability.
+
+- **Context rules are standing rules of every run (`references/context.md`).** In one measured run, 97% of tokens were context read again, and fix rounds sent back to a large builder were about half of builder cost. So a builder is closed when it reports and a fix round goes to a new agent with the findings and the diff; every agent has a context budget (about 250k tokens, the lead about 300k); a round has one general critic, and later rounds review the delta; the lead runs the suite, typecheck and lint and quotes the lines to the critic; finished-agent notices are read together. `SKILL.md`, `commands/run.md`, the briefs and the retro carry the rules, and Lucid Coding principle 8 now covers context as a cost a run budgets and measures.
+- **`scripts/context.mjs`: where a run's tokens went.** It reads Claude Code transcripts and prints tokens by kind, cost share by agent type, the largest contexts, cache rewrites, wake-ups and tool results over 10k characters. Counts only, no transcript text, no network. The retro records its figures (`learning.md`, step 7).
+- **Tokens per round.** Every brief `run.mjs brief` prints now starts with a marker line, `[coordinator-brief run=… unit=… round=… role=…]`. `context.mjs` reads it and adds `costShareByRole` (builders and critics apart, even on one agent type), `rounds` (one row per run, unit, round and role) and `resumedAgents` (agents given a second brief). Send the brief as printed; an agent launched without one counts as `unmarked`.
+- **What you make is yours, with no warranty and no liability (`DISCLAIMER.md`).** A notice for everyone who uses the software: what you make with Coordinator, with reins or by following Lucid Coding belongs to you, except changes and additions to those tools themselves; no warranty or guarantee is given or assumed; and nobody is liable for loss or for a gap the software did not find. The contributor agreement (`CLA.md`, sections 6 and 7) adopts it.
+- **Licence summary, trademark policy and contributor agreement** (`TRADEMARKS.md`, `CLA.md`, the README's licence table), and the **Lucid Coding whitepaper** (version 0.1 draft) in `docs/`.
+
+The service's own changes are in `service/CHANGELOG.md`.
+
 ## 1.3.0 (2026-11-11)
 reins reports as evidence, lessons in every brief, helper models, and a security fix for committed settings files.
 
