@@ -74,7 +74,7 @@
     </li>
     <li id="get-it-done">
       <h2><a href="#get-it-done">Get the work done; performance comes with experience and measurement.</a></h2>
-      <p>Finish the work to the bar first. Then measure what actually happened: when the page painted, when each component mounted, how long each API call took, and where the layout clipped. Speed and token cost improve from numbers on the record, not guesses.</p>
+      <p>Finish the work to the bar first. Then measure what actually happened: when the page painted, when each component mounted, how long each API call took, and where the layout clipped. Speed and token cost improve from numbers on the record, not guesses. Context is a cost a run must budget and measure: most of a run's tokens are context read again, not new work. So a run closes a builder when it reports, sends a fix round to a fresh agent with the findings and the diff, gives every agent a context budget, and records its token totals in the retro.</p>
     </li>
   </ol>
 

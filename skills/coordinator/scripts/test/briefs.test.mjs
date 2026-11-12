@@ -93,3 +93,15 @@ test('briefs keep context small: the context line in builder and critic, a fix r
   const first = buildBrief({ ...run, units: [{ ...run.units[0], rounds: [] }] }, { role: 'builder', unit: 'web', quotes: [] });
   assert.ok(!first.includes(FIX_ROUND_LINE), 'round 1 has no fix-round line');
 });
+
+test('the context rules are standing rules: SKILL.md, the run command and the retro carry them, and SKILL.md stays under 500 words', () => {
+  const refs = join(dirname(fileURLToPath(import.meta.url)), '../../');
+  const skill = readFileSync(join(refs, 'SKILL.md'), 'utf8');
+  const runDoc = readFileSync(join(refs, 'references/commands/run.md'), 'utf8');
+  const learning = readFileSync(join(refs, 'references/learning.md'), 'utf8');
+  assert.match(skill, /Context rules are standing rules[^\n]*references\/context\.md[^\n]*before the first launch/);
+  assert.match(skill, /records token totals in the retro/);
+  assert.match(runDoc, /Standing rules, every run[^\n]*references\/context\.md/);
+  assert.match(learning, /Measure the spend \(always[^\n]*context\.mjs/);
+  assert.ok(skill.split(/\s+/).filter(Boolean).length < 500, 'SKILL.md is under 500 words');
+});

@@ -151,7 +151,7 @@
       <dt>Sign it is missing</dt><dd>The critic finds the same kind of gap every week.</dd></dl>
 
       <h3>8. Get the work done; performance comes with experience and measurement.</h3>
-      <p>Finish the work to the bar first. Then measure what happened: when the page painted, how long each call took, how many tokens it cost. Speed and cost improve from numbers on the record, not from guesses.</p>
+      <p>Finish the work to the bar first. Then measure what happened: when the page painted, how long each call took, how many tokens it cost. Speed and cost improve from numbers on the record, not from guesses. Context is a cost a run must budget and measure: most of a run's tokens are context read again, not new work. So a run closes a builder when it reports, sends a fix round to a fresh agent with the findings and the diff, gives every agent a context budget, and records its token totals in the retro. In one measured run, 97% of tokens were context read again, builders were 61% of the cost, and fix rounds sent back to the same builder were about half of the builder cost (<a href="https://github.com/mindmakr/coordinator/blob/main/skills/coordinator/references/context.md">the figures and the rules</a>).</p>
       <dl><dt>In practice</dt><dd>Before and after measurements are attached to the unit that claims an improvement.</dd>
       <dt>Sign it is missing</dt><dd>"It feels faster."</dd></dl>
     </section>
