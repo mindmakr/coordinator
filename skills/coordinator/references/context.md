@@ -32,9 +32,16 @@ Why: a builder at 600k tokens re-reads 600k on every turn of the fix. The 26 res
 
 Check: `resumedAgents` in `S/context.mjs` counts the agents that were given a second brief. It should be 0, or each one small and inside the cache lifetime.
 
-### 2. Every agent has a context budget
+### 2. Every agent has a context budget, and the lead keeps its own
 
 At about 250k tokens an agent stops, writes a handover note (what is done, what is left, the files that matter, the commands that work) and reports. The lead starts a fresh agent with the note as its brief. The lead has a budget too: at about 300k it compacts, or hands over to a new session at the end of a batch of issues, with the run's own state as the handover (`durability.md`, Resume).
+
+The lead lives longest, so each token in its context is paid for more often than any other. Keeping it lean is the lead's own job, for the whole run:
+
+- **The run state is its memory.** Decisions, the situation and follow-ups go into the run with `run.mjs note`, and come back with `run.mjs show` and `next`. Nothing has to stay in the chat to be remembered, so a compaction or a new session loses nothing.
+- **It reads conclusions, not material.** Agents report in 10 lines or fewer. The lead does not read a whole diff, a whole log or an agent's transcript: it runs the check and keeps the pass or fail lines (rule 6), or sends an agent to read and report.
+- **It delegates looking.** A question that means reading several files goes to an investigator, which returns the answer with file and line, not the files.
+- **It acts once on a batch of notices** (rule 5).
 
 Why: builders ended between 340k and 920k and never compacted. The lead re-read 300k to 960k on each of 107 wake-ups.
 
@@ -50,13 +57,25 @@ Critics stay on the strong model for now. A cheaper critic for changes that do n
 
 Check: each round's critic setup (`verdict --critic`, `--specialist`) in `run.mjs show`. More than one general critic on a round is a miss.
 
-### 4. Briefs are short; agents read ranges
+### 4. Briefs are short and complete; agents read ranges
 
 A brief points to files. It does not paste what the repo already holds: not the playbook, not a design doc, not a diff the agent can run. Agents read file ranges (`sed -n 40,80p`, a search with context lines), not whole files over about 10k characters. They pipe long command output through a filter (`| tail -40`, `| grep -n FAIL`) and never read a saved log a second time. They attach evidence with `run.mjs evidence --file`, so the log is not re-read to quote it.
 
+Short is not thin. A brief holds every fact its agent needs to start work, and nothing the agent can read for itself. An agent that must find again what the lead already knows spends its context finding it, and one that guesses costs a round. So a brief names:
+
+- the goal, the bar, the behaviours and the fence (`run.mjs brief` fills these in);
+- where to work, the base and the head, and the files and line ranges that matter;
+- the commands that work here (the mapped tests, typecheck, lint) and how to see the result;
+- what is already known: the cause that was found, what was ruled out, the decision that was made and why, the hot-spot files;
+- on a fix round, the findings, each with its file and line.
+
+Every fact in a brief is one the lead checked: the path exists, the head is the one named, the command runs. A wrong fact in a brief costs more than a missing one, because the agent builds on it.
+
+The test for a brief: could the agent start from it alone, without asking and without searching for something the lead already knew? If not, add the fact. If a line would not change what the agent does, cut it.
+
 Why: 399 tool results over 10k characters were half of all tool-result volume, and each one rode along on every later turn.
 
-Check: `bigToolResults` in `S/context.mjs`. A run with a handful is healthy; hundreds means whole-file reads.
+Check: `bigToolResults` in `S/context.mjs`. A run with a handful is healthy; hundreds means whole-file reads. `subAgents.firstContextMedian` less the fixed prefix (rule 7) is the size of a brief: a large one was padded. A round lost because an agent lacked a fact the lead had is a lesson for the retro (`learning.md`).
 
 ### 5. Do not park a large agent, and wake once for several
 

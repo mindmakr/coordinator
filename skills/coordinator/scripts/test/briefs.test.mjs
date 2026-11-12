@@ -116,6 +116,11 @@ test('the context rules are standing rules: SKILL.md, the run command and the re
   const learning = readFileSync(join(refs, 'references/learning.md'), 'utf8');
   assert.match(skill, /Context rules are standing rules[^\n]*references\/context\.md[^\n]*before the first launch/);
   assert.match(skill, /records token totals in the retro/);
+  assert.match(skill, /budgets lead and agents, keeps briefs lean but complete/);
+  const context = readFileSync(join(refs, 'references/context.md'), 'utf8');
+  assert.match(context, /^### 2\. Every agent has a context budget, and the lead keeps its own$/m);
+  assert.match(context, /^### 4\. Briefs are short and complete; agents read ranges$/m);
+  assert.match(runDoc, /you keep your own context lean[^\n]*every brief is short and complete/);
   assert.match(runDoc, /Standing rules, every run[^\n]*references\/context\.md/);
   assert.match(learning, /Measure the spend \(always[^\n]*context\.mjs/);
   assert.ok(skill.split(/\s+/).filter(Boolean).length < 500, 'SKILL.md is under 500 words');

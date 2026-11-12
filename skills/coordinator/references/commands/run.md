@@ -1,6 +1,6 @@
 # /coordinator run <task>
 
-**Standing rules, every run.** Read `references/context.md` before the first launch and follow its eight rules for the whole run: a builder is closed when it reports, a fix round goes to a fresh agent (finding list plus diff, `references/briefs.md`), every agent and you keep a context budget, one critic per round. The briefs from `S/run.mjs brief` carry them. The retro records the token totals (`references/learning.md`, step 7). They are not optional reading.
+**Standing rules, every run.** Read `references/context.md` before the first launch and follow its eight rules for the whole run: a builder is closed when it reports, a fix round goes to a fresh agent (finding list plus diff, `references/briefs.md`), every agent and you keep a context budget, you keep your own context lean (the run state is your memory), every brief is short and complete, one critic per round. The briefs from `S/run.mjs brief` carry them. The retro records the token totals (`references/learning.md`, step 7). They are not optional reading.
 
 ## 1. Intake: everything up front
 
