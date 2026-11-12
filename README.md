@@ -262,3 +262,5 @@ Coordinator is maintained by one author. It needs contributors, people who write
 Solo developers get everything outside `service/ee/` free, with no time limit. If your company cannot use AGPL software, a commercial licence for the service is available: ask through the [sponsor or partner form](https://github.com/mindmakr/coordinator/issues/new?template=sponsor-or-partner.yml).
 
 The names "Lucid Coding", "Coordinator" and "reins" are covered by the [trademark policy](TRADEMARKS.md). Contributions come in under the [contributor agreement](CLA.md).
+
+What you make with Coordinator is yours, and the software comes with no warranty or guarantee and no liability: read the [notice](DISCLAIMER.md) before you rely on it.
