@@ -27,7 +27,7 @@ Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (bare skill).
 - **The dashboard takes answers.** Mirror questions with `run.mjs ask` (`references/hud.md`).
 - **The bar decides.** Behaviours make up the bar, written first. A fresh critic, never the builder, marks each against the real artifact (`references/bar.md`).
 - **Short, no slop.** Outcome first; everything people read meets the craft bar (`references/craft.md`).
-- **Context rules are standing rules.** Read `references/context.md` before the first launch. Every run closes a builder when it reports, gives fix rounds to a fresh agent, budgets each agent, and records token totals in the retro. None is optional.
+- **Context rules are standing rules.** Read `references/context.md` before the first launch. Each run closes builders on report, gives fix rounds to fresh agents, budgets lead and agents, keeps briefs lean but complete, and records token totals in the retro.
 - **The harness is the team.** Staff roles from its agents and skills (`references/team.md`), cheap models on mechanical builds only (`references/routing.md`), sub-skills for gaps (`references/sub-skills.md`).
 - **The log decides.** `.coordinator/runs/<run>/events.jsonl`, written only by `run.mjs`, says what happens next (`references/durability.md`).
 - **The fence holds.** Out-of-scope work is a follow-up.
