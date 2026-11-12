@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Where a run's tokens went, for the retro (references/context.md). Reads Claude
-// Code transcript files and prints counts only: no transcript text is printed.
+// Code transcript files and prints counts only, plus the run, unit, round and
+// role ids from a brief's marker line: no other transcript text is printed.
 //
 //   context.mjs <path> [<path> …] [--top N] [--cache-minutes M] [--json]
 //   <path>  a session's .jsonl file, or a folder searched for .jsonl files (a
@@ -11,9 +12,11 @@
 //   --cache-minutes M  how long the prompt cache lives (default 60)
 //
 // Prints: tokens by kind, the share read from cache, cost share by agent type
-// (relative weights, not money), sub-agent context sizes and compactions, the
-// lead's own, the costliest agents, cache rewrites after a pause longer than the
-// cache lifetime, and tool results over 10k characters.
+// (relative weights, not money) and by role, what each round cost (from the
+// marker line that starts every brief), agents given a second brief, sub-agent
+// context sizes and compactions, the lead's own, the costliest agents, cache
+// rewrites after a pause longer than the cache lifetime, and tool results over
+// 10k characters.
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
