@@ -69,9 +69,9 @@ p { margin: 0 0 1rem; }
 .mark { width: 22px; height: 22px; flex: none; color: var(--ink); }
 .nav nav { margin-left: auto; }
 .nav ul { display: flex; gap: 1.4rem; list-style: none; margin: 0; padding: 0; }
-.nav nav a { color: var(--ink-2); text-decoration: none; font-weight: 500; font-size: .95rem; }
+.nav nav a { color: var(--ink-2); text-decoration: none; font-weight: 500; font-size: .95rem; white-space: nowrap; }
 .nav nav a:hover { color: var(--ink); }
-@media (max-width: 860px) { .nav nav { display: none; } .nav .btn { margin-left: auto; } }
+@media (max-width: 960px) { .nav nav { display: none; } .nav .btn { margin-left: auto; } }
 
 /* Hero: the text, then the scan stage below it */
 .hero { padding: 3.5rem 0 2.2rem; }
@@ -251,7 +251,7 @@ section { padding: 5.5rem 0; }
 .resume { background: var(--bg-2); }
 .resume-in { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 3rem; align-items: start; }
 .resume-in p { color: var(--ink-2); max-width: 34rem; }
-.resume .sec-h { margin-bottom: 1.4rem; }
+.resume .sec-h, .bench .sec-h { margin-bottom: 1.4rem; }
 .term { list-style: none; counter-reset: t; margin: 0; padding: 1.4rem; background: #0e1820; color: #dfe7ed; border-radius: var(--r-frame); font-family: var(--mono); font-size: .92rem; box-shadow: 0 30px 60px -36px var(--shade); }
 .term li { counter-increment: t; padding: .9rem 0 .9rem 2.4rem; position: relative; border-top: 1px solid #22313c; }
 .term li:first-child { border-top: 0; }
