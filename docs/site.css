@@ -271,12 +271,13 @@ section { padding: 5.5rem 0; }
 .inst { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-frame); padding: 1.5rem; display: flex; flex-direction: column; align-items: flex-start; }
 .inst h3 { font-size: 1.25rem; font-weight: 800; margin-bottom: .9rem; }
 .inst p { color: var(--ink-2); }
-.inst .btn { margin-top: auto; }
+.inst .btn { margin-top: auto; max-width: 100%; white-space: normal; }
 .main-inst { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
-.cmd { position: relative; width: 100%; margin-bottom: 1rem; }
-.cmd pre { margin: 0; background: #0e1820; color: #ffffff; border-radius: var(--r-ctl); padding: 1rem 5.5rem 1rem 1rem; overflow-x: auto; }
+/* The button has its own column, so long commands scroll beside it, never under it. */
+.cmd { width: 100%; margin-bottom: 1rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; background: #0e1820; border-radius: var(--r-ctl); }
+.cmd pre { margin: 0; background: none; color: #ffffff; padding: 1rem; overflow-x: auto; }
 .cmd pre code { background: none; padding: 0; font-size: .92rem; line-height: 1.8; overflow-wrap: normal; }
-.copy { position: absolute; top: .6rem; right: .6rem; font: 600 .82rem var(--body); background: #22313c; color: #ffffff; border: 0; border-radius: 8px; padding: .4rem .7rem; cursor: pointer; }
+.copy { margin: .6rem .6rem 0 0; font: 600 .82rem var(--body); background: #22313c; color: #ffffff; border: 0; border-radius: 8px; padding: .4rem .7rem; cursor: pointer; }
 .copy:hover { background: #2e4150; }
 .aside { font-size: .95rem; }
 @media (max-width: 960px) { .install-grid { grid-template-columns: minmax(0, 1fr); } }
@@ -295,7 +296,7 @@ section { padding: 5.5rem 0; }
 }
 @media print { .nav, .skip, .beam, .inside { display: none; } .scan { height: auto !important; } .scan-pin { position: static !important; height: auto !important; } }
 @media (max-width: 600px) {
-  .cmd pre { padding-right: 1rem; }
+  .cmd { grid-template-columns: minmax(0, 1fr); }
   .cmd pre code { font-size: .8rem; }
-  .copy { position: static; margin-top: .5rem; }
+  .copy { justify-self: start; margin: 0 0 .8rem 1rem; }
 }
