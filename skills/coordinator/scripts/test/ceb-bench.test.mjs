@@ -199,8 +199,8 @@ test('the manifest and its signature come from one fixed https place, with no re
   await assert.rejects(fetchSuite('../../etc', { fetch: stub({}) }), /--suite must look like/);
 });
 
-test('the bench modules start no process, so they cannot call a model', () => {
-  for (const f of ['bench.mjs', 'cli.mjs', 'prices.mjs', 'fetch.mjs']) {
+test('planning starts no process: only the runner does, and it refuses a plan that is not confirmed (ceb-run.test.mjs)', () => {
+  for (const f of ['bench.mjs', 'cli.mjs', 'prices.mjs', 'fetch.mjs', 'trial.mjs']) {
     assert.doesNotMatch(readFileSync(here(`../lib/ceb/${f}`), 'utf8'), /child_process|\bspawn\b|\bexecFile/, f);
   }
 });

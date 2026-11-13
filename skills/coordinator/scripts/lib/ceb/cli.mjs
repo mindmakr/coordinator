@@ -1,6 +1,6 @@
 // run.mjs bench: plan a run of the Coordinator Engineering Benchmark, show what it should
 // cost, and record the person's go-ahead (references/commands/bench.md, references/ceb-bench.md).
-// No model is called by these commands, and none may be until the estimate is confirmed.
+// plan, confirm, show and prices call no model. start runs the tasks, and refuses until the estimate is confirmed.
 //
 //   run.mjs bench plan --model <exact model id> --effort <level> --cap "20 USD" --mode practice|ranked
 //                  checks the configuration, fetches and verifies the suite's signed manifest, and
@@ -20,7 +20,15 @@
 //                  --manifest <file> [--sig <file>]   read the manifest from disk instead of the network
 //                  --harness   claude-code|codex: the tool that runs the tasks; else the one this ran in
 //   run.mjs bench confirm <id> --confirm "their words"   the person agreed to the estimate of that plan
-//   run.mjs bench show [<id>]      one plan with whether it may start, or every plan here
+//   run.mjs bench start <id> --harness-bin <file> [--env NAME …] [--env-file <file>] [--task a,b]
+//                  runs each task of a confirmed practice plan that has not run yet: one container from the task's
+//                  image, a new model session, the cap passed to the harness. Needs Docker. Options:
+//                  --harness-bin  the Linux build of the harness (Claude Code), as one file; mounted read-only
+//                  --env          a variable of your environment to pass into the container (repeatable), such as
+//                                 ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN; its value is never written or printed
+//                  --env-file     a file of NAME=value lines to pass the same way; keep it outside the state folder
+//                  --task         only these tasks of the plan
+//   run.mjs bench show [<id>]      one plan with whether it may start and its trials, or every plan here
 //   run.mjs bench prices [--suite S]   the suite's pinned price list and the basis of the estimate
 //
 // Plans are kept in <state folder>/bench/<id>/bench.json. `bench plan` is the only one that calls the
@@ -33,10 +41,11 @@ import { BASIS, basisFor, benchId, confirmPlan, estimate, estimateText, intake, 
 import { fetchSuite, suiteId } from './fetch.mjs';
 import { openManifest } from './manifest.mjs';
 import { priceList } from './prices.mjs';
+import { runPlan, secretsFrom, trialBrief, trialsOf } from './runner.mjs';
 
 export const DEFAULT_SUITE = 'CEB-2026.12';
-export const BENCH_FLAGS = ['model', 'effort', 'cap', 'mode', 'arm', 'consent', 'task', 'serving', 'suite', 'manifest', 'sig', 'confirm'];
-export const BENCH_REPEAT = ['task'];
+export const BENCH_FLAGS = ['model', 'effort', 'cap', 'mode', 'arm', 'consent', 'task', 'serving', 'suite', 'manifest', 'sig', 'confirm', 'harness-bin', 'env', 'env-file'];
+export const BENCH_REPEAT = ['task', 'env'];
 export const benchHelp = () => headerText(import.meta.url);
 
 const dir = (base) => join(base, 'bench');
@@ -89,9 +98,17 @@ function confirm([, id], o, { base, now }) {
 }
 
 function show([, id], { base }) {
-  if (id) { const r = load(base, id); const refusal = startRefusal(r); return { ...r, mayStart: refusal === null, ...(refusal ? { refusal } : {}) }; }
+  if (id) { const r = load(base, id); const refusal = startRefusal(r); return { ...r, mayStart: refusal === null, ...(refusal ? { refusal } : {}), trials: trialsOf(base, r).map(trialBrief) }; }
   const ids = existsSync(dir(base)) ? readdirSync(dir(base)).filter((n) => isSafeId(n) && existsSync(file(base, n))).sort() : [];
   return { plans: ids.map((n) => { const r = readJson(file(base, n), null); return { id: n, suite: r.suite, model: r.config.model, harness: r.config.harness, arm: r.config.arm, mode: r.config.mode, tasks: r.tasks.length, estimate: `${r.estimate.expected} ${r.estimate.currency}`, status: r.status }; }) };
+}
+
+function start([, id], o, { base, exec }) {
+  const record = load(base, id);
+  const names = o.env === undefined ? [] : o.env.map((n) => str(n, 'env'));
+  const secrets = secretsFrom({ names, envFile: o['env-file'] === undefined ? null : str(o['env-file'], 'env-file'), base });
+  const only = o.task === undefined ? null : o.task.flatMap((t) => String(t).split(',')).map((t) => t.trim()).filter(Boolean);
+  return runPlan({ plan: record, base, harnessBin: o['harness-bin'] === undefined ? null : str(o['harness-bin'], 'harness-bin'), secrets, only, ...(exec ? { exec } : {}) });
 }
 
 function prices(o) {
@@ -101,12 +118,13 @@ function prices(o) {
 }
 
 // One bench command. `by` is the stamp of the tool that ran it ({ harness, skill }); `fetch` can be replaced in tests.
-export async function benchCommand(pos, o, { base, by = null, now = new Date(), fetch = null } = {}) {
+export async function benchCommand(pos, o, { base, by = null, now = new Date(), fetch = null, exec = null } = {}) {
   switch (pos[0]) {
     case 'plan': return plan(o, { base, by, now, fetch });
     case 'confirm': return confirm(pos, o, { base, now });
+    case 'start': return start(pos, o, { base, exec });
     case 'show': return show(pos, { base });
     case 'prices': return prices(o);
-    default: throw new Error('usage: run.mjs bench plan|confirm|show|prices … (run.mjs bench --help)');
+    default: throw new Error('usage: run.mjs bench plan|confirm|start|show|prices … (run.mjs bench --help)');
   }
 }
