@@ -1,7 +1,7 @@
 # Changelog
 
-## Unreleased
-The first parts of the Coordinator Engineering Benchmark (CEB), and support for Prism's visual contract. Nothing runs a benchmark task yet.
+## 1.5.0 (2026-11-14)
+The first parts of the Coordinator Engineering Benchmark (CEB), support for Prism's visual contract, and a cheaper general critic for work outside the pinned areas. Nothing runs a benchmark task yet.
 
 - **Suite `CEB-2026.12` is published and signed.** Twelve tasks in five categories (bug fix, feature, refactor, security fix, UI), each a container image pinned by digest, in [mindmakr/coordinator-bench](https://github.com/mindmakr/coordinator-bench). The hidden tests and reference solutions are private. The skill verifies the suite's manifest against a public key it ships (`references/ceb-manifest.md`).
 - **`/coordinator:bench` and `run.mjs bench` plan a run** (`references/commands/bench.md`, `references/ceb-bench.md`). The intake takes an exact model id (an alias such as "latest" is refused), the tool, the effort, a spending cap (required) and practice or ranked. It prints a cost estimate at the suite's pinned prices, and nothing may start until the person confirms it. The estimate's token figures are assumed until real runs replace them.
