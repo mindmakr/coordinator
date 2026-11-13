@@ -129,6 +129,9 @@
 //                  diff touched (default: its recorded detect base and head), what they call and what calls them; shown
 //                  on the unit page and the maps page's Calls view; map --unit U computes it for U too
 //   run.mjs sync <run> <unit> [--text T]   the target branch was merged into the unit's branch (after `next` asked)
+//   run.mjs bench plan|confirm|show|prices …   a run of the Coordinator Engineering Benchmark: the plan, its cost estimate at
+//                  the suite's pinned prices and the person's go-ahead; no model is called before that
+//                  (run.mjs bench --help lists the options; references/commands/bench.md)
 //   run.mjs models [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class
 //   run.mjs list | stats [--tag T] | where      list: every run with its status word, progress, ETA and status line;
 //                  where prints the state folder for briefs (COORDINATOR_DIR)
@@ -185,6 +188,7 @@ import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
 import { mapsPage } from './lib/mapspage.mjs';
 import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
+import { BENCH_FLAGS, BENCH_REPEAT, benchCommand, benchHelp } from './lib/ceb/cli.mjs';
 import { hasRetro, retroCommand } from './lib/retro.mjs';
 import { answer, answerText, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
@@ -209,11 +213,11 @@ const FLAGS = {
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'playbook', 'lessons'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
-  push: ['to', 'message'], pull: ['from'],
+  push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS,
 };
 // Notes about one unit (#45): scoped with --unit, shown on its page.
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
-const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'] };
+const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -1343,6 +1347,7 @@ const commands = {
     return { ...stats(runs), ...byModel(runs), ...costStats(runs) };
   },
   // The routing table (references/routing.md), or the model for one role and task class.
+  bench(pos, o) { return benchCommand(pos, o, { base: baseDir('project'), by: BY }); },
   models(_, o) {
     const cfg = routing(baseDir('project'));
     for (const w of cfg.warnings) console.error(`warning: ${w}`);
@@ -1378,9 +1383,10 @@ for (let i = 0; i < argv.length; i++) {
 }
 let BY = null;
 try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
+if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
-  const out = commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }, null, 2));
+  const out = await commands[cmd](pos, opt);
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
