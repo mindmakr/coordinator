@@ -50,7 +50,8 @@
 //                  score and gap required on fail; cause is the critic's root-cause tag (drives same-gap);
 //                  on a run with --paths, pass needs a clean detect.mjs --unit result;
 //                  [--behaviour B1=pass:"evidence" | B1=fail:"gap" …]: a pass needs every behaviour passing
-//                  [--model M] the model that judged (refused below the strong model while routing is on)
+//                  [--model M] the model that judged (refused below the strong model while routing is on, except a
+//                  general critic of a unit outside every pinned area, given [--class C1,C2] its task classes)
 //                  [--critic SETUP] who judged (e.g. "review skill high + security"): stats groups escapes by it
 //                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
 //                  the unit stays judging, and its pass is refused until every required specialist passed
@@ -181,7 +182,7 @@ import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push, VISIBILITY_HINT } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
 import { remoteWatch } from './lib/remote.mjs';
-import { atLeast, byModel, escalation, judgeAllowed, modelName, route, routing, setRouting, UNSPECIFIED } from './lib/models.mjs';
+import { atLeast, byModel, cheapCriticRefusal, escalation, judgeAllowed, modelName, route, routing, setRouting, UNSPECIFIED } from './lib/models.mjs';
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
 import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
@@ -210,7 +211,7 @@ const FLAGS = {
   extend: ['rounds', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', ...COST_FLAGS],
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
@@ -724,7 +725,12 @@ const commands = {
       const critic = optText(o.critic, 120);
       const judge = modelName(o.model, 'model');
       const rcfg = routing(baseDir('project'));
-      if (judge && !judgeAllowed(rcfg, judge)) throw new Error(`verdict refused: critics are never routed down; ${judge} is below the strong model or not it (references/routing.md)`);
+      if (o.class === true) throw new Error("--class takes the unit's task classes, e.g. --class docs,search-ui");
+      const classes = typeof o.class === 'string' ? o.class.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean) : [];
+      const role = o.specialist === undefined ? 'critic' : 'specialist';
+      if (judge && !judgeAllowed(rcfg, judge, role, { classes, unit: u })) {
+        throw new Error(`verdict refused: ${judge} is below the strong model (${rcfg.strong}); ${role === 'critic' ? `a cheaper general critic judges only a unit outside every pinned area: ${cheapCriticRefusal(rcfg, judge, classes, u)}` : 'specialist critics are never routed down'} (references/routing.md)`);
+      }
       const judgedBy = judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {});
       if (early) {
         const by = o.specialist === undefined ? 'critic' : safeId(String(o.specialist), 'specialist');
@@ -935,7 +941,7 @@ const commands = {
       const evidence = optText(o.evidence);
       const judge = modelName(o.model, 'model');
       const rcfg = routing(baseDir('project'));
-      if (judge && !judgeAllowed(rcfg, judge)) throw new Error(`integrate refused: the integrator is never routed down; ${judge} is below the strong model (references/routing.md)`);
+      if (judge && !judgeAllowed(rcfg, judge, 'integrator')) throw new Error(`integrate refused: the integrator is never routed down; ${judge} is below the strong model (references/routing.md)`);
       const j = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const marks = mark(s.goalBehaviours ?? [], o.behaviour, j.verdict);
       s.integration.rounds.push({ ...j, evidence, at: now(), ...(judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {})), ...(marks.length ? { behaviours: marks } : {}) });

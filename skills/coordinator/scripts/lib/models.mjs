@@ -1,5 +1,6 @@
-// Model routing (references/routing.md): mechanical builder work goes to a
-// cheaper model, critics always get the strong one. On unless
+// Model routing (references/routing.md): mechanical builder work and the general
+// critic of a unit outside every pinned area go to a cheaper model; specialists,
+// the visual critic, the integrator and pinned work get the strong one. On unless
 // .coordinator/coordinator.json says "models": false. Recording which
 // model built and judged each round works whether routing is on or off.
 import { existsSync, readFileSync } from 'node:fs';
@@ -26,7 +27,9 @@ export function pinned(cls) {
 export const UNSPECIFIED = 'unspecified';
 const ROLES = ['builder', 'critic', 'specialist', 'visual-critic', 'integrator', 'researcher'];
 export const JUDGES = ['critic', 'specialist', 'visual-critic', 'integrator'];
-export const DEFAULT = Object.freeze({ strong: 'opus', mechanical: 'sonnet' });
+export const DEFAULT = Object.freeze({ strong: 'opus', mechanical: 'sonnet', critic: 'sonnet' });
+// The one judge that may sit below strong: the general critic, on a unit outside every pinned area.
+export const CHEAP_JUDGE = 'critic';
 const NAME = /^[A-Za-z0-9][\w.:/@-]{0,79}$/;
 const KEY = /^[a-z][a-z0-9-]{0,39}$/;
 const own = (o, k) => Object.hasOwn(o, k);
@@ -77,8 +80,12 @@ export function normalize(raw) {
     table[k] = v;
   }
   const strong = table.strong;
+  // The default cheaper critic is a Claude name: under another harness's strong it stays strong unless named.
+  if (!own(raw && typeof raw === 'object' ? raw : {}, CHEAP_JUDGE) && !family(strong)) table[CHEAP_JUDGE] = strong;
   if (claudeish(strong) && family(strong) !== 'opus') throw new Error(`"models".strong = ${strong} is not opus: a name containing claude, anthropic, haiku, sonnet or opus must be a recognised opus id (judges and pinned work run on strong). Leave strong out (opus), or name a model for another harness that mentions none of them`);
   for (const k of Object.keys(table).filter((k) => JUDGES.includes(k) || pinned(k))) {
+    // A ranked general critic may sit below a ranked strong; it judges only unpinned units (cheapCriticRefusal).
+    if (k === CHEAP_JUDGE && family(table[k]) && family(strong)) continue;
     if (own(table, k) && !atLeast(table[k], strong)) {
       warnings.push(`"models".${k} = ${table[k]} ignored: ${JUDGES.includes(k) ? 'critics are never routed' : `${k} work is never routed`} below the strong model (${strong})`);
       table[k] = strong;
@@ -114,8 +121,13 @@ function forClass(cfg, cls) {
 export function route(cfg, role, classes = []) {
   if (!ROLES.includes(role)) throw new Error(`role must be one of ${ROLES.join(', ')}`);
   if (!cfg.on) return { model: null, why: 'routing off' };
-  if (JUDGES.includes(role)) return { model: own(cfg.table, role) ? cfg.table[role] : cfg.strong, why: 'review depth is not where to save' };
   const list = (Array.isArray(classes) ? classes : String(classes ?? '').split(',')).map((c) => String(c).trim().toLowerCase()).filter(Boolean);
+  if (role === CHEAP_JUDGE && !atLeast(cfg.table[role], cfg.strong)) {
+    if (!list.length) return { model: cfg.strong, why: 'no task class given: name the classes for the cheaper critic' };
+    const pin = list.find((c) => pinned(c));
+    return pin ? { model: cfg.strong, why: `${pin} (always strong)` } : { model: cfg.table[role], why: 'no pinned area' };
+  }
+  if (JUDGES.includes(role)) return { model: own(cfg.table, role) ? cfg.table[role] : cfg.strong, why: 'review depth is not where to save' };
   if (role === 'builder' && list.length) {
     const { model, why } = list.map((c) => forClass(cfg, c)).reduce((a, b) => (b.w > a.w ? b : a));
     return { model, why };
@@ -123,8 +135,26 @@ export function route(cfg, role, classes = []) {
   return { model: own(cfg.table, role) ? cfg.table[role] : null, why: 'default' };
 }
 
-// While routing is on, a judge must be at least the strong model (an unranked name only if it is the strong one).
-export const judgeAllowed = (cfg, model) => !cfg.on || atLeast(model, cfg.strong);
+// Why a general critic below strong may not judge this unit, or null when it may. It needs the unit's task
+// classes, none pinned; no specialist critic on the unit; and no pinned word in its title, bar or behaviours.
+export function cheapCriticRefusal(cfg, model, classes = [], unit = null) {
+  if (!family(model) || !family(cfg.strong)) return `${model} is not the strong model (${cfg.strong})`;
+  if (!atLeast(model, cfg.table[CHEAP_JUDGE])) return `${model} is below the critic model (${cfg.table[CHEAP_JUDGE]})`;
+  if (!classes.length) return "name the unit's task classes with --class";
+  const pin = classes.find((c) => pinned(c));
+  if (pin) return `${pin} is a pinned area`;
+  if (unit?.specialists?.length) return `the unit has a specialist critic (${unit.specialists.join(', ')})`;
+  const words = [unit?.title, unit?.bar, ...(unit?.behaviours ?? []).map((b) => b.text)].filter(Boolean).join(' ');
+  if (words && pinned(words)) return 'its title, bar or behaviours touch a pinned area';
+  return null;
+}
+
+// While routing is on, a judge must be at least the strong model (an unranked name only if it is the strong one),
+// except a general critic that cheapCriticRefusal lets judge an unpinned unit.
+export function judgeAllowed(cfg, model, role, { classes = [], unit = null } = {}) {
+  if (!cfg.on || atLeast(model, cfg.strong)) return true;
+  return role === CHEAP_JUDGE && cheapCriticRefusal(cfg, model, classes, unit) === null;
+}
 
 // Escalation: after a round that failed on a model below strong, the next try uses strong.
 // Returns { model, why } to suggest, or null.

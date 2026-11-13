@@ -53,7 +53,7 @@ A round has one general critic. A second critic joins only for a risk area: mone
 
 Investigators and researchers run on a cheaper model; the harness decides how you name it. The lead decides, and records it in the staffing note.
 
-Critics stay on the strong model for now. A cheaper critic for changes that do not touch money, stored amounts or security is not enabled: `review.md` fixes the depth, and `models.mjs` refuses a judge below `strong`. If the person wants it, they decide at intake, and the routing code needs a change first (`routing.md`). Reviewers were 16% of the run, so one critic and delta reviews take most of the saving without that risk.
+The general critic runs on the cheaper model only for a unit outside every pinned area (`routing.md`, The cheaper critic). Money, stored amounts, security and the other pinned areas keep the strong model, and so does every specialist. Reviewers were 16% of the run measured here; one critic per round and delta reviews still take most of that saving.
 
 Check: each round's critic setup (`verdict --critic`, `--specialist`) in `run.mjs show`. More than one general critic on a round is a miss.
 
