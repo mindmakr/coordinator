@@ -1,6 +1,6 @@
 // Model routing and recording (references/routing.md): which model built and
-// judged each round, stats per model, the off switch, old state, and critics
-// never routed below the strongest model.
+// judged each round, stats per model, the off switch, old state, and judges
+// never routed below the strongest model except a general critic on unpinned work.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { atLeast, family, normalize, route, whoUnit } from '../lib/models.mjs';
+import { atLeast, cheapCriticRefusal, family, judgeAllowed, normalize, route, whoUnit } from '../lib/models.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dirs = [];
@@ -31,11 +31,12 @@ test('routing is on by default: mechanical builder work is cheap, critics strong
   assert.equal(route(cfg, 'integrator').model, 'opus');
 });
 
-test('critics are never routed below the strongest model, whatever the table says', () => {
+test('specialists, the visual critic and the integrator are never routed below the strongest model', () => {
   const cfg = normalize({ critic: 'haiku', specialist: 'sonnet', builder: 'opus', mechanical: 'sonnet' });
+  // With no task class the general critic is strong; a ranked cheaper critic is not a warning.
   assert.equal(route(cfg, 'critic').model, 'opus');
   assert.equal(route(cfg, 'specialist').model, 'opus');
-  assert.equal(cfg.warnings.length, 2);
+  assert.equal(cfg.warnings.length, 1);
   assert.equal(route(cfg, 'builder', 'translations').model, 'sonnet');
   assert.equal(route(cfg, 'builder').model, 'opus');
   // Ranked against the fixed strong model, not the strongest name in the table.
@@ -51,6 +52,32 @@ test('critics are never routed below the strongest model, whatever the table say
   assert.equal(route(normalize({ strong: 'gpt-x', critic: 'gpt-x-mini' }), 'critic').model, 'gpt-x');
   assert.throws(() => normalize({ critic: 3 }), /model name/);
   assert.throws(() => normalize('yes'), /must be false or an object/);
+});
+
+test('the general critic of an unpinned unit runs on the cheaper model; pinned work keeps the strong one', () => {
+  const cfg = normalize(undefined);
+  assert.deepEqual(route(cfg, 'critic', 'docs'), { model: 'sonnet', why: 'no pinned area' });
+  assert.deepEqual(route(cfg, 'critic', 'search-ui'), { model: 'sonnet', why: 'no pinned area' });
+  assert.deepEqual(route(cfg, 'critic', 'docs,payroll-export'), { model: 'opus', why: 'payroll-export (always strong)' });
+  assert.equal(route(cfg, 'critic', []).model, 'opus');
+  // The person can keep every critic strong.
+  assert.equal(route(normalize({ critic: 'opus' }), 'critic', 'docs').model, 'opus');
+  // Under another harness's strong, the critic stays strong unless named, with no warning.
+  const codex = normalize({ strong: 'gpt-x' });
+  assert.equal(codex.table.critic, 'gpt-x'); assert.equal(codex.warnings.length, 0);
+  assert.equal(route(codex, 'critic', 'docs').model, 'gpt-x');
+  // What a cheaper critic may judge.
+  const unit = { title: 'Search box', bar: 'typing filters the list', behaviours: [{ text: 'empty query shows all' }] };
+  assert.equal(cheapCriticRefusal(cfg, 'sonnet', ['search-ui'], unit), null);
+  assert.equal(judgeAllowed(cfg, 'sonnet', 'critic', { classes: ['search-ui'], unit }), true);
+  assert.match(cheapCriticRefusal(cfg, 'sonnet', [], unit), /--class/);
+  assert.match(cheapCriticRefusal(cfg, 'sonnet', ['auth'], unit), /auth is a pinned area/);
+  assert.match(cheapCriticRefusal(cfg, 'sonnet', ['ui'], { ...unit, specialists: ['security'] }), /specialist critic/);
+  assert.match(cheapCriticRefusal(cfg, 'sonnet', ['ui'], { ...unit, bar: 'the refund total matches the ledger' }), /pinned area/);
+  assert.match(cheapCriticRefusal(cfg, 'haiku', ['ui'], unit), /below the critic model/);
+  assert.match(cheapCriticRefusal(cfg, 'gpt-4o-mini', ['ui'], unit), /not the strong model/);
+  for (const role of ['specialist', 'visual-critic', 'integrator']) assert.equal(judgeAllowed(cfg, 'sonnet', role, { classes: ['ui'], unit }), false);
+  assert.equal(judgeAllowed(normalize(false), 'haiku', 'integrator'), true);
 });
 
 test('init --models off|on writes "models" in coordinator.json and keeps other keys', () => {
@@ -73,7 +100,10 @@ test('start and verdict record the models; the HUD, unit page and stats show the
   assert.equal(JSON.parse(readFileSync(join(dir, 'runs', 'm', 'state.json'), 'utf8')).units[0].builtBy, 'sonnet');
   ok('built', 'm', 'docs');
   const low = cli(dir, 'verdict', 'm', 'docs', 'pass', '--evidence', 'e', '--model', 'sonnet');
-  assert.equal(low.code, 1); assert.match(low.err, /never routed down/);
+  assert.equal(low.code, 1); assert.match(low.err, /--class/);
+  const pinnedClass = cli(dir, 'verdict', 'm', 'docs', 'pass', '--evidence', 'e', '--model', 'sonnet', '--class', 'docs,billing');
+  assert.equal(pinnedClass.code, 1); assert.match(pinnedClass.err, /billing is a pinned area/);
+  assert.equal(cli(dir, 'verdict', 'm', 'docs', 'pass', '--evidence', 'e', '--model', 'haiku', '--class', 'docs').code, 1);
   ok('verdict', 'm', 'docs', 'fail', '--severity', 'high', '--evidence', 'e', '--gap', 'typo', '--score', '5', '--model', 'opus');
   ok('start', 'm', 'docs', '--model', 'sonnet', '--why', 'docs-only', '--force-model', 'typo only'); ok('built', 'm', 'docs');
   ok('verdict', 'm', 'docs', 'pass', '--evidence', 'e', '--model', 'opus');
@@ -91,6 +121,28 @@ test('start and verdict record the models; the HUD, unit page and stats show the
     { model: 'unspecified', rounds: 1, passed: 1, passRate: 1 },
   ]);
   assert.deepEqual(st.roundsByJudgeModel, [{ model: 'opus', rounds: 3 }]);
+});
+
+test('verdict: a cheaper general critic judges an unpinned unit; never a specialist, a pinned unit or the integrator', () => {
+  const dir = folder(); const ok = okIn(dir);
+  ok('init', 'c', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  ok('add', 'c', 'ui', '--bar', 'the list filters as you type');
+  ok('add', 'c', 'pay', '--bar', 'the payslip shows net salary', '--specialist', 'money', '--reason', 'pay');
+  ok('freeze', 'c');
+  ok('start', 'c', 'ui', '--model', 'sonnet', '--why', 'ui'); ok('built', 'c', 'ui');
+  ok('verdict', 'c', 'ui', 'pass', '--evidence', 'e', '--model', 'sonnet', '--class', 'search-ui');
+  assert.equal(JSON.parse(readFileSync(join(dir, 'runs', 'c', 'state.json'), 'utf8')).units[0].rounds[0].judgedBy, 'sonnet');
+  ok('start', 'c', 'pay'); ok('built', 'c', 'pay');
+  const spec = cli(dir, 'verdict', 'c', 'pay', 'pass', '--evidence', 'e', '--model', 'sonnet', '--specialist', 'money', '--class', 'ui');
+  assert.equal(spec.code, 1); assert.match(spec.err, /specialist critics are never routed down/);
+  const gen = cli(dir, 'verdict', 'c', 'pay', 'pass', '--evidence', 'e', '--model', 'sonnet', '--class', 'ui');
+  assert.equal(gen.code, 1); assert.match(gen.err, /specialist critic \(money\)/);
+  assert.match(cli(dir, 'verdict', 'c', 'pay', 'pass', '--evidence', 'e', '--class').err, /--class takes/);
+  ok('verdict', 'c', 'pay', 'pass', '--evidence', 'e', '--model', 'opus', '--specialist', 'money');
+  ok('verdict', 'c', 'pay', 'pass', '--evidence', 'e', '--model', 'opus');
+  const integ = cli(dir, 'integrate', 'c', 'pass', '--evidence', 'e', '--model', 'sonnet');
+  assert.equal(integ.code, 1); assert.match(integ.err, /integrator is never routed down/);
+  assert.deepEqual(ok('models', '--role', 'critic', '--class', 'docs'), { role: 'critic', class: 'docs', model: 'sonnet', why: 'no pinned area' });
 });
 
 test('routing off: any judging model is recorded, nothing refused', () => {

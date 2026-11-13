@@ -10,12 +10,12 @@
 
 Cheaper review rounds have passed work that still had real bugs, and the fix cost more later. So every round runs at full depth, whatever the budget:
 
-- a strong model, never the cheap tier the builders may use;
+- a strong model for pinned work and every specialist; only the general critic of a unit outside every pinned area may run on the cheaper tier (`routing.md`), at this same depth;
 - the diff in scope (round 1: the whole unit; later: the delta below), plus the files that call what changed;
 - the red test against the base, and the checks for the sides touched against the head;
 - the correctness, security and project-rule passes below, every round.
 
-A budget may cut rounds or minutes. It never cuts a pass, the diff's reach or the model tier.
+A budget may cut rounds or minutes. It never cuts a pass or the diff's reach, and never moves a pinned unit's critic to a cheaper model.
 
 ## Delta review, from round 2
 

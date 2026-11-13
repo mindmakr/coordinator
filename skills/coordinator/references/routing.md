@@ -1,12 +1,13 @@
 # Model routing: which model each role gets
 
-Mechanical builder work goes to a cheaper model. Judgement stays on the strong one. Routing is on by default; the person can turn it off or change the table.
+Mechanical builder work, and the general critic of a unit outside every pinned area, go to a cheaper model. Every other judgement stays on the strong one. Routing is on by default; the person can turn it off or change the table.
 
 ## The table
 
 | Role or task class | Model | Why |
 |---|---|---|
-| Critic, specialist critic, visual critic, integrator | `strong` (`opus`) | Review depth is not where to save. Never below `strong`, whatever the table says. |
+| General critic of a unit outside every pinned area | `critic`, cheap (`sonnet`) | Most rounds judge UI, docs and plain logic at full depth; risky work never gets it. Needs the unit's task classes (The cheaper critic, below) |
+| General critic of pinned work or with no class given; specialist critic, visual critic, integrator | `strong` (`opus`) | Review depth is not where to save on risky work. Never below `strong`, whatever the table says |
 | Builder: security, money, migrations, auth, payments, billing, invoicing, authentication, authorization, permissions, secrets, crypto, PII, personal data | `strong` | Pinned: the table cannot route them down |
 | Builder, `mechanical` work: docs, copy, translations, renames, test fixtures, small mirror changes | cheap (`sonnet`) | The bar and the critic catch a slip; the work needs care, not judgement |
 | Builder, anything else | the harness's default | Logic, data and UI need the full model |
@@ -16,7 +17,7 @@ A class is pinned when any word of it (split on anything but letters and digits)
 
 Ask the script instead of working it out: `S/run.mjs models --role builder --class docs` prints `{ model, why }`. `model: null` means "pass no model, use the default".
 
-Critics stay on `strong` today, though they were 16% of the cost in the run measured in `context.md`. A cheaper critic for changes that touch no money, stored amounts or security would need a change here and in `review.md` (Depth is fixed), and is the person's decision at intake. One critic per round and delta reviews (`context.md`, rule 3) save most of that cost without it.
+**The cheaper critic.** The general critic runs on `critic` (default `sonnet`) only when all of these hold, and on `strong` otherwise: `verdict --class` names the unit's task classes and none is pinned; the unit has no specialist critic; and no word of its title, bar or behaviours is pinned. `S/run.mjs models --role critic --class search-ui` prints the choice. The critic's depth does not change (`sub-skills/review.md`), and the specialists a risk area adds stay on `strong`. Critics were 16% of the cost in the run measured in `context.md`. To keep every critic strong, set `"models": { "critic": "opus" }`.
 
 Jobs smaller than a role (a one-line summary, a pick from a list, a first look at a screenshot) can go to a helper model, local or through a router, when the person set one up (`helpers.md`). A helper never takes a role in this table.
 
@@ -34,7 +35,7 @@ Jobs smaller than a role (a one-line summary, a pick from a list, a first look a
 - `false`: off. Every agent gets the harness's default, and nothing is refused;
 - an object mapping a role or task class to a model name, over the defaults, e.g. `{ "strong": "opus", "critic": "opus", "builder": "opus", "mechanical": "sonnet" }`. `strong` (default `opus`) is the floor for judges and pinned classes. A custom `strong` that contains `claude`, `anthropic`, `haiku`, `sonnet` or `opus` anywhere (any case, any separator) must be a recognised opus id, or it is refused: `sonnet`, `claude-3-5-haiku`, `us.anthropic.claude-haiku-4-5`, `claude_haiku` and `opus-haiku` all are. Any other custom `strong` is an unranked name for another harness. The same parsing applies to judge names in `verdict` and `integrate` and to the escalation check in `start`: a Claude-looking name that does not parse never counts as strong. A key for a single class (`"translations": "haiku"`) beats `mechanical`.
 
-A judge or pinned-class entry below `strong` is ignored with a warning. `S/run.mjs init --models on|off` writes the switch and keeps the rest of the file (a malformed file is refused, never overwritten); `/coordinator:init` asks the person once (`commands/init.md`).
+A judge or pinned-class entry below `strong` is ignored with a warning, except a Claude `critic`, which judges only unpinned units. Under a `strong` for another harness, `critic` is `strong` unless the table names one. `S/run.mjs init --models on|off` writes the switch and keeps the rest of the file (a malformed file is refused, never overwritten); `/coordinator:init` asks the person once (`commands/init.md`).
 
 ## Escalation
 
@@ -45,7 +46,7 @@ After any try fails on a model below `strong`, and until a try builds on `strong
 Record every choice, routed or not, so the retro and `stats` can tell whether cheaper builders fail more:
 
 - `S/run.mjs start <run> <unit> --model sonnet --why docs-only`: the model building this try, and the class that chose it.
-- `S/run.mjs verdict … --model opus` and `S/run.mjs integrate … --model opus`: the model that judged. While routing is on, a judge below `strong` (or an unranked name other than `strong`) is refused.
+- `S/run.mjs verdict … --model opus` and `S/run.mjs integrate … --model opus`: the model that judged. While routing is on, a judge below `strong` (or an unranked name other than `strong`) is refused, except a general critic at or above `critic` whose `verdict` has `--class` on an unpinned unit (The cheaper critic).
 
 - `--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"` on `start`, `built`, `verdict` and `foldin`: what the harness reported for that launch. `stats` adds `costByRun`, `costByUnit` and `costByModel`; `show` and the dashboard print them, with "not recorded" where nothing was.
 
