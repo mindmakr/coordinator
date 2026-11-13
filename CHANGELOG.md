@@ -1,12 +1,13 @@
 # Changelog
 
 ## Unreleased
-The first parts of the Coordinator Engineering Benchmark (CEB). Nothing runs a benchmark task yet.
+The first parts of the Coordinator Engineering Benchmark (CEB), and support for Prism's visual contract. Nothing runs a benchmark task yet.
 
 - **Suite `CEB-2026.12` is published and signed.** Twelve tasks in five categories (bug fix, feature, refactor, security fix, UI), each a container image pinned by digest, in [mindmakr/coordinator-bench](https://github.com/mindmakr/coordinator-bench). The hidden tests and reference solutions are private. The skill verifies the suite's manifest against a public key it ships (`references/ceb-manifest.md`).
 - **`/coordinator:bench` and `run.mjs bench` plan a run** (`references/commands/bench.md`, `references/ceb-bench.md`). The intake takes an exact model id (an alias such as "latest" is refused), the tool, the effort, a spending cap (required) and practice or ranked. It prints a cost estimate at the suite's pinned prices, and nothing may start until the person confirms it. The estimate's token figures are assumed until real runs replace them.
 - **With and without the Coordinator.** A plan has an arm: `coordinator` runs each task through the loop, `baseline` gives the same model the task on its own in the same tool, so the board can show what the loop adds.
 - **A pinned price list for 27 models** from Anthropic, OpenAI, Google and xAI, and open-weight models from Alibaba, DeepSeek, Z.ai, MiniMax and Mistral, each read from the provider's own pricing page. The reference has setup notes for running other providers' and open-weight models through Codex; those routes are not tested yet.
+- **Prism's visual contract and gate (`references/prism.md`).** Prism, a planned companion tool, writes the look of screens, game scenes and images into a `.prism/` folder and checks builds against it. On a project with that folder: `detect.mjs` flags a build that changes the contract (`visual-contract`), except in the look-dev unit the person approved (`--allow visual-contract`); `run.mjs evidence --kind prism` reads the gate report and refuses one made against other tokens or another commit; a FAIL report blocks every pass on that build, and the `prism` specialist passes only on a PASS report the critic attached while judging. `doctor` has a `prism` line. A project without `.prism/` sees no change.
 - **Lucid Coding whitepaper, version 0.2:** a new chapter, "Visual lucidity", on keeping what agents build looking the way it was meant to: the drift from words to pixels, choosing and writing down the look before the build, checking it on the running product, and keeping exploration apart from the gate. The homepage has a section on how Coordinator, reins and Prism (being designed) fit together.
 
 ## 1.4.1 (2026-11-12)

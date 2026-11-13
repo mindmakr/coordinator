@@ -23,7 +23,7 @@ The person may be juggling several pieces of work, and reads replies between oth
 
 ## UI and UX start from references, never from a blank page
 
-1. **References first.** If the person gave references (Mobbin flows, screenshots, Figma, a site they admire, a design system), they are the bar. Use them before anything else. If a Mobbin or design tool is connected to the harness, search it for the same flow (for example "onboarding", "settings", "checkout") in products the person respects.
+1. **References first.** If the project has a `.prism/` folder, its tokens and anchors are the bar for the look, and a build may not change them (`prism.md`). If the person gave references (Mobbin flows, screenshots, Figma, a site they admire, a design system), they are the bar. Use them before anything else. If a Mobbin or design tool is connected to the harness, search it for the same flow (for example "onboarding", "settings", "checkout") in products the person respects.
 2. **Otherwise research.** Search the web for 3–5 strong, current examples of the same flow, in apps or sites known for doing it well. Save the links or screenshots, and say in one line each what to take from it.
 3. **Write the reference into the unit's bar:** "Matches the hierarchy and density of <ref A>; navigation follows <ref B>; our design tokens."
 4. **The critic compares side by side**, blind where it can: our screen and the reference at the same size, in each text direction and at phone width.

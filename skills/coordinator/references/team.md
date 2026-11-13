@@ -11,7 +11,7 @@ At intake, look at what this harness lists: agent types, skills and connected to
 | Researcher | web search, docs lookup, design-reference tools (e.g. Mobbin) | Runs at intake, so builders start with answers |
 | Builder | the project's own fix or build skill; a language-specific agent | One per unit; has its own worktree |
 | Critic | a review skill; a specialist reviewer (security, accessibility, database, language) | Never the same agent instance as the builder. One critic per round. For risk areas (money, stored amounts, security, auth, migrations) add a specialist (`context.md`, rule 3) |
-| Visual critic | a browser or screenshot tool; a visual-test skill | Required for UI units |
+| Visual critic | a browser or screenshot tool; a visual-test skill; Prism's gate when the project has `.prism/` | Required for UI units. With `.prism/`, it runs the gate itself, in a fresh session (`prism.md`) |
 | Integrator | a general agent with fresh context | Once all the units have passed |
 
 Write the staffing into the run: `run.mjs note --kind decision --text "critic: security-reviewer + review skill"`.

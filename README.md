@@ -182,13 +182,23 @@ Summaries of what an agent did, picks from a fixed list, and a first look at scr
 
 [**reins**](https://github.com/mindmakr/reins) ([site](https://mindmakr.github.io/reins/) · [examples](https://github.com/mindmakr/reins-examples)) is the companion tool for web (Vite, Next.js, React) and Expo apps. While Coordinator runs the builder and blind-critic loop, **reins** sits inside your app during development (< 5 KB core, stripped from production builds and checked by `reins-verify-bundle`) and gives builders and visual critics 11 MCP tools (plus WebMCP) to trigger typed actions (`login-as-tester`, `set-locale`), read store snapshots, inspect network calls and console errors, measure page lifecycle, component mount/render and API latency (`reins_perf`), inspect DOM subtrees with computed CSS and overflow/clipping flags (`reins_dom`), and snap exact panel screenshots by id (`reins_snap`) instead of clicking by pixels. With `reins/node` on the backend, one timeline runs from the click through the fetch, the server route and its database spans, back to the panel's re-render (`reins_server`). `reins_report` turns a session into a Markdown report that a Coordinator critic attaches as evidence, `npx reins report --compare` shows what a change made faster or slower, and testers can record a session on a staging build and export it for an agent to analyse. Its own agent skill (`/reins:setup`) wires an existing or new app automatically.
 
+## Planned companion: Prism
+
+Prism is a third tool, being designed, for the look of what agents build: screens, game scenes and generated images. It writes the look down in a `.prism/` folder (named tokens, reference images, look rules) and checks a build against it. Coordinator already supports the folder (`references/prism.md`):
+
+- **A build may not change the look.** `detect.mjs` flags any change to the contract as `visual-contract`, except in the one look-dev unit the person approved.
+- **The critic runs the gate.** `run.mjs evidence --kind prism` reads the gate report and checks it against its tokens and the commit being judged. A FAIL report blocks the pass, and the `prism` specialist passes only on a PASS one.
+- **`doctor` checks the folder:** its tokens must read, and the gate report must not be committed.
+
+A project without `.prism/` sees no change.
+
 ## Safe by default
 
 - Network calls only where you ask for them: `run.mjs push` and `pull` run git against your own remotes at pit stops; `run.mjs watch --remote` pulls the state branch on a timer and can hold one connection to a coordinator service you name; doctor asks `gh` and checks the latest release tag unless `--offline`; `helper.mjs` calls the helper-model server you set up (on your machine, your network, or the router you chose), with the key read from an environment variable. Nothing else connects anywhere.
 - No shell strings; ids are checked against path traversal.
 - Secrets are refused in lessons and masked in run state.
 - Merging, deploying, deleting, spending or posting needs your approval, given up front.
-- A detector reads each diff for the usual ways to fake a green run: focused, skipped or deleted tests, removed assertions, rewritten snapshots and suppressed checks.
+- A detector reads each diff for the usual ways to fake a green run: focused, skipped or deleted tests, removed assertions, rewritten snapshots and suppressed checks. On a project with a `.prism/` visual contract, it also flags a build that changes the contract.
 
 ## 1.1: shipped so far, and coming
 
@@ -214,7 +224,7 @@ skills/doctor/                   /coordinator:doctor (runs scripts/doctor.mjs)
 skills/coordinator/
 ├── SKILL.md                    the router and the rules every command shares (<500 words)
 ├── references/                 one playbook per command, the bar, briefs, craft, team, routing,
-│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains, ceb-manifest, ceb-bench
+│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains, ceb-manifest, ceb-bench, prism
 └── scripts/                    Node 18+, zero dependencies
     ├── run.mjs                 run state and the loop's decisions
     ├── doctor.mjs              the setup check
