@@ -12,6 +12,7 @@ import { checkSettings, readSettings, SENDS_TOKENS, settingsTracked, TRACKED_FIX
 import { themeFile } from './theme.mjs';
 import { readRegistry } from './registry.mjs';
 import { staleCommands } from './pkg-scripts.mjs';
+import { LOCAL, MANY_SKILLS, measure } from './prefix.mjs';
 
 export const RELEASES = 'https://github.com/mindmakr/coordinator';
 const LOCK_STALE_MS = 30_000;
@@ -350,9 +351,21 @@ export function registryCheck(ctx) {
     : out('registry', 'ok', text);
 }
 
+// The fixed prompt prefix (references/context.md, rule 7): what loads for this project, from prefix.mjs.
+// Many skills and no local trim is a warning: every agent turn re-sends their names and descriptions.
+export function prefixCheck(ctx) {
+  let m;
+  try { m = measure({ project: ctx.project, home: ctx.home }); } catch (e) { return out('prefix', 'skip', `could not measure the prefix: ${e.message}`); }
+  const c = m.counts;
+  const text = `${c.plugins} plugins, ${c.skills} skills (${c.descriptionChars} description characters), ${c.mcpServers} MCP servers; local trim: ${m.localTrim ? 'yes' : 'no'}`;
+  return c.skills > MANY_SKILLS && !m.localTrim
+    ? out('prefix', 'warn', `${text}; every agent turn re-sends them`, `node <skill-dir>/scripts/prefix.mjs draft, show it, then write --confirm (${LOCAL}, this project only; references/context.md rule 7)`)
+    : out('prefix', 'ok', text);
+}
+
 export function diagnose(ctx) {
   const c = { exec: realExec, online: true, ...ctx };
-  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), reinsCheck(c), prismCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
+  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), reinsCheck(c), prismCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c), prefixCheck(c)];
 }
 
 const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', skip: 'skip' };

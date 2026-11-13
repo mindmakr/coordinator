@@ -95,9 +95,11 @@ Check: `verdict --full-suite yes` is recorded once per head.
 
 ### 7. Trim the fixed prefix before a long run
 
-Every agent starts with a fixed prefix, resent on every turn. In the run above it was about 72k tokens, about 15% of cost. Before a long run, per project, turn off the plugins, skills and MCP servers the project does not use, and shorten project instructions and memory to what a builder needs. `doctor.mjs` does not yet check this; do it in the harness's own settings.
+Every agent starts with a fixed prefix, resent on every turn. In the run above it was about 72k tokens, about 15% of cost. Before a long run, per project, turn off the plugins, skills and MCP servers the project does not use, and shorten project instructions and memory to what a builder needs.
 
-Check: `subAgents.firstContextMedian` in `S/context.mjs` is roughly the prefix plus the brief. Write it in the retro; a figure that grows run on run is a plugin or a memory file that grew.
+`S/prefix.mjs report` lists what loads for the project (enabled plugins from the user, project and local settings, user skills, MCP servers) with counts and the skills' description characters. `S/prefix.mjs draft` prints a `.claude/settings.local.json` for this project only that turns off the plugins and skills not kept (coordinator, what the project's own config names and anything given with `--keep` stay), and `S/prefix.mjs write --confirm` writes it after the person approves the draft. `init` offers it (`commands/init.md`), and doctor's `prefix` line shows the counts and warns when a project loads many skills with no local trim. Plugin changes need a new Claude process; `/clear` keeps the old plugins. The token figure itself is `/context` in a session of the project.
+
+Check: `subAgents.firstContextMedian` in `S/context.mjs` is roughly the prefix plus the brief. Write it and the `prefix.mjs report` counts in the retro (`learning.md`, step 7); a figure that grows run on run is a plugin or a memory file that grew.
 
 ### 8. Measure, and write the numbers in the retro
 
