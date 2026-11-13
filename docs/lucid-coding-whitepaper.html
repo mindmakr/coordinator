@@ -63,7 +63,7 @@
     <h1 class="mf-title wp-title">Build with agents. Still know your system.</h1>
     <p class="mf-intro">Agents now write much of the code. The risk is no longer that the code does not get written. The risk is that nobody can say what was built, why, or what proved it works. <span data-term>Lucid Coding</span> is a way of working that keeps that knowledge.</p>
     <p class="mf-by">Asif Raja</p>
-    <p class="wp-meta">Version 0.1, draft for comment · 11 November 2026 · <a href="lucid-coding.html">The manifesto</a> is the short form of this paper.</p>
+    <p class="wp-meta">Version 0.2, draft for comment · 13 November 2026 · <a href="lucid-coding.html">The manifesto</a> is the short form of this paper.</p>
   </header>
 
   <article class="wp">
@@ -72,13 +72,14 @@
       <h2>Summary</h2>
       <p class="lead">Lucid Coding is the practice of building software with AI agents so that you always know what your agents changed, why they changed it, and what proved it works.</p>
       <p>It rests on eight principles and one working loop. People agree what "done" means before the build. One agent builds. A second agent, who never sees the first one's reasoning, checks the real result. Every pass carries proof. Every run stays on the record, and what went wrong becomes a lesson for the next run.</p>
-      <p>This paper explains the problem, the principles and the reasons behind them, the loop, what a running app should report about itself, how a team can read a system it did not type, what to measure, and how to adopt the practice in steps.</p>
+      <p>This paper explains the problem, the principles and the reasons behind them, the loop, what a running app should report about itself, how the same practice holds for what a product looks like, how a team can read a system it did not type, what to measure, and how to adopt the practice in steps.</p>
       <ol class="wp-toc">
         <li><a href="#problem">The problem</a></li>
         <li><a href="#definition">What Lucid Coding is</a></li>
         <li><a href="#principles">The eight principles</a></li>
         <li><a href="#loop">The working loop</a></li>
         <li><a href="#instruments">Instruments</a></li>
+        <li><a href="#visual">Visual lucidity</a></li>
         <li><a href="#seeing">Seeing the system you deployed</a></li>
         <li><a href="#adopting">Adopting it in steps</a></li>
         <li><a href="#measure">What to measure</a></li>
@@ -188,11 +189,70 @@
       <p>Two rules keep instruments safe. They do nothing until a local, authenticated tool connects. And they are stripped from production builds, with a build step that fails if any trace remains.</p>
     </section>
 
+    <section id="visual">
+      <h2>6. Visual lucidity: extending deterministic workflows from code to pixels</h2>
+      <p>The principles so far are about what a system does. The same loss of knowledge happens to how it looks, and it is harder to notice, because a wrong colour passes every test. Visual lucidity is the same practice applied to pixels: the look is chosen before the build, written down where agents can read it, measured on the running product, and checked by someone other than its maker.</p>
+
+      <h3>The drift from words to pixels</h3>
+      <p>An agent asked for something "clean and modern" fills the gap with the average of what it has seen. Each session starts from the conversation it is given, and last week's decisions about the look are not in it. So the look drifts.</p>
+      <ul>
+        <li><strong>In apps,</strong> raw values appear beside a design system that already has a name for each: a hex colour, a 13-pixel gap, a third typeface, a loading state nobody checked.</li>
+        <li><strong>In games,</strong> a new scene gets its own camera angle, lighting and colour grade, figures in front stop standing out from the background, and an effect added for one scene costs a phone its frame rate.</li>
+        <li><strong>In generated images,</strong> a character's face, proportions and palette change from one image to the next, and several screens squeezed into one image blur into mush.</li>
+      </ul>
+      <p>The cause is the same in all three. The visual intent was agreed in a conversation and never written into the repository. A conversation is not versioned, the next agent cannot read it, and a critic cannot check work against it.</p>
+      <dl><dt>In practice</dt><dd>Decisions about the look live in files under version control, and change by a reviewed commit, as code does.</dd>
+      <dt>Sign it is missing</dt><dd>Two screens built a week apart use different greys for the same thing, and nobody chose either.</dd></dl>
+
+      <h3>Choose the look before you draw it</h3>
+      <p>Improvising taste on a blank page is where agents are weakest. Two habits replace it.</p>
+      <ol>
+        <li><strong>Choose from a few vetted directions.</strong> Instead of asking a model to invent a palette, type and layout, offer a small number of complete, proven directions and let a person choose one. Set it with numbers, not adjectives: how dense, how much motion, how much variation from one screen to the next.</li>
+        <li><strong>One reference image per key view, then measure it.</strong> Make or collect one full-size reference image for each key screen, scene or character, never several squeezed into one. Measure those pixels: colours, type sizes and ratios, spacing, radii, camera and light. Write what you measured down. Only then build, from what was written down, not from the prose.</li>
+      </ol>
+      <p>The result is a visual contract kept beside the code. Every entry in it names how it is checked: a computed value, a measured setting, or a comparison with a named reference image.</p>
+      <div class="wp-table"><table>
+        <thead><tr><th>Surface</th><th>What the contract fixes</th><th>What breaks it</th></tr></thead>
+        <tbody>
+          <tr><td>App screens</td><td>Named tokens for colour, type, spacing, radii and elevation, and which component uses which.</td><td>A raw value where a token exists, or a new token nobody approved.</td></tr>
+          <tr><td>Games</td><td>The camera and field of view, the lighting and exposure, the colour grade, and the effects each kind of device can afford.</td><td>A scene whose camera, light or grade falls outside the stated ranges, or an effect over its budget.</td></tr>
+          <tr><td>Generated images</td><td>A reference image for each character and style, and a fixed structure for prompts: subject, framing, style, palette and what to avoid.</td><td>A prompt that skips the structure, or an image made without its reference.</td></tr>
+        </tbody>
+      </table></div>
+      <dl><dt>In practice</dt><dd>A unit's bar cites the contract: "uses only the contract's tokens; matches the reference image for this screen".</dd>
+      <dt>Sign it is missing</dt><dd>The design system exists only in a design tool the agents cannot open.</dd></dl>
+
+      <h3>Sight that knows what it is looking at</h3>
+      <p>A screenshot alone is a weak judge. It cannot say whether a grey is the token or a near miss. A script that photographs a public page cannot reach a signed-in screen, an empty account, a server error or the third level of a game. Sight becomes reliable when it is paired with control over the state, at both ends, and with the meaning behind the pixels.</p>
+      <ol>
+        <li><strong>Set the state, at both ends.</strong> On the server: seeded data that is empty, full, overflowing or failing, with fixed times and ids. In the app or game: this user, this language and text direction, this theme, animation paused, this level and camera.</li>
+        <li><strong>Capture the region.</strong> A snapshot of the named panel or view the change touches, at each screen size the contract names.</li>
+        <li><strong>Read the meaning.</strong> Ask the running product what lies behind that region: the computed styles and the tokens they come from, the fonts actually loaded, the contrast and the margins; or the camera, light and effect values in use.</li>
+        <li><strong>Compare with the contract.</strong> Values are checked exactly. Pictures are compared with their reference within a stated tolerance.</li>
+        <li><strong>Correct and repeat.</strong> A mismatch goes back with the value found and the value required, and the same state is set again to show the fix.</li>
+      </ol>
+      <p>The same state gives the same capture, so a failure can be reproduced and a fix can be shown. An image has no computed styles to read. There the check is the prompt against its structure, and the image beside its reference, judged by a critic that sees both. What reaches a person has already been checked for conformance. The person judges what cannot be measured: whether it is good.</p>
+      <dl><dt>In practice</dt><dd>Each visual check stores the state that was set, the snapshot and the values that were read.</dd>
+      <dt>Sign it is missing</dt><dd>The agent fixes a layout by editing styles until one screenshot looks right.</dd></dl>
+
+      <h3>Explore apart, enforce at the gate</h3>
+      <p>Exploring a look and enforcing a look are different jobs. Mixing them is how drift gets merged. The loop keeps them apart.</p>
+      <ul>
+        <li><strong>Exploration happens in variant branches, before the build.</strong> Builders are asked for a few versions of a screen, scene or image, each in its own isolated copy. Nothing there has to conform. The output is snapshots for a person to choose from, and the choice becomes the contract.</li>
+        <li><strong>A build treats the contract as read-only.</strong> A build that changes the contract to pass its own check is caught like a deleted test. A build that needs a new token or reference image stops and asks, because that is a decision about the look, and it belongs to a person.</li>
+        <li><strong>Enforcement is a gate run by the critic.</strong> The builder may check its own work against the contract, which helps, but its check is not a verdict. A visual critic, after the code critic and without the builder's explanation, sets the states, runs the check on the commit to be merged, and records the result. A failed check blocks the merge.</li>
+      </ul>
+      <dl><dt>In practice</dt><dd>The record shows which variant was chosen, by whom, the contract that followed, and the gate result for the commit that was merged.</dd>
+      <dt>Sign it is missing</dt><dd>A design experiment reaches production because it was the branch that happened to be open.</dd></dl>
+
+      <p>Not all of this exists in tools yet. Setting an app's state, a snapshot of one panel, and its layout and computed styles exist for web and Expo apps. A visual critic after the code critic, a gate result that blocks a pass, and a check that a build did not change the contract exist too. Choosing from vetted directions, measuring reference images into a contract, and instruments for game engines and image pipelines are still being built.</p>
+    </section>
+
     <section id="seeing">
-      <h2>6. Seeing the system you deployed</h2>
+      <h2>7. Seeing the system you deployed</h2>
       <p>As agents write more of the code, fewer people will learn a system by reading its source. They will need another way to know what they have deployed. The record of lucid work is that way. It gives four views of the same system.</p>
       <ul>
-        <li><strong>The intent view:</strong> the bars. Read together, they are a plain-language description of what the system is meant to do, kept current because every change starts by writing one.</li>
+        <li><strong>The intent view:</strong> the bars and the visual contract. Read together, they are a plain-language description of what the system is meant to do and how it is meant to look, kept current because every change starts by writing a bar, and every change to the look starts with the contract.</li>
         <li><strong>The change view:</strong> the runs. For any part of the system you can see which units touched it, what they changed and why.</li>
         <li><strong>The proof view:</strong> the evidence. For any behaviour you can open what showed it working, and when.</li>
         <li><strong>The runtime view:</strong> the instruments. For any screen or request you can see what it does when it runs, not what the code suggests it does.</li>
@@ -201,7 +261,7 @@
     </section>
 
     <section id="adopting">
-      <h2>7. Adopting it in steps</h2>
+      <h2>8. Adopting it in steps</h2>
       <p>Nobody needs all of this on the first day. Each step is useful alone.</p>
       <div class="wp-table"><table>
         <thead><tr><th>Step</th><th>What you add</th><th>What you gain</th></tr></thead>
@@ -210,14 +270,15 @@
           <tr><td>2. Separate the critic</td><td>A second agent that sees only the bar and the result.</td><td>Gaps are found before you find them in production.</td></tr>
           <tr><td>3. Require evidence</td><td>Proof attached to every pass.</td><td>Claims you can check later.</td></tr>
           <tr><td>4. Instrument the app</td><td>Actions, state, timings and layout in development.</td><td>Critics that judge causes, not pixels.</td></tr>
-          <tr><td>5. Keep the record and the lessons</td><td>Run pages, lessons, budgets from past runs.</td><td>A system the whole team can read, and a process that improves.</td></tr>
+          <tr><td>5. Write the visual contract</td><td>The chosen look as tokens, rules and reference images, beside the code.</td><td>Screens and scenes that stay the same across sessions.</td></tr>
+          <tr><td>6. Keep the record and the lessons</td><td>Run pages, lessons, budgets from past runs.</td><td>A system the whole team can read, and a process that improves.</td></tr>
         </tbody>
       </table></div>
       <p><strong>For a solo developer,</strong> steps 1 to 3 fit in a single session and cost little more than the build itself. <strong>For a team,</strong> the shared record is the point: reviews, handovers and incident reviews start from it. <strong>For an organisation,</strong> the same record answers who approved what, and on what evidence.</p>
     </section>
 
     <section id="measure">
-      <h2>8. What to measure</h2>
+      <h2>9. What to measure</h2>
       <p>These numbers come from the record, so they cost nothing extra to collect.</p>
       <ul>
         <li><strong>First-pass rate:</strong> the share of units that meet the bar on the first critique. Low means the briefs or the bars need work.</li>
@@ -231,33 +292,33 @@
     </section>
 
     <section id="limits">
-      <h2>9. Limits and open questions</h2>
+      <h2>10. Limits and open questions</h2>
       <ul>
         <li><strong>A critic can be wrong too.</strong> Independence removes shared blind spots; it does not make the critic correct. Escapes should be traced back and turned into lessons.</li>
         <li><strong>A weak bar passes weak work.</strong> The practice moves the hard thinking to the start. It does not remove it.</li>
         <li><strong>It costs more per task.</strong> A second agent and stored evidence take time and tokens. The claim is that this is cheaper than the rework and incidents it prevents; each team should check that against its own numbers.</li>
-        <li><strong>Not everything is checkable.</strong> Taste, product judgement and ethics stay with people.</li>
+        <li><strong>Not everything is checkable.</strong> Taste, product judgement and ethics stay with people. A visual contract can show that a screen conforms; it cannot show that the screen is good.</li>
         <li><strong>Open questions.</strong> How blind should a critic be on very large changes? How long should lessons live before they are retired? How should records from many repositories be read as one system?</li>
       </ul>
     </section>
 
     <section id="future">
-      <h2>10. Where this is going</h2>
+      <h2>11. Where this is going</h2>
       <p>Agents will get faster and cheaper, and they will be trusted with larger pieces of work. The amount of software one person is responsible for will grow with them. The scarce skill will be knowing: being able to stand behind a system you directed and did not type.</p>
-      <p>Teams that keep the bar, the independent judgement, the evidence and the record will be able to move quickly and still explain themselves to users, to colleagues and to regulators. That is what Lucid Coding is for.</p>
+      <p>Teams that keep the bar, the independent judgement, the evidence and the record will be able to move quickly and still explain themselves to users, to colleagues and to regulators. That holds for how a product looks as much as for what it does: a look that is written down, measured and checked by someone other than its maker is one a team can stand behind. That is what Lucid Coding is for.</p>
     </section>
 
     <section id="use">
       <h2>Using and citing this paper</h2>
       <p>This paper is published under <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0</a>. You may share and adapt it, with credit.</p>
-      <p>Cite it as: Asif Raja, "Lucid Coding: a whitepaper", version 0.1, November 2026, https://mindmakr.github.io/coordinator/lucid-coding-whitepaper.html</p>
+      <p>Cite it as: Asif Raja, "Lucid Coding: a whitepaper", version 0.2, November 2026, https://mindmakr.github.io/coordinator/lucid-coding-whitepaper.html</p>
       <p>"Lucid Coding" is a trademark of Asif Raja (Mindmakr); see the <a href="https://github.com/mindmakr/coordinator/blob/main/TRADEMARKS.md">trademark policy</a>. Comments and corrections are welcome as <a href="https://github.com/mindmakr/coordinator/issues">issues</a>.</p>
     </section>
 
   </article>
 
   <footer class="mf-end">
-    <p><a href="./">Coordinator</a> and <a href="https://mindmakr.github.io/reins/">reins</a> are open-source tools that practise <span data-term>Lucid Coding</span>: Coordinator runs the builder and blind-critic loop and keeps the record, and reins gives agents instruments inside web, Expo and Node apps.</p>
+    <p><a href="./">Coordinator</a> and <a href="https://mindmakr.github.io/reins/">reins</a> are open-source tools that practise <span data-term>Lucid Coding</span>: Coordinator runs the builder and blind-critic loop and keeps the record, and reins gives agents instruments inside web, Expo and Node apps. Prism, being designed, will hold the visual contract and run its gate.</p>
     <p class="mf-sign">Author: <a href="https://github.com/mindmakr">Asif Raja, by Mindmakr</a></p>
   </footer>
 </main>
