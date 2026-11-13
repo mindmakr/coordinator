@@ -110,6 +110,7 @@ Then, in a project:
 | `/coordinator:run <task>` | Intake, then the loop until the bar is met. Takes an issue, a PR, or a plain description |
 | `/coordinator:status [run]` | Where a run stands, in a compact text view, or picks it up after a break or a crash |
 | `/coordinator:retro <run>` | Lessons, budgets and proposals from a finished run |
+| `/coordinator:bench [model]` | Plans a run of the Coordinator Engineering Benchmark: the model, the tool, with or without the Coordinator loop, a spending cap, and a cost estimate at pinned prices that you confirm before anything is spent. Running the tasks comes in a later version |
 
 Each step also has its own playbook you can run alone: `/coordinator:investigate`, `plan`, `fix`, `review` (with a security pass and a project-rule pass every round), `verify`, `visual`, `translations`, `release-notes` (for testers, operators and users) and `board`. If your project has its own skill for a step, that one is used instead.
 
@@ -213,7 +214,7 @@ skills/doctor/                   /coordinator:doctor (runs scripts/doctor.mjs)
 skills/coordinator/
 ├── SKILL.md                    the router and the rules every command shares (<500 words)
 ├── references/                 one playbook per command, the bar, briefs, craft, team, routing,
-│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains, ceb-manifest
+│                               guardrails, context, durability, hud, map, quality, learning, codex, sub-skills, domains, ceb-manifest, ceb-bench
 └── scripts/                    Node 18+, zero dependencies
     ├── run.mjs                 run state and the loop's decisions
     ├── doctor.mjs              the setup check

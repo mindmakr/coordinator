@@ -35,6 +35,7 @@
         <li><a href="#views">Views</a></li>
         <li><a href="#maps">Maps</a></li>
         <li><a href="#features">Features</a></li>
+        <li><a href="#bench">Benchmark</a></li>
         <li><a href="lucid-coding.html">Manifesto</a></li>
         <li><a href="lucid-coding-whitepaper.html">Whitepaper</a></li>
       </ul>
@@ -287,6 +288,24 @@
       <li><code>/coordinator:doctor</code><span>checks the setup first: Node, <code>gh</code>, settings, stale locks and dashboards</span></li>
       <li><code>/coordinator:status</code><span>where each run stands; the lead carries on with <code>run.mjs next</code> and does not ask your answers again</span></li>
       <li><code>run.mjs pull &lt;run&gt;</code><span>on another machine: restores the run from the <code>coordinator-state</code> branch the lead pushed at its last pit stop; a public repo keeps it in a private <code>stateRepo</code> instead</span></li>
+    </ol>
+  </div>
+</section>
+
+<section class="bench" id="bench" aria-labelledby="bench-h">
+  <div class="wrap resume-in">
+    <div>
+      <h2 id="bench-h" class="sec-h">A benchmark for the loop itself</h2>
+      <p>The Coordinator Engineering Benchmark (CEB) gives a model small, real engineering tasks and grades the result with tests the model never sees. Each model runs twice: through the Coordinator loop, and on its own in the same tool. The difference between the two is what the loop adds.</p>
+      <p>It is being built in the open. The twelve tasks are published and signed today; the command that runs them and the public board come next. There are no results yet, and none will be shown until the benchmark's own grader has produced them.</p>
+      <p><a href="https://github.com/mindmakr/coordinator-bench">The tasks</a> · <a href="https://github.com/mindmakr/coordinator/blob/main/docs/design/ceb.md">The design</a></p>
+    </div>
+    <ol class="term" aria-label="What the benchmark has today">
+      <li><code>12 tasks</code><span>bug fixes, features, refactors, security fixes and UI work in English and Arabic, each a container image pinned by digest</span></li>
+      <li><code>hidden tests</code><span>kept private and run by the benchmark's own grader, so a score is never the runner's own claim</span></li>
+      <li><code>with and without</code><span>the same model through the loop and on its own, on the same tasks with the same spending cap</span></li>
+      <li><code>27 models priced</code><span>from Anthropic, OpenAI, Google and xAI, and open-weight models from Alibaba, DeepSeek, Z.ai, MiniMax and Mistral, at prices pinned from each provider's own page</span></li>
+      <li><code>/coordinator:bench</code><span>plans a run and shows what it should cost before anything is spent; running the tasks comes next</span></li>
     </ol>
   </div>
 </section>

@@ -7,6 +7,8 @@ Notes since it was written:
 - "1.0.1" in this document means the first phase (the MVP). No version number is fixed; it is picked when the work ships.
 - The repos are named after the product: `mindmakr/coordinator-bench` (public tasks), `mindmakr/coordinator-bench-graders` (private hidden tests and reference solutions) and `mindmakr/coordinator-bench-ledger` (the public ledger, called `mindmakr/ceb-ledger` below).
 - Section 2.3 says the event log records no tokens or cost. It does now (`skills/coordinator/scripts/lib/cost.mjs`), so that part of the MVP is mostly done.
+- **With and without the Coordinator (owner, 2026-11-13).** A configuration also has an arm: `coordinator` (the task runs through the loop) or `baseline` (the same model does the task on its own in the same harness, one session). Both arms get the same tasks, cap and hidden grader, and the board shows both rows and the difference, so the benchmark also measures what the loop adds. The bench intake records the arm (`run.mjs bench plan --arm`); the run and the board follow in #98 and #113.
+- **More providers (owner, 2026-11-13).** The suite's price list also covers Google and xAI models and open-weight models, run through Codex (`references/ceb-bench.md`). The harnesses are still Claude Code and Codex.
 - The work is planned as two epics: part 1 (suite, bench command, grading, tickets) and part 2 (signatures, ledger, leaderboard, anomaly flags).
 
 CEB compares models doing real engineering work inside the Coordinator loop. Community members run it on their own machines with their own API keys, and a public leaderboard shows who leads on accuracy, quality, cost and speed. Results have to be trustworthy even though we never see the runner's machine.
