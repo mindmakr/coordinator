@@ -177,6 +177,9 @@ test('the pure parts: prompts, harness arguments, docker arguments and the harne
   assert.equal(readClaudeReport('not json'), null);
   const fromList = readClaudeReport(JSON.stringify([{ type: 'system' }, { type: 'result', subtype: 'error_max_budget_usd', usage: { input_tokens: 5, output_tokens: 7 } }]));
   assert.equal(fromList.isError, true);
+  const notLoggedIn = readClaudeReport(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, terminal_reason: 'api_error', result: 'Not logged in · Please run /login', modelUsage: {} }));
+  assert.deepEqual([notLoggedIn.isError, notLoggedIn.terminalReason, notLoggedIn.errorText], [true, 'api_error', 'Not logged in · Please run /login']);
+  assert.equal(readClaudeReport(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'the work is done' })).errorText, null, 'what the model wrote is not copied');
   assert.deepEqual(fromList.tokens, { input: 5, cachedInput: 0, cacheWrite: 0, output: 7 });
   assert.equal(timeoutMinutes({ humanMinutes: 3 }), 20);
   assert.equal(timeoutMinutes({ humanMinutes: 30 }), 120);

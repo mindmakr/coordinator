@@ -131,7 +131,7 @@ export function runTrial({ plan, task, base, harnessBin, harness, secrets = {}, 
   return record;
 }
 
-const brief = (t) => ({ task: t.task, status: t.status, minutes: Math.round(t.wallMs / 6000) / 10, turns: t.report?.turns ?? null, pinnedCost: t.pinnedCost, filesChanged: t.diff.files, ...(t.otherModels.length ? { otherModels: t.otherModels } : {}), ...(t.problem ? { problem: t.problem } : {}) });
+const brief = (t) => ({ task: t.task, status: t.status, minutes: Math.round(t.wallMs / 6000) / 10, turns: t.report?.turns ?? null, pinnedCost: t.pinnedCost, filesChanged: t.diff.files, ...(t.otherModels.length ? { otherModels: t.otherModels } : {}), ...(t.problem ? { problem: t.problem } : {}), ...(t.report?.errorText ? { harnessSaid: t.report.errorText } : {}) });
 
 // Every task of the plan that has not run yet, one after another, until the tasks or the cap run out.
 export function runPlan({ plan, base, harnessBin, secrets = {}, only = null, exec = spawnSync, now = () => new Date(), onTrial = () => {} }) {

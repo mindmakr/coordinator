@@ -4,6 +4,7 @@
 // the harness's report and the run's state are read afterwards. Starting the
 // container is lib/ceb/runner.mjs.
 import { createHash } from 'node:crypto';
+import { maskSecrets } from '../secrets.mjs';
 import { tokenCost } from './prices.mjs';
 
 export const TRIAL_SCHEMA = 1;
@@ -99,6 +100,9 @@ export function readClaudeReport(text) {
     apiMs: int(r.duration_api_ms),
     reportedCostUsd: Number.isFinite(r.total_cost_usd) ? r.total_cost_usd : null,
     sessionId: typeof r.session_id === 'string' ? r.session_id : null,
+    terminalReason: typeof r.terminal_reason === 'string' ? r.terminal_reason : null,
+    // What the harness said when it ended in an error ("Not logged in"), masked and cut short; never the model's work.
+    errorText: (r.is_error === true || (typeof r.subtype === 'string' && r.subtype !== 'success')) && typeof r.result === 'string' ? maskSecrets(r.result).slice(0, 200) : null,
     modelsUsed: perModel.map(([m]) => m).sort(),
     tokens,
   };
@@ -151,7 +155,7 @@ export function trialRecord({ plan, task, price, per, harness, startedAt, endedA
     timedOut,
     status,
     ...(leaked.length ? { problem: `a secret value was found in ${leaked.length} file${leaked.length === 1 ? '' : 's'} of the trial folder: ${leaked.join(', ')}` } : {}),
-    report: report ? { isError: report.isError, subtype: report.subtype, turns: report.turns, durationMs: report.durationMs, apiMs: report.apiMs, reportedCostUsd: report.reportedCostUsd, sessionId: report.sessionId } : null,
+    report: report ? { isError: report.isError, subtype: report.subtype, turns: report.turns, durationMs: report.durationMs, apiMs: report.apiMs, reportedCostUsd: report.reportedCostUsd, sessionId: report.sessionId, terminalReason: report.terminalReason, ...(report.errorText ? { errorText: report.errorText } : {}) } : null,
     tokens: report?.tokens ?? null,
     pinnedCost: report && price ? tokenCost(price, report.tokens, per) : null,
     modelsUsed: report?.modelsUsed ?? [],
