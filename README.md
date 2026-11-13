@@ -172,7 +172,7 @@ Mechanical builder work (docs, copy, translations, renames, fixtures) can go to 
 
 ## Context: where the tokens go
 
-In one measured run, 97% of tokens were context being re-read, and fix rounds sent back to a large builder were about half of builder cost. So a builder is closed when it reports and a fix round goes to a fresh agent; every agent has a token budget; a round has one critic; the lead runs test suites itself; and the lead trims the fixed prefix before a long run. After a run, `node <skill-dir>/scripts/context.mjs <transcript folder>` prints the aggregates for the retro: counts only, never transcript text ([context.md](skills/coordinator/references/context.md)).
+In one measured run, 97% of tokens were context being re-read, and fix rounds sent back to a large builder were about half of builder cost. So a builder is closed when it reports and a fix round goes to a fresh agent; every agent has a token budget; a round has one critic; the lead runs test suites itself; and the lead trims the fixed prefix before a long run. After a run, `node <skill-dir>/scripts/context.mjs <transcript folder>` prints the aggregates for the retro: counts only, never transcript text ([context.md](skills/coordinator/references/context.md)). `node <skill-dir>/scripts/prefix.mjs report` lists the plugins, skills and MCP servers a project loads; `draft` and `write --confirm` turn off what it does not use, in that project's `.claude/settings.local.json` only.
 
 ## Helper models: small jobs off the expensive model
 
@@ -231,6 +231,7 @@ skills/coordinator/
     ├── lessons.mjs             the lesson store
     ├── detect.mjs              the bar-gaming detector
     ├── context.mjs             where a run's tokens went, from transcripts (counts only)
+    ├── prefix.mjs              what the fixed prompt prefix loads per project, and a local trim
     ├── lib/                    pure modules with tests in test/
     └── test/                   node:test suites, and run folders from 0.1 to 0.5 for the migration test
 docs/                           the homepage, the manifesto, and install · connect · self-host · permissions · privacy

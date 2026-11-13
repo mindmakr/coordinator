@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **A per-project trim of the fixed prompt prefix (`scripts/prefix.mjs`, `references/context.md`, rule 7).** Every agent turn re-sends the names and descriptions of every enabled plugin and skill. `prefix.mjs report` lists what loads for a project (plugins from the user, project and local settings, user skills including linked folders, MCP servers by name) with counts and description characters. `draft` prints a `.claude/settings.local.json` for that project, merged into the existing file, that turns off the plugins and skills not kept (coordinator, what the project's own config names, and `--keep`); the claude.ai sync and connector keys only with `--claude-ai`. `write --confirm` writes it and adds it to `.git/info/exclude` (a project in a repository subfolder too) and says whether git now ignores it; it refuses without `--confirm` and never writes the user-level settings. `draft` and `write` refuse a local file that is not a JSON object (bad JSON, a trailing comma) rather than write over it; a byte order mark is read. `init` offers it as a question, doctor has a `prefix` line that warns on many skills with no trim, and the retro records the prefix size run on run.
+- **This repository has a `COORDINATOR.md`** with the owner's setup answers: base `main`, checks `npm test` and `claude plugin validate .`, run state local, 4 rounds and 240 minutes per unit.
+
 ## 1.5.0 (2026-11-14)
 The first parts of the Coordinator Engineering Benchmark (CEB), support for Prism's visual contract, and a cheaper general critic for work outside the pinned areas. Nothing runs a benchmark task yet.
 

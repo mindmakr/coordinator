@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   codexCheck, contextCheck, dashboardsCheck, diagnose, format, ghCheck, gitCheck, lessonsCheck, locksCheck,
-  nodeCheck, realExec, reinsCheck, settingsCheck, stateDirCheck, versionCheck, worktreesCheck,
+  nodeCheck, prefixCheck, realExec, reinsCheck, settingsCheck, stateDirCheck, versionCheck, worktreesCheck,
 } from '../lib/doctor.mjs';
 import { checkSettings } from '../lib/settings.mjs';
 
@@ -247,4 +247,32 @@ test('reins: skipped when absent, warns without the bridge in .mcp.json, ok when
   assert.match(ok.text, /--kind reins/);
   writeFileSync(join(p, '.mcp.json'), '{ broken');
   assert.equal(reinsCheck(c).status, 'warn', 'an unreadable .mcp.json is not a crash');
+});
+
+test('prefix: reports the counts, warns on many skills with no local trim, ok once the project has one', () => {
+  const p = fresh(); const home = fresh();
+  const c = ctx({ project: p, home });
+  const quiet = prefixCheck(c);
+  assert.equal(quiet.status, 'ok');
+  assert.match(quiet.text, /0 plugins, 0 skills \(0 description characters\), 0 MCP servers; local trim: no/);
+  for (let i = 0; i < 31; i++) {
+    mkdirSync(join(home, '.claude', 'skills', `s${i}`), { recursive: true });
+    writeFileSync(join(home, '.claude', 'skills', `s${i}`, 'SKILL.md'), '---\ndescription: abc\n---\n');
+  }
+  writeFileSync(join(p, '.mcp.json'), JSON.stringify({ mcpServers: { reins: { command: 'npx' } } }));
+  const many = prefixCheck(c);
+  assert.equal(many.status, 'warn');
+  assert.match(many.text, /31 skills \(93 description characters\), 1 MCP servers; local trim: no/);
+  assert.match(many.fix, /prefix\.mjs draft[^\n]*write --confirm/);
+  mkdirSync(join(p, '.claude'), { recursive: true });
+  writeFileSync(join(p, '.claude', 'settings.local.json'), JSON.stringify({ skillOverrides: { s0: 'off' } }));
+  const trimmed = prefixCheck(c);
+  assert.equal(trimmed.status, 'ok');
+  assert.match(trimmed.text, /30 skills[^\n]*local trim: yes/);
+  writeFileSync(join(p, '.claude', 'settings.local.json'), '{ "skillOverrides": { "s0": "off" }, }');
+  const broken = prefixCheck(c);
+  assert.equal(broken.status, 'warn', 'a local file that is not valid JSON is a warning, not a quiet "no trim"');
+  assert.match(broken.text, /not counted: local settings is not valid JSON/);
+  assert.match(broken.fix, /settings\.local\.json/);
+  assert.ok(format(diagnose(ctx({ online: false, project: repo() }))).split('\n').some((l) => l.split(/\s+/)[1] === 'prefix'), 'diagnose has a prefix line');
 });
