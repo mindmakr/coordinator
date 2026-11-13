@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { draft, measure, skillDescription, writeTrim } from '../lib/prefix.mjs';
+import { draft, excludeLine, measure, skillDescription, writeTrim } from '../lib/prefix.mjs';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'prefix.mjs');
 const root = mkdtempSync(join(tmpdir(), 'coord-prefix-'));
@@ -150,4 +150,123 @@ test('the CLI refuses bad arguments', () => {
   assert.match(run(s).stderr, /report, draft or write/);
   assert.match(run(s, 'report', '--keep', 'x').stderr, /only --project/);
   assert.match(run(s, 'draft', '--bogus').stderr, /unknown option/);
+});
+
+test('skillDescription counts every line of a plain or quoted value that wraps', () => {
+  const d = join(root, 'wrap');
+  put(join(d, 'plain.md'), '---\ndescription: one\n  two\nname: p\n---\n');
+  put(join(d, 'quoted.md'), '---\ndescription: "one,\n  two three"\nname: q\n---\n');
+  put(join(d, 'crlf.md'), '---\r\ndescription: one\r\n  two\r\n---\r\n');
+  assert.equal(skillDescription(join(d, 'plain.md')), 'one two');
+  assert.equal(skillDescription(join(d, 'plain.md')).length, 7);
+  assert.equal(skillDescription(join(d, 'quoted.md')), 'one, two three');
+  assert.equal(skillDescription(join(d, 'crlf.md')), 'one two');
+});
+
+test('a byte order mark is read: user, project and local settings with one count and merge as usual', () => {
+  const s = setup();
+  const bom = (file) => writeFileSync(file, `﻿${readFileSync(file, 'utf8')}`);
+  bom(join(s.home, '.claude', 'settings.json'));
+  bom(join(s.project, '.claude', 'settings.json'));
+  const local = join(s.project, '.claude', 'settings.local.json');
+  put(local, `﻿${JSON.stringify({ permissions: { allow: ['Bash(ls)'] }, env: { A: '1' } })}`);
+  const m = measure(s);
+  assert.equal(m.counts.plugins, 5, 'the BOM user and project files still count their plugins');
+  assert.deepEqual(m.unreadable, []);
+  const ok = run(s, 'write', '--confirm', '--json');
+  assert.equal(ok.status, 0, ok.stderr);
+  const written = JSON.parse(readFileSync(local, 'utf8'));
+  assert.deepEqual(written.permissions, { allow: ['Bash(ls)'] }, 'no key dropped');
+  assert.deepEqual(written.env, { A: '1' });
+  assert.equal(written.enabledPlugins['ecc@ecc'], false);
+});
+
+test('draft and write refuse a local file they cannot read as an object, and leave it as it was', () => {
+  for (const text of [
+    '{ "permissions": { "allow": ["Bash(ls)"] }, "env": { "A": "1" }, }', // trailing comma
+    '{ not json',
+    '["an", "array"]',
+    JSON.stringify({ permissions: {}, enabledPlugins: ['ecc@ecc'] }),
+    JSON.stringify({ permissions: {}, skillOverrides: 'off' }),
+  ]) {
+    const s = setup();
+    const local = join(s.project, '.claude', 'settings.local.json');
+    put(local, text);
+    assert.throws(() => draft(s), /fix or remove it first/, text);
+    assert.throws(() => writeTrim({ ...s, confirm: true }), /fix or remove it first/, text);
+    const cli = run(s, 'write', '--confirm');
+    assert.equal(cli.status, 2, text);
+    assert.match(cli.stderr, /settings\.local\.json (is not valid JSON|is not a JSON object|has \w+ that is not an object)/);
+    assert.equal(run(s, 'draft').status, 2);
+    assert.equal(readFileSync(local, 'utf8'), text, 'the local file is unchanged');
+    assert.equal(existsSync(join(s.project, '.git', 'info', 'exclude')) && readFileSync(join(s.project, '.git', 'info', 'exclude'), 'utf8').includes('settings.local.json'), false, 'no exclude line either');
+    const report = run(s, 'report');
+    assert.equal(report.status, 0, report.stderr);
+    if (!text.includes('enabledPlugins') && !text.includes('skillOverrides')) assert.match(report.stdout, /not counted: the local settings .*settings\.local\.json/);
+  }
+});
+
+test('write from a project in a repository subfolder: the exclude line is the path from the top level, and git ignores the file', () => {
+  const s = setup();
+  const top = join(dirname(s.project), 'mono');
+  const sub = join(top, 'apps', 'web');
+  mkdirSync(sub, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: top });
+  const ctx = { home: s.home, project: sub };
+  const ok = run(ctx, 'write', '--confirm', '--json');
+  assert.equal(ok.status, 0, ok.stderr);
+  const out = JSON.parse(ok.stdout);
+  assert.equal(out.excludeLine, '/apps/web/.claude/settings.local.json');
+  assert.equal(out.ignored, true);
+  const exclude = readFileSync(join(top, '.git', 'info', 'exclude'), 'utf8');
+  assert.ok(exclude.split(/\r?\n/).includes('/apps/web/.claude/settings.local.json'));
+  assert.equal(spawnSync('git', ['check-ignore', '-q', 'apps/web/.claude/settings.local.json'], { cwd: top }).status, 0, 'git ignores it');
+  assert.match(run(ctx, 'write', '--confirm').stdout, /git ignores it/);
+  assert.equal(readFileSync(join(top, '.git', 'info', 'exclude'), 'utf8'), exclude, 'the line is added once');
+  assert.equal(excludeLine('a b/[x]*?/'), '/a b/\\[x\\]\\*\\?/.claude/settings.local.json', 'pattern characters are escaped');
+  assert.equal(excludeLine(''), '.claude/settings.local.json');
+});
+
+test('write says so when git does not ignore the local file because it is tracked', () => {
+  const s = setup();
+  const local = join(s.project, '.claude', 'settings.local.json');
+  put(local, { permissions: {} });
+  spawnSync('git', ['add', '-f', '.claude/settings.local.json'], { cwd: s.project });
+  const ok = run(s, 'write', '--confirm', '--json');
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(JSON.parse(ok.stdout).ignored, false);
+  assert.match(run(s, 'write', '--confirm').stdout, /git does not ignore the file: it is tracked/);
+});
+
+test('a local file that only turns plugins or skills on is not a trim', () => {
+  const s = setup();
+  const local = join(s.project, '.claude', 'settings.local.json');
+  put(local, { enabledPlugins: { 'ecc@ecc': true }, skillOverrides: { alpha: 'on' } });
+  assert.equal(measure(s).localTrim, false);
+  put(local, { enabledPlugins: { 'ecc@ecc': false } });
+  assert.equal(measure(s).localTrim, true);
+  put(local, { skillOverrides: { alpha: 'off' } });
+  assert.equal(measure(s).localTrim, true);
+});
+
+test('a flag with no value is refused, never read as a default', () => {
+  const s = setup();
+  const env = { ...process.env, HOME: s.home, USERPROFILE: s.home };
+  const cli = (...args) => spawnSync(process.execPath, [script, ...args], { env, encoding: 'utf8', cwd: s.project });
+  for (const args of [['report', '--project'], ['report', '--project='], ['report', '--project', '--json'], ['write', '--confirm', '--project=']]) {
+    const r = cli(...args);
+    assert.equal(r.status, 2, args.join(' '));
+    assert.match(r.stderr, /--project needs a folder/, args.join(' '));
+  }
+  assert.match(cli('write', '--confirm', '--project', join(s.project, 'missing')).stderr, /--project is not a folder/);
+  assert.equal(existsSync(join(s.project, 'missing')), false, 'no folder created');
+  for (const args of [['draft', '--keep'], ['draft', '--keep='], ['draft', '--keep', ','], ['draft', '--keep', ' , '], ['write', '--confirm', '--keep=']]) {
+    const r = cli(...args, '--project', s.project);
+    assert.equal(r.status, 2, args.join(' '));
+    assert.match(r.stderr, /--keep needs a list/, args.join(' '));
+  }
+  assert.equal(existsSync(join(s.project, '.claude', 'settings.local.json')), false, 'nothing written');
+  const spaced = JSON.parse(cli('draft', '--json', '--keep', ' beta , docs ', '--project', s.project).stdout);
+  assert.deepEqual(spaced.off.plugins, ['ecc@ecc'], 'names are trimmed: docs is kept');
+  assert.ok(!spaced.off.skills.includes('beta'));
 });

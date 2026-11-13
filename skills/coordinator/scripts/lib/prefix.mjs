@@ -17,9 +17,31 @@ export const MANY_SKILLS = 30;
 const SETUP = 'coordinator';
 const CLAUDE_AI = { syncClaudeAiSkills: false, syncClaudeAiPlugins: false, disableClaudeAiConnectors: true };
 
-const json = (f) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return null; } };
+// A UTF-8 byte order mark (Windows editors write one) is not part of the JSON.
+const parse = (text) => JSON.parse(text.replace(/^\uFEFF/, ''));
+const json = (f) => { try { return parse(readFileSync(f, 'utf8')); } catch { return null; } };
 const isDir = (p) => { try { return statSync(p).isDirectory(); } catch { return false; } }; // statSync follows links and junctions
-const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+const plain = (v) => Boolean(v && typeof v === 'object' && !Array.isArray(v));
+const obj = (v) => (plain(v) ? v : {});
+
+// One settings file: { data, error }. A missing file is empty; a file that is there but is not a JSON
+// object (bad JSON, a trailing comma, an array) has an error, so nothing ever merges into it as if empty.
+export function readSettings(file) {
+  let text;
+  try { text = readFileSync(file, 'utf8'); } catch (e) {
+    return e.code === 'ENOENT' || e.code === 'ENOTDIR' ? { data: {}, error: null } : { data: {}, error: `cannot be read (${e.code ?? e.message})` };
+  }
+  let v;
+  try { v = parse(text); } catch (e) { return { data: {}, error: `is not valid JSON (${e.message})` }; }
+  return plain(v) ? { data: v, error: null } : { data: {}, error: 'is not a JSON object' };
+}
+
+// Why the local file cannot take a merged draft without losing a key, or null when it can.
+function localProblem(local) {
+  if (local.error) return local.error;
+  for (const k of ['enabledPlugins', 'skillOverrides']) if (k in local.data && !plain(local.data[k])) return `has ${k} that is not an object`;
+  return null;
+}
 const shortName = (id) => String(id).split('@')[0];
 const norm = (p) => resolve(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
@@ -32,12 +54,14 @@ export function skillDescription(file) {
   const lines = fm[1].split(/\r?\n/);
   const i = lines.findIndex((l) => /^description\s*:/.test(l));
   if (i < 0) return '';
-  let value = lines[i].replace(/^description\s*:\s*/, '');
-  if (/^[>|][+-]?\s*$/.test(value) || value === '') {
-    const more = [];
-    for (let j = i + 1; j < lines.length && (/^\s/.test(lines[j]) || lines[j] === ''); j++) more.push(lines[j].trim());
-    value = more.join(' ').trim();
-  }
+  const first = lines[i].replace(/^description\s*:\s*/, '').trim();
+  // Indented lines after the key continue the value: a block (`>`, `|`), or a plain or quoted value
+  // that wraps. Each line break counts as one character.
+  const more = [];
+  for (let j = i + 1; j < lines.length && (/^\s/.test(lines[j]) || lines[j].trim() === ''); j++) more.push(lines[j].trim());
+  while (more.length && more[more.length - 1] === '') more.pop();
+  const block = /^[>|][+-]?\d?$/.test(first);
+  const value = (block ? more : [first, ...more]).filter((l) => l !== '').join(' ').trim();
   return value.replace(/^(['"])([\s\S]*)\1$/, '$2');
 }
 
@@ -60,7 +84,7 @@ export function layers(project, home) {
     ['user', join(home, '.claude', 'settings.json')],
     ['project', join(project, '.claude', 'settings.json')],
     ['local', join(project, '.claude', 'settings.local.json')],
-  ].map(([scope, file]) => ({ scope, file, data: obj(json(file)) }));
+  ].map(([scope, file]) => ({ scope, file, ...readSettings(file) }));
 }
 
 // Where an installed plugin lives: the entry for this project first, then the user-wide one.
@@ -107,7 +131,9 @@ export function measure({ project, home }) {
     skills: { user, project: projectSkills },
     mcpServers: { project: projectMcp, user: userServers },
     claudeAi: Object.fromEntries(Object.keys(CLAUDE_AI).map((k) => [k, merged[k] ?? null])),
-    localTrim: Object.keys(obj(local.enabledPlugins)).length > 0 || Object.keys(obj(local.skillOverrides)).length > 0,
+    // A trim turns something off; a local file that only turns plugins or skills on is not one.
+    localTrim: Object.values(obj(local.enabledPlugins)).some((v) => v === false) || Object.values(obj(local.skillOverrides)).some((v) => v === 'off'),
+    unreadable: ls.filter((l) => l.error).map((l) => ({ scope: l.scope, file: l.file, error: l.error })),
     counts: {
       plugins: on.length,
       pluginsOff: pluginList.length - on.length,
@@ -133,6 +159,7 @@ export function summary(m) {
     `user skills (~/.claude/skills): ${c.userSkills} on, ${c.userSkillsOff} off; project skills: ${c.projectSkills}; plugin skills: ${c.pluginSkills}`,
     `MCP servers: project .mcp.json ${m.mcpServers.project.join(', ') || 'none'}; user config ${m.mcpServers.user.join(', ') || 'none'}`,
     `local trim (${LOCAL}): ${m.localTrim ? 'yes' : 'no'}; tokens: not measured here, run /context in a session of this project`,
+    ...m.unreadable.map((u) => `not counted: the ${u.scope} settings ${u.file} ${u.error}`),
   ].join('\n');
 }
 
@@ -141,6 +168,8 @@ export function summary(m) {
 export function draft({ project, home, keep = [], claudeAi = false }) {
   const m = measure({ project, home });
   const ls = layers(project, home);
+  const problem = localProblem(ls[2]);
+  if (problem) throw new Error(`${ls[2].file} ${problem}: fix or remove it first; nothing is drafted or written over it, so none of its keys is lost`);
   const current = ls[2].data;
   const names = new Set(keep.map((k) => String(k).trim()).filter(Boolean));
   const projectPlugins = Object.entries(obj(ls[1].data.enabledPlugins)).filter(([, v]) => v === true).map(([id]) => id);
@@ -191,20 +220,31 @@ export function draftText(d) {
 export function writeTrim({ project, home, keep, claudeAi, confirm, exec = execFileSync }) {
   if (confirm !== true) throw new Error('write needs --confirm: show the person the draft first (prefix.mjs draft) and write only after they agree');
   if (norm(project) === norm(home)) throw new Error('the project is the home folder: this writes a project\'s local file only, never the user-level settings');
+  if (!isDir(project)) throw new Error(`the project is not a folder: ${project}`);
   const d = draft({ project, home, keep, claudeAi });
   if (norm(d.file) === norm(join(home, '.claude', 'settings.json'))) throw new Error('refusing to write the user-level settings file');
   writeJson(d.file, d.settings);
-  let exclude = null;
+  const git = (args) => exec('git', args, { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  let exclude = null; let line = null;
   try {
-    const p = exec('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    exclude = resolve(project, p);
-  } catch { /* not a git repo: nothing to exclude */ }
-  let excluded = false;
+    exclude = resolve(project, git(['rev-parse', '--git-path', 'info/exclude']).trim());
+    line = excludeLine(git(['rev-parse', '--show-prefix']).trim());
+  } catch { exclude = null; line = null; /* not a git repo: nothing to exclude */ }
+  let ignored = false;
   if (exclude) {
     const text = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
     mkdirSync(dirname(exclude), { recursive: true });
-    if (!text.split(/\r?\n/).some((l) => l.trim() === LOCAL || l.trim() === `/${LOCAL}`)) appendFileSync(exclude, `${text && !text.endsWith('\n') ? '\n' : ''}${LOCAL}\n`);
-    excluded = true;
+    const same = new Set([line, line.replace(/^\//, '')]);
+    if (!text.split(/\r?\n/).some((l) => same.has(l.trim()))) appendFileSync(exclude, `${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`);
+    // Report what git does, not what was meant: a file git already tracks is not hidden by an exclude line.
+    try { git(['check-ignore', '-q', d.file]); ignored = true; } catch { ignored = false; }
   }
-  return { ...d, written: d.file, exclude: excluded ? exclude : null };
+  return { ...d, written: d.file, exclude, excludeLine: line, ignored };
+}
+
+// The exclude line for the local file of a project at `prefix` (git rev-parse --show-prefix) in its
+// repository. Patterns in .git/info/exclude are relative to the top level, so a project in a subfolder
+// gets its own anchored path, with git's pattern characters escaped.
+export function excludeLine(prefix) {
+  return prefix ? `/${prefix.replace(/[\\*?[\]]/g, '\\$&')}${LOCAL}` : LOCAL;
 }

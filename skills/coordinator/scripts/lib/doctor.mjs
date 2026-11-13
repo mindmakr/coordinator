@@ -358,6 +358,7 @@ export function prefixCheck(ctx) {
   try { m = measure({ project: ctx.project, home: ctx.home }); } catch (e) { return out('prefix', 'skip', `could not measure the prefix: ${e.message}`); }
   const c = m.counts;
   const text = `${c.plugins} plugins, ${c.skills} skills (${c.descriptionChars} description characters), ${c.mcpServers} MCP servers; local trim: ${m.localTrim ? 'yes' : 'no'}`;
+  if (m.unreadable.length) return out('prefix', 'warn', `${text}; not counted: ${m.unreadable.map((u) => `${u.scope} settings ${u.error}`).join('; ')}`, `fix ${m.unreadable.map((u) => u.file).join(', ')} (prefix.mjs draft and write refuse an unreadable local file)`);
   return c.skills > MANY_SKILLS && !m.localTrim
     ? out('prefix', 'warn', `${text}; every agent turn re-sends them`, `node <skill-dir>/scripts/prefix.mjs draft, show it, then write --confirm (${LOCAL}, this project only; references/context.md rule 7)`)
     : out('prefix', 'ok', text);

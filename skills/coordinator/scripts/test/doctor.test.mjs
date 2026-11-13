@@ -269,5 +269,10 @@ test('prefix: reports the counts, warns on many skills with no local trim, ok on
   const trimmed = prefixCheck(c);
   assert.equal(trimmed.status, 'ok');
   assert.match(trimmed.text, /30 skills[^\n]*local trim: yes/);
+  writeFileSync(join(p, '.claude', 'settings.local.json'), '{ "skillOverrides": { "s0": "off" }, }');
+  const broken = prefixCheck(c);
+  assert.equal(broken.status, 'warn', 'a local file that is not valid JSON is a warning, not a quiet "no trim"');
+  assert.match(broken.text, /not counted: local settings is not valid JSON/);
+  assert.match(broken.fix, /settings\.local\.json/);
   assert.ok(format(diagnose(ctx({ online: false, project: repo() }))).split('\n').some((l) => l.split(/\s+/)[1] === 'prefix'), 'diagnose has a prefix line');
 });
