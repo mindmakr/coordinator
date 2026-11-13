@@ -60,7 +60,7 @@ export function skillDescription(file) {
   const more = [];
   for (let j = i + 1; j < lines.length && (/^\s/.test(lines[j]) || lines[j].trim() === ''); j++) more.push(lines[j].trim());
   while (more.length && more[more.length - 1] === '') more.pop();
-  const block = /^[>|][+-]?\d?$/.test(first);
+  const block = /^[>|](?:[+-]?\d?|\d?[+-]?)\s*(?:#.*)?$/.test(first);
   const value = (block ? more : [first, ...more]).filter((l) => l !== '').join(' ').trim();
   return value.replace(/^(['"])([\s\S]*)\1$/, '$2');
 }
@@ -234,7 +234,9 @@ export function writeTrim({ project, home, keep, claudeAi, confirm, exec = execF
   if (exclude) {
     const text = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
     mkdirSync(dirname(exclude), { recursive: true });
-    const same = new Set([line, line.replace(/^\//, '')]);
+    // At the repository root, `/.claude/settings.local.json` and the unanchored form are the same file.
+    const bare = line.replace(/^\//, '');
+    const same = new Set([line, bare, `/${bare}`]);
     if (!text.split(/\r?\n/).some((l) => same.has(l.trim()))) appendFileSync(exclude, `${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`);
     // Report what git does, not what was meant: a file git already tracks is not hidden by an exclude line.
     try { git(['check-ignore', '-q', d.file]); ignored = true; } catch { ignored = false; }

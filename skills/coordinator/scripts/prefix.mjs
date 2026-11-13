@@ -45,9 +45,11 @@ try {
   if (extra !== undefined) throw new Error(`unexpected argument: ${extra}`);
   for (const f of ['claude-ai', 'confirm', 'json']) if (opt[f] !== undefined && opt[f] !== true) throw new Error(`--${f} takes no value`);
   // A flag with no value (`--project` last, `--project=`, `--keep ,`) is an error, never a quiet default.
-  if (opt.project !== undefined && (typeof opt.project !== 'string' || !opt.project.trim())) throw new Error('--project needs a folder');
+  // A value that starts with `--` is a mistyped flag, so it counts as missing too.
+  const dashed = (v) => typeof v === 'string' && v.startsWith('--');
+  if (opt.project !== undefined && (typeof opt.project !== 'string' || !opt.project.trim() || dashed(opt.project))) throw new Error('--project needs a folder');
   if (opt.project !== undefined && !isDir(resolve(opt.project))) throw new Error(`--project is not a folder: ${opt.project}`);
-  if ((opt.keep ?? []).some((k) => typeof k !== 'string' || !k.split(',').some((x) => x.trim()))) throw new Error('--keep needs a list: --keep a,b');
+  if ((opt.keep ?? []).some((k) => typeof k !== 'string' || dashed(k) || !k.split(',').some((x) => x.trim()))) throw new Error('--keep needs a list: --keep a,b');
   if (cmd === 'report' && (opt.keep || opt['claude-ai'] || opt.confirm)) throw new Error('report takes only --project and --json');
   if (cmd === 'draft' && opt.confirm) throw new Error('draft writes nothing; use write --confirm');
   const project = resolve(opt.project ?? topLevel());

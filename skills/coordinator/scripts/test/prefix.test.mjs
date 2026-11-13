@@ -161,6 +161,16 @@ test('skillDescription counts every line of a plain or quoted value that wraps',
   assert.equal(skillDescription(join(d, 'plain.md')).length, 7);
   assert.equal(skillDescription(join(d, 'quoted.md')), 'one, two three');
   assert.equal(skillDescription(join(d, 'crlf.md')), 'one two');
+  // The block header takes the indentation and chomping indicators in either order, and a comment.
+  const headers = ['>2-', '>-2', '|+', '|2', '> # note', '>- # note'];
+  headers.forEach((h, i) => put(join(d, `h${i}.md`), `---
+description: ${h}
+    one
+    two
+name: h
+---
+`));
+  headers.forEach((h, i) => assert.equal(skillDescription(join(d, `h${i}.md`)), 'one two', h));
 });
 
 test('a byte order mark is read: user, project and local settings with one count and merge as usual', () => {
@@ -227,6 +237,23 @@ test('write from a project in a repository subfolder: the exclude line is the pa
   assert.equal(excludeLine(''), '.claude/settings.local.json');
 });
 
+test('write at the repository root: an existing anchored or unanchored exclude line counts as present', () => {
+  for (const existing of ['/.claude/settings.local.json', '.claude/settings.local.json']) {
+    const s = setup();
+    const file = join(s.project, '.git', 'info', 'exclude');
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `# mine
+${existing}
+`);
+    const ok = run(s, 'write', '--confirm', '--json');
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(readFileSync(file, 'utf8'), `# mine
+${existing}
+`, `no duplicate next to ${existing}`);
+    assert.equal(JSON.parse(ok.stdout).ignored, true);
+  }
+});
+
 test('write says so when git does not ignore the local file because it is tracked', () => {
   const s = setup();
   const local = join(s.project, '.claude', 'settings.local.json');
@@ -258,9 +285,12 @@ test('a flag with no value is refused, never read as a default', () => {
     assert.equal(r.status, 2, args.join(' '));
     assert.match(r.stderr, /--project needs a folder/, args.join(' '));
   }
+  const dashedProject = cli('report', '--project', '--Reins');
+  assert.equal(dashedProject.status, 2);
+  assert.match(dashedProject.stderr, /--project needs a folder/);
   assert.match(cli('write', '--confirm', '--project', join(s.project, 'missing')).stderr, /--project is not a folder/);
   assert.equal(existsSync(join(s.project, 'missing')), false, 'no folder created');
-  for (const args of [['draft', '--keep'], ['draft', '--keep='], ['draft', '--keep', ','], ['draft', '--keep', ' , '], ['write', '--confirm', '--keep=']]) {
+  for (const args of [['draft', '--keep'], ['draft', '--keep='], ['draft', '--keep', ','], ['draft', '--keep', ' , '], ['write', '--confirm', '--keep='], ['draft', '--keep', '--Reins']]) {
     const r = cli(...args, '--project', s.project);
     assert.equal(r.status, 2, args.join(' '));
     assert.match(r.stderr, /--keep needs a list/, args.join(' '));
