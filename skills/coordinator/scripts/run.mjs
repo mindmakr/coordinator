@@ -20,7 +20,9 @@
 //                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
 //   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
-//   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link|reins [--label L]
+//   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link|reins|prism [--label L]
+//                  prism: --file <worktree>/.prism/gate-report.json, beside the tokens.json it was checked against; while the
+//                  unit is judged it must be for the commit being judged, and its PASS or FAIL then gates the pass (references/prism.md)
 //   run.mjs link <run> <unit> [--issue … ] [--pr …] [--merge URL [--same-tree T]] [--url U --label L]   GitHub issues, PRs and merges;
 //                  --same-tree: the merged tree is the reviewed head merged with the target, so no post-merge re-check (recorded)
 //                  [--continues <run>:<unit>]  record afterwards that this unit continues that one (any id; closed runs too)
@@ -156,6 +158,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
 import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
+import { prismRefusal } from './lib/prismreport.mjs';
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
@@ -734,6 +737,9 @@ const commands = {
       if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
         if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (run.mjs add-specialist ${s.id} ${u.id} ${name} --reason …)`);
+        // The visual gate (references/prism.md): a FAIL report blocks every pass; the prism specialist needs a PASS one.
+        const gate = verdict === 'pass' && !late ? prismRefusal(u, name) : null;
+        if (gate) throw new Error(gate);
         const mark = { verdict, score: score(o.score), gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
         if (late) { (closed.specialists ??= {})[name] = { ...mark, late: true }; log(u, 'verdict', `${name}: ${verdict} on round ${closed.n ?? u.rounds.length}, after the round closed`); }
         else (u.specialistMarks ??= {})[name] = mark;
@@ -745,6 +751,8 @@ const commands = {
       }
       const missing = (u.specialists ?? []).filter((n) => u.specialistMarks?.[n]?.verdict !== 'pass');
       if (verdict === 'pass' && missing.length) throw new Error(`pass refused: specialist ${missing.join(', ')} has not passed this build`);
+      const gate = verdict === 'pass' ? prismRefusal(u) : null;
+      if (gate) throw new Error(gate);
       const round = u.rounds.length + 1;
       if (verdict === 'pass' && s.paths?.length && !(u.detect?.round === round && u.detect.clean)) {
         throw new Error(`pass refused: no clean detect result for round ${round}; run detect.mjs --run ${s.id} --unit ${u.id} --base … first`);

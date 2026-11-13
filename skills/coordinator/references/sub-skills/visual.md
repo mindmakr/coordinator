@@ -20,9 +20,10 @@
    - spacing or components that differ from sibling screens and from the reference.
 
    Record a finding only when you can point at it in a screenshot.
-5. **Side by side** with the bar's reference when it has one.
-6. **Trace** each finding to its component or string (`investigate.md`, cite three ways), or mark it "not traced".
-7. **Clean up.** Stop every server and browser you started.
+5. **Side by side** with the bar's reference when it has one. When the project has `.prism/`, its tokens and anchors are that reference.
+6. **Run the visual gate, when the project has `.prism/`.** Check out the commit you were given, run Prism's gate there yourself, and attach its report: `run.mjs evidence <run> <unit> --kind prism --file <worktree>/.prism/gate-report.json`. A report the builder made does not count. A FAIL report blocks the pass; your verdict as the `prism` specialist passes only on a PASS report (`prism.md`). A change to the contract itself (`tokens.json`, `anchors/`, `dials.json`, `brief.json`) is a finding, unless this is the look-dev unit.
+7. **Trace** each finding to its component or string (`investigate.md`, cite three ways), or mark it "not traced".
+8. **Clean up.** Stop every server and browser you started.
 
 ## Output
 
