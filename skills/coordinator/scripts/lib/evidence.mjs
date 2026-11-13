@@ -9,11 +9,13 @@ import { STORED_FILE } from './eventschema.mjs';
 import { oneOf, optText, text } from './args.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { parseReinsReport } from './reinsreport.mjs';
+import { judgedHead, parsePrismReport, sameHead, tokensHash } from './prismreport.mjs';
 import { webUrl } from './links.mjs';
 import { writeAtomic } from './store.mjs';
 
 // reins: the Markdown a reins session report or compare is saved as; its findings are read into the item (lib/reinsreport.mjs).
-export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link', 'reins'];
+// prism: the .prism/gate-report.json Prism writes; read, checked against its tokens and the build's commit (lib/prismreport.mjs).
+export const KINDS = ['test', 'screenshot', 'pdf', 'log', 'link', 'reins', 'prism'];
 // perRound: pieces per unit (or the goal) in one round, so a long unit never runs out (#66); a piece records the
 // round it came in (pieces from before, with none, count toward no round). total: what an id (E1-E999) can number.
 export const LIMITS = { text: 20_000, image: 5 * 1024 * 1024, textFile: 512 * 1024, perRound: 60, total: 999 };
@@ -72,6 +74,34 @@ export function copyIn(src, runDir, target, eid) {
   return { file: `${target}/${name}`, type: IMAGE[ext] ? 'image' : DOC[ext] ? 'doc' : 'text', bytes: st.size, sha256: sha256(stored) };
 }
 
+// A small file's bytes, or a plain refusal naming `what`.
+function readSmall(f, what) {
+  try { if (lstatSync(f).size > LIMITS.textFile) throw new Error('big'); return readFileSync(f); } catch (e) {
+    throw new Error(e.message === 'big' ? `${what} is over the cap of ${LIMITS.textFile / 1024} KB` : `no file: ${f}`);
+  }
+}
+
+// A Prism gate report for one build (references/prism.md). It must sit in the .prism/ folder it was made in,
+// beside the tokens.json it was checked against. While the unit is being judged it must be for the commit
+// under judgement, and only then does it count for the gate (lib/prismreport.mjs, prismGate).
+function readPrism(unit, file) {
+  if (!unit) throw new Error('--kind prism goes on a unit: a gate report is for one build');
+  if (typeof file !== 'string' || extname(file).toLowerCase() !== '.json') throw new Error('--kind prism takes --file <worktree>/.prism/gate-report.json');
+  let p;
+  try { p = parsePrismReport(readSmall(file, '--file').toString('utf8')); } catch (e) { throw new Error(`--kind prism: ${e.message}`); }
+  const tokensFile = join(dirname(file), 'tokens.json');
+  let tokens;
+  try { tokens = readSmall(tokensFile, 'tokens.json'); } catch { throw new Error('--kind prism: no tokens.json beside the report; attach the gate-report.json from the .prism/ folder it was made in'); }
+  if (tokensHash(tokens) !== p.tokensSha256) throw new Error(`--kind prism: the report was checked against other tokens (${p.tokensSha256.slice(0, 12)}) than the tokens.json beside it (${tokensHash(tokens).slice(0, 12)}); run the gate again`);
+  const judging = unit.status === 'judging';
+  if (judging) {
+    const head = judgedHead(unit);
+    if (!head) throw new Error('--kind prism: the build being judged has no recorded commit; record it first (built --head <sha>, or detect.mjs --run <run> --unit <unit> --head <sha>)');
+    if (!sameHead(head, p.head)) throw new Error(`--kind prism: the report is for commit ${p.head.slice(0, 12)}, but the build being judged is ${head.slice(0, 12)}; run the gate on that commit`);
+  }
+  return { ...p, counts: judging };
+}
+
 // o: { kind, text?, file?, url?, label?, behaviour?, source? }. Returns the evidence id.
 // source: the original path a file was adopted from (`run.mjs adopt`), so adopting twice is a no-op.
 export function addEvidence(s, unit, o, runDir) {
@@ -86,6 +116,7 @@ export function addEvidence(s, unit, o, runDir) {
     reins = parseReinsReport(maskSecrets(md));
     if (!reins) throw new Error('--kind reins: the file is not a reins session report or compare (its first heading is "# reins session: …" or "# reins compare: …"); attach other files with --kind log');
   }
+  const prism = kind === 'prism' ? readPrism(unit, o.file) : null;
   const list = listOf(s, unit);
   // The round this piece belongs to: the unit's try under way (or next), or the goal's integration round.
   const round = (unit ? unit.rounds?.length ?? 0 : s.integration?.rounds?.length ?? 0) + 1;
@@ -107,6 +138,7 @@ export function addEvidence(s, unit, o, runDir) {
     Object.assign(item, copyIn(o.file, runDir, unit ? unit.id : GOAL_DIR, eid));
     if (typeof o.source === 'string') item.source = o.source;
     if (reins) item.reins = reins;
+    if (prism) item.prism = prism;
   }
   list.push(item);
   return eid;

@@ -148,6 +148,21 @@ function reinsSummary(r) {
   return rows.length ? `${title}<ul class="reins-findings">${rows.join('')}</ul>${more}` : `${title}<p><span class="chip s-pass">clean</span> nothing crossed the thresholds</p>`;
 }
 
+// What a Prism gate report says (lib/prismreport.mjs): PASS or FAIL, for which commit, whether it decides
+// the gate, and its violations. Values come from the state, which may be hand-edited: shown escaped.
+function prismSummary(p) {
+  if (p === null || typeof p !== 'object') return '';
+  const pass = p.status === 'PASS';
+  const head = typeof p.head === 'string' ? ` at <code>${esc(p.head.slice(0, 12))}</code>` : '';
+  const checks = Number.isInteger(p.checks?.total) && p.checks.total ? `, ${p.checks.total - (p.checks.failed ?? 0)} of ${p.checks.total} checks passed` : '';
+  const counts = p.counts === true ? '' : ' · not the gate: attached while the unit was not being judged';
+  const title = `<p class="cause"><span class="chip ${pass ? 's-pass' : 's-fail'}">${pass ? 'PASS' : 'FAIL'}</span> Prism gate${head}${checks}${counts}</p>`;
+  const rows = (Array.isArray(p.violations) ? p.violations : []).filter((v) => v && typeof v.rule === 'string')
+    .map((v) => `<li><span class="chip${v.fixable === false ? '' : ' s-fail'}">${esc(v.rule)}</span>${typeof v.where === 'string' ? ` ${esc(v.where)}` : ''}${typeof v.detail === 'string' ? `: ${esc(v.detail)}` : ''}</li>`);
+  const more = Number.isInteger(p.more) && p.more > 0 ? `<p class="cause">${p.more} more in the file</p>` : '';
+  return `${title}${rows.length ? `<ul class="reins-findings">${rows.join('')}</ul>` : ''}${more}`;
+}
+
 function evidenceItem(e, repo, ctx, key) {
   const head = `${badge('evidence', e.kind)}${e.behaviour ? ` <b>${esc(e.behaviour)}</b>` : ''} ${esc(e.label ?? '')}`;
   let body = '';
@@ -159,7 +174,7 @@ function evidenceItem(e, repo, ctx, key) {
   // A missing stored copy says so; screenshots and text files open in the viewer (lib/evview.mjs).
   else if (e.file && (ctx.has && !ctx.has(e.file) || ctx.artHref(e.file))) body = itemBody(e, e.file.split('/')[0], ctx) ?? '';
   else if (e.file) body = `<p class="cause">${esc(e.file.split('/').pop())}: file kept locally</p>`;
-  return `<li class="evidence" data-a="${esc(`${key}-${e.id}`)}"><div>${head} ${stamp(e.at, 'cause')}</div>${e.reins ? reinsSummary(e.reins) : ''}${body}</li>`;
+  return `<li class="evidence" data-a="${esc(`${key}-${e.id}`)}"><div>${head} ${stamp(e.at, 'cause')}</div>${e.reins ? reinsSummary(e.reins) : ''}${e.prism ? prismSummary(e.prism) : ''}${body}</li>`;
 }
 
 export const evidenceList = (list, repo, ctx, key) => (list.length ? grows(`<ul class="evlist" data-ev-list>${list.map((e) => evidenceItem(e, repo, ctx, key)).join('')}</ul>`) : '');

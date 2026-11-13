@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Flags a diff that games the bar: focused, skipped, deleted or renamed-away
 // tests, removed, weakened or trivialized assertions, tests excluded in runner
-// config, rewritten snapshots, suppressed checks, ignored failures, and files
-// outside the fence. Exit 0 = clean, 1 = hits (a FAIL), 2 = usage.
+// config, rewritten snapshots, suppressed checks, ignored failures, files
+// outside the fence, and changes to the visual contract in .prism/ (brief, dials,
+// tokens, anchors: allowed only on the look-dev unit, with --allow visual-contract).
+// Exit 0 = clean, 1 = hits (a FAIL), 2 = usage.
 //
 //   detect.mjs --base <ref> [--head <ref>] [--run <run> [--unit <unit>]] [--fence a,b] [--allow rule[:path],…]
 // --allow may be given more than once (--allow a:x --allow b:y), or as one comma list.

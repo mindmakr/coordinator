@@ -265,6 +265,22 @@ export function reinsCheck(ctx) {
     : out('reins', 'warn', 'reins is installed but .mcp.json does not register its bridge, so agents cannot drive the app', 'add "reins": { "command": "npx", "args": ["reins", "bridge"] } under mcpServers in .mcp.json');
 }
 
+// Prism's visual contract (references/prism.md) is optional: a .prism/ folder at the root or one folder down.
+// Its tokens.json must read, or the gate has nothing to check against; gate-report.json is output for one
+// commit and must not be committed, or an old report rides along with new code.
+export function prismCheck(ctx) {
+  let folders = [];
+  try { folders = readdirSync(ctx.project, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules').slice(0, 40).map((d) => join(ctx.project, d.name)); } catch { /* unreadable: the root only */ }
+  const found = [ctx.project, ...folders].map((dir) => join(dir, '.prism')).filter((p) => { try { return statSync(p).isDirectory(); } catch { return false; } });
+  if (!found.length) return out('prism', 'skip', 'no .prism/ here (optional: a visual contract for screens, game scenes and images; references/prism.md)');
+  const where = (p) => rel(ctx.project, p);
+  const unreadable = found.filter((p) => { try { JSON.parse(readFileSync(join(p, 'tokens.json'), 'utf8')); return false; } catch { return true; } });
+  if (unreadable.length) return out('prism', 'warn', `${unreadable.map(where).join(', ')} has no readable tokens.json, so the visual gate has nothing to check against`, 'lock the look first (a look-dev unit; references/prism.md), or remove the empty .prism/ folder');
+  const tracked = found.map((p) => rel(ctx.project, join(p, 'gate-report.json'))).filter((f) => ctx.exec('git', ['ls-files', '--error-unmatch', '--', f], { cwd: ctx.project })?.status === 0);
+  if (tracked.length) return out('prism', 'warn', `${tracked.join(', ')} is committed; a gate report is for one commit and an old one would ride along with new code`, `stop tracking it: git rm --cached ${tracked.join(' ')}, and add .prism/gate-report.json to .gitignore`);
+  return out('prism', 'ok', `${found.map(where).join(', ')}: tokens.json reads; attach gate reports with evidence --kind prism`);
+}
+
 // Every copy of the coordinator skill this machine and project hold, by the tool that reads it
 // (references/harnesses.md). A copy is a folder with coordinator/SKILL.md; its version is in
 // scripts/lib/version.mjs, and a copy without scripts/run.mjs cannot keep a run.
@@ -336,7 +352,7 @@ export function registryCheck(ctx) {
 
 export function diagnose(ctx) {
   const c = { exec: realExec, online: true, ...ctx };
-  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), reinsCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
+  return [nodeCheck(c), versionCheck(c), ghCheck(c), gitCheck(c), contextCheck(c), stateDirCheck(c), ...settingsCheck(c), locksCheck(c), ...dashboardsCheck(c), ...artifactsCheck(c), worktreesCheck(c), lessonsCheck(c), codexCheck(c), reinsCheck(c), prismCheck(c), copiesCheck(c), ...harnessesCheck(c), registryCheck(c)];
 }
 
 const MARK = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', skip: 'skip' };

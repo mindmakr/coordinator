@@ -6,6 +6,10 @@ const SNAPSHOT = /(__snapshots__\/|\.snap$)/;
 // Test-runner configs: an added ignore/exclude entry hides tests from the run.
 const RUNNER_CONFIG = /(^|\/)((jest|vitest|playwright|cypress|karma|mocha|ava)\.config\.[cm]?[jt]s|\.mocharc\.\w+|pytest\.ini|setup\.cfg|tox\.ini|pyproject\.toml|phpunit\.xml(\.dist)?|package\.json)$/;
 const RUNNER_IGNORE = /testPathIgnorePatterns|modulePathIgnorePatterns|testIgnore|exclude|excludeSpecPattern|--ignore|--deselect|norecursedirs|addopts\s*=.*(-k\s|--ignore|--deselect)|<exclude>|"skip"/;
+// The visual contract (references/prism.md): Prism's brief, dials, tokens and anchors, in any folder's .prism/.
+// A build treats it as read-only, so a build cannot loosen the look to pass the gate. Only the look-dev
+// unit the person approved changes it, and the lead allows that with --allow visual-contract.
+const VISUAL_CONTRACT = /(^|\/)\.prism\/(brief\.json|dials\.json|tokens\.json|anchors\/.+)$/;
 
 const ADDED = [
   { rule: 'focused-test', re: /\b(it|test|describe)(\.\w+)*\.only\b|\bf(it|describe)\s*\(/ },
@@ -62,6 +66,8 @@ export function detect(diff, { fence = [] } = {}) {
     if (f.renamedFrom && TEST_FILE.test(f.renamedFrom) && (!isTest || dropsSuffix)) hit('test-deleted', f.renamedFrom, `renamed to ${f.path}`);
     if (SNAPSHOT.test(f.path) && f.removed.length) hit('snapshot-rewritten', f.path, `${f.removed.length} lines replaced`);
     if (!inFence(f.path, fence)) hit('outside-fence', f.path);
+    if (f.renamedFrom && VISUAL_CONTRACT.test(f.renamedFrom)) hit('visual-contract', f.renamedFrom, `renamed to ${f.path}`);
+    else if (VISUAL_CONTRACT.test(f.path)) hit('visual-contract', f.path, f.deleted ? 'deleted' : 'changed');
     if (RUNNER_CONFIG.test(f.path)) for (const t of f.added) if (RUNNER_IGNORE.test(t)) hit('tests-excluded', f.path, t.trim().slice(0, 160));
     for (const t of f.added) for (const { rule, re } of ADDED) if (re.test(t)) hit(rule, f.path, t.trim().slice(0, 160));
     if (!isTest || f.deleted) continue;
