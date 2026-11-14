@@ -24,7 +24,7 @@ Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (skill). Read
 
 ## The core
 
-- **Ask once, through the question tool.** One batch before the run, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Then decide within the answers, log each decision, stop only for an unapproved gated action (`references/guardrails.md`).
+- **Ask once, through the question tool.** One batch before the run, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Decide within the answers, log each decision, ask only for gated actions, design changes, stuck loops (`references/guardrails.md`).
 - **The dashboard takes answers.** Mirror questions with `run.mjs ask` (`references/hud.md`).
 - **The bar decides.** Behaviours make up the bar, written first. A fresh critic, never the builder, marks each against the real artifact (`references/bar.md`).
 - **Short, no slop.** Outcome first; everything people read meets the craft bar (`references/craft.md`).

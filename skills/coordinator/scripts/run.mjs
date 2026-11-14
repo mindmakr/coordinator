@@ -85,7 +85,7 @@
 //   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready question next names, the finish line
 //                  (ship with follow-ups, one more round, stop) or, with reason "same-files: <file>", same files
 //                  (change the bar, simplify the design, accept as is, one more round); next acts on the person's pick
-//                  The time budget pauses while a question to the person is open (ask to its answer).
+//                  The time budget pauses while a question to the person is open (ask to its answer) and no unit is building or judging.
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
 //                  [--confirm "their words"] with --by person only: the person said this; never without their words
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change

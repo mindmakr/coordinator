@@ -19,7 +19,7 @@ The person may be juggling several pieces of work, and reads replies between oth
 - Lead with the outcome in one sentence.
 - As short as the content allows. No recap of earlier messages, no closing summary.
 - When more than one piece of work is active, open with a context line naming the run or issue and the unit, such as `cw-efficiency · reviews unit`. Leave it out otherwise.
-- Questions go through the question tool, never as prose (`commands/run.md` step 1.7).
+- Questions go through the question tool, never as prose, and each stands on its own in plain English: the situation, why it matters, each option as a consequence, no run jargon (`commands/run.md` step 1.7).
 
 ## UI and UX start from references, never from a blank page
 
