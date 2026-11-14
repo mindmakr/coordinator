@@ -363,7 +363,8 @@ function listAll(flag) {
 }
 
 // The machine-wide register (lib/registry.mjs): every write keeps this run listed for list --all and
-// the global dashboard. It never fails the write; COORDINATOR_REGISTRY=off leaves it alone.
+// the global dashboard. It never fails the write; COORDINATOR_REGISTRY=off leaves it alone, and a run
+// whose state folder is in the system temporary folder is left out unless COORDINATOR_REGISTRY=on.
 function registerRun(s) {
   if (process.env.COORDINATOR_REGISTRY === 'off') return;
   try { register(entryFor(s, { project: projectDir(), stateDir: baseDir('project') })); } catch (e) { console.error(`warning: the run register (${registryFile()}) was not updated: ${e.message}`); }
