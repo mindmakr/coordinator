@@ -1359,6 +1359,7 @@ const commands = {
     if (d.action === 'lead') {
       // Its own lead (the step /coordinator:status runs): records this window's process again, so a resumed
       // window that has only run this step does not look ended.
+      // Decided outside the lock; `refresh` re-checks the lead id under the lock.
       const machine = machineFor(s.id, me);
       if (stale(s.lead, me, machine)) updateRun(runDir(run), { kind: 'lead.claim', by: BY }, (st) => refresh(st, me, { at: now(), machine }), derived);
       return report(load(run), { id: me.id });

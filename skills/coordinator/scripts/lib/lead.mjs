@@ -75,7 +75,7 @@ export const runMachine = (machine, project, run) => createHash('sha256').update
 // Whether the lead's window process still runs: true or false where its tool gave one and it was recorded on
 // this PC, else null (unknown). pidAlive: (pid) => boolean; machine: (run) => this PC's value for that run, or null.
 export const windowAlive = (pidAlive, machine) => (lead, run) => {
-  if (!Number.isInteger(lead?.pid) || !lead.machine) return null;
+  if (!Number.isInteger(lead?.pid) || lead.pid <= 0 || !lead.machine) return null;
   const here = machine(run);
   return here && lead.machine === here ? pidAlive(lead.pid) : null;
 };

@@ -19,7 +19,7 @@ The coordinator is plain `SKILL.md` folders and Node scripts, so any tool that r
 
 A tool's own marker wins over the editor it runs in: Gemini CLI in Antigravity's terminal is `gemini`. The guess is best effort; the flag and the variable always win. Any other short lowercase name is kept as given.
 
-**Say which window leads.** The lead id comes from the tool's own window id where one is verified (Claude Code only, so far); Codex, Gemini CLI, Antigravity, Cursor and any other tool pass `--lead <id>` on each lead step, or set `COORDINATOR_LEAD` in that window's shell only: never in a shell profile or any file every window reads, or all windows share one lead id. `init` (or `run.mjs lead <run>`) prints the id to pass. Such a tool's lead counts as gone only by the quiet rule (no lead step and no unit beat for the run's stale minutes); a Claude Code lead whose window has closed is gone after 10 quiet minutes (`durability.md`, One lead, Gone).
+**Say which window leads.** The lead id comes from the tool's own window id where one is verified (Claude Code only, so far); Codex, Gemini CLI, Antigravity, Cursor and any other tool pass `--lead <id>` on each lead step, or set `COORDINATOR_LEAD` in that window's shell only: never in a shell profile or any file every window reads, or all windows share one lead id. `init` (or `run.mjs lead <run>`) prints the id to pass. How a lead counts as gone is in `durability.md`, One lead, Gone.
 
 **Give the run the name you use.** `run.mjs init <run> --alias "payday-onboarding-filter" …` records what you call it, and the pages show it beside the id, so a run stored as `payday-1275-onboarding` is still found by that name.
 

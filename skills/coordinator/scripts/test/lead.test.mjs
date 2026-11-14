@@ -125,6 +125,7 @@ test('B2, B3: the lead decides; others are refused while it is active, and take 
   refresh(resumed, { id: 'old', pid: 99 }, { at: iso(0), machine: 'm1' });
   assert.equal(goneWhy(resumed, NOW + 11 * 60_000, windowAlive((p) => p === 99, () => 'm1')), null, 'its new window runs');
   assert.equal(windowAlive(() => false, () => null)(pid, 'r'), null, 'no id for this PC: nothing recorded here');
+  for (const bad of [0, -1]) assert.equal(windowAlive(() => true, () => 'm1')({ ...pid, pid: bad, machine: 'm1' }, 'r'), null, 'a pid of ' + bad + ' is unknown: not alive, not ended');
   // A takeover is logged.
   const s = run(other);
   claim(s, me, { harness: 'codex', at: iso(0), from: 'old', why: 'quiet since 10:15' });
