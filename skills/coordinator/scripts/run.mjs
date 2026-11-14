@@ -18,7 +18,8 @@
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
 //   run.mjs add-specialist <run> <unit> <name> --reason R   a critic that must also pass, added after add: required from the
 //                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
-//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
+//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove;
+//                  behaviour text (here and in add --behaviour) is 500 characters at most, refused over it, never cut
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link|reins|prism [--label L]
 //                  prism: --file <worktree>/.prism/gate-report.json, beside the tokens.json it was checked against; while the
