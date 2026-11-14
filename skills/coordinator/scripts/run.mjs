@@ -159,13 +159,15 @@
 //                  copy's newer events; never overwrites local events the copy lacks. After the lead's own
 //                  later events, it replays the copy's extra answers and person notes (nothing else) on top
 //   run.mjs list --all     every run on this PC from the register (~/.coordinator/registry.json), by project
-//   run.mjs dashboard [--port P] [--open] | dashboard stop   the live page of every run on this PC (default port 7480);
-//                  a running one prints its link instead of starting another (references/hud.md)
+//   run.mjs dashboard [--port P] [--open] [--foreground] | dashboard stop   the live page of every run on this PC
+//                  (default port 7480), detached so it outlives this window (--foreground: in this process), output
+//                  in ~/.coordinator/dashboard.log; a running one prints its link instead of starting another; its
+//                  Needs you answers any registered run's open questions (references/hud.md)
 //   --harness NAME (any command): the tool running it (claude-code, codex, antigravity, gemini …); else
 //                  COORDINATOR_HARNESS, else detected. Every write stamps the run with it and the skill version
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { spawn as spawnProcess } from 'node:child_process';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { execFileSync, spawn as spawnProcess } from 'node:child_process';
 import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
@@ -191,7 +193,8 @@ import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
 import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
 import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dashboardCaller, pcAnswer, VIA_ENV } from './lib/pcanswer.mjs';
 import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push, VISIBILITY_HINT } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
@@ -230,7 +233,7 @@ const FLAGS = {
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
-  brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
+  brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open', 'foreground'], list: ['all'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'],
 };
 // Notes about one unit (#45): scoped with --unit, shown on its page.
@@ -1095,7 +1098,11 @@ const commands = {
   },
   answer([run, id], o) {
     if (o.confirm !== undefined && o.by !== 'person') throw new Error('--confirm needs an explicit --by person');
-    return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person', via: 'cli', confirm: o.confirm === true ? '' : o.confirm }));
+    // Started by the PC dashboard for an answer the person gave on its page (lib/pcanswer.mjs): recorded via the dashboard.
+    const dash = process.env[VIA_ENV] !== undefined;
+    if (dash && !dashboardCaller(process.env[VIA_ENV], readDashboardRecord(), process.ppid)) throw new Error(`${VIA_ENV} is set, but this process was not started by the running PC dashboard`);
+    if (dash && (o.by !== 'person' || o.confirm !== undefined)) throw new Error('an answer from the PC dashboard is --by person, with no --confirm');
+    return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person', via: dash ? 'dashboard' : 'cli', confirm: o.confirm === true ? '' : o.confirm }));
   },
   'use-answer'([run, id]) { return change(run, 'answer.used', (s) => useAnswer(s, id)); },
   questions([run]) { return questions(load(run), { project: project() }).map(({ open, ...q }) => q); },
@@ -1156,9 +1163,10 @@ const commands = {
     return null;
   },
   // The global dashboard: every run on this PC (lib/dashboard.mjs), no run argument, on a stable port.
+  // It runs detached, so it outlives the session and shell that started it (--foreground: in this process).
   dashboard([verb], o) {
-    const rec = join(registryHome(), 'dashboard.json');
-    const old = (() => { try { return JSON.parse(readFileSync(rec, 'utf8')); } catch { return null; } })();
+    const rec = dashboardFile();
+    const old = readDashboardRecord();
     const running = old && Number.isInteger(old.pid) && pidAlive(old.pid);
     if (verb === 'stop') {
       if (!running) { rmSync(rec, { force: true }); console.log(JSON.stringify({ stopped: false, note: 'no dashboard was running' }, null, 2)); return null; }
@@ -1171,36 +1179,12 @@ const commands = {
       });
       return null;
     }
-    if (verb !== undefined) throw new Error('usage: run.mjs dashboard [--port P] [--open] | dashboard stop');
+    if (verb !== undefined) throw new Error('usage: run.mjs dashboard [--port P] [--open] [--foreground] | dashboard stop');
     registerFolder();
     if (o.open !== undefined && o.open !== true) throw new Error('--open takes no value');
+    if (o.foreground !== undefined && o.foreground !== true) throw new Error('--foreground takes no value');
     const port = num(o.port, DASHBOARD_PORT, 1, 65_535);
-    const start = (p) => serve({
-      port: p, post: {}, extra: PROJECT_PAGE, version: () => pcVersion(readRegistry()),
-      page: (path, live) => {
-        const t = `t=${encodeURIComponent(live.token)}`;
-        const home = { path: '/', label: 'This PC', href: `/?${t}` };
-        if (path === '/') {
-          const ctx = { live, theme: null, run: null, store: null, base: '', home: `/?${t}`, embed: null, readOnly: true, pages: [home], runHref: () => null, pcHref: (key, id) => `/p/${key}/run/${encodeURIComponent(id)}?${t}` };
-          return pcPage(pcModel(readRegistry(), { here: null }), Date.now(), ctx);
-        }
-        return projectPage(path, live, readRegistry(), home);
-      },
-    });
-    const ready = ({ server, url }) => {
-      writeAtomic(rec, `${JSON.stringify({ pid: process.pid, port: server.address().port, url, at: now() })}
-`);
-      try { chmodSync(rec, 0o600); } catch { /* not on this file system */ }
-      const drop = () => { try { if (JSON.parse(readFileSync(rec, 'utf8')).pid === process.pid) rmSync(rec); } catch { /* gone */ } };
-      process.on('exit', drop);
-      for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
-      if (o.open) openBrowser(url);
-      console.log(JSON.stringify({ url, note: 'every run on this PC; local only; stop with run.mjs dashboard stop' }));
-    };
-    const fresh = () => start(port).catch((e) => {
-      if (e.code === 'EADDRINUSE' && o.port === undefined) { console.error(`port ${port} is taken; using a free one`); return start(0); }
-      throw e;
-    }).then(ready, (e) => { console.error(`error: ${e.message}`); process.exit(1); });
+    const fresh = () => (o.foreground ? serveDashboard(port, o) : startDashboard(port, o));
     // A dashboard already running answers its own link: print it instead of starting another.
     if (running && old.url) {
       answers(old.url).then((ok) => {
@@ -1471,6 +1455,101 @@ function answers(url) {
 function openBrowser(url) {
   const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
   try { spawnProcess(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch (e) { console.error(`could not open a browser: ${e.message}`); }
+}
+
+// The PC dashboard (run.mjs dashboard): its record, its log, the server itself and the detached start.
+const RUN_MJS = fileURLToPath(import.meta.url);
+const DETACHED_ENV = 'COORDINATOR_DASHBOARD_DETACHED'; // set by startDashboard for its child: no token in the log
+const LOG_MAX = 1024 * 1024; // a longer dashboard.log starts again at the next start
+const dashboardFile = () => join(registryHome(), 'dashboard.json');
+function readDashboardRecord() { try { return JSON.parse(readFileSync(dashboardFile(), 'utf8')); } catch { return null; } }
+
+// An answer from the front page's Needs you: checked first (lib/pcanswer.mjs), then recorded by
+// `run.mjs answer` in that project's state folder, the same locked code as on the CLI, as given via the dashboard.
+function answerFromPc(form, token) {
+  const t = pcAnswer(readRegistry(), form);
+  try {
+    execFileSync(process.execPath, [RUN_MJS, ...t.args], {
+      cwd: existsSync(t.entry.project) ? t.entry.project : t.entry.stateDir,
+      env: { ...process.env, COORDINATOR_DIR: t.entry.stateDir, [VIA_ENV]: token },
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 60_000,
+    });
+  } catch (e) {
+    const why = String(e.stderr ?? '').split(/\r?\n/).reverse().find((l) => l.startsWith('error: '));
+    throw new Error(why ? why.slice('error: '.length) : 'the answer was not recorded');
+  }
+  return t.anchor;
+}
+
+// Serves the PC dashboard in this process and records { pid, port, url } in dashboard.json (0600).
+function serveDashboard(port, o) {
+  const rec = dashboardFile();
+  let token = null;
+  const start = (p) => serve({
+    port: p, extra: PROJECT_PAGE, version: () => pcVersion(readRegistry()),
+    post: { '/answer': (form) => answerFromPc(form, token) },
+    page: (path, live) => {
+      const t = `t=${encodeURIComponent(live.token)}`;
+      const home = { path: '/', label: 'This PC', href: `/?${t}` };
+      if (path === '/') {
+        const ctx = { live, theme: null, run: null, store: null, base: '', home: `/?${t}`, embed: null, readOnly: true, pages: [home], runHref: () => null, pcHref: (key, id) => `/p/${key}/run/${encodeURIComponent(id)}?${t}`, answerForm: { token: live.token } };
+        return pcPage(pcModel(readRegistry(), { here: null }), Date.now(), ctx);
+      }
+      return projectPage(path, live, readRegistry(), home);
+    },
+  });
+  const ready = ({ server, url, token: made }) => {
+    token = made;
+    writeAtomic(rec, `${JSON.stringify({ pid: process.pid, port: server.address().port, url, at: now() })}\n`);
+    try { chmodSync(rec, 0o600); } catch { /* not on this file system */ }
+    const drop = () => { try { if (JSON.parse(readFileSync(rec, 'utf8')).pid === process.pid) rmSync(rec); } catch { /* gone */ } };
+    process.on('exit', drop);
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
+    if (process.env[DETACHED_ENV]) { console.log(JSON.stringify({ started: true, pid: process.pid, port: server.address().port, at: now() })); return; }
+    if (o.open) openBrowser(url);
+    console.log(JSON.stringify({ url, note: 'every run on this PC; local only; stop with run.mjs dashboard stop' }));
+  };
+  start(port).catch((e) => {
+    if (e.code === 'EADDRINUSE' && o.port === undefined) { console.error(`port ${port} is taken; using a free one`); return start(0); }
+    throw e;
+  }).then(ready, (e) => { console.error(`error: ${e.message}`); process.exit(1); });
+}
+
+// Starts the PC dashboard as a detached process (no console window on Windows), its output in
+// dashboard.log, and prints its link once the link answers. The child records itself in dashboard.json.
+function startDashboard(port, o) {
+  const log = join(registryHome(), 'dashboard.log');
+  mkdirSync(registryHome(), { recursive: true });
+  let size = 0; try { size = statSync(log).size; } catch { /* none yet */ }
+  const fd = openSync(log, size > LOG_MAX ? 'w' : 'a', 0o600);
+  try { chmodSync(log, 0o600); } catch { /* not on this file system */ }
+  let child;
+  try {
+    child = spawnProcess(process.execPath, [RUN_MJS, 'dashboard', '--foreground', ...(o.port !== undefined ? ['--port', String(port)] : [])], {
+      detached: true, windowsHide: true, stdio: ['ignore', fd, fd], cwd: process.cwd(), env: { ...process.env, [DETACHED_ENV]: '1' },
+    });
+  } finally { closeSync(fd); }
+  let exited = false;
+  child.on('exit', () => { exited = true; });
+  child.on('error', () => { exited = true; });
+  const until = Date.now() + 20_000;
+  const tick = async () => {
+    const r = readDashboardRecord();
+    if (r && r.pid === child.pid && typeof r.url === 'string' && await answers(r.url)) {
+      child.unref();
+      if (o.open) openBrowser(r.url);
+      console.log(JSON.stringify({ url: r.url, pid: child.pid, log, note: 'every run on this PC; it runs on after this window closes; local only; stop with run.mjs dashboard stop' }));
+      return;
+    }
+    if (exited || Date.now() > until) {
+      if (!exited) { try { child.kill(); } catch { /* gone */ } }
+      let tail = ''; try { tail = readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean).slice(-3).join(' | '); } catch { /* none */ }
+      console.error(`error: the dashboard did not start${tail ? `: ${tail}` : ''} (log: ${log})`);
+      process.exit(1);
+    }
+    setTimeout(tick, 150);
+  };
+  tick();
 }
 
 // --harness works on every command: it names the tool that runs this one (lib/harness.mjs).
