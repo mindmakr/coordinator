@@ -13,7 +13,7 @@
     "demo": "node src/demo.mjs",
     "sync": "node src/cli.mjs sync",
     "migrate": "node src/cli.mjs migrate",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --import ../skills/coordinator/scripts/test/home.setup.mjs --test test/*.test.mjs"
   },
   "dependencies": {
     "nodemailer": "10.1.7",
