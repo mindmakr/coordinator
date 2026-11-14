@@ -202,3 +202,8 @@ test('a try a specialist failed names the specialist in its dot label', () => {
   assert.match(html, /<title>Try 1: failed, 6\/10 — g<\/title>/);
   assert.match(html, /<title>Try 2: failed by specialist money, security, 9\/10 — rounds half up<\/title>/);
 });
+
+test('a lone try a specialist failed names the specialist too', () => {
+  assert.match(scoreChart([{ n: 1, verdict: 'fail', score: 9, failedBy: ['security'], cause: 'leak', general: 'pass' }]), /Failed try 1 by specialist security \(9\/10\) — leak/);
+  assert.match(scoreChart([{ n: 1, verdict: 'fail', score: 6, gap: 'g' }]), /Failed try 1 \(6\/10\) — g/);
+});
