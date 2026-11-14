@@ -6,6 +6,7 @@ import { questions } from './questions.mjs';
 import { gapsModel } from './gaps.mjs';
 import { clip, duration, estimate } from './plain.mjs';
 import { openPause, resumeStep } from './pause.mjs';
+import { ageText } from './age.mjs';
 
 const MINUTE = 60_000;
 const FINISHING = ['integrate', 'done', 'done-with-gaps', 'stopped'];
@@ -20,6 +21,22 @@ export function clock(ms, nowMs, timeZone) {
   const day = (x) => new Date(x).toLocaleDateString('en-GB', timeZone ? { timeZone } : {});
   const t = new Date(ms).toLocaleTimeString('en-GB', opt);
   return day(ms) === day(nowMs) ? t : `${new Date(ms).toLocaleDateString('en-GB', { weekday: 'short', ...(timeZone ? { timeZone } : {}) })} ${t}`;
+}
+
+// The zone's offset at that moment: "UTC+3", "UTC-5:30", or "UTC".
+export function zone(ms, timeZone) {
+  const part = new Intl.DateTimeFormat('en-US', { timeZoneName: 'shortOffset', ...(timeZone ? { timeZone } : {}) })
+    .formatToParts(new Date(ms)).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
+  return part.replace(/^GMT/, 'UTC');
+}
+
+// How long ago, then the clock time on this machine and its zone: "52 min ago (14:05 local, UTC+3)".
+// Every age a lead acts on (last beat, last lead step) is printed this way, worked out here: never a
+// bare UTC timestamp for someone to convert (docs/design/one-boss.md 5.2). null for a missing time.
+export function agoText(at, nowMs, timeZone) {
+  const ms = typeof at === 'number' ? at : Date.parse(at ?? '');
+  if (!Number.isFinite(ms)) return null;
+  return `${ageText(nowMs - ms)} ago (${clock(ms, nowMs, timeZone)} local, ${zone(ms, timeZone)})`;
 }
 
 // The estimate in plain words: "about 1 h 10 min left; ready around 21:40 local time", or "no estimate yet".
@@ -72,7 +89,7 @@ export function runStatus(run, plan = null, { nowMs = Date.now(), runs = null, t
   const done = passed + stopped;
   const pct = total ? Math.round((done / total) * 100) : 0;
   const current = run.units.filter((u) => ['building', 'judging'].includes(u.status))
-    .map((u) => ({ id: u.id, phase: u.status === 'building' ? 'building' : 'checking', round: u.rounds.length + 1 }));
+    .map((u) => ({ id: u.id, phase: u.status === 'building' ? 'building' : 'checking', round: u.rounds.length + 1, lastBeat: agoText(u.heartbeatAt ?? run.createdAt, nowMs, timeZone) }));
   const open = run.closed ? [] : questions(run).filter((q) => q.open);
   const asked = new Set(open.map((q) => q.unit).filter(Boolean));
   const finish = run.closed ? [] : plan.units.filter((d) => d.action === 'ask-person' && !asked.has(d.id))
@@ -84,7 +101,7 @@ export function runStatus(run, plan = null, { nowMs = Date.now(), runs = null, t
   const word = outcome ? `Concluded: ${outcome}` : KINDS[kind];
   const t = eta(run, plan, nowMs, timeZone);
   const doing = pause ? `paused since ${clock(Date.parse(pause.from), nowMs, timeZone)}${pause.reason ? `: ${clip(pause.reason, 120)}` : ''} (${resumeStep(run)} to go on)`
-    : current.length ? current.map((c) => `${c.phase} ${c.id} round ${c.round}`).join(', ')
+    : current.length ? current.map((c) => `${c.phase} ${c.id} round ${c.round}${c.lastBeat ? `, last beat ${c.lastBeat}` : ''}`).join(', ')
     : kind === 'waiting' ? 'waiting on you'
       : kind === 'finishing' ? (plan.decision === 'integrate' ? 'integration check next' : 'closing next')
         : plan.decision === 'split' ? 'planning units' : 'nothing in progress';

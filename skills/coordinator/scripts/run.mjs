@@ -42,7 +42,18 @@
 //   Cost (start, built, verdict, foldin): [--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"], what the harness
 //                  reported for that launch; stats, show and the HUD sum them per unit, model and run ("not recorded" when missing)
 //   --accept-open (init, add, behave): keep a goal, bar or behaviour line that reads open-ended (lib/openbar.mjs), recorded as a bar note
+//   One lead per run (lib/lead.mjs, references/durability.md "One lead"): the lead steps (init, add, add-specialist,
+//                  start, reset, verdict, strategy, extend, freeze, foldin, ship, integrate, close, ask, use-answer, pause,
+//                  resume, push, pull, and next when it records a stop; there is no stop command) are refused from any
+//                  window but the run's lead. The first lead step claims a run that has none (event lead.claim, written
+//                  with the step or not at all). Every lead step takes [--lead ID] (or COORDINATOR_LEAD) where the tool
+//                  gives no window id of its own, and [--takeover]: claims the run of a lead that is gone; never one still active
+//   run.mjs lead <run> [--takeover --reason R] [--lead ID]   who leads the run, since when, last active (minutes ago and
+//                  local time); claims the run when it has no lead or its lead is gone (logged "took over from <id>: <why>");
+//                  --takeover --reason R takes it from a lead still active, only with the person's yes (the one way to)
 //   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
+//                  a unit being built or judged whose last beat is younger than the stale minutes keeps its agent:
+//                  start refuses unless [--takeover --reason R] from the window that already leads the run, logged on the unit
 //                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
 //                  after a try failed on a model below strong, a model below strong needs [--force-model "reason"]
 //   run.mjs beat <run> <unit> [--text T]     builder or critic still working (T: the milestone, e.g. "pushed"); on an open unit
@@ -194,6 +205,8 @@ import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
 import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
+import { claim, claimText, decideLead, identity, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, secondBuilder, stale, windowAlive } from './lib/lead.mjs';
+import { agoText } from './lib/progress.mjs';
 import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
 import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
 import { waitingList, waitingText } from './lib/waiting.mjs';
@@ -239,8 +252,11 @@ const FLAGS = {
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open', 'foreground'], list: ['all'], waiting: ['json'], 'status-line': ['json'],
-  push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'],
+  push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'], lead: ['lead', 'takeover', 'reason'],
 };
+// Lead steps (lib/lead.mjs) all take --lead and --takeover (claims a gone lead's run). A step's own --reason is never a
+// takeover's reason: only run.mjs lead <run> --takeover --reason R takes over a lead that is still active.
+for (const c of LEAD_STEPS) FLAGS[c] = [...new Set([...(FLAGS[c] ?? []), 'lead', 'takeover'])];
 // Notes about one unit (#45): scoped with --unit, shown on its page.
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
@@ -441,9 +457,76 @@ function load(run) {
 
 // Every change: one event of `kind` in the run's log, locked and atomic, refused
 // on a closed run, with the snapshot and workbench refreshed in the same lock.
-function change(run, kind, mutate, { closedOk = false, unit = null } = {}) {
+// During a lead step on this run (LEAD), refused unless this window leads it; a claim the step needs is written
+// with it, as its own lead.claim event, in the same lock: both or neither. A change it makes marks the lead
+// active and records this window's process again (a resumed window has a new one).
+// leadWhen: { o, when(s) }: this change is a lead step only when when(s) holds on the locked state (next, when it
+// records a stop); the check is made there, in the same locked write as the change.
+function change(run, kind, mutate, { closedOk = false, unit = null, leadWhen = null } = {}) {
   if (!exists(run)) throw new Error(`no run: ${run}`);
-  return updateRun(runDir(run), { kind, unit, by: BY }, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); }, derived);
+  let claimed = null;
+  const out = updateRun(runDir(run), { kind, unit, by: BY }, (s, mark) => {
+    if (s.closed && !closedOk) throw new Error(`run ${run} is closed`);
+    if (leadWhen && !LEAD && !s.closed && leadWhen.when(s)) leadCheck(run, leadWhen.o, s);
+    const mine = LEAD && LEAD.run === s.id && !s.closed;
+    if (mine) claimed = leadOf(s, mark);
+    const before = mine ? JSON.stringify(s) : null;
+    mutate(s);
+    if (mine) {
+      const machine = machineFor(s.id, LEAD.me);
+      if (JSON.stringify(s) !== before || stale(s.lead, LEAD.me, machine)) refresh(s, LEAD.me, { at: now(), machine });
+    }
+  }, derived);
+  if (claimed) CLAIMED = claimed;
+  return out;
+}
+
+// One lead per run (lib/lead.mjs). LEAD: this window while one of its lead steps runs (led: it led the run
+// before this step); CLAIMED: what a claim prints.
+let LEAD = null; let CLAIMED = null;
+// This PC's value for a run (lib/lead.mjs runMachine): read only when checking, made when a lead is recorded.
+const hereFor = (run, create) => { const m = machineId(registryHome(), { create }); return m ? runMachine(m, projectKey(baseDir('project')), run) : null; };
+const machineFor = (run, me) => (me.pid ? hereFor(run, true) : null);
+const leadAlive = (lead, run) => windowAlive(pidAlive, (r) => hereFor(r, false))(lead, run);
+const takeoverOf = (o) => {
+  if (o.takeover !== undefined && o.takeover !== true) throw new Error('--takeover takes no value');
+  return o.takeover === true;
+};
+// Before a lead step changes anything: who this window is (a bad --lead stops it here), and whether it may lead
+// the run. Refuses at once when it may not; writes nothing (change() writes the claim with the step).
+// --takeover claims a gone lead's run, never an active one (run.mjs lead --takeover --reason R does that).
+// s: the run's state when the caller already holds it (under the lock).
+function leadCheck(run, o, s = null) {
+  const me = identity(BY.harness, { flag: o.lead });
+  const opts = () => ({ nowMs: Date.now(), alive: leadAlive, claimGone: takeoverOf(o) });
+  const first = decideLead(s ?? load(run), me, opts());
+  if (first.action === 'refuse') throw new Error(first.message);
+  LEAD = { run: safeId(run, 'run'), me, opts, led: first.action === 'lead' };
+  return LEAD;
+}
+// Under the run's lock: decides again (another window may have claimed it since) and records a claim.
+// mark (lib/events.mjs updateRun): ends the claim's own lead.claim event before the step's.
+function leadOf(s, mark = null) {
+  const d = decideLead(s, LEAD.me, LEAD.opts());
+  if (d.action === 'refuse') throw new Error(d.message);
+  if (d.action !== 'claim') return null;
+  const lead = claim(s, LEAD.me, { harness: BY.harness, at: now(), from: d.from, why: d.why, machine: machineFor(s.id, LEAD.me) });
+  mark?.('lead.claim');
+  return claimText(LEAD.me, lead, BY.harness);
+}
+// A claim on its own (push, run.mjs lead): one lead.claim event.
+function claimNow(run) {
+  let claimed = null;
+  updateRun(runDir(run), { kind: 'lead.claim', by: BY }, (s) => { claimed = leadOf(s); }, derived);
+  if (claimed) CLAIMED = claimed;
+}
+// --continues also writes the parent run's side of the link: refused while another window actively leads the
+// parent (a gone lead, or none, is fine: that link is all this writes there).
+function parentLead(c, o) {
+  const p = load(c.run);
+  if (p.closed) return;
+  const d = decideLead(p, identity(BY.harness, { flag: o.lead }), { nowMs: Date.now(), alive: leadAlive, claimGone: true });
+  if (d.action === 'refuse') throw new Error(`--continues ${c.run}:${c.unit}: ${d.message}`);
 }
 
 function unitOf(s, id) {
@@ -571,7 +654,16 @@ const commands = {
       fresh.theme = f;
     }
     const warning = openCheck([{ what: 'the goal', text: fresh.goal }, { what: 'the bar', text: fresh.bar }], o['accept-open'], fresh.notes);
-    const made = updateRun(runDir(run), { kind: 'run.init', by: BY }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    // Who leads, checked before anything is written: a bad --lead leaves no run without a lead.
+    const me = identity(BY.harness, { flag: o.lead });
+    if (takeoverOf(o)) throw new Error('--takeover: a new run has no lead to take over');
+    for (const c of parents) parentLead(c, o);
+    // The window that starts the run leads it: run.init and its lead.claim are written together, or neither.
+    LEAD = { run, me, opts: () => ({ nowMs: Date.now(), alive: leadAlive }), led: false };
+    let claimed = null;
+    updateRun(runDir(run), { kind: 'run.init', by: BY, then: { kind: 'lead.claim', mutate: (s) => { claimed = leadOf(s); } } }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    if (claimed) CLAIMED = claimed;
+    const made = load(run);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
     for (const c of parents) markParent(c, run);
     // push needs to know whether the repo is public; say where to put it now, not at the first pit stop (#66).
@@ -581,6 +673,7 @@ const commands = {
   },
   add([run, unit], o) {
     const cont = o.continues === undefined ? null : parentOf(o.continues, run, safeId(unit, 'unit'));
+    if (cont) parentLead(cont, o);
     let warning = null;
     const out = change(run, 'unit.add', (s) => {
       safeId(unit, 'unit');
@@ -644,14 +737,26 @@ const commands = {
     if (force && !model) throw new Error('--force-model goes with --model');
     if (o['force-start'] !== undefined && o['force-start'] !== true) throw new Error('--force-start takes no value; give --reason R');
     const early = o['force-start'] === true ? text(o.reason, 'reason (starting before the specialists marked the round)', 300) : null;
-    if (!early && o.reason !== undefined) throw new Error('--reason goes with --force-start');
+    const takeover = takeoverOf(o);
+    if (!early && !takeover && o.reason !== undefined) throw new Error('--reason goes with --force-start or --takeover');
     const cfg = routing(baseDir('project'));
     return change(run, 'unit.start', (s) => {
       const paused = pausedRefusal(s, 'start'); // a paused run starts no unit (#132)
       if (paused) throw new Error(paused);
       const u = unitOf(s, unit);
-      // A new build ends the round: a specialist mark still to come could no longer be recorded.
-      if (early) {
+      // No second builder on a working unit (lib/lead.mjs): its agent keeps it while it beats.
+      const busy = secondBuilder(u, s, Date.now());
+      if (busy && !takeover) throw new Error(busy);
+      // Taking over the run and taking over a unit at work are separate acts: the second only by its lead.
+      if (busy && !LEAD?.led) throw new Error(`start --takeover refused: ${u.id} is ${u.status === 'building' ? 'being built' : 'being judged'}, and this window did not lead run ${s.id} before this step. Taking over the run comes first, as its own step: run.mjs lead ${s.id}; then start ${s.id} ${u.id} --takeover --reason R`);
+      if (takeover && ['building', 'judging'].includes(u.status)) {
+        const d = decideUnit(u, s, Date.now()); // a takeover skips only the wait for the working agent, never a stop
+        if (!s.frozen || !['wait', 'judge', 'check-stale'].includes(d.action)) throw new Error(`start --takeover refused: next says "${d.action}"${d.reason ? ` (${d.reason})` : ''} for ${u.id}`);
+        const why = text(o.reason, `reason (why ${u.id} gets a new builder while ${u.status === 'building' ? 'its builder' : 'its critic'} may still work)`, 300);
+        const last = agoText(u.heartbeatAt ?? s.createdAt, Date.now()) ?? 'not recorded';
+        s.notes.push({ kind: 'decision', text: `${u.id}: started try ${u.rounds.length + 1} while ${u.status} (last beat ${last}): ${why}`, at: now() });
+        log(u, 'start', `took over from the ${u.status === 'building' ? 'builder' : 'critic'} (last beat ${last}): ${why}`);
+      } else if (early) {
         const d = decideUnit(u, s, Date.now());
         if (!s.frozen || d.action !== 'wait' || !d.specialists) throw new Error(`--force-start refused: next says "${d.action}" for ${u.id}; it only skips a wait for specialist marks`);
         s.notes.push({ kind: 'decision', text: `${u.id}: started try ${u.rounds.length + 1} before ${d.specialists.join(', ')} marked round ${u.rounds.length}; their findings on it are lost: ${early}`, at: now() });
@@ -1240,12 +1345,44 @@ const commands = {
   // until nothing changes; each stop is reported once, here.
   // Past the time budget, looking changes nothing (#132): the stops are worked out in memory, reported
   // with recorded: false, and recorded by close.
-  next([run]) {
+  // Who leads the run; claims it when it has none or its lead is gone (the step /coordinator:status runs).
+  // A lead still active is only reported, unless --takeover --reason (after the person's yes).
+  lead([run], o) {
+    const s = load(run);
+    const me = identity(BY.harness, { flag: o.lead });
+    const takeover = takeoverOf(o);
+    if (o.reason !== undefined && !takeover) throw new Error('--reason goes with --takeover');
+    const force = takeover ? text(o.reason, 'reason (why this window takes the run over: the person said yes)', 300) : null;
+    const report = (st, extra = {}) => {
+      const i = leadInfo(st, Date.now(), { alive: leadAlive });
+      return { run: st.id, you: !!i && st.lead.id === me.id, ...(i ? { tool: i.tool, since: i.since, lastActive: i.lastActive, ...(i.gone ? { gone: i.goneText } : {}) } : { tool: null }), ...extra };
+    };
+    if (s.closed) return report(s, { closed: true });
+    const d = decideLead(s, me, { nowMs: Date.now(), alive: leadAlive, claimGone: true, force });
+    if (d.action === 'refuse') return report(s, { step: `this window does not lead ${s.id}: leave its lead steps to that window; with the person's yes, run.mjs lead ${s.id} --takeover --reason R takes it over now` });
+    if (d.action === 'lead') {
+      // Its own lead (the step /coordinator:status runs): records this window's process again, so a resumed
+      // window that has only run this step does not look ended.
+      // Decided outside the lock; `refresh` re-checks the lead id under the lock.
+      const machine = machineFor(s.id, me);
+      if (stale(s.lead, me, machine)) updateRun(runDir(run), { kind: 'lead.claim', by: BY }, (st) => refresh(st, me, { at: now(), machine }), derived);
+      return report(load(run), { id: me.id });
+    }
+    LEAD = { run: safeId(run, 'run'), me, opts: () => ({ nowMs: Date.now(), alive: leadAlive, claimGone: true, force }), led: false };
+    claimNow(run);
+    const claimed = CLAIMED; CLAIMED = null;
+    return report(load(run), { ...(claimed ?? {}), id: me.id });
+  },
+  next([run], o = {}) {
     let stopped; let s = load(run);
     const expired = !s.closed && spent(s, Date.now());
     // Expired: applyStops changes the loaded state in memory only; it is never saved.
     if (expired) stopped = applyStops(s);
-    else s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
+    else {
+      // Recording a stop is a lead step (lib/lead.mjs); reading what to do next is not. Whether it records
+      // one is decided on the locked state, with the lead check, in the same write as the stop.
+      s = change(run, 'run.stop', (st) => { stopped = applyStops(st); }, { leadWhen: { o, when: (st) => applyStops(structuredClone(st)).size > 0 } });
+    }
     const plan = decide(s);
     const cfg = routing(baseDir('project'));
     const suggest = (u) => { const e = u.action === 'build' ? escalation(cfg, unitOf(s, u.id)) : null; return e ? { ...u, model: e.model, modelWhy: e.why } : u; };
@@ -1263,11 +1400,15 @@ const commands = {
     // The per-launch caps the lead passes to the agent it launches for this step (guardrails.md).
     const caps = launchCaps(s);
     const launch = (u) => (caps && ['build', 'judge', 'fold-in'].includes(u.action) ? { ...u, launch: { ...(caps.minutes ? { minutes: caps.minutes } : {}), ...(caps.cost ? { cost: `${caps.cost.amount} ${caps.cost.currency}` } : {}) } } : u);
-    const units = plan.units.map((u) => (stopped.has(u.id) ? { ...stopped.get(u.id), ...(expired ? { recorded: false } : {}) } : launch(early(how(sync(suggest(u)))))));
+    // A unit at work: its last beat, worked out here in minutes and local time (never a bare UTC time to convert).
+    const beat = (u) => { const x = unitOf(s, u.id); return ['building', 'judging'].includes(x.status) ? { ...u, lastBeat: agoText(x.heartbeatAt ?? s.createdAt, Date.now()) } : u; };
+    const units = plan.units.map((u) => (stopped.has(u.id) ? { ...stopped.get(u.id), ...(expired ? { recorded: false } : {}) } : beat(launch(early(how(sync(suggest(u))))))));
     const paused = pauseNote(s); // a paused run starts nothing: its build and judge steps wait (lib/pause.mjs)
     const outcome = { stopped: 'stopped', 'done-with-gaps': 'partial', done: 'done' }[plan.decision];
+    const led = s.closed ? null : leadInfo(s, Date.now(), { alive: leadAlive });
     return {
       decision: paused ? 'paused' : plan.decision, ...(paused ? { paused } : {}), units,
+      ...(led ? { lead: { tool: led.tool, lastActive: led.lastActive, ...(led.gone ? { gone: led.goneText } : {}) } } : {}),
       ...(expired ? { spent: { text: 'the time budget is spent: next recorded nothing', step: outcome ? `run.mjs close ${s.id} --outcome ${outcome} records the stops above` : 'a critic started inside the time budget may still return its verdict; then close records the stops' } } : {}),
     };
   },
@@ -1310,7 +1451,7 @@ const commands = {
     for (const l of lines) console.log(l);
     return null;
   },
-  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s), project: project() }))); return null; },
+  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s), project: project(), alive: leadAlive }))); return null; },
   // Reads under the lock so it never renders a half-applied change; also refreshes the elapsed time.
   hud([run]) {
     if (!exists(run)) throw new Error(`no run: ${run}`);
@@ -1447,10 +1588,13 @@ const commands = {
   where() { const d = baseDir('project').replace(/\\/g, '/'); return { stateDir: d, env: `COORDINATOR_DIR='${d.replace(/'/g, "'\\''")}'` }; },
   push([run], o) {
     load(run);
+    if (LEAD?.run === run && !LEAD.led) claimNow(run); // the pushed copy holds the claim
     return push({ run, dir: runDir(run), base: baseDir('project'), project: projectDir(), to: o.to, message: optText(o.message, 200) ?? undefined, render: (s) => render(s, decide(s)), attach: [mapAttach(runDir(run))] });
   },
   pull([run], o) {
     safeId(run, 'run');
+    // Checked as a lead step (refused while another window actively leads the run), but never claims, even with
+    // --takeover against a gone lead: a claim here would fork the local log from the copy. The next lead step claims.
     return pull({ run, dir: runDir(run), base: baseDir('project'), project: projectDir(), from: o.from, after: derived, restore: { map: mapRestore(runDir(run)) } });
   },
   stats(_, o) {
@@ -1609,10 +1753,18 @@ for (let i = 0; i < argv.length; i++) {
 }
 let BY = null;
 try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|waiting|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|lead|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|waiting|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
 if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
+  // One lead per run (lib/lead.mjs): a lead step from another window is refused before it changes anything; a
+  // claim it needs is written with its change (change()). init checks and claims itself; next only when it would
+  // record a stop; pull checks and never writes a claim. Closed runs have no lead.
+  if (LEAD_STEPS.has(cmd) && !['init', 'next'].includes(cmd)) {
+    const run = pos[0];
+    if (typeof run === 'string' && isSafeId(run) && exists(run) && !load(run).closed) leadCheck(run, opt);
+  }
   const out = await commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }, null, 2));
+  const claimed = (o) => (CLAIMED && o && typeof o === 'object' && !Array.isArray(o) ? { ...o, claim: CLAIMED } : o);
+  if (out !== null) console.log(JSON.stringify(claimed(out.id === undefined || ['models', 'next', 'lead', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }), null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

@@ -14,3 +14,8 @@ if (!process.env.COORDINATOR_HOME) {
   process.env.COORDINATOR_REGISTRY ??= 'on';
   process.on('exit', () => { try { rmSync(home, { recursive: true, force: true }); } catch { /* in use */ } });
 }
+
+// One lead per run (lib/lead.mjs): tests never take this machine's window as the lead. Every
+// child process leads as the same fixed id unless a test names another (--lead or its own env).
+for (const k of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_PID']) delete process.env[k];
+process.env.COORDINATOR_LEAD = 'test-lead';

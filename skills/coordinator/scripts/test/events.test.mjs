@@ -30,10 +30,12 @@ test('every change appends one event with v, seq, at, kind and unit; no-op steps
   const ev = lines('e1');
   assert.equal(ev.length, before, 'reads and an unchanged next add nothing');
   assert.deepEqual(ev.map((e) => e.seq), ev.map((_, i) => i + 1));
-  assert.deepEqual(ev.map((e) => e.kind), ['run.init', 'unit.add', 'unit.add', 'unit.add', 'run.freeze', 'unit.start', 'unit.beat']);
-  assert.deepEqual(Object.keys(ev[6]), ['v', 'seq', 'at', 'kind', 'unit', 'payload']);
-  assert.equal(ev[6].unit, 'u1');
-  assert.equal(ev[4].unit, undefined);
+  // init claims the run for the window that starts it (lib/lead.mjs): lead.claim right after run.init.
+  assert.deepEqual(ev.map((e) => e.kind), ['run.init', 'lead.claim', 'unit.add', 'unit.add', 'unit.add', 'run.freeze', 'unit.start', 'unit.beat']);
+  assert.deepEqual(Object.keys(ev[7]), ['v', 'seq', 'at', 'kind', 'unit', 'payload']);
+  assert.equal(ev[7].unit, 'u1');
+  assert.equal(ev[5].unit, undefined);
+  assert.equal(ev[1].unit, undefined);
   for (const e of ev) { assert.equal(e.v, 1); assert.match(e.at, /^\d{4}-\d\d-\d\dT[\d:.]+Z$/); validateEvent(e); }
   assert.equal(readFileSync(join(runDir('e1'), 'events.jsonl'), 'utf8').includes('\n  '), false, 'one line per event, never pretty-printed');
 });
@@ -42,7 +44,7 @@ test('the snapshot is derived from the events: stable keys, planned order, last 
   setup('e2');
   const s = snap('e2');
   const raw = readFileSync(join(runDir('e2'), 'events.jsonl'));
-  assert.deepEqual(s.snapshot.seq, 4);
+  assert.deepEqual(s.snapshot.seq, 5);
   assert.equal(s.snapshot.sha256, sha256(raw));
   assert.deepEqual(body(s), replay(parseLog(raw).events));
   assert.deepEqual(s.units.map((u) => u.id), ['u2', 'u10', 'u1'], 'units stay in the order they were planned');
@@ -68,7 +70,7 @@ test('a gap (log ahead of the snapshot) or a bad hash rebuilds the state from th
   writeFileSync(file, '{ not json'); // an unreadable snapshot
   assert.equal(readRun(runDir('e3')).state.frozen, true);
   assert.equal(run('start', 'e3', 'u1').code, 0, 'a write repairs the snapshot');
-  assert.equal(snap('e3').snapshot.seq, 6);
+  assert.equal(snap('e3').snapshot.seq, 7);
   assert.equal(readRun(runDir('e3')).rebuilt, undefined);
 });
 
@@ -78,7 +80,7 @@ test('a broken log fails loudly: torn line, bad JSON, wrong schema, seq gap, los
   const good = readFileSync(log, 'utf8');
   const cases = [
     [good.slice(0, -5), /torn write/],
-    [`${good}{oops\n`, /line 5 is not JSON/],
+    [`${good}{oops\n`, /line 6 is not JSON/],
     [good.replace('"kind":"unit.add"', '"kind":"unit.explode"'), /unknown event kind/],
     [good.replace('"seq":3', '"seq":7'), /seq 7; the log has a gap/],
     [good.replace(/"unit":"u2",/, ''), /missing unit/],
@@ -104,7 +106,7 @@ test('every event kind has a JSON Schema; writes that break it are refused', () 
   setup('e5');
   assert.throws(() => updateRun(runDir('e5'), { kind: 'unit.start' }, (s) => { s.frozen = true; }), /missing unit/);
   assert.throws(() => updateRun(runDir('e5'), { kind: 'no.such' }, (s) => { s.frozen = true; }), /unknown event kind/);
-  assert.equal(lines('e5').length, 4, 'nothing was written');
+  assert.equal(lines('e5').length, 5, 'nothing was written');
   assert.equal(snap('e5').frozen, false);
 });
 
@@ -115,12 +117,13 @@ test('unit events read on their own: add carries the unit, later changes name it
   const ev = lines('e8');
   const add = ev.find((e) => e.kind === 'unit.add' && e.unit === 'alpha');
   // Every change ends with the writer stamp (lib/harness.mjs): the tool and skill version that made it.
-  assert.deepEqual(add.payload.ops.map((o) => [o.op, o.path]), [['push', ['units']], ['set', ['writer']]]);
-  assert.deepEqual(Object.keys(add.payload.ops[1].value).sort(), ['harness', 'skill']);
-  assert.equal(add.payload.ops[0].values[0].id, 'alpha');
-  assert.equal(add.payload.ops[0].values[0].after, 'zeta');
+  // A lead step also marks its lead active (lib/lead.mjs): lead.at.
+  assert.deepEqual(add.payload.ops.map((o) => [o.op, o.path]), [['set', ['lead', 'at']], ['push', ['units']], ['set', ['writer']]]);
+  assert.deepEqual(Object.keys(add.payload.ops[2].value).sort(), ['harness', 'skill']);
+  assert.equal(add.payload.ops[1].values[0].id, 'alpha');
+  assert.equal(add.payload.ops[1].values[0].after, 'zeta');
   const start = ev.find((e) => e.kind === 'unit.start');
-  assert.ok(start.payload.ops.filter((o) => o.path[0] !== 'writer').every((o) => JSON.stringify(o.path.slice(0, 2)) === JSON.stringify(['units', { id: 'zeta' }])), 'addressed by id, not position');
+  assert.ok(start.payload.ops.filter((o) => !['writer', 'lead'].includes(o.path[0])).every((o) => JSON.stringify(o.path.slice(0, 2)) === JSON.stringify(['units', { id: 'zeta' }])), 'addressed by id, not position');
   assert.deepEqual(run('next', 'e8').out.units.map((u) => u.id), ['zeta', 'alpha'], 'a stacked unit is listed after its base');
   assert.deepEqual(snap('e8').units.map((u) => u.id), ['zeta', 'alpha']);
   assert.ok(readFileSync(join(runDir('e8'), 'hud.html'), 'utf8').indexOf('zeta') < readFileSync(join(runDir('e8'), 'hud.html'), 'utf8').indexOf('alpha'));

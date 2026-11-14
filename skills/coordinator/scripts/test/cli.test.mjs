@@ -138,7 +138,10 @@ test('a stale critic is re-sent without throwing away the build', () => {
   run('add', 'r10', 'a', '--bar', 'b'); run('freeze', 'r10'); run('start', 'r10', 'a'); run('built', 'r10', 'a');
   const file = join(dir, 'runs', 'r10', 'state.json');
   const s = JSON.parse(readFileSync(file, 'utf8')); s.units[0].heartbeatAt = new Date(Date.now() - 600_000).toISOString(); writeFileSync(file, JSON.stringify(s));
-  assert.deepEqual(run('next', 'r10').out.units[0], { id: 'a', action: 'check-stale', phase: 'judging' });
+  const stale = run('next', 'r10').out.units[0];
+  assert.match(stale.lastBeat, /^10 min ago \(\d\d:\d\d local, UTC[+-]?[\d:]*\)$/, 'the age is worked out by the script, in local time');
+  delete stale.lastBeat;
+  assert.deepEqual(stale, { id: 'a', action: 'check-stale', phase: 'judging' });
   assert.equal(run('start', 'r10', 'a').code, 1, 'restarting the builder is refused for a stale critic');
   assert.equal(run('beat', 'r10', 'a').code, 0);
   assert.equal(run('verdict', 'r10', 'a', 'pass', '--evidence', 'ok').code, 0);

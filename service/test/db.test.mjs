@@ -39,7 +39,7 @@ for (const kind of ['memory', 'postgres']) {
       const ingest = ingester({ db, gh });
       await ingest.syncRepo(7, { id: 70, fullName: 'acme/web' });
       const first = await db.runs(7, 70);
-      assert.deepEqual(first.map((r) => [r.runId, r.seq]), [['r1', 7]]);
+      assert.deepEqual(first.map((r) => [r.runId, r.seq]), [['r1', 8]]);
       assert.equal(first[0].state.units[0].id, 'u1');
       assert.equal((await ingest.syncRepo(7, { id: 70, fullName: 'acme/web' })).unchanged, true);
       assert.equal((await db.runs(8, 70)).length, 0, 'another installation sees nothing');

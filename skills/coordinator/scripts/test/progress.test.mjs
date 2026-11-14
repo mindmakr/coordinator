@@ -76,8 +76,9 @@ test('progress: decided units out of total, a percentage, and the round in progr
   const s = st(state());
   assert.deepEqual([s.done, s.total, s.pct, s.stopped], [2, 4, 50, 0]);
   assert.equal(s.progress, '2 of 4 units done (50%)');
-  assert.deepEqual(s.current, [{ id: 'u3', phase: 'building', round: 2 }]);
-  assert.equal(s.doing, 'building u3 round 2');
+  // The last beat's age is worked out here, in minutes and local time, never left as a UTC timestamp.
+  assert.deepEqual(s.current, [{ id: 'u3', phase: 'building', round: 2, lastBeat: '1 min ago (18:44 local, UTC)' }]);
+  assert.equal(s.doing, 'building u3 round 2, last beat 1 min ago (18:44 local, UTC)');
   const thirds = state(); thirds.units = [thirds.units[0], unit('a'), { ...unit('b'), status: 'stopped', stopReason: 'x', rounds: [fail(1, 5)] }];
   const t = st(thirds);
   assert.equal(t.pct, 67);
@@ -86,7 +87,7 @@ test('progress: decided units out of total, a percentage, and the round in progr
   assert.equal(st(none).pct, 0);
   assert.equal(st(none).progress, '0 of 0 units done (0%)');
   const one = state(); one.units = [unit('only', { status: 'judging', rounds: [] })];
-  assert.equal(st(one).doing, 'checking only round 1');
+  assert.match(st(one).doing, /^checking only round 1, last beat \d+ (min|h)[^()]* ago \(\d\d:\d\d local, UTC\)$/);
   assert.equal(st(one).progress, '0 of 1 unit done (0%)');
 });
 
@@ -111,9 +112,9 @@ test('the ETA in plain words: time left and a local ready time, or no estimate y
 });
 
 test('status-line and the closing line say it one way', () => {
-  assert.equal(st(state()).line, 'payday-x · Running: 2 of 4 units done (50%), building u3 round 2, about 1 h left (~19:45). Nothing needs you.');
+  assert.equal(st(state()).line, 'payday-x · Running: 2 of 4 units done (50%), building u3 round 2, last beat 1 min ago (18:44 local, UTC), about 1 h left (~19:45). Nothing needs you.');
   const q = st(state({ notes: [{ kind: 'question', text: 'Which zone?', unit: 'u4', at: at(10) }] }));
-  assert.equal(q.line, 'payday-x · Waiting on you: 2 of 4 units done (50%), building u3 round 2, about 1 h left (~19:45). Needs you: q1.');
+  assert.equal(q.line, 'payday-x · Waiting on you: 2 of 4 units done (50%), building u3 round 2, last beat 1 min ago (18:44 local, UTC), about 1 h left (~19:45). Needs you: q1.');
   const closed = state({ closed: { outcome: 'partial', at: at(90) }, notes: [{ kind: 'follow-up', text: 'u4 dates in the export', unit: 'u4', at: at(80) }] });
   const c = st(closed);
   assert.match(c.line, /^payday-x concluded: partial\. Delivered: u1 Totals; u2 Dates\. Follow-ups: \d+ in Gaps\. Ready for the next run\.$/);
@@ -175,7 +176,7 @@ test('the CLI: list, status-line (one run and all), show and self print the same
   ok('add', 'r2', 'd1', '--bar', 'page exists'); ok('freeze', 'r2'); ok('next', 'r2');
   ok('note', 'r2', '--kind', 'decision', '--text', 'skip');
   const one = ok('status-line', 'r1').trim();
-  assert.equal(one, 'r1 · Running: 0 of 2 units done (0%), building api round 1, no estimate yet. Nothing needs you.');
+  assert.match(one, /^r1 · Running: 0 of 2 units done \(0%\), building api round 1, last beat under a minute ago \(\d\d:\d\d local, UTC[+-]?[\d:]*\), no estimate yet\. Nothing needs you\.$/);
   const list = JSON.parse(ok('list'));
   const r1 = list.find((r) => r.run === 'r1');
   assert.equal(r1.line, one);
@@ -187,7 +188,7 @@ test('the CLI: list, status-line (one run and all), show and self print the same
   assert.equal(all.length, 2);
   const show = ok('show', 'r1');
   assert.match(show, /^r1 \[code\] · Running/);
-  assert.match(show, /^progress {3}0 of 2 units done \(0%\) · building api round 1$/m);
+  assert.match(show, /^progress {3}0 of 2 units done \(0%\) · building api round 1, last beat under a minute ago \(\d\d:\d\d local, UTC[+-]?[\d:]*\)$/m);
   assert.match(show, /^eta {8}no estimate yet$/m);
   assert.ok(ok('self').includes(one));
   const json = JSON.parse(ok('status-line', 'r1', '--json'));

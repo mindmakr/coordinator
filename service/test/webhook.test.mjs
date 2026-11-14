@@ -50,7 +50,7 @@ test('webhook: a push to the state branch is ingested once; a redelivery and a s
     assert.equal(r.status, 202);
     await t.app.idle();
     const runs = await t.db.runs(7, 70);
-    assert.deepEqual(runs.map((x) => [x.runId, x.seq, x.error]), [['r1', 7, null]]);
+    assert.deepEqual(runs.map((x) => [x.runId, x.seq, x.error]), [['r1', 8, null]]);
     const calls = t.gh.calls.length;
 
     r = await post(t, pushPayload()); // the same delivery id: GitHub's redelivery
@@ -66,7 +66,7 @@ test('webhook: a push to the state branch is ingested once; a redelivery and a s
     r = await post(t, pushPayload({ pusher: { name: 'b' } }), { delivery: 'd2' }); // a new delivery, same branch tip
     await t.app.idle();
     assert.deepEqual(t.gh.calls.slice(calls).map((c) => c[0]), ['installationToken', 'ref'], 'tip unchanged: no tree or blob read');
-    assert.deepEqual((await t.db.runs(7, 70)).map((x) => x.seq), [7]);
+    assert.deepEqual((await t.db.runs(7, 70)).map((x) => x.seq), [8]);
   } finally { await t.close(); }
 });
 
