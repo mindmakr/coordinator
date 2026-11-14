@@ -63,7 +63,7 @@
     <h1 class="mf-title wp-title">Build with agents. Still know your system.</h1>
     <p class="mf-intro">Agents now write much of the code. The risk is no longer that the code does not get written. The risk is that nobody can say what was built, why, or what proved it works. <span data-term>Lucid Coding</span> is a way of working that keeps that knowledge.</p>
     <p class="mf-by">Asif Raja</p>
-    <p class="wp-meta">Version 0.2, draft for comment · 13 November 2026 · <a href="lucid-coding.html">The manifesto</a> is the short form of this paper.</p>
+    <p class="wp-meta">Version 0.3, draft for comment · 14 November 2026 · <a href="lucid-coding.html">The manifesto</a> is the short form of this paper.</p>
   </header>
 
   <article class="wp">
@@ -72,7 +72,7 @@
       <h2>Summary</h2>
       <p class="lead">Lucid Coding is the practice of building software with AI agents so that you always know what your agents changed, why they changed it, and what proved it works.</p>
       <p>It rests on eight principles and one working loop. People agree what "done" means before the build. One agent builds. A second agent, who never sees the first one's reasoning, checks the real result. Every pass carries proof. Every run stays on the record, and what went wrong becomes a lesson for the next run.</p>
-      <p>This paper explains the problem, the principles and the reasons behind them, the loop, what a running app should report about itself, how the same practice holds for what a product looks like, how a team can read a system it did not type, what to measure, and how to adopt the practice in steps.</p>
+      <p>This paper explains the problem, the principles and the reasons behind them, the loop, what a running app should report about itself, how the same practice holds for what a product looks like, how a team can read a system it did not type, what to measure, how to adopt the practice in steps, and what one of our own runs taught us when the critic was right and the bar was wrong.</p>
       <ol class="wp-toc">
         <li><a href="#problem">The problem</a></li>
         <li><a href="#definition">What Lucid Coding is</a></li>
@@ -83,6 +83,7 @@
         <li><a href="#seeing">Seeing the system you deployed</a></li>
         <li><a href="#adopting">Adopting it in steps</a></li>
         <li><a href="#measure">What to measure</a></li>
+        <li><a href="#bar-wrong">When the critic is right and the bar is wrong</a></li>
         <li><a href="#limits">Limits and open questions</a></li>
         <li><a href="#future">Where this is going</a></li>
       </ol>
@@ -291,8 +292,40 @@
       <p>Whether the loop itself helps can be measured as well. The Coordinator Engineering Benchmark gives a model the same small engineering tasks twice, once through the loop and once on its own, and grades both with tests the model never sees. Its tasks are <a href="https://github.com/mindmakr/coordinator-bench">public</a>. It has no results yet; this paper will cite them when it does.</p>
     </section>
 
+    <section id="bar-wrong">
+      <h2>10. When the critic is right and the bar is wrong</h2>
+      <p>This section tells one of our own runs, because it went wrong in a way the loop should have caught. We used Coordinator to build flight, a new part of reins that records what a deployed server does, checks it against promises written in the repository, and reports when behaviour drifts. We judged the run as a user would: did it get us to the goal? It did not.</p>
+
+      <h3>What happened</h3>
+      <p>One unit failed five rounds. Every finding was real. Each critic came with a probe on the real code, and each fix came with a test that failed before it. No critic invented a gap or gamed the bar.</p>
+      <p>But rounds 2 to 5 all sat in the same few hundred lines. Two or more servers share one store. While that store is down, which server sends the notice that flight cannot see, exactly once? The bar asked for one notice. With the store down, the servers have no shared place to agree, so exactly once across them cannot be guaranteed. Every fix moved the hole. Round 1 lost a notice. Round 2 silenced an outage at start-up. Round 3 sent a notice twice. Rounds 4 and 5 each silenced an outage another way.</p>
+      <p>Each round, the critic described the cause in different words, while the files stayed the same. Coordinator's "same gap twice" check compares those cause words, so it never fired. Its "no progress" check did not fire either: the general critic's scores crept from 6.5 to 7.8, while the security critic's rose to 9.2 and fell back to 7.6. That one unit took 36% of the whole run's spend, and the run ended without its goal.</p>
+      <p>The run collected everything needed to see the loop: the scores, the causes, the files, the cost of each unit. None of it reached the person as a decision. The lead also made a design call alone to answer round 2, and that design is where rounds 3 to 5 failed. Fix rounds lost part of their finding lists to a brief that was cut without a warning, and the clock kept running while the person was deciding.</p>
+
+      <h3>What we learned</h3>
+      <ul>
+        <li><strong>The critic can be right while the bar is wrong.</strong> When fixes keep moving the same hole, check the bar before the code.</li>
+        <li><strong>Same area, different words.</strong> Watch the files that keep failing, not the labels on the failures.</li>
+        <li><strong>A bar must be achievable.</strong> Exactly once across parties with no shared state is not a bar, it is a wish. Write it per party and state the duplicate: one notice per server while the store is down, one across servers while it is up.</li>
+        <li><strong>Every round should move the goal,</strong> not only close the last finding.</li>
+        <li><strong>Ask the value question while there is still budget:</strong> would the person who uses this care about this case? Here it was the tool reporting on its own blindness, with several servers, during an outage. It should not have decided the unit.</li>
+        <li><strong>Use what you collect.</strong> Evidence that never becomes a decision is cost, not knowledge.</li>
+        <li><strong>Dogfood honestly.</strong> When we use our own tools on ourselves, we judge them as a user would: did they get us to the goal? A user would value the critics that caught a write that hung and filled the database pool, and a start that hung forever. A user would walk away from a run that spent a third of its budget on a corner case and needed our internals to explain why.</li>
+      </ul>
+
+      <h3>What Coordinator now does</h3>
+      <ul>
+        <li><strong>Same files, ask the person.</strong> When a unit's last two failing rounds both have serious findings in the same file, the run asks the person, whatever the cause words say: change the bar, simplify the design, accept it as is with follow-ups, or one more round.</li>
+        <li><strong>No progress counts the lowest critic.</strong> A round's score is the lowest across the general critic and every specialist, so one critic rising does not hide another standing still.</li>
+        <li><strong>A bar check before the build.</strong> Before the bar is frozen, the lead checks that each behaviour can be met at all. An "exactly once" or "never" across parties that share no state is rewritten per party, with the duplicate stated.</li>
+        <li><strong>A value question at round 3.</strong> Before a unit's third round, the lead asks whether the failing behaviour is worth another round to the person who will use the work, and asks the person when the answer is not clearly yes. A finding that needs a design change goes to the person as a question.</li>
+        <li><strong>The clock pauses while the person decides.</strong> Time spent waiting for an answer does not count against the time budget, so the round the person approves can still run.</li>
+        <li><strong>No silent brief cut.</strong> A brief that is too long is refused, not cut. The findings go in a file the agent reads in full, and a fix round fixes every listed finding.</li>
+      </ul>
+    </section>
+
     <section id="limits">
-      <h2>10. Limits and open questions</h2>
+      <h2>11. Limits and open questions</h2>
       <ul>
         <li><strong>A critic can be wrong too.</strong> Independence removes shared blind spots; it does not make the critic correct. Escapes should be traced back and turned into lessons.</li>
         <li><strong>A weak bar passes weak work.</strong> The practice moves the hard thinking to the start. It does not remove it.</li>
@@ -303,7 +336,7 @@
     </section>
 
     <section id="future">
-      <h2>11. Where this is going</h2>
+      <h2>12. Where this is going</h2>
       <p>Agents will get faster and cheaper, and they will be trusted with larger pieces of work. The amount of software one person is responsible for will grow with them. The scarce skill will be knowing: being able to stand behind a system you directed and did not type.</p>
       <p>Teams that keep the bar, the independent judgement, the evidence and the record will be able to move quickly and still explain themselves to users, to colleagues and to regulators. That holds for how a product looks as much as for what it does: a look that is written down, measured and checked by someone other than its maker is one a team can stand behind. That is what Lucid Coding is for.</p>
     </section>
@@ -311,7 +344,7 @@
     <section id="use">
       <h2>Using and citing this paper</h2>
       <p>This paper is published under <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0</a>. You may share and adapt it, with credit.</p>
-      <p>Cite it as: Asif Raja, "Lucid Coding: a whitepaper", version 0.2, November 2026, https://mindmakr.github.io/coordinator/lucid-coding-whitepaper.html</p>
+      <p>Cite it as: Asif Raja, "Lucid Coding: a whitepaper", version 0.3, November 2026, https://mindmakr.github.io/coordinator/lucid-coding-whitepaper.html</p>
       <p>"Lucid Coding" is a trademark of Asif Raja (Mindmakr); see the <a href="https://github.com/mindmakr/coordinator/blob/main/TRADEMARKS.md">trademark policy</a>. Comments and corrections are welcome as <a href="https://github.com/mindmakr/coordinator/issues">issues</a>.</p>
     </section>
 
