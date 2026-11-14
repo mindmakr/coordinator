@@ -137,7 +137,7 @@ const freePort = () => new Promise((ok) => { const s = createServer(); s.listen(
 
 test('dashboard: serves every registered run, a second call reuses it, stop stops it', async () => {
   const port = await freePort();
-  const child = spawn(process.execPath, [join(scripts, 'run.mjs'), 'dashboard', '--port', String(port)], { cwd: tmp, env: env('p1') });
+  const child = spawn(process.execPath, [join(scripts, 'run.mjs'), 'dashboard', '--foreground', '--port', String(port)], { cwd: tmp, env: env('p1') });
   const first = await new Promise((ok, fail) => {
     let buf = ''; child.stdout.on('data', (d) => { buf += d; const m = /\{.*\}/.exec(buf); if (m) ok(JSON.parse(m[0])); });
     child.on('exit', (c) => fail(new Error(`exited ${c}`)));
@@ -335,7 +335,7 @@ test('B2: register entries for temporary state folders are not shown by readRegi
   assert.doesNotMatch(readFileSync(join(state('b2new'), 'coordinator.html'), 'utf8'), /old-q5/, 'hidden by default');
   // The PC dashboard.
   const port = await freePort();
-  const child = spawn(process.execPath, [join(scripts, 'run.mjs'), 'dashboard', '--port', String(port)], { cwd: tmp, env: env('b2new', off) });
+  const child = spawn(process.execPath, [join(scripts, 'run.mjs'), 'dashboard', '--foreground', '--port', String(port)], { cwd: tmp, env: env('b2new', off) });
   try {
     const first = await new Promise((ok, fail) => {
       let buf = ''; child.stdout.on('data', (d) => { buf += d; const m = /\{.*\}/.exec(buf); if (m) ok(JSON.parse(m[0])); });

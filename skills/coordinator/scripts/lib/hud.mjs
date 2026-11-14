@@ -129,7 +129,8 @@ const BUDGET_HELP = {
 
 // A form object: the live page's { token } (field `t`, posts to /answer and /note), or a hosted
 // copy's { token, tokenName, post: path prefix, disabled: why this viewer cannot write }.
-const hidden = (live, fields) => [[live.tokenName ?? 't', live.token], ...(live.back ? [['back', live.back]] : []), ...fields].map(([k, val]) => `<input type="hidden" name="${k}" value="${esc(val)}">`).join('');
+// live.fields: more hidden fields every form carries (the PC dashboard's project key and run id).
+const hidden = (live, fields) => [[live.tokenName ?? 't', live.token], ...(live.back ? [['back', live.back]] : []), ...(live.fields ?? []), ...fields].map(([k, val]) => `<input type="hidden" name="${k}" value="${esc(val)}">`).join('');
 const recommended = ' <span class="chip s-pass">Recommended</span>';
 const action = (live, path) => esc(`${live.post ?? ''}${path}`);
 const off = (live) => (live.disabled ? ' disabled' : '');
@@ -159,13 +160,14 @@ function optionList(q) {
   return `<ul class="opts">${q.options.map((o, i) => `<li${q.answer?.choices.includes(o.label) ? ' class="picked"' : ''}><b>${esc(o.label)}</b>${i === 0 ? recommended : ''}${o.description ? ` · ${esc(o.description)}` : ''}</li>`).join('')}</ul>`;
 }
 
-export function questionItem(q, live, repo = null) {
+// prefix: keeps ids unique on a page that lists the questions of several runs (the PC dashboard).
+export function questionItem(q, live, repo = null, prefix = '') {
   const head = `<p class="qtext">${q.header ? `<span class="chip">${esc(q.header)}</span> ` : ''}<b>${esc(q.id)}</b> ${linkify(q.text, repo)}${q.unit ? ` <span class="cause">· ${esc(q.unit)}</span>` : ''}</p>`;
   const rec = q.recommend && !q.options.length ? `<p class="rec">Recommended: ${esc(q.recommend)}</p>` : '';
   const changes = q.history.length - 1;
   const ans = q.answer ? `<p class="ans"><b>Answer:</b> ${esc(answerText(q.answer))} <span class="cause">by ${esc(q.answer.by)}, ${stamp(q.answer.at)}${changes > 0 ? `, changed ${changes} ${changes === 1 ? 'time' : 'times'}` : ''}</span></p>` : '';
   const body = live && ['open', 'answered'].includes(q.status) ? answerForm(q, live) : optionList(q);
-  return `<li class="q" id="${esc(q.id)}" data-a="q-${esc(q.id)}">${qLabel(q)}${head}${rec}${ans}${body}</li>`;
+  return `<li class="q" id="${esc(prefix + q.id)}" data-a="q-${esc(prefix + q.id)}">${qLabel(q)}${head}${rec}${ans}${body}</li>`;
 }
 
 // The unit's own links (--link at add, then each `run.mjs link`), http(s) only.

@@ -49,7 +49,7 @@ const errorPage = (msg, back) => `<!doctype html><meta charset="utf-8"><meta nam
 const pathOf = (p, extra = null) => (PAGE.test(p ?? '') || (extra && extra.test(p ?? '')) ? p : null);
 
 // page(path, { token, nonce }) returns the HTML or null; post[path](form) writes
-// and returns the anchor to show next; file(target, name, run) returns { fd | file, type }
+// and returns the anchor to show next, or a promise of it; file(target, name, run) returns { fd | file, type }
 // for an artifact the state names (run: null for the served run, else the run
 // named in /run/<run>/…), or null; version() changes when any page's data does.
 // extra: a regex of more page paths (the global dashboard's /p/<key>/run/<run>/…, lib/dashboard.mjs).
@@ -96,7 +96,7 @@ export function serve({ port = 0, page, post, file = () => null, version = () =>
       const form = new URLSearchParams(await readBody(req));
       if (!sameToken(req.headers['x-coordinator-token'] ?? form.get('t'), token)) return send(res, 403, 'missing or wrong token');
       let anchor;
-      try { anchor = post[url.pathname](form); } catch (e) {
+      try { anchor = await post[url.pathname](form); } catch (e) {
         return send(res, 400, errorPage(e.message, home), { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'" });
       }
       const back = form.get('back');
