@@ -11,13 +11,14 @@ import { DOTS, dotWords } from './plain.mjs';
 import { eventEvidence, itemBody } from './evview.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
+import { ageText } from './age.mjs';
 
 export { esc };
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
 // The live page's script: updates, then the map panels (lib/maptips.mjs), walking a map (lib/mapnav.mjs) and the evidence viewer (lib/evview.mjs).
 const CLIENT = ['./live.client.js', './maptips.client.js', './mapnav.client.js', './evview.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
-const SERVED = [matches, morph, findMatches, highlight, unhighlight];
+const SERVED = [matches, morph, findMatches, highlight, unhighlight, ageText];
 
 export const cls = (s) => String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '');
 export const when = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');

@@ -14,7 +14,8 @@ import { decide } from '../lib/rules.mjs';
 import { view } from '../lib/view.mjs';
 import { hud } from '../lib/hud.mjs';
 import { VERSION } from '../lib/version.mjs';
-import { projectPage } from '../lib/dashboard.mjs';
+import { pcModel, pcPage, pcSection, projectPage } from '../lib/dashboard.mjs';
+import { ageText } from '../lib/age.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(join(tmpdir(), 'coord-reg-'));
@@ -225,4 +226,45 @@ test('the register ignores entries whose run id is not a safe id', () => {
   mkdirSync(h, { recursive: true });
   writeFileSync(registryFile(h), JSON.stringify({ v: 1, runs: [{ run: '../..', stateDir: sd }, { run: 'ok', stateDir: sd }] }));
   assert.deepEqual(readRegistry({ home: h }).map((e) => e.run), ['ok']);
+});
+
+test('ageText: minutes, hours and days in plain words', () => {
+  const m = 60_000;
+  assert.equal(ageText(0), 'under a minute');
+  assert.equal(ageText(59_000), 'under a minute');
+  assert.equal(ageText(-5 * m), 'under a minute', 'a clock a little ahead never shows a negative age');
+  assert.equal(ageText(17 * m), '17 min');
+  assert.equal(ageText(60 * m), '1 h');
+  assert.equal(ageText(131 * m), '2 h 11 min');
+  assert.equal(ageText(24 * 60 * m), '1 d');
+  assert.equal(ageText(26 * 60 * m + 30 * m), '1 d 2 h');
+});
+
+test('run cards on This PC show when the run started, when it ended or should end, and its age', () => {
+  assert.equal(init('cards', 'live1').code, 0);
+  assert.equal(init('cards', 'over1').code, 0);
+  const closed = cli('cards', ['close', 'over1', '--outcome', 'stopped', '--reason', 'test']);
+  assert.equal(closed.code, 0, closed.err);
+  const at = (run) => loadRun(join(state('cards'), 'runs', run));
+  const start = at('live1').createdAt; const end = at('over1').closed.at;
+  const nowMs = Date.parse(start) + 3 * 3600_000;
+  const pc = pcModel(readRegistry({ home }).filter((e) => ['live1', 'over1'].includes(e.run)), { nowMs });
+  const card = (html, run) => html.split('<li ').find((li) => li.includes(`>${run}<`));
+  const html = pcSection({ pc }, {});
+  const live = card(html, 'live1'); const over = card(html, 'over1');
+  assert.ok(live.includes(`started <time datetime="${start}" class="abs"`), 'the start, as a clock time the page localises');
+  assert.match(live, /ending: no estimate yet/, 'no estimate yet is said, not left out');
+  assert.match(live, /age <time datetime="[^"]+" class="age" title="[^"]+ UTC">3 h<\/time>/, 'the age, from the start to now');
+  assert.ok(over.includes(`ended <time datetime="${end}" class="abs"`), 'a finished run says when it ended');
+  assert.match(over, /\(took (under a minute|\d+ min)\)/, 'and how long it took');
+  assert.doesNotMatch(over, /ending/);
+  // A running run with an estimate says when it should end.
+  const readyAt = new Date(nowMs + 25 * 60_000).toISOString();
+  for (const g of pc.groups) for (const r of g.runs) if (r.run === 'live1') r.status = { ...r.status, eta: { ...r.status.eta, readyAt, short: 'about 25 min' } };
+  assert.ok(card(pcSection({ pc }, {}), 'live1').includes(`ending about <time datetime="${readyAt}" class="abs"`));
+  // The live page keeps the age current, and shows start and end as clock times, not "3 hours ago".
+  const served = pcPage(pc, nowMs, { live: { token: 't', nonce: 'n' } });
+  assert.match(served, /const ageText = /);
+  assert.match(served, /classList\.contains\('age'\)/);
+  assert.match(served, /classList\.contains\('abs'\)/);
 });
