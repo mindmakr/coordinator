@@ -67,7 +67,7 @@ test('ask, answer, change, use: every answer is kept and a used one cannot chang
   let [q] = run('questions', 'a1').out;
   assert.equal(q.status, 'answered');
   assert.deepEqual(q.history.map((a) => [a.choices, a.other, a.by]), [[['Yes'], null, 'person'], [[], 'after the demo', 'lead']]);
-  assert.match(run('show', 'a1').out, /^answered {3}q1: "after the demo" \(by lead; the lead has not used it yet\)$/m);
+  assert.match(run('show', 'a1').out, /^answered {3}coordinator-answers-\w+ · g \(a1\)\n {11}q1: "after the demo" \(by lead; the lead has not used it yet\)$/m, 'its label, then the answer');
   assert.equal(run('use-answer', 'a1', 'q1').code, 0);
   assert.equal(run('answer', 'a1', 'q1', '--choice', 'No').code, 1, 'used: refused');
   assert.match(run('answer', 'a1', 'q1', '--choice', 'No').err, /already used/);

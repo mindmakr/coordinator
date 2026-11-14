@@ -43,6 +43,25 @@ test('every page escapes run text, carries no script, and sends a strict CSP and
   } finally { await t.close(); }
 });
 
+test('each question names its project (the repo), run and task, from the skill\'s own label', async () => {
+  const t = await startApp();
+  t.gh.addRepo('acme/web', { id: 70, installationId: 7, files: stateFiles({ r1: makeRun('r1'), r4: makeRun('r4', { alias: 'Financial Insights', askUnit: true }) }) });
+  t.gh.addUser('tok-reader', { id: 1, login: 'reader', read: ['acme/web'] });
+  await t.db.upsertInstallation({ id: 7, account: 'acme' });
+  await t.app.ingest.syncInstallation(7);
+  const cookie = await signIn(t, 'reader');
+  const get = async (path) => (await fetch(`${t.base}${path}`, { headers: { Cookie: cookie } })).text();
+  const line = (label) => `<p class="qlabel" title="Which run and task this question comes from">${label}</p>`;
+  try {
+    const run = await get('/r/acme/web/run/r4');
+    assert.ok(run.includes(`<li class="q" id="q1" data-a="q-q1">${line('web · Financial Insights (r4)')}`), 'a question on the whole run: project, run name and id');
+    assert.ok(run.includes(`<li class="q" id="q2" data-a="q-q2">${line('web · Financial Insights (r4) › Task u1: Totals')}`), 'a question on a unit: and its task');
+    assert.ok((await get('/r/acme/web/run/r4/unit/u1')).includes(line('web · Financial Insights (r4) › Task u1: Totals')), 'the unit page');
+    const plain = await get('/r/acme/web/run/r1');
+    assert.ok(plain.includes(line('web · Totals match &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; (r1)')), 'no alias: the goal, escaped');
+  } finally { await t.close(); }
+});
+
 test('a missing run or unit, or an unsafe id, is a 404', async () => {
   const t = await world();
   try {

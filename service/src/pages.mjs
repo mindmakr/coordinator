@@ -153,7 +153,7 @@ export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null) {
   const cards = rows.map((row) => {
     if (!row.state) return `<div class="card"><h3>${esc(row.runId)}${chip('unreadable', 'fail')}</h3><p class="meta">${esc(row.error ?? '')}</p></div>`;
     const s = runState(row);
-    const v = runView(s, decide(s), nowMs, { repo: repo.fullName });
+    const v = runView(s, decide(s), nowMs, { repo: repo.fullName, project: repo.fullName.split('/').pop() });
     const passed = v.units.filter((u) => u.status === 'pass').length;
     return `<div class="card${v.open ? '' : ' fin'}" data-a="run-${esc(row.runId)}"><h3><a href="${esc(ctx.runHref(row.runId))}">${esc(row.runId)}</a>${chip(v.phase, v.open ? v.phase : v.phase.replace(/^closed: /, ''))}</h3>`
       + `<p class="say">${esc(v.situation.text)}</p>`
@@ -179,7 +179,8 @@ export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null) {
   return withBar(page({ title: repo.fullName, body, ctx, path: ctx.base }), user, repo.fullName);
 }
 
-const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName }), gh); };
+// project: the repo's name, first in each question's label (the skill's questionLabel, through runView), as a local run shows its folder's name.
+const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName, project: repo.fullName.split('/').pop() }), gh); };
 
 export function runPage(user, repo, row, nowMs = Date.now(), gh = []) {
   return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row, user)), user, repo.fullName);
