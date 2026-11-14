@@ -6,10 +6,13 @@
 // Written atomically under a lock (lib/store.mjs), so leads in different tools
 // can write at once. It holds no secrets: titles are masked, and nothing else is text.
 // Entries whose run folder is gone are pruned on every write and skipped on every read.
+// A run whose state folder is in the system temporary folder (a test, a trial) is never
+// recorded, and an old entry for one is pruned and skipped the same way; COORDINATOR_REGISTRY=on
+// records it anyway (the skill's own tests, whose register is itself temporary).
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, renameSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, renameSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join, parse, resolve } from 'node:path';
 import { maskSecrets } from './secrets.mjs';
 import { isSafeId, withLock, writeJson } from './store.mjs';
 
@@ -23,6 +26,19 @@ export const registryFile = (home = registryHome()) => join(home, REGISTRY);
 const norm = (p) => { const r = resolve(p).replace(/\\/g, '/'); return process.platform === 'win32' ? r.toLowerCase() : r; };
 // A short stable id for a state folder: the served pages name a project by it, never by its path.
 export const projectKey = (stateDir) => createHash('sha256').update(norm(stateDir)).digest('hex').slice(0, 12);
+// The folder as written and as it is on disk (a Windows 8.3 short name spelled out, /var -> /private/var).
+const spellings = (p) => { const a = norm(p); try { return [...new Set([a, norm(realpathSync.native(p))])]; } catch { return [a]; } };
+const cache = new Map();
+// The system temporary folder in every spelling the register compares; never a drive or filesystem root.
+export function tempRoots(tmp = tmpdir()) {
+  if (!cache.has(tmp)) cache.set(tmp, spellings(tmp).filter((r) => r !== norm(parse(resolve(r)).root)));
+  return cache.get(tmp);
+}
+// True when dir is one of roots or inside one (case-insensitive on Windows, any trailing separator).
+export const inTemp = (dir, roots = tempRoots()) => spellings(dir).some((d) => roots.some((r) => d === r || d.startsWith(r.endsWith('/') ? r : `${r}/`)));
+// The roots whose runs the register leaves out: the temporary folder, unless COORDINATOR_REGISTRY=on.
+export const skipRoots = (env = process.env) => (env.COORDINATOR_REGISTRY === 'on' ? [] : tempRoots());
+const kept = (skip) => (e) => alive(e) && !(skip.length && inTemp(e.stateDir, skip));
 const same = (a, b) => norm(a.stateDir) === norm(b.stateDir) && a.run === b.run;
 const alive = (e) => { try { return existsSync(join(e.stateDir, 'runs', e.run)); } catch { return false; } };
 const clean = (t, max = 200) => (typeof t === 'string' && t.trim() ? maskSecrets(t.replace(/[\u0000-\u001f\u007f]/g, ' ').trim()).slice(0, max) : null);
@@ -48,8 +64,9 @@ export function entryFor(s, { project, stateDir, stamp, at = new Date().toISOStr
 const unchanged = (a, b, now) => a && ['project', 'title', 'alias', 'tag', 'harness', 'skill', 'startedIn', 'closed'].every((k) => (a[k] ?? null) === (b[k] ?? null))
   && now - Date.parse(a.lastSeen ?? 0) < FRESH_MS;
 
-// Records (or refreshes) one run. Returns true when it wrote.
-export function register(entry, { home = registryHome(), now = Date.now() } = {}) {
+// Records (or refreshes) one run. Returns true when it wrote. skip: roots whose runs are never recorded.
+export function register(entry, { home = registryHome(), now = Date.now(), skip = skipRoots() } = {}) {
+  if (skip.length && inTemp(entry.stateDir, skip)) return false;
   const file = registryFile(home);
   const seen = readFile(file);
   if (seen && unchanged(seen.find((e) => same(e, entry)), entry, now)) return false;
@@ -59,7 +76,7 @@ export function register(entry, { home = registryHome(), now = Date.now() } = {}
       try { renameSync(file, `${file}.bad-${now}`); } catch { /* gone meanwhile */ }
       runs = [];
     }
-    runs = runs.filter((e) => !same(e, entry) && alive(e));
+    runs = runs.filter((e) => !same(e, entry) && kept(skip)(e));
     runs.push(entry);
     runs.sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)));
     writeJson(file, { v: 1, note: NOTE, runs });
@@ -67,13 +84,13 @@ export function register(entry, { home = registryHome(), now = Date.now() } = {}
   return true;
 }
 
-// Every registered run whose folder still exists, newest first. prune: also drop the rest from the file.
-export function readRegistry({ home = registryHome(), prune = false } = {}) {
+// Every registered run whose folder still exists and is not under skip, newest first. prune: also drop the rest from the file.
+export function readRegistry({ home = registryHome(), prune = false, skip = skipRoots() } = {}) {
   const file = registryFile(home);
   const runs = readFile(file) ?? [];
-  const live = runs.filter(alive);
+  const live = runs.filter(kept(skip));
   if (prune && live.length !== runs.length) {
-    withLock(file, () => { const kept = (readFile(file) ?? []).filter(alive); writeJson(file, { v: 1, note: NOTE, runs: kept }); });
+    withLock(file, () => { const rest = (readFile(file) ?? []).filter(kept(skip)); writeJson(file, { v: 1, note: NOTE, runs: rest }); });
   }
   return live.map((e) => ({ ...e, key: projectKey(e.stateDir) }));
 }

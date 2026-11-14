@@ -1,14 +1,14 @@
 // The machine-wide run register, the harness and version stamp, and the global dashboard.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, parse, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, harnessOf, origin, versionWarning } from '../lib/harness.mjs';
-import { entryFor, readRegistry, register, registryFile } from '../lib/registry.mjs';
+import { entryFor, inTemp, readRegistry, register, registryFile, skipRoots, tempRoots } from '../lib/registry.mjs';
 import { loadRun, updateRun, parseLog } from '../lib/events.mjs';
 import { decide } from '../lib/rules.mjs';
 import { view } from '../lib/view.mjs';
@@ -267,4 +267,87 @@ test('run cards on This PC show when the run started, when it ended or should en
   assert.match(served, /const ageText = /);
   assert.match(served, /classList\.contains\('age'\)/);
   assert.match(served, /classList\.contains\('abs'\)/);
+});
+
+// Design 5.7: runs whose state folder is in the system temporary folder stay off the PC list.
+// Every state folder in this file is under tmpdir(); COORDINATOR_REGISTRY '' is the person's default.
+const real = { COORDINATOR_REGISTRY: '' };
+const ids = (h) => (existsSync(registryFile(h)) ? JSON.parse(readFileSync(registryFile(h), 'utf8')).runs.map((e) => e.run) : []);
+
+test('temp folder: the folder itself and inside it count, any case on Windows, any trailing separator, never a root', () => {
+  const t = join(tmp, 'sys-tmp');
+  const roots = tempRoots(t + sep);
+  assert.equal(inTemp(t, roots), true, 'the temporary folder itself');
+  assert.equal(inTemp(join(t, 'tmp.AbC', '.coordinator'), roots), true, 'inside it');
+  assert.equal(inTemp(t + sep, roots), true, 'with a trailing separator');
+  assert.equal(inTemp(join(tmp, 'sys-tmp-other', '.coordinator'), roots), false, 'a sibling that only shares the prefix');
+  assert.equal(inTemp(join(tmp, 'elsewhere'), roots), false);
+  if (process.platform === 'win32') assert.equal(inTemp(join(t, 'X').toUpperCase(), roots), true, 'case-insensitive on Windows');
+  assert.deepEqual(tempRoots(parse(tmp).root), [], 'a drive or filesystem root is never the temporary folder');
+  assert.deepEqual(skipRoots({ COORDINATOR_REGISTRY: 'on' }), [], 'on records temporary runs');
+  assert.deepEqual(skipRoots({}), tempRoots(), 'by default the system temporary folder is left out');
+  assert.equal(inTemp(state('any'), skipRoots({})), true, "this file's state folders are temporary");
+});
+
+test('temp folder: a Windows 8.3 short spelling of a folder inside it counts', { skip: process.platform !== 'win32' }, (t) => {
+  const tdir = join(tmp, 'sys tmp long name'); const run = join(tdir, 'a long run folder name'); mkdirSync(run, { recursive: true });
+  const short = (p) => execFileSync('cmd.exe', ['/d', '/c', `for %I in ("${p}") do @echo %~sI`], { encoding: 'utf8', windowsVerbatimArguments: true }).trim();
+  const [st, sr] = [short(tdir), short(run)];
+  if (st.toLowerCase() === tdir.toLowerCase()) { t.skip('8.3 names are off on this volume'); return; }
+  assert.equal(inTemp(sr, tempRoots(tdir)), true, 'short run folder, long temporary folder');
+  assert.equal(inTemp(run, tempRoots(st)), true, 'long run folder, short temporary folder');
+});
+
+test('B1: a run.mjs write in a temporary state folder never reaches the register, unless COORDINATOR_REGISTRY=on', () => {
+  const h = join(tmp, 'b1-home');
+  const e = (x) => ({ COORDINATOR_HOME: h, ...x });
+  assert.equal(cli('b1', ['init', 'trial-q1', '--goal', 'g', '--bar', 'b', '--fence', 'f'], e(real)).code, 0);
+  assert.equal(cli('b1', ['add', 'trial-q1', 'u1', '--bar', 'b'], e(real)).code, 0);
+  assert.equal(cli('b1', ['hud', 'trial-q1'], e(real)).code, 0);
+  assert.equal(cli('b1', ['list', '--all'], e(real)).code, 0, "list --all registers the folder's old runs: not these");
+  assert.deepEqual(ids(h), [], 'no entry written');
+  // The pure function, with a fake temporary folder: inside is refused, outside recorded.
+  const fake = tempRoots(join(tmp, 'b1-fake-tmp'));
+  const mk = (sd) => entryFor({ id: 'r', goal: 'g', units: [] }, { project: sd, stateDir: sd });
+  assert.equal(register(mk(join(tmp, 'b1-fake-tmp', 'p', '.coordinator')), { home: join(tmp, 'b1-pure'), skip: fake }), false);
+  assert.equal(existsSync(registryFile(join(tmp, 'b1-pure'))), false);
+  assert.equal(register(mk(join(tmp, 'b1-real', '.coordinator')), { home: join(tmp, 'b1-pure'), skip: fake }), true);
+  // on: recorded.
+  assert.equal(cli('b1', ['note', 'trial-q1', '--kind', 'info', '--text', 'x'], e({ COORDINATOR_REGISTRY: 'on' })).code, 0);
+  assert.deepEqual(ids(h), ['trial-q1']);
+});
+
+test('B2: register entries for temporary state folders are not shown by readRegistry, This PC, the PC dashboard or list --all', async () => {
+  const h = join(tmp, 'b2-home'); mkdirSync(h, { recursive: true });
+  const on = { COORDINATOR_HOME: h, COORDINATOR_REGISTRY: 'on' }; const off = { COORDINATOR_HOME: h, ...real };
+  assert.equal(cli('b2old', ['init', 'old-q5', '--goal', 'g', '--bar', 'b', '--fence', 'f'], on).code, 0, 'an entry from before the fix');
+  assert.deepEqual(ids(h), ['old-q5']);
+  // readRegistry: hidden by default, shown with on; reading writes nothing.
+  assert.deepEqual(readRegistry({ home: h, skip: [] }).map((e) => e.run), ['old-q5']);
+  assert.deepEqual(readRegistry({ home: h, skip: skipRoots({}) }), []);
+  assert.deepEqual(ids(h), ['old-q5'], 'a read without prune leaves the file alone');
+  // With a fake temporary folder, an entry outside it still shows.
+  assert.deepEqual(readRegistry({ home: h, skip: tempRoots(join(tmp, 'b2-fake-tmp')) }).map((e) => e.run), ['old-q5']);
+  // This PC on the coordinator page (coordinator.html, rewritten on every write).
+  assert.equal(cli('b2new', ['init', 'new-run', '--goal', 'g', '--bar', 'b', '--fence', 'f'], on).code, 0);
+  assert.match(readFileSync(join(state('b2new'), 'coordinator.html'), 'utf8'), /old-q5/, 'shown with on');
+  assert.equal(cli('b2new', ['note', 'new-run', '--kind', 'info', '--text', 'x'], off).code, 0);
+  assert.doesNotMatch(readFileSync(join(state('b2new'), 'coordinator.html'), 'utf8'), /old-q5/, 'hidden by default');
+  // The PC dashboard.
+  const port = await freePort();
+  const child = spawn(process.execPath, [join(scripts, 'run.mjs'), 'dashboard', '--port', String(port)], { cwd: tmp, env: env('b2new', off) });
+  try {
+    const first = await new Promise((ok, fail) => {
+      let buf = ''; child.stdout.on('data', (d) => { buf += d; const m = /\{.*\}/.exec(buf); if (m) ok(JSON.parse(m[0])); });
+      child.on('exit', (c) => fail(new Error(`exited ${c}`)));
+    });
+    const page = await (await fetch(first.url)).text();
+    assert.match(page, /Coordinator · this PC/);
+    assert.doesNotMatch(page, /old-q5|new-run/);
+  } finally { child.kill(); }
+  // list --all: hidden, and pruned from the file.
+  const all = cli('b2new', ['list', '--all'], off);
+  assert.equal(all.code, 0, all.err);
+  assert.deepEqual(all.out, []);
+  assert.deepEqual(ids(h), [], 'list --all prunes them');
 });
