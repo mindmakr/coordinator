@@ -71,18 +71,18 @@ Log both with `run.mjs ask` (only a logged question pauses the clock), ask them 
 
 Other files link here; the list lives only here.
 
-**The lead does these without asking.** It says what it did in the chat, and the log records it.
+**The lead does these without asking.** It says what it did in the chat, and the run's log records the run steps.
 
 - Start the PC dashboard (`run.mjs dashboard`).
 - Restart a builder or critic that went quiet (`next` says `check-stale`), once per unit per round. When the same unit goes quiet again in that round, it asks.
 - Take over a run whose lead is gone (`run.mjs lead <run>`; `durability.md`, One lead).
-- Close a run once every unit has passed and the final check has passed (`next` says `done`), then run its retro (`commands/run.md` step 4).
+- Close a run, and run its retro first (`commands/run.md` step 4), only when no unit is stopped (every unit passed; a unit the person chose to ship counts as passed) and the final check passed. `next` saying `done` is not enough: it also says `done` when one unit passed and another stopped. Check it in `S/run.mjs show <run>` (no unit's status is `stopped`) and in `S/run.mjs waiting` (it lists a finished run that has a stopped unit or a final check not passed). Otherwise, ask.
 
 **The lead still asks the person for these:**
 
 - a new run (its up-front questions, `commands/run.md` step 1);
 - taking over from a lead that is still active;
-- closing a run with a stopped unit, or whose final check did not pass;
+- closing a run with a stopped unit, or whose final check did not pass (`next` says `done-with-gaps` or `stopped`, or `done` with a stopped unit);
 - merging, releasing, publishing, deploying, a push to a protected or release branch, a force push, deleting data or branches, schema changes on shared databases, spending or new paid services, messages to people, public posts, filing upstream (the retro's upstream proposals count as posting: they wait under Waiting on you until the person says go), and changing CI.
 
 Ask once (`commands/run.md`, Asking), with the evidence, and record the answer with `run.mjs note --kind decision`. A standing permission the person gave for this run, such as "merge when the review says READY", is recorded the same way and applies only to this run.
