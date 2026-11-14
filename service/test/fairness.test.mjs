@@ -62,7 +62,7 @@ test('pool: installations take turns; one with many queued reads does not go bef
   const p = parser({ workers: 1 });
   try {
     const order = [];
-    const read = (tenant, i) => p.readLog('r1', small, tenant).then((r) => { assert.equal(r.seq, 7); order.push(`${tenant}${i}`); });
+    const read = (tenant, i) => p.readLog('r1', small, tenant).then((r) => { assert.equal(r.seq, 8); order.push(`${tenant}${i}`); });
     await Promise.all([read('a', 1), read('a', 2), read('a', 3), read('a', 4), read('b', 1)]);
     assert.ok(order.indexOf('b1') <= 2, `b went third at the latest: ${order}`);
   } finally { await p.close(); }
@@ -80,7 +80,7 @@ test('pool: a large read never takes the last worker, so a small one is read at 
     const done = [];
     const bigs = [1, 2, 3].map((i) => p.readLog('r1', big, 'mallory').then((r) => { done.push(`big${i}`); return r; }));
     const tiny = p.readLog('r1', small, 'acme').then((r) => { done.push('small'); return r; });
-    assert.equal((await tiny).seq, 7);
+    assert.equal((await tiny).seq, 8);
     assert.deepEqual(done, ['small'], `the small read waited behind a large one: ${done}`);
     for (const r of await Promise.all(bigs)) assert.equal(r.error, undefined, r.error);
     assert.deepEqual(done, ['small', 'big1', 'big2', 'big3'], 'the large reads take the one worker in turn');
@@ -92,12 +92,12 @@ test('budget: past its reading time for the hour an installation is deferred, ot
   const p = parser({ workers: 1, budgetMs: 1, now: () => clock });
   try {
     clock = 0; const first = p.readLog('r1', small, 66);
-    clock = 5; assert.equal((await first).seq, 7, 'the first read runs');
+    clock = 5; assert.equal((await first).seq, 8, 'the first read runs');
     assert.ok(p.spent(66) >= 1);
     assert.deepEqual(await p.readLog('r1', small, 66), { error: DEFERRED, deferred: true });
-    assert.equal((await p.readLog('r1', small, 7)).seq, 7, 'another installation reads on');
+    assert.equal((await p.readLog('r1', small, 7)).seq, 8, 'another installation reads on');
     clock = 3_700_000;
-    assert.equal((await p.readLog('r1', small, 66)).seq, 7, 'a new hour, a new budget');
+    assert.equal((await p.readLog('r1', small, 66)).seq, 8, 'a new hour, a new budget');
   } finally { await p.close(); }
 });
 

@@ -92,7 +92,7 @@ test('childEnv: the dashboard and its answer children get no session tokens or i
   assert.deepEqual(env, { PATH: '/bin', Path: 'C:\\bin', SystemRoot: 'C:\\Windows', USERPROFILE: 'C:\\u', TEMP: 'C:\\t', COORDINATOR_HOME: '/h', COORDINATOR_REGISTRY: 'on', COORDINATOR_HARNESS: DASHBOARD_HARNESS, COORDINATOR_DIR: '/state' });
 });
 
-test('Needs you: every open question of every registered run, labelled, each with its own answer form', () => {
+test('Waiting on you, its questions: every open question of every registered run, labelled, each with its own answer form', () => {
   setup('beta', 'rb', 'Merge');
   const pc = pcModel(readRegistry({ home }));
   const html = needsSection(pc, { answerForm: { token: 'tok' }, pcHref: (k, r) => `/p/${k}/run/${r}?t=tok` });
@@ -144,7 +144,7 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     writeFileSync(join(home, 'dashboard.json'), JSON.stringify(rec));
 
     const page = await (await fetch(url)).text();
-    assert.match(page, /<h2 id="pc-needs"[^>]*>Needs you<\/h2>/);
+    assert.match(page, /<h2 id="pc-waiting"[^>]*>Waiting on you<\/h2>.*<h3 id="pc-needs"[^>]*>Questions for you<\/h3>/s, 'the open questions are the first part of Waiting on you');
     assert.match(page, /gamma · gamma work \(rg\) › Task u1: Mobile card/);
     assert.match(page, /delta · delta work \(rd\) › Task u1: Mobile card/);
     const entries = readRegistry({ home });

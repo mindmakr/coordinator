@@ -10,6 +10,7 @@ import {
   codexCheck, contextCheck, dashboardsCheck, diagnose, format, ghCheck, gitCheck, lessonsCheck, locksCheck,
   nodeCheck, prefixCheck, realExec, reinsCheck, settingsCheck, stateDirCheck, versionCheck, worktreesCheck,
 } from '../lib/doctor.mjs';
+import { doctorFile, doctorRecord } from '../lib/doctorrecord.mjs';
 import { checkSettings } from '../lib/settings.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,6 +37,20 @@ test('version: skipped offline, warns when a newer release exists, ok when curre
   assert.equal(versionCheck(ctx({ exec: tags(['v0.5.0', 'v0.7.0']) })).status, 'warn');
   assert.equal(versionCheck(ctx({ exec: tags(['v0.5.0', 'v0.6.0']) })).status, 'ok');
   assert.equal(versionCheck(ctx({ exec: fake({}) })).status, 'skip', 'unreachable is a skip, not a fail');
+  // What doctor.mjs keeps for Waiting on you (lib/doctorrecord.mjs): the versions it compared, only when it compared them.
+  const warn = versionCheck(ctx({ exec: tags(['v0.5.0', 'v0.7.0']) }));
+  assert.deepEqual([warn.mine, warn.latest], ['0.6.0', '0.7.0']);
+  assert.equal(doctorRecord([warn], 'T').latest, '0.7.0');
+  assert.equal(doctorRecord([versionCheck(ctx({ online: false }))]), null, 'offline: nothing kept');
+  assert.equal(doctorRecord([versionCheck(ctx({ exec: fake({}) }))]), null, 'unreachable: nothing kept');
+});
+
+test('doctor.mjs --offline keeps no version check on disk', () => {
+  const h = mkdtempSync(join(tmpdir(), 'coord-doc-home-'));
+  try {
+    spawnSync(process.execPath, [join(scripts, 'doctor.mjs'), '--offline', '--json'], { cwd: h, env: { ...process.env, COORDINATOR_HOME: h }, encoding: 'utf8' });
+    assert.equal(existsSync(doctorFile(h)), false);
+  } finally { rmSync(h, { recursive: true, force: true }); }
 });
 
 test('gh: missing, logged out, short scopes and good scopes; the token never shows', () => {

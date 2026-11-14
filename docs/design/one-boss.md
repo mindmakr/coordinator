@@ -29,7 +29,7 @@ Coordinator works well because each run is self-contained and its log lets it su
 
 ## 3. What changes for you
 
-- **You can lead from any window, in any tool.** The first window that leads a run keeps it. Another window that tries to change the run is told "this run is led by another window (Claude Code, last active 12 min ago)". Once that window has closed and the run has been quiet for 10 minutes, or the run has been quiet for 45 minutes, the next window that runs `/coordinator:status <run>` takes it over without asking you, and says so.
+- **You can lead from any window, in any tool.** The first window that leads a run keeps it. Another window that tries to change the run is told "run X is led by another window (Claude Code, last active 12 min ago (13:53 local, UTC+3))". Once that window has closed and the run has been quiet for 10 minutes, or the run has been quiet for its stale minutes (45 by default), the next window that runs `/coordinator:status <run>` takes it over without asking you, and says so.
 - **Every question says which run it is about**, for example "payday · Financial Insights (payday-fi-1426) › Task u2: Payout summary card".
 - **You choose how questions reach you.** By default a question opens the question dialog in the lead's window. If you prefer, choose **dashboard first**: the lead writes the question in the chat and on the dashboards, keeps working, and takes your first answer from either place.
 - **One dashboard for everything.** `http://127.0.0.1:7480` keeps running when windows close. The first Coordinator window that starts a run or runs `/coordinator:dashboard` starts it, and later windows reuse it. You can answer any run's questions on its front page.
@@ -53,14 +53,14 @@ Coordinator works well because each run is self-contained and its log lets it su
 
 ### 5.1 One lead per run
 
-- **Claiming.** A run records its lead with a `lead.claim` event: a random lead id (never a host or user name), the tool, and the time. The `docs/design/v1.md` section 4.5 sketch used the same name. `init` claims for the window that starts the run. A run made before this change has no claim; its first lead step claims it.
-- **The id.** The claiming step prints the id, and the lead passes it on every later lead step as `--lead <id>`, or sets it once as `COORDINATOR_LEAD` where its shell keeps environment variables. The playbook's `S` line carries it, so the lead never has to remember it.
-- **Lead steps** are the steps that change the plan or the run's course: `init`, `add`, `add-specialist`, `start`, `reset`, `verdict`, `strategy`, `extend`, `freeze`, `foldin`, `ship`, `integrate`, `stop`, `close`, `ask`, `use-answer`, `pause`, `resume`, `push`, `pull`, and `next` when it would record a stop. With a different lead's id, or none, they refuse: "run X is led by another window (Claude Code, last active 14:05, 12 min ago); `/coordinator:status X` takes it over once that window has been quiet for 45 min".
-- **Never refused:** worker steps (`beat`, `built`, `evidence`, and an agent's `note`), so builders and critics keep working whoever leads. Also never refused: read-only steps (`show`, `status-line`, `questions`, `list`), answers and person notes from the dashboard or the CLI.
+- **Claiming.** A run records its lead with a `lead.claim` event: a lead id (never a host or user name), the tool, and the time. The `docs/design/v1.md` section 4.5 sketch used the same name. `init` claims for the window that starts the run. A run made before this change has no claim; its first lead step claims it. A lead step writes the claim it needs with its own change, in one locked write: both or neither.
+- **The id.** In Claude Code it is a short hash of the window's own session id, so there is nothing to pass, and the window's process is recorded with a value for this PC. Every other tool passes `--lead <id>` on each lead step or sets `COORDINATOR_LEAD` in that window's shell only; without either, the claim makes a random id and prints how to pass it. The playbook's `S` line carries it, so the lead never has to remember it. A tool's own session variables are used only once verified (`references/durability.md`, One lead).
+- **Lead steps** are the steps that change the plan or the run's course: `init`, `add`, `add-specialist`, `start`, `reset`, `verdict`, `strategy`, `extend`, `freeze`, `foldin`, `ship`, `integrate`, `close`, `ask`, `use-answer`, `pause`, `resume`, `push`, `pull`, `next` when it records a stop (there is no stop command: `next` and `close` record stops), and `note --kind decision --asking …`, which changes how the run asks the person. From another window they refuse: "run X is led by another window (Claude Code, last active 12 min ago (13:53 local, UTC+3)); leave its lead steps to it. Once it has been quiet for 45 min, run.mjs lead X takes it over; …".
+- **Never refused:** worker steps (`beat`, `built`, `evidence`, and an agent's `note` without `--asking`), so builders and critics keep working whoever leads. Also never refused: read-only steps (`show`, `status-line`, `questions`, `list`), answers and person notes from the dashboard or the CLI.
 - **When a lead counts as gone.** A lead is active while the run sees a lead step from it, or a beat from one of its units. It counts as gone in one of two ways:
   - **its window has ended:** the tool told us the window's process (Claude Code does), that process no longer runs on this PC, and the run has seen no lead step and no beat for 10 minutes (q1). A window reopened within those 10 minutes keeps its run;
   - **it has been quiet:** whatever the tool, no lead step and no beat for the run's stale time (`--stale-minutes`, 45 by default), the same clock that already decides a builder is quiet. This is the only signal that holds for every tool.
-- **Taking over.** Once the lead is gone, the next window that runs `status <run>` (or any lead step with `--takeover`) claims the run without asking (D2, D4) and writes "took over from <old id>: quiet since 14:05". While the old lead is still active, a takeover needs `--takeover --reason "…"` and happens only after you say yes. The window that took over follows the existing Resume steps (`references/durability.md`): units whose builders belonged to the old window go back to build with `reset`, and fresh agents start.
+- **Taking over.** Once the lead is gone, the next window that runs `run.mjs lead <run>` (which `/coordinator:status <run>` does), or any lead step with `--takeover`, claims the run without asking (D2, D4) and logs "took over from <old id>: quiet for over 45 min; last active 50 min ago (10:15 local, UTC+3)". While the old lead is still active, only `run.mjs lead <run> --takeover --reason "…"` takes it over, and only after you say yes. The window that took over follows the existing Resume steps (`references/durability.md`): units whose builders belonged to the old window go back to build with `reset`, and fresh agents start.
 - **The old window**, if it is still open, has its next lead step refused with the message above, so it stops instead of competing.
 
 ### 5.2 No second builder on a working unit
@@ -68,7 +68,7 @@ Coordinator works well because each run is self-contained and its log lets it su
 This is the fix for what happened on 2026-11-14, and it holds for every lead:
 
 - `start` on a unit that is building or being judged, with a beat younger than its stale time, refuses unless the lead adds `--takeover --reason "…"`, which is logged.
-- Every age the lead acts on comes from the script, worked out in minutes and printed in this PC's time zone: "last beat 52 min ago (14:05 local)". `show`, `next`, `status-line` and the refusals print ages this way. The lead never works out an age from a UTC timestamp, which is the mistake that started the second builder.
+- Every age the lead acts on comes from the script, worked out in minutes and printed in this PC's time zone: "last beat 52 min ago (14:05 local, UTC+3)". `show`, `next`, `status-line`, `lead` and the refusals print ages this way. The lead never works out an age from a UTC timestamp, which is the mistake that started the second builder.
 
 ### 5.3 Questions name their run and task
 
@@ -145,7 +145,7 @@ The fix:
 
 ### 5.8 Network and privacy
 
-Nothing new calls the network (D3). The lead id is random. The claim holds the id, the tool and a time. The detached dashboard listens on 127.0.0.1 only.
+Nothing new calls the network (D3). The lead id is a hash of the window's session id, a passed id or a random one, never a host or user name. The claim holds the id, the tool and a time, and, for a tool that gives its window's process, the process id and a value for this PC that cannot be tied to the PC (`push` blanks the process id). The detached dashboard listens on 127.0.0.1 only.
 
 ### 5.9 Not in this build
 

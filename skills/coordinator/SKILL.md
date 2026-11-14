@@ -24,11 +24,11 @@ Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (skill). Read
 
 ## The core
 
-- **Ask once, through the question tool.** One batch up front, recommendation first (`references/commands/run.md` step 1.7); agents report to you and never ask. Decide within the answers, log each decision, ask only for gated actions, design changes, stuck loops (`references/guardrails.md`).
-- **Log every question with `run.mjs ask`:** label first, in the mode printed (`references/commands/run.md`, Asking).
+- **Ask once, through the question tool.** One batch up front, recommendation first (`references/commands/run.md` step 1.7); agents report to you, never ask. Decide within the answers, log each decision, ask only for gated actions, design changes, stuck loops (`references/guardrails.md`).
+- **Log questions with `run.mjs ask`:** label first, mode as printed (`references/commands/run.md`, Asking).
 - **The bar decides.** Behaviours make up the bar, written first. A fresh critic, never the builder, marks each against the real artifact (`references/bar.md`).
 - **Short, no slop.** Outcome first; everything people read meets the craft bar (`references/craft.md`).
-- **Context rules are standing rules.** Read `references/context.md` first. Each run closes builders on report, gives fix rounds to fresh agents, budgets lead and agents, keeps briefs lean but complete, and records token totals in the retro.
+- **Context rules are standing rules.** Read `references/context.md` before the first launch. Each run closes builders on report, gives fix rounds to fresh agents, budgets lead and agents, keeps briefs lean but complete, and records token totals in the retro.
 - **The harness is the team.** Staff roles from its agents and skills (`references/team.md`), cheap models only where `references/routing.md` allows, sub-skills for gaps (`references/sub-skills.md`).
 - **The log decides.** `.coordinator/runs/<run>/events.jsonl`, written only by `run.mjs`, says what happens next (`references/durability.md`).
 - **The fence holds.** Out-of-scope work is a follow-up.

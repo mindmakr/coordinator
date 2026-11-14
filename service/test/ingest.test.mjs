@@ -21,7 +21,7 @@ test('readLog: a valid log replays to the run, with secrets masked a second time
   const withSecret = appendEvent(good, 'note', { ops: [{ op: 'push', path: ['notes'], values: [{ kind: 'info', text: `token ${SECRET}`, at: '2026-11-06T10:00:00.000Z' }] }] });
   const r = readLog('r1', withSecret);
   assert.equal(r.error, undefined, r.error);
-  assert.equal(r.seq, 8);
+  assert.equal(r.seq, 9);
   assert.equal(r.state.id, 'r1');
   assert.equal(JSON.stringify(r.state).includes(SECRET), false);
   assert.match(JSON.stringify(r.state), /\[redacted\]/);
@@ -51,7 +51,7 @@ test('sync: stores each run, is idempotent, keeps the last good state when a log
   let out = await t.ingest.syncRepo(7, REPO);
   assert.deepEqual(out.updated.sort(), ['r1', 'r2']);
   let runs = await t.db.runs(7, 70);
-  assert.deepEqual(runs.map((r) => [r.runId, r.seq, !!r.state, r.error]), [['r1', 7, true, null], ['r2', 8, true, null]]);
+  assert.deepEqual(runs.map((r) => [r.runId, r.seq, !!r.state, r.error]), [['r1', 8, true, null], ['r2', 9, true, null]]);
 
   const blobs = () => t.gh.calls.filter((c) => c[0] === 'blob').length;
   const before = blobs();
@@ -60,7 +60,7 @@ test('sync: stores each run, is idempotent, keeps the last good state when a log
   assert.equal(blobs(), before);
   out = await t.ingest.syncRepo(7, REPO, { force: true });
   assert.deepEqual(out.updated.sort(), ['r1', 'r2'], 'forced: read again');
-  assert.deepEqual((await t.db.runs(7, 70)).map((r) => r.seq), [7, 8], 'with the same result');
+  assert.deepEqual((await t.db.runs(7, 70)).map((r) => r.seq), [8, 9], 'with the same result');
 
   // r1's log is replaced by a broken one; r2 grows by one valid event.
   t.gh.setFiles('acme/web', stateFiles({ r1: Buffer.from('{"broken":\n'), r2: appendEvent(other, 'note', { ops: [{ op: 'push', path: ['notes'], values: [{ kind: 'info', text: 'later', at: '2026-11-06T10:00:00.000Z' }] }] }) }));
@@ -69,10 +69,10 @@ test('sync: stores each run, is idempotent, keeps the last good state when a log
   assert.deepEqual(out.updated, ['r2']);
   runs = await t.db.runs(7, 70);
   const r1 = runs.find((r) => r.runId === 'r1');
-  assert.equal(r1.seq, 7, 'the last good copy is kept');
+  assert.equal(r1.seq, 8, 'the last good copy is kept');
   assert.equal(r1.state.id, 'r1');
   assert.match(r1.error, /not JSON/);
-  assert.equal(runs.find((r) => r.runId === 'r2').seq, 9);
+  assert.equal(runs.find((r) => r.runId === 'r2').seq, 10);
 
   t.gh.setFiles('acme/web', stateFiles({ r2: other }));
   await t.ingest.syncRepo(7, REPO);

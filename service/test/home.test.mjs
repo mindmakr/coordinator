@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { leadEnv } from '../src/demo/runs.mjs';
+import { DEMO_LEAD, leadEnv } from '../src/demo/runs.mjs';
 import { makeRun } from './helpers.mjs';
 
 const home = process.env.COORDINATOR_HOME;
@@ -30,5 +30,6 @@ test('the demo lead\'s run.mjs keeps the temporary home and never writes a regis
   assert.equal(env.COORDINATOR_HOME, home);
   assert.equal(env.COORDINATOR_REGISTRY, 'off');
   assert.equal(env.COORDINATOR_DIR, '/x/.coordinator');
+  assert.equal(env.COORDINATOR_LEAD, DEMO_LEAD, 'the demo lead has an id of its own');
   assert.equal('COORDINATOR_HOME' in leadEnv('/x', { PATH: 'p' }), false, 'nothing set: nothing added');
 });

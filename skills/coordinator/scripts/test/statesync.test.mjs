@@ -82,12 +82,12 @@ test('pull never overwrites local events the copy lacks', () => {
   cli(B, 'note', 'r1', '--kind', 'info', '--text', 'only on b'); cli(B, 'push', 'r1');
   const before = readFileSync(join(runDir(A, 'r1'), 'events.jsonl'), 'utf8');
   const r = cli(A, 'pull', 'r1');
-  assert.equal(r.code, 1); assert.match(r.err, /different histories after event 4/); assert.match(r.err, /nothing changed. To recover: move the local run folder aside/);
+  assert.equal(r.code, 1); assert.match(r.err, /different histories after event 5/); assert.match(r.err, /nothing changed. To recover: move the local run folder aside/);
   assert.equal(readFileSync(join(runDir(A, 'r1'), 'events.jsonl'), 'utf8'), before);
   // Nor does push drop the other machine's events.
   const tip = git(origin, 'rev-parse', 'coordinator-state').trim();
   const p = cli(A, 'push', 'r1');
-  assert.equal(p.code, 1); assert.match(p.err, /different histories after event 4; nothing pushed/); assert.match(p.err, /move the local run folder aside, run.mjs pull r1/);
+  assert.equal(p.code, 1); assert.match(p.err, /different histories after event 5; nothing pushed/); assert.match(p.err, /move the local run folder aside, run.mjs pull r1/);
   assert.equal(git(origin, 'rev-parse', 'coordinator-state').trim(), tip);
   assert.match(show('coordinator-state', 'runs/r1/events.jsonl'), /only on b/);
   // A machine that is merely behind is told to pull first.
@@ -263,4 +263,23 @@ test('a note or answer from the branch with fields run.mjs never writes is not r
   const log = readFileSync(join(runDir(A, 'r5'), 'events.jsonl'), 'utf8');
   for (let i = 0; i < 2; i++) assert.match(cli(A, 'pull', 'r5', '--from', folder).err, /different histories/);
   assert.equal(readFileSync(join(runDir(A, 'r5'), 'events.jsonl'), 'utf8'), log);
+});
+
+test('push blanks the lead\'s window process; pull and the next push agree with it', () => {
+  const env = { ...process.env, COORDINATOR_DIR: stateDir(A), CLAUDE_CODE_SESSION_ID: 'sync-window', CLAUDE_PID: String(process.pid) };
+  delete env.COORDINATOR_LEAD;
+  const lead = (...a) => { const x = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { cwd: A, env, encoding: 'utf8' }); return { code: x.status, out: json(x.stdout), err: x.stderr }; };
+  const r = lead('init', 'rp', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'claude-code');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(readRun(runDir(A, 'rp')).state.lead.pid, process.pid, 'kept on this PC');
+  const folder = join(root, 'pid-copy');
+  const p = lead('push', 'rp', '--to', folder);
+  assert.equal(p.code, 0, p.err);
+  const copied = readFileSync(join(folder, 'runs', 'rp', 'events.jsonl'), 'utf8');
+  assert.equal(copied.includes(`"pid":${process.pid}`), false, 'no process id in the copy');
+  assert.equal(JSON.parse(readFileSync(join(folder, 'runs', 'rp', 'state.json'), 'utf8')).lead.pid, null);
+  assert.equal(lead('pull', 'rp', '--from', folder).out.status, 'up-to-date');
+  const again = lead('push', 'rp', '--to', folder); assert.equal(again.code, 0, again.err);
+  assert.equal(readFileSync(join(folder, 'runs', 'rp', 'events.jsonl'), 'utf8'), copied, 'the next push agrees with the blanked copy');
+  assert.equal(cli(B, 'pull', 'rp', '--from', folder).out.status, 'restored');
 });

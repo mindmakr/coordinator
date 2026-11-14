@@ -2,7 +2,8 @@
 // log, its snapshot and a plain README, plus project lessons and one stats line
 // per closed run, written to a `coordinator-state` branch (or a folder) only
 // when the lead calls `push`. Everything written is masked first: secrets
-// become [redacted], the project path becomes `.`, the home folder `~`.
+// become [redacted], the project path becomes `.`, the home folder `~`, and the
+// lead's window process is blanked (it means nothing off this PC).
 // A public repo is refused unless a private companion repo is configured.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -10,6 +11,7 @@ import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { EVENTS, STATE, parseLog, readRun, replay, snapshotText, updateRun } from './events.mjs';
 import { extras, holds, replayAct, shared } from './incoming.mjs';
+import { blankPid } from './lead.mjs';
 import { maskSecrets } from './secrets.mjs';
 import { safeId, withLock, writeAtomic } from './store.mjs';
 
@@ -29,7 +31,8 @@ export function redactor(project) {
   const deep = (v) => (typeof v === 'string' ? str(v) : Array.isArray(v) ? v.map(deep) : isObj(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)])) : v);
   return deep;
 }
-const redactLog = (log, red) => Buffer.from(log.events.map((e) => `${JSON.stringify(red(e))}\n`).join(''));
+// The lead's window process stays on this PC (lib/lead.mjs blankPid).
+const redactLog = (log, red) => Buffer.from(log.events.map((e) => `${JSON.stringify(red(blankPid(e)))}\n`).join(''));
 
 // .coordinator/coordinator.json (optional): { visibility, state, remote, stateRepo, branch } (lib/settings.mjs).
 // `file` (where it is or would be) rides along so a refusal can name it.

@@ -10,7 +10,8 @@ import { bySetup, earlySummary, escapes, roundCap, unmet } from './rules.mjs';
 import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
 import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
-import { runStatus } from './progress.mjs';
+import { agoText, runStatus } from './progress.mjs';
+import { leadInfo } from './lead.mjs';
 import { pauseParts, usedMinutes } from './clock.mjs';
 import { openPause, resumeStep } from './pause.mjs';
 
@@ -46,7 +47,7 @@ function nextStep(run, plan) {
 
 // linked: the runs this one continues or was continued in (lib/chain.mjs linkedRuns); without them a chain still shows, its other runs as "not here".
 // project: the project's name for each question's label (lib/questions.mjs questionLabel); the hosted service passes the repo's name.
-export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null, project = null } = {}) {
+export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null, project = null, alive = null, timeZone } = {}) {
   const end = run.closed ? Date.parse(run.closed.at) : nowMs;
   const next = new Map(plan.units.map((u) => [u.id, u]));
   const integ = run.integration?.rounds ?? [];
@@ -72,6 +73,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     status: runStatus(run, plan, { nowMs, runs: linked ? [...linked.values()].filter((r) => r && Array.isArray(r.units)) : [run] }),
     retroPending: retroPending(run, plan.decision), // every unit decided and no retro note yet (lib/retro.mjs)
     open: !run.closed, started: run.createdAt, closedAt: run.closed?.at ?? null,
+    // Ages worked out here, in minutes and this machine's local time (lib/lead.mjs, lib/progress.mjs agoText).
+    startedText: agoText(run.createdAt, nowMs, timeZone), lead: run.closed ? null : leadInfo(run, nowMs, { alive, timeZone }),
     situation: situation(run, plan, run.closed ? [] : qs),
     needsYou: run.closed ? [] : qs.filter((q) => q.open),
     answered: run.closed ? [] : qs.filter((q) => q.status === 'answered'),
@@ -97,6 +100,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
       return {
         id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, shipped: u.shipped ?? null, after: u.after ?? null,
         sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
+        lastBeat: ['building', 'judging'].includes(u.status) ? agoText(u.heartbeatAt ?? run.createdAt, nowMs, timeZone) : null,
         dot: dots.get(u.id), badge: stateBadge(dots.get(u.id), u, d), finished: ['passed', 'stopped'].includes(dots.get(u.id)),
         // Depends on (its after) and blocks (units whose after names it), each with its state.
         dependsOn: waitIds(u).map(brief), dependents: run.units.filter((x) => waitIds(x).includes(u.id)).map((x) => brief(x.id)),
@@ -150,6 +154,9 @@ export const trend = (scores) => scores.map((s) => (s.score === null ? '–' : S
 // "failed by specialist money (general critic: pass, 9)": the critic that failed a round the general critic passed.
 const failedByText = (f) => `failed by specialist ${f.specialists.join(', ')} (general critic: ${f.general ?? 'pass'}${f.score === null ? '' : `, ${f.score}`})`;
 
+// Who leads the run (lib/lead.mjs): its tool, since when, last active; gone, and how it is taken over.
+const leadLine = (v) => (!v.lead ? 'none recorded yet: the next lead step claims the run'
+  : `${v.lead.tool} · since ${v.lead.since ?? 'unknown'} · last active ${v.lead.lastActive ?? 'unknown'}${v.lead.gone ? ` · gone (${v.lead.goneText}): run.mjs lead ${v.id} takes it over` : ''}`);
 export function text(v) {
   const w = Math.max(4, ...v.units.map((u) => u.id.length)) + 2;
   const budget = v.budget.map((b) => `${b.name} ${b.used}/${b.max}${b.unit ? ` ${b.unit}` : ''}${b.note ? ` (${b.note})` : ''}`).join(' · ');
@@ -158,9 +165,10 @@ export function text(v) {
     : ['needs you  nothing'];
   const answered = v.answered.flatMap((q) => [`answered   ${q.label}`, `${' '.repeat(11)}${q.id}: ${clip(answerText(q.answer), 100)} (by ${q.answer.by}; the lead has not used it yet)`]);
   const lines = [
-    `${v.id} [${v.tag}] · ${v.status.word} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
+    `${v.id} [${v.tag}] · ${v.status.word} · started ${v.startedText ?? v.started.slice(0, 16).replace('T', ' ')}`,
     ...statusLines(v.status),
     `phase      ${v.phase}`,
+    ...(v.open ? [`lead       ${leadLine(v)}`] : []),
     `situation  ${clip(v.situation.text, 240)}`,
     ...needs,
     ...answered,
@@ -174,6 +182,7 @@ export function text(v) {
     const bs = u.behaviours.length ? ` · behaviours ${u.behaviours.filter((b) => b.status === 'pass').length}/${u.behaviours.length}` : '';
     lines.push(`${u.id.padEnd(w)}${(u.shipped ? 'shipped' : u.status).padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
+    if (u.lastBeat) lines.push(`${' '.repeat(w)}last beat ${u.lastBeat}`);
     if (u.gap) lines.push(`${' '.repeat(w)}└ ${u.failedBy ? `${failedByText(u.failedBy)}: ` : ''}${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
     if (u.early) lines.push(`${' '.repeat(w)}◦ ${clip(u.early.text, 200)}`);
     if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
