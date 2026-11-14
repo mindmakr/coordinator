@@ -22,7 +22,7 @@ The launch caps are passed on, not enforced live: `next` lists them as `launch` 
 
 **The clock stops while the run is paused.** When the person stops the work (overnight, a PC restart), record it: `run.mjs pause <run> --reason "…"`, and `run.mjs resume <run>` when they say to go on. No minute in between counts toward `--max-minutes`, whatever runs meanwhile. While paused, `next` says so and how to resume and starts no unit, and `start` is refused; `show` and the dashboard say Paused. A second `pause`, or `resume` on a run that is not paused, is refused.
 
-**Looking never stops a run.** Past the time budget, `next` records nothing: it lists the units it would stop (`recorded: false`) and the `close` that records those stops. Stops from verdicts (rounds, same gap, no progress) are recorded by `next` as before.
+**Looking never stops a run.** Past the time budget, `next` records nothing: it lists the units it would stop (`recorded: false`) and the `close` that records those stops. Stops from verdicts (rounds, same gap, no progress) are recorded by `next` as before, until the time budget is spent.
 
 Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run.
 

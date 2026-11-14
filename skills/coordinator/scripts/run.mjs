@@ -1219,6 +1219,7 @@ const commands = {
   next([run]) {
     let stopped; let s = load(run);
     const expired = !s.closed && spent(s, Date.now());
+    // Expired: applyStops changes the loaded state in memory only; it is never saved.
     if (expired) stopped = applyStops(s);
     else s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
     const plan = decide(s);
