@@ -18,7 +18,8 @@
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
 //   run.mjs add-specialist <run> <unit> <name> --reason R   a critic that must also pass, added after add: required from the
 //                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
-//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove
+//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove;
+//                  behaviour text (here and in add --behaviour) is 500 characters at most, refused over it, never cut
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link|reins|prism [--label L]
 //                  prism: --file <worktree>/.prism/gate-report.json, beside the tokens.json it was checked against; while the
@@ -35,6 +36,9 @@
 //                  verdict"; delivered, never a clean pass), links the merge, and files the missing verdict and its last round's
 //                  open findings as follow-ups; without --confirm or --answer, their latest note on the unit (lib/approval.mjs)
 //   run.mjs freeze <run>
+//   run.mjs pause <run> --reason R | resume <run>   the person stops the work by hand (overnight, a restart): until resume,
+//                  no minute counts toward the time budget, next says paused and starts no unit, and start is refused;
+//                  a second pause, or resume on a run that is not paused, is refused (lib/pause.mjs)
 //   Cost (start, built, verdict, foldin): [--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"], what the harness
 //                  reported for that launch; stats, show and the HUD sum them per unit, model and run ("not recorded" when missing)
 //   --accept-open (init, add, behave): keep a goal, bar or behaviour line that reads open-ended (lib/openbar.mjs), recorded as a bar note
@@ -107,7 +111,8 @@
 //   run.mjs watch <run> [--remote [--every S]]   one line per new or changed answer and per note from the person; never exits.
 //                  --remote also pulls the run from its state branch every S seconds (10-60, default 30), and at once
 //                  when the service's doorbell rings (COORDINATOR_SERVICE); lines starting "remote:" are about that link
-//   run.mjs next <run>     prints what to do and records any stops
+//   run.mjs next <run>     prints what to do and records any stops; on a run past its time budget it records nothing and
+//                          lists the stops close will record (recorded: false); on a paused run it says how to resume
 //   run.mjs show <run>     prints the compact text HUD (status, progress, ETA, situation, needs you, units, budget, next step)
 //   run.mjs status-line [<run>] [--json]   the one line the lead posts at each milestone ("payday-x · Running: 2 of 4 units
 //                          done (50%), building u3 round 2, about 1 h left (~21:40). Nothing needs you."), the closing
@@ -168,8 +173,9 @@ import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
-import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
+import { allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
 import { usedMinutes } from './lib/clock.mjs';
+import { pauseNote, pausedRefusal, pauseRun, resumeRun } from './lib/pause.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
@@ -222,7 +228,7 @@ const FLAGS = {
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
-  push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS,
+  push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'],
 };
 // Notes about one unit (#45): scoped with --unit, shown on its page.
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
@@ -598,6 +604,13 @@ const commands = {
       s.frozen = true;
     });
   },
+  // The person stops the work by hand (overnight, a restart): paused minutes count toward no budget
+  // and no unit starts until resume (lib/pause.mjs, #132).
+  pause([run], o) {
+    const reason = text(o.reason, 'reason (why the run pauses)', 300);
+    return change(run, 'run.pause', (s) => pauseRun(s, { reason, at: now() }));
+  },
+  resume([run]) { return change(run, 'run.resume', (s) => resumeRun(s, { at: now() })); },
   // A new build: the critic marks every behaviour again.
   start([run, unit], o) {
     const model = modelName(o.model, 'model'); const why = optText(o.why, 80);
@@ -609,6 +622,8 @@ const commands = {
     if (!early && o.reason !== undefined) throw new Error('--reason goes with --force-start');
     const cfg = routing(baseDir('project'));
     return change(run, 'unit.start', (s) => {
+      const paused = pausedRefusal(s, 'start'); // a paused run starts no unit (#132)
+      if (paused) throw new Error(paused);
       const u = unitOf(s, unit);
       // A new build ends the round: a specialist mark still to come could no longer be recorded.
       if (early) {
@@ -1207,9 +1222,14 @@ const commands = {
   // Returns this round's actions (a stop shows once, here) and records the stops.
   // Stops cascade (a stopped unit stops the units stacked on it), so apply them
   // until nothing changes; each stop is reported once, here.
+  // Past the time budget, looking changes nothing (#132): the stops are worked out in memory, reported
+  // with recorded: false, and recorded by close.
   next([run]) {
-    let stopped;
-    const s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
+    let stopped; let s = load(run);
+    const expired = !s.closed && spent(s, Date.now());
+    // Expired: applyStops changes the loaded state in memory only; it is never saved.
+    if (expired) stopped = applyStops(s);
+    else s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
     const plan = decide(s);
     const cfg = routing(baseDir('project'));
     const suggest = (u) => { const e = u.action === 'build' ? escalation(cfg, unitOf(s, u.id)) : null; return e ? { ...u, model: e.model, modelWhy: e.why } : u; };
@@ -1227,7 +1247,13 @@ const commands = {
     // The per-launch caps the lead passes to the agent it launches for this step (guardrails.md).
     const caps = launchCaps(s);
     const launch = (u) => (caps && ['build', 'judge', 'fold-in'].includes(u.action) ? { ...u, launch: { ...(caps.minutes ? { minutes: caps.minutes } : {}), ...(caps.cost ? { cost: `${caps.cost.amount} ${caps.cost.currency}` } : {}) } } : u);
-    return { decision: plan.decision, units: plan.units.map((u) => stopped.get(u.id) ?? launch(early(how(sync(suggest(u)))))) };
+    const units = plan.units.map((u) => (stopped.has(u.id) ? { ...stopped.get(u.id), ...(expired ? { recorded: false } : {}) } : launch(early(how(sync(suggest(u)))))));
+    const paused = pauseNote(s); // a paused run starts nothing: its build and judge steps wait (lib/pause.mjs)
+    const outcome = { stopped: 'stopped', 'done-with-gaps': 'partial', done: 'done' }[plan.decision];
+    return {
+      decision: paused ? 'paused' : plan.decision, ...(paused ? { paused } : {}), units,
+      ...(expired ? { spent: { text: 'the time budget is spent: next recorded nothing', step: outcome ? `run.mjs close ${s.id} --outcome ${outcome} records the stops above` : 'a critic started inside the time budget may still return its verdict; then close records the stops' } } : {}),
+    };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];
@@ -1436,7 +1462,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 let BY = null;
 try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
 if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);

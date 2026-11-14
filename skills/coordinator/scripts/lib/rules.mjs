@@ -5,6 +5,7 @@ import { chainUnits } from './chain.mjs';
 import { doubtful, fromPerson } from './approval.mjs';
 import { strategyHint } from './strategy.mjs';
 import { usedMinutes } from './clock.mjs';
+import { held } from './pause.mjs';
 
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
@@ -55,7 +56,7 @@ export function earlySummary(unit) {
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
 // The time budget's clock: paused while a question to the person is open and no unit is building or judging (lib/clock.mjs).
-const spent = (run, nowMs) => usedMinutes(run, nowMs) > run.budget.maxMinutes;
+export const spent = (run, nowMs) => usedMinutes(run, nowMs) > run.budget.maxMinutes;
 
 // Severity of a finding (the critic's reply, references/briefs.md). Only high and medium fail a round;
 // low and nit ride on a pass as fold-ins (`verdict pass --fold`).
@@ -242,7 +243,10 @@ function finishLine(unit, run) {
 const judgingInTime = (unit, run) => unit.status === 'judging' && typeof unit.judgingAt === 'string'
   && usedMinutes(run, Date.parse(unit.judgingAt)) <= run.budget.maxMinutes;
 
-export function decideUnit(unit, run, nowMs) {
+// A paused run (run.mjs pause, lib/pause.mjs) starts no agent: those steps wait until it resumes.
+export const decideUnit = (unit, run, nowMs) => held(run, unitStep(unit, run, nowMs));
+
+function unitStep(unit, run, nowMs) {
   const { budget } = run;
   if (unit.status === 'pass') {
     // A pass that carries fold-ins waits for their targeted check (`run.mjs foldin`), then merges.

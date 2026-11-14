@@ -11,14 +11,26 @@ import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
 import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
 import { runStatus } from './progress.mjs';
-import { pausedMinutes, usedMinutes } from './clock.mjs';
+import { pauseParts, usedMinutes } from './clock.mjs';
+import { openPause, resumeStep } from './pause.mjs';
 
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'];
 
 const label = (d) => (d ? `${d.action}${d.reason ? `: ${d.reason}` : ''}${d.phase ? ` (${d.phase})` : ''}` : '');
 
+// The time line's note: the minutes that did not count, and why.
+function pausedNote(run, end) {
+  const p = pauseParts(run, end);
+  const parts = [
+    ...(Math.round(p.held) ? [`${Math.round(p.held)} min on pause`] : []),
+    ...(Math.round(p.asked) ? [`${Math.round(p.asked)} min paused while the person decided and no unit was at work`] : []),
+  ];
+  return parts.length ? { note: parts.join(', ') } : {};
+}
+
 function nextStep(run, plan) {
   if (run.closed) return `nothing: closed as ${run.closed.outcome}`;
+  if (openPause(run)) return `paused: ${resumeStep(run)} when the person says to go on`;
   switch (plan.decision) {
     case 'split': return 'add units, then freeze';
     case 'integrate': return 'send the integrator';
@@ -54,7 +66,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
       behaviours: goalBehaviours, evidence: run.goalEvidence ?? [],
       met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
     }, bar: run.bar, fence: run.fence,
-    phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
+    phase: run.closed ? `closed: ${run.closed.outcome}` : openPause(run) ? 'paused' : plan.decision,
     // The plain status word, progress and ETA (lib/progress.mjs), the same everywhere.
     status: runStatus(run, plan, { nowMs, runs: linked ? [...linked.values()].filter((r) => r && Array.isArray(r.units)) : [run] }),
     retroPending: retroPending(run, plan.decision), // every unit decided and no retro note yet (lib/retro.mjs)
@@ -65,8 +77,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     asks: qs, personNotes,
     timeLeft: timeLeft(run, plan, nowMs),
     budget: [
-      // Minutes while a question to the person is open and no unit is at work do not count (lib/clock.mjs).
-      { name: 'time', used: Math.round(usedMinutes(run, end)), max: run.budget.maxMinutes, unit: 'min', ...(Math.round(pausedMinutes(run, end)) ? { note: `${Math.round(pausedMinutes(run, end))} min paused while the person decided and no unit was at work` } : {}) },
+      // Minutes paused by hand, or while a question to the person is open and no unit is at work, do not count (lib/clock.mjs).
+      { name: 'time', used: Math.round(usedMinutes(run, end)), max: run.budget.maxMinutes, unit: 'min', ...pausedNote(run, end) },
       { name: 'units', used: run.units.length, max: run.budget.maxUnits, unit: '' },
       { name: 'added after freeze', used: run.addedAfterFreeze ?? 0, max: run.budget.maxAdded, unit: '' },
       { name: 'integration rounds', used: integ.length, max: run.budget.maxRounds, unit: '' },
