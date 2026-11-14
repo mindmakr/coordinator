@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { needsSection, pcModel } from '../lib/dashboard.mjs';
@@ -126,7 +126,8 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     const rec = JSON.parse(readFileSync(join(home, 'dashboard.json'), 'utf8'));
     assert.deepEqual([rec.pid, rec.version], [pid, VERSION], 'the record names the pid and the skill version');
     const line = readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).findLast((l) => l?.started && l.pid === pid);
-    assert.equal(resolve(line.cwd), resolve(home), 'the dashboard runs in the register folder, not the caller\'s');
+    assert.equal(line.cwdIsHome, true, 'the dashboard runs in the register folder, not the caller\'s');
+    assert.equal(line.cwd, undefined, 'the log line holds no folder path');
     rmSync(starter, { recursive: true });
     assert.ok(!existsSync(starter), 'the folder it was started from can be removed while it runs');
     assert.doesNotMatch(readFileSync(log, 'utf8'), /\?t=/, 'the log holds no token');

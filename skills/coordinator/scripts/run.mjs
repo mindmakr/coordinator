@@ -166,7 +166,7 @@
 //   --harness NAME (any command): the tool running it (claude-code, codex, antigravity, gemini …); else
 //                  COORDINATOR_HARNESS, else detected. Every write stamps the run with it and the skill version
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, truncateSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, lstatSync, rmSync, statSync, truncateSync } from 'node:fs';
 import { execFile, spawn as spawnProcess } from 'node:child_process';
 import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
@@ -1522,8 +1522,8 @@ function serveDashboard(port, o) {
     if (process.env[DETACHED_ENV]) {
       // Keep dashboard.log short while the dashboard runs for days. Its stdout is that file opened for append,
       // so emptying it in place is safe: the next line lands at the new end.
-      setInterval(() => { try { if (statSync(dashboardLog()).size > LOG_MAX) truncateSync(dashboardLog(), 0); } catch { /* gone */ } }, 60_000).unref();
-      console.log(JSON.stringify({ started: true, pid: process.pid, port: server.address().port, cwd: process.cwd(), version: VERSION, at: now() }));
+      setInterval(() => trimLog(dashboardLog()), 60_000).unref();
+      console.log(JSON.stringify({ started: true, pid: process.pid, port: server.address().port, cwdIsHome: resolve(process.cwd()) === resolve(registryHome()), version: VERSION, at: now() }));
       return;
     }
     if (o.open) openBrowser(url);
@@ -1535,6 +1535,11 @@ function serveDashboard(port, o) {
   }).then(ready, (e) => { console.error(`error: ${e.message}`); process.exit(1); });
 }
 
+// Empties the log in place when it is too long. lstat, not stat: only a regular file is trimmed, never what a symlink points at.
+function trimLog(path) {
+  try { const st = lstatSync(path); if (st.isFile() && st.size > LOG_MAX) truncateSync(path, 0); } catch { /* none yet, or gone */ }
+}
+
 // Starts the PC dashboard as a detached process (no console window on Windows), its output in
 // dashboard.log, and prints its link once the link answers. The child records itself in dashboard.json.
 // It runs in the register's folder, so it never holds the caller's folder (often a worktree) open, and it
@@ -1542,8 +1547,7 @@ function serveDashboard(port, o) {
 function startDashboard(port, o) {
   const log = dashboardLog();
   mkdirSync(registryHome(), { recursive: true });
-  let size = 0; try { size = statSync(log).size; } catch { /* none yet */ }
-  if (size > LOG_MAX) truncateSync(log, 0);
+  trimLog(log);
   // A raw file handle, not lib/store.mjs: the log is the detached child's own stdout and stderr, which must be
   // a file descriptor (a pipe would die with this process, and a hidden window on Windows needs a handle).
   // Opened for append, so the child's in-place trim (serveDashboard) is safe.
