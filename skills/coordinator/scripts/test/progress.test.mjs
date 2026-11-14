@@ -176,7 +176,7 @@ test('the CLI: list, status-line (one run and all), show and self print the same
   ok('add', 'r2', 'd1', '--bar', 'page exists'); ok('freeze', 'r2'); ok('next', 'r2');
   ok('note', 'r2', '--kind', 'decision', '--text', 'skip');
   const one = ok('status-line', 'r1').trim();
-  assert.match(one, /^r1 · Running: 0 of 2 units done \(0%\), building api round 1, last beat under a minute ago \(\d\d:\d\d local, UTC[+-]?[\d:]*\), no estimate yet\. Nothing needs you\.$/);
+  assert.match(one, /^r1 · Running: 0 of 2 units done \(0%\), building api round 1, last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\), no estimate yet\. Nothing needs you\.$/);
   const list = JSON.parse(ok('list'));
   const r1 = list.find((r) => r.run === 'r1');
   assert.equal(r1.line, one);
@@ -188,7 +188,7 @@ test('the CLI: list, status-line (one run and all), show and self print the same
   assert.equal(all.length, 2);
   const show = ok('show', 'r1');
   assert.match(show, /^r1 \[code\] · Running/);
-  assert.match(show, /^progress {3}0 of 2 units done \(0%\) · building api round 1, last beat under a minute ago \(\d\d:\d\d local, UTC[+-]?[\d:]*\)$/m);
+  assert.match(show, /^progress {3}0 of 2 units done \(0%\) · building api round 1, last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\)$/m);
   assert.match(show, /^eta {8}no estimate yet$/m);
   assert.ok(ok('self').includes(one));
   const json = JSON.parse(ok('status-line', 'r1', '--json'));
