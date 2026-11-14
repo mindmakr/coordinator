@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { briefMark } from '../lib/briefs.mjs';
+import { briefMark, briefPrompt } from '../lib/briefs.mjs';
 import { AgentSummary, report, WEIGHTS } from '../lib/context.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -131,6 +131,19 @@ test('a marker inside a tool result, or in the lead\'s own transcript, starts no
   assert.deepEqual(run([asst('a', 0), inResult, asst('b', 1)], { id: 's' }).rounds, []);
   assert.deepEqual(run([brief('web', 1, 'builder'), asst('a', 0)], { id: 'lead', main: true }).rounds, []);
   assert.deepEqual(run([{ type: 'user', message: { content: 'see [coordinator-brief run=r1 unit=web round=1 role=builder] above' } }, asst('a', 0)], { id: 's' }).rounds, []);
+});
+
+test('an agent briefed by file (run.mjs brief --to) counts under its role and round; the file it reads stays unread', () => {
+  const body = `${briefMark({ run: 'r1', unit: 'web', round: 3, role: 'builder' })}\nYou are the builder.`;
+  const prompt = { type: 'user', message: { content: briefPrompt(body, 'C:/scratch/brief-web-r3.md') } };
+  const read = { type: 'assistant', message: { id: 'tu', model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }], usage: { input_tokens: 2, output_tokens: 5 } }, timestamp: '2026-11-14T10:00:00Z' };
+  // The tool result that read the file carries another marker: never read, so it starts no round.
+  const result = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: briefMark({ run: 'r1', unit: 'web', round: 9, role: 'critic' }) }] } };
+  const sub = run([prompt, read, result, asst('a', 1, { write: 50_000 })], { id: 'b-3', agentType: 'general-purpose' });
+  assert.deepEqual(sub.rounds.map((s) => [s.unit, s.round, s.role, s.turns]), [['web', 3, 'builder', 2]]);
+  const rep = report([sub]);
+  assert.deepEqual(rep.costShareByRole.map((g) => g.role), ['builder']);
+  assert.deepEqual(rep.rounds.map((g) => `${g.unit}/${g.round}/${g.role}`), ['web/3/builder']);
 });
 
 test('report: cost share by role, one row per run, unit, round and role, and the resumed agents', () => {
