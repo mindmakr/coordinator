@@ -94,6 +94,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         sync: syncs.has(u.id) ? syncStep(run.id, u.id, syncs.get(u.id), u.status === 'pass') : null,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
+        // A round the general critic passed and a specialist failed (#126): who failed it, and the general verdict and score.
+        failedBy: u.status !== 'pass' && last?.failedBy ? { specialists: last.failedBy, general: last.general ?? null, score: typeof last.score === 'number' ? last.score : null } : null,
         evidence: last?.evidence ?? null,
         next: label(d),
         personNotes: personNotes.filter((n) => n.unit === u.id),
@@ -132,6 +134,9 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
 export const trend = (scores) => scores.map((s) => (s.score === null ? '–' : String(s.score))).join(' → ');
 
 // The compact text HUD: the situation first, then a dozen lines of detail.
+// "failed by specialist money (general critic: pass, 9)": the critic that failed a round the general critic passed.
+const failedByText = (f) => `failed by specialist ${f.specialists.join(', ')} (general critic: ${f.general ?? 'pass'}${f.score === null ? '' : `, ${f.score}`})`;
+
 export function text(v) {
   const w = Math.max(4, ...v.units.map((u) => u.id.length)) + 2;
   const budget = v.budget.map((b) => `${b.name} ${b.used}/${b.max}${b.unit ? ` ${b.unit}` : ''}${b.note ? ` (${b.note})` : ''}`).join(' · ');
@@ -156,7 +161,7 @@ export function text(v) {
     const bs = u.behaviours.length ? ` · behaviours ${u.behaviours.filter((b) => b.status === 'pass').length}/${u.behaviours.length}` : '';
     lines.push(`${u.id.padEnd(w)}${(u.shipped ? 'shipped' : u.status).padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
-    if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
+    if (u.gap) lines.push(`${' '.repeat(w)}└ ${u.failedBy ? `${failedByText(u.failedBy)}: ` : ''}${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
     if (u.early) lines.push(`${' '.repeat(w)}◦ ${clip(u.early.text, 200)}`);
     if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
     if (u.chainText) lines.push(`${' '.repeat(w)}↔ ${clip(u.chainText, 200)}`);

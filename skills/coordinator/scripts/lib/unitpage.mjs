@@ -20,7 +20,11 @@ function links(u, ctx) {
 
 function round(r, repo) {
   const marks = (r.behaviours ?? []).map((m) => `<li data-a="r${r.n}-${esc(m.id)}">${chip(m.status, m.status)} <b>${esc(m.id)}</b>${m.evidence ? ` ${linkify(m.evidence, repo)}` : ''}</li>`).join('');
-  return `<div class="round" data-a="round-${r.n}"><h4>Round ${r.n} ${chip(r.verdict, r.verdict)}${r.score !== null && r.score !== undefined ? ` <span class="cause">score ${esc(r.score)}</span>` : ''}`
+  const score = r.score !== null && r.score !== undefined ? `score ${esc(r.score)}` : null;
+  // A round the general critic passed and a specialist failed (#126): say who failed it, and the general verdict and score.
+  const head = r.failedBy ? ` <span class="cause">failed by specialist ${esc(r.failedBy.join(', '))}</span> <span class="cause">general critic: ${esc(r.general ?? 'pass')}${score ? `, ${score}` : ''}</span>`
+    : score ? ` <span class="cause">${score}</span>` : '';
+  return `<div class="round" data-a="round-${r.n}"><h4>Round ${r.n} ${chip(r.verdict, r.verdict)}${head}`
     + `${r.cause ? ` <span class="cause">cause: ${esc(r.cause)}</span>` : ''} ${stamp(r.at, 'cause')}</h4>`
     + (whoRound(r) ? `<p class="cause" data-a="r${r.n}-who">${esc(whoRound(r))}</p>` : '')
     + `<dl>${r.report ? `<dt>Builder's report</dt><dd>${linkify(r.report, repo)}</dd>` : ''}`

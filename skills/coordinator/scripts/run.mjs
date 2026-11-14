@@ -168,7 +168,7 @@ import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
-import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, stats } from './lib/rules.mjs';
+import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
 import { usedMinutes } from './lib/clock.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
@@ -746,7 +746,8 @@ const commands = {
       const worst = SEVERITIES.find((x) => findings.some((f) => f.severity === x));
       if (v === 'fail' && worst && SEVERITIES.indexOf(worst) < SEVERITIES.indexOf(severity)) throw new Error(`--severity ${severity}, but a ${worst} finding is listed: the gap's severity is the worst finding's`);
       if (v === 'pass' && FAILING.includes(worst)) throw new Error(`pass refused: a ${worst} finding is listed; a high or medium finding fails the round`);
-      const folds = (o.fold ?? []).map((f) => checkFold(text(f === true ? undefined : f, 'fold', 500))).map((f) => (f.severity === 'low' ? f.text : `nit: ${f.text}`));
+      const foldItems = (o.fold ?? []).map((f) => checkFold(text(f === true ? undefined : f, 'fold', 500)));
+      const folds = foldItems.map((f) => (f.severity === 'low' ? f.text : `nit: ${f.text}`));
       if (folds.length && v !== 'pass') throw new Error('--fold goes with a pass: a fail sends the gap back to the builder');
       if (folds.length > 10) throw new Error('at most 10 --fold items: more than that is another round');
       const fullSuite = o['full-suite'] === undefined ? null : o['full-suite'] === true ? true : oneOf(String(o['full-suite']), ['yes', 'no'], '--full-suite') === 'yes';
@@ -784,28 +785,34 @@ const commands = {
         return;
       }
       if (late) throw new Error('unreachable');
-      {
-      }
-      const missing = (u.specialists ?? []).filter((n) => u.specialistMarks?.[n]?.verdict !== 'pass');
-      if (verdict === 'pass' && missing.length) throw new Error(`pass refused: specialist ${missing.join(', ')} has not passed this build`);
-      const gate = verdict === 'pass' ? prismRefusal(u) : null;
+      // Every required specialist marks the build before a general pass closes the round.
+      const unmarked = (u.specialists ?? []).filter((n) => !u.specialistMarks?.[n]);
+      if (verdict === 'pass' && unmarked.length) throw new Error(`pass refused: specialist ${unmarked.join(', ')} has not passed this build`);
+      // A general pass on a build a specialist failed (#126): recorded as given, the round closes as failed by that specialist.
+      const byS = verdict === 'pass' ? specialistFailure(u.specialistMarks) : null;
+      const passes = verdict === 'pass' && !byS;
+      const gate = passes ? prismRefusal(u) : null;
       if (gate) throw new Error(gate);
       const round = u.rounds.length + 1;
-      if (verdict === 'pass' && s.paths?.length && !(u.detect?.round === round && u.detect.clean)) {
+      if (passes && s.paths?.length && !(u.detect?.round === round && u.detect.clean)) {
         throw new Error(`pass refused: no clean detect result for round ${round}; run detect.mjs --run ${s.id} --unit ${u.id} --base … first`);
       }
       const marks = mark(u.behaviours ?? [], o.behaviour, verdict);
       // A specialist's fold-ins ride on the pass too.
-      if (verdict === 'pass') for (const [n, m] of Object.entries(u.specialistMarks ?? {})) for (const f of m.folds ?? []) extra.folds = [...(extra.folds ?? []), `${f} (${n})`];
+      if (passes) for (const [n, m] of Object.entries(u.specialistMarks ?? {})) for (const f of m.folds ?? []) extra.folds = [...(extra.folds ?? []), `${f} (${n})`];
+      // A failed round carries no fold-ins: the general critic's lows and nits stay on it as findings.
+      if (byS) { delete extra.folds; if (foldItems.length) extra.findings = [...(extra.findings ?? []), ...foldItems]; }
+      const closing = byS ? { verdict: 'fail', gap: byS.gap, cause: byS.cause } : { verdict, gap, cause };
       addCost(s, u, costEntry(o, { step: 'verdict', role: 'critic', model: judge, at: now() }));
       // The head the critic reviewed, from the detect run of this round: a fold-in must build on it.
       // The head the critic judged (--head), else this round's detect head, else the builder's reported head.
       const reviewedHead = typeof o.head === 'string' ? o.head.toLowerCase() : (u.detect?.round === round && u.detect.head) ? u.detect.head : (u.builtHead ?? null);
       // Kept on a fail too: the next critic reviews the delta since this head (sub-skills/review.md, Delta review).
       if (reviewedHead) extra.reviewedHead = reviewedHead;
-      u.rounds.push({ n: round, verdict, score: score(o.score), gap, cause, evidence, at: now(), ...extra, ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
+      u.rounds.push({ n: round, verdict: closing.verdict, score: score(o.score), gap: closing.gap, cause: closing.cause, evidence, at: now(), ...extra, ...(byS ? { severity: byS.severity, general: 'pass', failedBy: byS.failedBy } : {}), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
       u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt; delete u.builtHead;
-      u.status = verdict === 'pass' ? 'pass' : 'open';
+      if (byS) log(u, 'verdict', `round ${round} failed by specialist ${byS.failedBy.join(', ')}; the general critic passed it (score ${score(o.score) ?? 'none'})`);
+      u.status = passes ? 'pass' : 'open';
     }, { unit });
   },
   // The targeted check of a pass's fold-ins: only the folds and the tests they touch, no new critic round.
