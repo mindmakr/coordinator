@@ -13,6 +13,7 @@ import { themeFile } from './theme.mjs';
 import { readRegistry } from './registry.mjs';
 import { staleCommands } from './pkg-scripts.mjs';
 import { LOCAL, MANY_SKILLS, measure } from './prefix.mjs';
+import { newer, semver } from './doctorrecord.mjs';
 
 export const RELEASES = 'https://github.com/mindmakr/coordinator';
 const LOCK_STALE_MS = 30_000;
@@ -27,8 +28,6 @@ export function realExec(cmd, args, { cwd, timeout = 20_000 } = {}) {
 // Drops user:password@ from URLs, then masks anything that looks like a secret.
 export const clean = (s) => maskSecrets(String(s).replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, '$1'));
 const out = (id, status, text, fix) => ({ id, status, text: clean(text), ...(fix ? { fix: clean(fix) } : {}) });
-const semver = (s) => (/^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(s).trim()) ?? []).slice(1).map(Number);
-const newer = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
 const rel = (from, p) => relative(from, p).replace(/\\/g, '/') || '.';
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 
@@ -46,8 +45,10 @@ export function versionCheck(ctx) {
   if (!tags.length) return out('version', 'skip', `plugin ${ctx.version}; no release tags found`);
   const latest = tags.reduce((a, b) => (newer(b, a) ? b : a));
   const mine = semver(ctx.version);
-  return newer(latest, mine) ? out('version', 'warn', `plugin ${ctx.version}; ${latest.join('.')} is out`, 'update the plugin (/plugin in Claude Code), or git pull your skill copy')
-    : out('version', 'ok', `plugin ${ctx.version} (latest)`);
+  // mine and latest: what doctor.mjs keeps in ~/.coordinator/doctor.json (lib/doctorrecord.mjs) for Waiting on you.
+  const seen = { mine: ctx.version, latest: latest.join('.') };
+  return { ...(newer(latest, mine) ? out('version', 'warn', `plugin ${ctx.version}; ${latest.join('.')} is out`, 'update the plugin (/plugin in Claude Code), or git pull your skill copy')
+    : out('version', 'ok', `plugin ${ctx.version} (latest)`)), ...seen };
 }
 
 export function ghCheck(ctx) {

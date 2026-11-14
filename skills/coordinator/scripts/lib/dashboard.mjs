@@ -2,9 +2,10 @@
 // dashboard`, `/coordinator:dashboard`), the "This PC" section of the coordinator
 // page and `run.mjs list --all`. Runs of other projects are read from their own
 // state folders, read-only, and a path names a project only by its key in the register,
-// never by a folder. The one write is an answer from the front page's Needs you
+// never by a folder. The one write is an answer from the front page's Waiting on you
 // (lib/pcanswer.mjs), recorded by `run.mjs answer` in that project's state folder.
-//   GET /                                       this PC: Needs you, then every registered run, grouped by project
+//   GET /                                       this PC: Waiting on you (questions with forms, then the rest:
+//                                               lib/waiting.mjs), then every registered run, grouped by project
 //   POST /answer (key, run, q, choice, other)   an answer to an open question of a registered run
 //   GET /p/<key>/run/<run>[/unit/<u>|/maps|/report|/retro]   one run's pages, read-only
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -20,6 +21,7 @@ import { ageText } from './age.mjs';
 import { blk, chip, esc, page, stamp, when } from './parts.mjs';
 import { runStatus } from './progress.mjs';
 import { needsAnchor } from './pcanswer.mjs';
+import { doctorFile } from './doctorrecord.mjs';
 import { projectName, questions } from './questions.mjs';
 import { byProject, findEntry, registryFile, registryHome } from './registry.mjs';
 import { reportPages } from './report/cli.mjs';
@@ -114,12 +116,38 @@ export function needsSection(pc, ctx = {}) {
     + `<span class="cause">${count(g.asking.reduce((n, r) => n + r.questions.length, 0), 'open question')}</span></h3>${g.asking.map(runBlock).join('')}</section>`).join('');
 }
 
-// The global dashboard's home page.
-export function pcPage(pc, nowMs, ctx) {
+// Waiting on you (design one-boss 5.5): the open questions first, with their answer forms (needsSection),
+// then the rest of what waits on the person (lib/waiting.mjs; its questions are those same forms, so they
+// are not listed twice). Each item says how long it has waited; the live page keeps that current.
+export function waitingSection(pc, waiting, ctx = {}) {
+  const asking = pc.groups.some((g) => g.runs.some((r) => r.questions?.length));
+  const rest = (waiting ?? []).filter((x) => x.kind !== 'question');
+  if (!asking && !rest.length) return '<div class="needs calm">Nothing waits on you.</div>';
+  const href = (x) => {
+    if (!x.link) return null;
+    if (x.link.startsWith('/#')) return x.link.slice(1);
+    const sub = x.link.slice(`/p/${x.key}/run/${encodeURIComponent(x.run)}`.length);
+    return ctx.pcHref ? ctx.pcHref(x.key, x.run, sub) : null;
+  };
+  const item = (x) => {
+    const where = x.run ? `${esc(x.project)} · ${x.name ? `${esc(x.name)} ` : ''}(${esc(x.run)})` : 'this PC';
+    const h = href(x);
+    const since = x.since ? `<time datetime="${esc(x.since)}" class="age" title="${esc(when(x.since))}">${esc(ageText((pc.now ?? Date.now()) - Date.parse(x.since)))}</time> ago` : 'since unknown';
+    const list = x.items?.length > 1 ? `<ul>${x.items.map((g) => `<li><span class="cause">${esc(g.id)}</span> ${esc(g.text)}</li>`).join('')}</ul>` : '';
+    return `<li class="card" data-a="wait-${esc(x.kind)}-${esc(x.key ?? 'pc')}-${esc(x.run ?? 'plugin')}"><h3><span>${h ? `<a href="${esc(h)}">${where}</a>` : where}</span>${chip(x.what, x.kind === 'plugin' ? 'not-yet' : 'needs-you')}</h3>`
+      + `<p class="say">${esc(x.text)}</p>${list}<p class="cause">waiting ${since}${x.fix ? ` · <code>${esc(x.fix)}</code>` : ''}</p></li>`;
+  };
+  const questionsPart = asking ? `<h3 id="pc-needs" data-a="h-pc-needs">Questions for you</h3>${needsSection(pc, ctx)}` : '';
+  const restPart = rest.length ? `<h3 id="pc-loose" data-a="h-pc-loose">Loose ends · ${count(rest.length, 'item')}, oldest first</h3><ul class="plain run-rows">${rest.map(item).join('')}</ul>` : '';
+  return questionsPart + restPart;
+}
+
+// The global dashboard's home page. waiting: lib/waiting.mjs waitingList, read now.
+export function pcPage(pc, nowMs, ctx, waiting = []) {
   const tools = [...new Set(pc.groups.flatMap((g) => g.runs.map((r) => r.origin?.harness).filter(Boolean)))].map(harnessName);
   const body = [
     blk('head', `<header class="run"><h1>Coordinator · this PC</h1><span class="meta">${count(pc.runs, 'run')} in ${count(pc.groups.length, 'project')}${tools.length ? ` · from ${esc(tools.join(', '))}` : ''} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
-    `<h2 id="pc-needs" data-a="h-pc-needs">Needs you</h2>${blk('pc-needs', needsSection(pc, ctx), 'section', ' aria-labelledby="pc-needs"')}`,
+    `<h2 id="pc-waiting" data-a="h-pc-waiting">Waiting on you</h2>${blk('pc-waiting', waitingSection(pc, waiting, ctx), 'section', ' aria-labelledby="pc-waiting"')}`,
     `<h2 id="self-pc" data-a="h-pc">Runs on this PC</h2>${blk('self-pc', pcSection({ pc }, ctx), 'section', ' class="self" aria-labelledby="self-pc"')}`,
   ].join('\n');
   return page({ title: 'This PC', body, ctx, path: '/' });
@@ -131,7 +159,7 @@ function projectCtx(live, key, id, home) {
   const base = `/p/${key}/run/${encodeURIComponent(id)}`;
   return {
     live, theme: null, run: null, store: id, base, home: `${base}?${t}`, embed: null, readOnly: true,
-    readOnlyHint: 'Read-only here. Answer an open question under Needs you on the This PC page, in that run\'s own dashboard (run.mjs serve), or in the lead\'s chat.',
+    readOnlyHint: 'Read-only here. Answer an open question under Waiting on you on the This PC page, in that run\'s own dashboard (run.mjs serve), or in the lead\'s chat.',
     maps: `${base}/maps?${t}`, report: `${base}/report?${t}`, retro: `${base}/retro?${t}`,
     unitHref: (u) => `${base}/unit/${encodeURIComponent(u)}?${t}`,
     artHref: () => null, // stored files of other projects stay on disk: the page says "file kept locally"
@@ -162,8 +190,8 @@ export function projectPage(path, live, entries, home, nowMs = Date.now()) {
   return rest === '/' ? hud(v, nowMs, ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), nowMs, ctx);
 }
 
-// Changes when the register or any registered run changes: the live page's cue to re-render.
+// Changes when the register, any registered run or the stored doctor check changes: the live page's cue to re-render.
 export function pcVersion(entries) {
-  return [registryFile(), ...entries.map((e) => join(runDirOf(e), 'state.json'))]
+  return [registryFile(), doctorFile(), ...entries.map((e) => join(runDirOf(e), 'state.json'))]
     .map((f) => { try { const st = statSync(f); return `${st.mtimeMs}:${st.size}`; } catch { return '-'; } }).join('|');
 }
