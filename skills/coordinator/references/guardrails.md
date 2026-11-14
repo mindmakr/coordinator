@@ -9,7 +9,7 @@ Pass these to `run.mjs init`. They are written into the run and enforced by `run
 | Option | Default | Stops |
 |---|---|---|
 | `--max-rounds` | 4 | a unit after this many critic rounds |
-| `--max-minutes` | 240 | every unit once this much wall-clock time has passed since init |
+| `--max-minutes` | 240 | every unit once this much wall-clock time has passed since init, not counting time a question to the person is open |
 | `--max-units` | 6 | adding units beyond this number |
 | `--max-added` | 2 | units added after `freeze` (scope creep) |
 | `--stale-minutes` | 45 | marks an in-progress unit with no heartbeat as stale |
@@ -17,6 +17,8 @@ Pass these to `run.mjs init`. They are written into the run and enforced by `run
 | `--max-launch-minutes`, `--max-launch-cost` | off | one agent launch (builder, critic, fold-in check) past this time or money, e.g. `10` and `"0.50 USD"` |
 
 The launch caps are passed on, not enforced live: `next` lists them as `launch` on each build, judge and fold-in step, and the brief tells the agent to stop and report near them. The harness reports a launch's figures afterwards (`--minutes`, `--cost` on `start`, `built`, `verdict`, `foldin`), and one over a cap is noted on its unit for the retro. Set them in `budgets.launchMinutes` and `budgets.launchCost` to apply to every run.
+
+**The clock pauses while the person decides.** Minutes from an `ask` to its answer do not count toward `--max-minutes`: not in `next`'s time check, `show`'s time line or the ETA. So a round the person approves can still run in the run that asked.
 
 Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run.
 
@@ -34,7 +36,8 @@ Full suites run again and again under load made late critic rounds three to six 
 ## Loop stops, enforced by `run.mjs next`
 
 - **Same gap twice in a row:** the reply is `change-strategy`. Two rounds are the same gap when the critic gave both the same `CAUSE` tag (`verdict --cause`), even if the wording differs; when either round has no cause, most of the gap's words must match. After one change of strategy, the same gap again means `stop` (stuck).
-- **No progress:** the score has not beaten the best earlier score for 2 rounds, so `stop`.
+- **Same files, ask the person:** when a unit's two latest failing rounds both have high or medium findings in at least one common file, `next` says `ask-person` with reason `same-files: <file>`, whatever the cause tags say. Critics name the same hole in different words, so the cause tags change while the files stay the same. The suggested options: change the bar, simplify the design, accept as is (ship with follow-ups), one more round. The person's answer, recorded with `ask` and `answer`, lets the run go on (`commands/run.md`, Loop). It needs each finding recorded with its file and line: `verdict --finding "<severity> <file:line> <what>"`.
+- **No progress:** the score has not beaten the best earlier score for 2 rounds, so `stop`. A round's score is the lowest across the general critic and every specialist, so one critic rising while another stays flat is no progress.
 - **The budget is spent**, rounds or time: `stop`. Time is checked first, so even a waiting unit stops. One exception (#45): a critic that started (`built` recorded) inside the time budget may still return its verdict after it, and a silent one is still checked on (`check-stale`); it gets no new build. Its pass still counts: when no other unit is still open and none was stopped by the time budget (`budget: time`), the integration check of that work may be logged once after the budget (`integrate`), and a pass there lets `close --outcome done` through. The budget stops only new builds and critics.
 - **Only a high or medium finding fails a round** (`bar.md`, Severity). Lows and nits are fold-ins on a pass, checked with `foldin`, not with a new critic round.
 - **The finish line:** the last open unit failing from round 2 on (or at 8 or more) with medium findings at most, from the general critic and every specialist, gets `ask-person` before the round budget applies, unless the rules would stop it as stuck or making no progress. The person's pick (ship with follow-ups, one more round, stop) decides; a lead's own answer, or words that refuse or hedge, do not count (`lib/approval.mjs`).
@@ -43,6 +46,15 @@ Full suites run again and again under load made late critic rounds three to six 
 - **A PASS with no evidence** is recorded as FAIL, and it still counts against the budget.
 - **Out-of-order steps are refused:** `start`, `strategy` and `integrate` work only when `next` asks for them; `verdict` only after `built`; `built`, `verdict` and `beat` are refused for a unit the rules have stopped; `close --outcome done` only when the run is done, never while a unit is in progress, and closing as `partial` or `stopped` before the rules end the run needs `--reason`. A fail needs `--gap` and `--score`. The rules hold even if the lead forgets to call `next`.
 - **Integration** has the same time budget and same-gap stop: it ends as `done-with-gaps`, except the one check after a late pass above.
+
+## The lead's own checks
+
+`next` cannot see these; the lead does them.
+
+- **The value question at round 3.** Before sending a unit's third round, ask yourself: is the behaviour that keeps failing worth another round to the person who will use the work? If the answer is not clearly yes, ask the person, while there is still budget to act on it. One run spent a third of its budget on a corner case nobody would have chosen.
+- **A design change goes to the person.** When a finding can only be answered by changing the design (a new mechanism, a hand-over between parts, a changed rule), ask the person, with the designs as options and what each costs. The lead does not pick a design itself: in one run, a design the lead chose to answer round 2 made the code that rounds 3 to 5 failed on.
+
+Both questions follow `commands/run.md` step 1.7: the situation in plain words, why it matters, each option as a consequence. The clock is paused while they are open.
 
 ## The fence (staying on task)
 

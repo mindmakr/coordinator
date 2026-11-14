@@ -34,7 +34,7 @@ Check: `resumedAgents` in `S/context.mjs` counts the agents that were given a se
 
 ### 2. Every agent has a context budget, and the lead keeps its own
 
-At about 250k tokens an agent stops, writes a handover note (what is done, what is left, the files that matter, the commands that work) and reports. The lead starts a fresh agent with the note as its brief. The lead has a budget too: at about 300k it compacts, or hands over to a new session at the end of a batch of issues, with the run's own state as the handover (`durability.md`, Resume).
+At about 250k tokens an agent stops, writes a handover note (what is done, what is left, the files that matter, the commands that work) and reports. The lead starts a fresh agent with the note as its brief. The lead has a budget too: at about 300k it compacts, or hands over to a new session at the end of a batch of issues, with the run's own state as the handover (`durability.md`, Resume). **The lead checks, not only knows:** at each batch of notices (rule 5), before acting on it, it reads its own context size (the harness's context meter, or `lead` in `S/context.mjs` on the session's transcript folder), and at about 300k it compacts or hands over first. One run's lead knew the rule and reached 430k without checking.
 
 The lead lives longest, so each token in its context is paid for more often than any other. Keeping it lean is the lead's own job, for the whole run:
 
@@ -67,7 +67,7 @@ Short is not thin. A brief holds every fact its agent needs to start work, and n
 - where to work, the base and the head, and the files and line ranges that matter;
 - the commands that work here (the mapped tests, typecheck, lint) and how to see the result;
 - what is already known: the cause that was found, what was ruled out, the decision that was made and why, the hot-spot files;
-- on a fix round, the findings, each with its file and line.
+- on a fix round, every finding, each with its file and line, in a file passed with `--findings-file` (`briefs.md`); the builder fixes every listed finding. `--where` stays short: over its limit it is refused, never cut.
 
 Every fact in a brief is one the lead checked: the path exists, the head is the one named, the command runs. A wrong fact in a brief costs more than a missing one, because the agent builds on it.
 
