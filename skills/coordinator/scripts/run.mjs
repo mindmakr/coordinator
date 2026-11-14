@@ -54,7 +54,7 @@
 //                  general critic of a unit outside every pinned area, given [--class C1,C2] its task classes)
 //                  [--critic SETUP] who judged (e.g. "review skill high + security"): stats groups escapes by it
 //                  [--specialist NAME] a required second critic's verdict on this build (add --specialist a,b);
-//                  the unit stays judging, and its pass is refused until every required specialist passed
+//                  the unit stays judging; the general pass is refused until every required specialist has marked the build, and a failed mark closes the round as failed by that specialist
 //                  --severity high|medium on a fail (required; a low or nit never fails: pass with --fold instead)
 //                  [--finding "<high|medium|low|nit>: …" …] each FINDINGS line; the fail's severity is the worst; a pass lists none high or medium
 //                  [--fold "…" …] on a pass: lows and nits ("nit: …") folded in before merge; never one in a pinned area; next then says fold-in

@@ -100,7 +100,7 @@ function bar(used, max, tone = '', title = '') {
 }
 
 // What one try came to, for a dot's tooltip and screen readers.
-const tryLabel = (r) => `Try ${r.n}: ${r.verdict === 'pass' ? 'passed' : 'failed'}${typeof r.score === 'number' ? `, ${r.score}/10` : ''}${r.verdict === 'pass' ? '' : (r.cause || r.gap) ? ` — ${clip(r.cause || r.gap, 70)}` : ''}`;
+const tryLabel = (r) => `Try ${r.n}: ${r.verdict === 'pass' ? 'passed' : r.failedBy?.length ? `failed by specialist ${r.failedBy.join(', ')}` : 'failed'}${typeof r.score === 'number' ? `, ${r.score}/10` : ''}${r.verdict === 'pass' ? '' : (r.cause || r.gap) ? ` — ${clip(r.cause || r.gap, 70)}` : ''}`;
 
 // Scores per try on a 0-10 scale, one focusable dot per try coloured by verdict.
 // One try reads better as words than as a lone dot.
