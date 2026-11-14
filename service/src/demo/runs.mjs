@@ -98,10 +98,17 @@ export function writeFolder(root, files) {
   for (const [p, b] of files) { mkdirSync(dirname(join(root, p)), { recursive: true }); writeFileSync(join(root, p), b); }
 }
 
+// The environment of the demo lead's run.mjs: the copy's state folder, and never the person's run
+// register (lib/registry.mjs): the copies are throwaway. A COORDINATOR_HOME already set (the tests') is kept.
+export const leadEnv = (base, env = process.env) => ({
+  PATH: env.PATH ?? '', SystemRoot: env.SystemRoot ?? '', COORDINATOR_DIR: base, COORDINATOR_REGISTRY: 'off',
+  ...(env.COORDINATOR_HOME ? { COORDINATOR_HOME: env.COORDINATOR_HOME } : {}),
+});
+
 // The lead asks a question on a copied run, with the skill's own CLI (the copy only).
 export function leadAsks(p, run, { question, header, options }) {
   const r = spawnSync(process.execPath, [RUN_MJS, 'ask', run.id, '--question', question, '--header', header, ...options.flatMap((o) => ['--option', o])], {
-    cwd: p.root, env: { PATH: process.env.PATH ?? '', SystemRoot: process.env.SystemRoot ?? '', COORDINATOR_DIR: p.base }, encoding: 'utf8',
+    cwd: p.root, env: leadEnv(p.base), encoding: 'utf8',
   });
   if (r.status !== 0) throw new Error(`the lead could not ask: ${String(r.stderr).trim().split('\n').at(-1)}`);
   return JSON.parse(r.stdout).asked;
