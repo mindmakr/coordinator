@@ -200,6 +200,19 @@ test('an open question while another unit builds or is judged does not pause the
   assert.match(textView(view(r, decide(r, T0 + 200 * MIN), T0 + 200 * MIN)), /\(10 min paused while the person decided and no unit was at work\)/);
 });
 
+// Read at a past time (the "critic started in time" check reads the clock at judgingAt), a unit
+// judged after that time was still at work then: its later verdict closes the span at that time.
+test('the clock read at a past time counts a unit judged after it as at work', () => {
+  const b = { ...unit([{ n: 1, verdict: 'pass', score: 9, at: at(130) }], { id: 'b', status: 'pass' }), log: [{ kind: 'start', text: 'try 1', at: at(0) }, { kind: 'built', text: '', at: at(20) }] };
+  const a = { ...unit([], { id: 'a', status: 'judging', judgingAt: at(105), heartbeatAt: at(105) }), log: [{ kind: 'start', text: 'try 1', at: at(30) }, { kind: 'built', text: '', at: at(105) }] };
+  const r = run([a, b], { budget: { maxRounds: 5, maxMinutes: 100, maxUnits: 6, maxAdded: 2, staleMinutes: 45 }, notes: [question(15, null, { unit: 'a' })] });
+  // b is judged from 20 to 130, so at 105 nothing is paused.
+  assert.equal(pausedMinutes(r, T0 + 105 * MIN), 0);
+  assert.equal(usedMinutes(r, T0 + 105 * MIN), 105);
+  // a's critic started past the 100-minute budget: stopped, not judged.
+  assert.deepEqual(decideUnit(a, r, T0 + 140 * MIN), { action: 'stop', reason: 'budget: time' });
+});
+
 // B3 on the state the CLI really writes: start, built, verdict fail, evidence, ask, answer, start.
 // The CLI stamps the real time, so the test then moves each recorded time onto the scenario's minutes.
 test('through the CLI: the paused minutes stay excluded after the approved round starts, and evidence on an idle unit does not end the pause', () => {

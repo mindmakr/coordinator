@@ -4,7 +4,7 @@
 // is not the run working, but a unit at work is. One run waited hours on a question and its
 // clock ran out meanwhile (the reins-flight retro). Overlapping questions count once. Pure: lib/rules.mjs (next), lib/plain.mjs (the estimate and ETA) and lib/view.mjs
 // (show's time line) all read it, so they agree.
-import { unitTimeline } from './timeline.mjs';
+import { runTimeline } from './timeline.mjs';
 
 const MINUTE = 60_000;
 
@@ -34,16 +34,20 @@ function openSpans(run, atMs) {
 // or the next start. A span still open runs to atMs while the unit is building or judging; on an
 // idle unit (a log cut short) it ends at its last sign of work (start, built or a heartbeat),
 // never at a later evidence or link entry. An early review closes nothing: the unit still builds.
+// Read at a past time, a start at or after atMs opens nothing, but a later close still ends the
+// span (at atMs): the unit was at work then. The timeline is built once per read, for every unit.
 const CLOSES = new Set(['verdict pass', 'verdict fail', 'reset', 'stop', 'ship', 'start']);
 const WORK = new Set(['start', 'beat', 'built']);
 function busySpans(run, atMs) {
   const spans = [];
+  const byUnit = new Map();
+  for (const e of run.units?.length ? runTimeline(run) : []) if (e.unit !== null) (byUnit.get(e.unit) ?? byUnit.set(e.unit, []).get(e.unit)).push(e);
   for (const u of run.units ?? []) {
     let from = null; let lastWork = null;
     const close = (to) => { if (from !== null && Math.min(to, atMs) > from) spans.push([from, Math.min(to, atMs)]); from = null; };
-    for (const e of unitTimeline(run, u.id)) {
+    for (const e of byUnit.get(u.id) ?? []) {
       const t = Date.parse(e.at);
-      if (!Number.isFinite(t) || t >= atMs) continue;
+      if (!Number.isFinite(t) || (t >= atMs && e.label === 'start')) continue;
       if (CLOSES.has(e.label)) close(t);
       if (e.label === 'start') from = t;
       if (from !== null && WORK.has(e.label)) lastWork = t;
