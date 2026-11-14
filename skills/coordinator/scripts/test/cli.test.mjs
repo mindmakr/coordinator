@@ -358,6 +358,10 @@ test('brief carries the top lessons for the run tag as fenced hints, and counts 
     assert.deepEqual(used(billing).usedIn, ['ls1']);
     assert.doesNotMatch(sh('run.mjs', 'brief', 'ls1', 'api', '--role', 'builder', '--lessons', '0').stdout, /lessons from past runs/);
     assert.equal(sh('run.mjs', 'brief', 'ls1', 'api', '--role', 'builder', '--lessons', '99').status, 1, 'the count is capped');
+    sh('run.mjs', 'init', 'ls2', '--goal', 'totals', '--bar', 'b', '--fence', 'backend/', '--tag', 'billing');
+    sh('run.mjs', 'add', 'ls2', 'api', '--bar', 'totals add up');
+    assert.equal(sh('run.mjs', 'brief', 'ls2', 'api', '--role', 'builder', '--to', base).status, 1, 'a folder is refused');
+    assert.deepEqual(used(billing).usedIn, ['ls1'], 'a refused --to leaves the lessons unused');
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
@@ -374,7 +378,7 @@ test('brief --to writes the whole brief to the file and prints a short prompt th
   const lines = r.stdout.trimEnd().split('\n');
   assert.equal(lines.length, 2);
   assert.equal(lines[0], '[coordinator-brief run=bto unit=api round=1 role=builder]');
-  assert.equal(lines[1].startsWith(`Read ${file.replace(/\\/g, '/')} in full first`), true, lines[1]);
+  assert.equal(lines[1].startsWith(`Read "${file.replace(/\\/g, '/')}" in full first`), true, lines[1]);
   assert.equal(sh('brief', 'bto', 'api', '--role', 'builder', '--to', dir).status, 1, 'a folder is refused');
   assert.equal(sh('brief', 'bto', 'api', '--role', 'builder', '--to', 'a\nb.md').status, 1, 'a control character is refused');
 });

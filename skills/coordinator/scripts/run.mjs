@@ -81,7 +81,7 @@
 //                  [--lessons N] the top N lessons for the run's tag ride along as hints (default 5, 0 for none),
 //                  fenced as data too; a lesson counts as used once per run
 //                  [--to F] writes the whole brief to F and prints a short prompt instead: the brief's marker line,
-//                  then "Read F in full first", so context.mjs still counts the agent under its role and round
+//                  then `Read "F" in full first`, so context.mjs still counts the agent under its role and round
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
 //                  [--approves <label>] the option that approves a step only the person may approve (extend)
 //   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready question next names, the finish line
@@ -1241,6 +1241,7 @@ const commands = {
       if (!existsSync(f) || !statSync(f).isFile()) throw new Error(`--quote: no file ${f}`);
       return { source: labels[i] ?? basename(f), text: readFileSync(f, 'utf8') };
     });
+    const to = briefTo(o.to); // a bad --to fails before anything is marked used
     const env = process.env.COORDINATOR_DIR ? commands.where().env : '';
     // What past runs taught rides along in every builder and critic brief (references/learning.md).
     const top = num(o.lessons, 5, 0, 20);
@@ -1251,7 +1252,6 @@ const commands = {
         try { markUsed(lessons, run); } catch { /* a locked or read-only lessons file never blocks a brief */ }
       }
     }
-    const to = briefTo(o.to);
     const brief = `${buildBrief(load(run), { role: o.role, unit, quotes, where: briefWhere(o.where), findingsFile: findingsFile(o['findings-file']), playbook: briefPlaybook(o.playbook), env })}\n`;
     if (!to) { process.stdout.write(brief); return null; }
     // Passed by file: the whole brief goes to the file, and the prompt printed for the agent starts with its marker line.

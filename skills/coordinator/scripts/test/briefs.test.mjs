@@ -118,7 +118,7 @@ test('a brief passed by file: the prompt is its marker line, then the file to re
   const lines = prompt.split('\n');
   assert.equal(lines.length, 2, 'short: the marker line and the read line');
   assert.equal(lines[0], briefMark({ run: 'r1', unit: 'web', round: 2, role: 'critic' }));
-  assert.ok(lines[1].startsWith('Read C:/tmp/brief-web-r2.md in full first'), lines[1]);
+  assert.ok(lines[1].startsWith('Read "C:/tmp/brief-web-r2.md" in full first'), lines[1]);
   assert.deepEqual(parseBriefMark(prompt), { run: 'r1', unit: 'web', round: 2, role: 'critic' });
   assert.throws(() => briefPrompt('no marker here\nbody', 'x.md'), /marker line/);
   for (const name of ['briefs.md', 'context.md']) {

@@ -53,7 +53,7 @@ export function parseBriefMark(text) {
 
 // A brief passed by file (run.mjs brief --to): the agent's prompt is the brief's marker line, then the file to read.
 // context.mjs finds the marker in what the lead sent, so it never has to read the tool result that read the file (#131).
-export const readBriefLine = (path) => `Read ${path} in full first: it is your whole brief from the lead. Then do the work it describes and report as it says.`;
+export const readBriefLine = (path) => `Read "${path}" in full first: it is your whole brief from the lead. Then do the work it describes and report as it says.`;
 export function briefPrompt(brief, path) {
   const first = String(brief ?? '').split('\n', 1)[0];
   if (!parseBriefMark(first)) throw new Error('a brief starts with its marker line');
