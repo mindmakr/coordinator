@@ -125,6 +125,18 @@ export function questionLabel(run, unit = null, project = null) {
   return `${head} › Task ${clean(unit)}${title ? `: ${title}` : ''}`;
 }
 
+// How the lead asks (references/commands/run.md, Asking): `dialog`, the harness's question tool, is the default;
+// `dashboard` logs the question, writes it in the chat and opens no dialog, so an answer on a dashboard is never
+// stuck behind a dialog that waits for the terminal. The run's own choice (its intake answer, `note --kind decision
+// --asking`) wins over the project's ("asking" in .coordinator/coordinator.json). A value that is not a mode
+// counts as unset (doctor reports a bad setting).
+export const ASKING = ['dialog', 'dashboard'];
+export function askingMode(run, settings = {}) {
+  if (ASKING.includes(run?.askMode)) return { mode: run.askMode, from: 'run' };
+  if (ASKING.includes(settings?.asking)) return { mode: settings.asking, from: 'project' };
+  return { mode: 'dialog', from: 'default' };
+}
+
 // One line per new or changed answer and per new note from the person, between
 // two reads of the state. With no earlier read: the answers still waiting for the lead.
 export function events(prev, next) {
