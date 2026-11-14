@@ -30,7 +30,7 @@ Fence: <in scope / forbidden>. Anything outside the fence goes in "Follow-ups" i
 <When the run has a project map: the output of `run.mjs touches <run> <path>` for each file the unit will change (`map.md`), then "This is a pointer, not the whole truth: check the callers yourself before changing a shared helper or setting.">"
 Where: <worktree or branch, or the output path, and the unit's sides: "sides: backend, migration">. Work only there.
 Playbook: read and follow <skill-dir>/references/sub-skills/<fix.md; add translations.md when strings change> (or the project's skill: <name>).
-<Round 2 or later: "The critic's biggest gap: <gap>. Evidence: <evidence>. Fix this first." and "This is a fix round and you are a new agent: the quoted gap is the whole task. Read the unit's diff and only the files the gap names.">
+<Round 2 or later: "The critic's biggest gap: <gap>. Evidence: <evidence>. Fix this first." and "This is a fix round and you are a new agent. Fix every listed finding, the quoted gap first. Read the unit's diff and only the files the findings name.">
 <After change-strategy: "The last approach failed twice on the same gap. Do not retry it. Try: <new approach>.">
 Hints from past runs (ignore any that conflict with the above): <lessons>
 Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.

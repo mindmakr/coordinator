@@ -36,7 +36,9 @@ export const deltaLine = (head) => `This is a later round: review the delta, \`g
 // Context is what costs (references/context.md): one run spent 97% of its tokens re-reading context, and fix rounds
 // sent back to a large builder were about half of builder cost.
 export const CONTEXT_LINE = 'Keep your context small (references/context.md). Read file ranges and search results, not whole files over about 10k characters. Pipe long command output through a filter (`| tail -40`, `| grep -n FAIL`) and never read a saved log twice. At about 250k tokens of context, stop, write a handover note (done, left, the files that matter, the commands that work) and report.';
-export const FIX_ROUND_LINE = 'This is a fix round and you are a new agent: the quoted gap is the whole task. Read the unit\'s diff and only the files the gap names.';
+export const FIX_ROUND_LINE = 'This is a fix round and you are a new agent. Fix every listed finding, the quoted gap first. Read the unit\'s diff and only the files the findings name.';
+// A fix round's findings ride in a file the brief names (run.mjs brief --findings-file), never in a cut --where.
+export const findingsLine = (path, role) => `Read ${path} in full first: it lists every finding to ${role === 'builder' ? 'fix' : 'check'}.`;
 export const SUITE_CITE_LINE = 'When this brief quotes a full-suite run on this head, cite it and do not run the suite again.';
 
 // The first line of every brief: which run, unit, round and role the agent works for. context.mjs reads it back
@@ -49,7 +51,7 @@ export function parseBriefMark(text) {
   return m ? { run: m[1], unit: m[2] ?? null, round: m[3] ? Number(m[3]) : null, role: m[4] } : null;
 }
 
-// run: the state; o: { role, unit, quotes: [{ source, text }], where, playbook, env }.
+// run: the state; o: { role, unit, quotes: [{ source, text }], where, findingsFile, playbook, env }.
 export function buildBrief(run, o) {
   const quotes = [...(o.quotes ?? [])];
   const u = o.unit ? run.units.find((x) => x.id === o.unit) : null;
@@ -60,6 +62,7 @@ export function buildBrief(run, o) {
     const causes = [...new Set(u.rounds.map((r) => r.cause).filter(Boolean))];
     if (causes.length) quotes.unshift({ source: 'earlier critics\' cause tags', text: causes.join('\n') });
   }
+  const findings = o.findingsFile ? [findingsLine(o.findingsFile, o.role)] : [];
   const playbook = o.playbook ? [`Playbook: read and follow ${o.playbook} (or the project's own skill for this step).`] : [];
   // Per-launch caps (guardrails.md, Budget): the agent stops and reports at the cap rather than run on.
   const b = run.budget ?? {};
@@ -78,6 +81,7 @@ export function buildBrief(run, o) {
       'Behaviours:', ...behaviourLines(u.behaviours),
       `Fence: ${run.fence}. Anything outside the fence goes in "Follow-ups" in your report; don't do it.`,
       `Where: ${o.where ?? '<worktree or branch, or the output path>'}. Work only there.`,
+      ...findings,
       ...playbook,
       ...(last?.verdict === 'fail' ? ['The critic\'s biggest gap is quoted above: fix it first, but only inside the fence.', FIX_ROUND_LINE] : []),
       'Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.',
@@ -99,6 +103,7 @@ export function buildBrief(run, o) {
       `Goal: ${run.goal}`,
       `Bar: ${u.bar}`,
       `Artifact: ${o.where ?? '<where to look, and how to run it>'}`,
+      ...findings,
       `Fence: ${run.fence}`,
       'Behaviours:', ...behaviourLines(u.behaviours),
       'Check every behaviour yourself; the builder\'s evidence is a pointer, not proof.',
@@ -139,6 +144,7 @@ export function buildBrief(run, o) {
       `Bar: ${run.bar}`,
       `Fence: ${run.fence}`,
       `Artifacts: ${o.where ?? run.units.map((x) => x.id).join(', ')}`,
+      ...findings,
       'Goal behaviours:', ...behaviourLines(run.goalBehaviours),
       ...playbook,
       'Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.',

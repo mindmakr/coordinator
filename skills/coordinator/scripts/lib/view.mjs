@@ -11,8 +11,8 @@ import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
 import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
 import { runStatus } from './progress.mjs';
+import { pausedMinutes, usedMinutes } from './clock.mjs';
 
-const MINUTE = 60_000;
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'];
 
 const label = (d) => (d ? `${d.action}${d.reason ? `: ${d.reason}` : ''}${d.phase ? ` (${d.phase})` : ''}` : '');
@@ -65,7 +65,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     asks: qs, personNotes,
     timeLeft: timeLeft(run, plan, nowMs),
     budget: [
-      { name: 'time', used: Math.max(0, Math.round((end - Date.parse(run.createdAt)) / MINUTE)), max: run.budget.maxMinutes, unit: 'min' },
+      // Minutes while a question to the person is open and no unit is at work do not count (lib/clock.mjs).
+      { name: 'time', used: Math.round(usedMinutes(run, end)), max: run.budget.maxMinutes, unit: 'min', ...(Math.round(pausedMinutes(run, end)) ? { note: `${Math.round(pausedMinutes(run, end))} min paused while the person decided and no unit was at work` } : {}) },
       { name: 'units', used: run.units.length, max: run.budget.maxUnits, unit: '' },
       { name: 'added after freeze', used: run.addedAfterFreeze ?? 0, max: run.budget.maxAdded, unit: '' },
       { name: 'integration rounds', used: integ.length, max: run.budget.maxRounds, unit: '' },
@@ -133,7 +134,7 @@ export const trend = (scores) => scores.map((s) => (s.score === null ? '–' : S
 // The compact text HUD: the situation first, then a dozen lines of detail.
 export function text(v) {
   const w = Math.max(4, ...v.units.map((u) => u.id.length)) + 2;
-  const budget = v.budget.map((b) => `${b.name} ${b.used}/${b.max}${b.unit ? ` ${b.unit}` : ''}`).join(' · ');
+  const budget = v.budget.map((b) => `${b.name} ${b.used}/${b.max}${b.unit ? ` ${b.unit}` : ''}${b.note ? ` (${b.note})` : ''}`).join(' · ');
   const needs = v.needsYou.length
     ? v.needsYou.map((q, i) => `${i ? ' '.repeat(11) : 'needs you  '}${q.id}: ${clip(q.text, 120)}${q.recommend ? ` → recommended: ${clip(q.recommend, 80)}` : ''}`)
     : ['needs you  nothing'];

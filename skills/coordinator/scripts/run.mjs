@@ -74,14 +74,18 @@
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
 //                  [--unit U] (person: a note from the person about one unit; decision, follow-up, info: scoped to that unit,
 //                  shown on its page) [--confirm] (person: their words, pasted)
-//   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P]
+//   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P (300 characters at most, refused over it)]
+//                  [--findings-file F] the brief says to read F in full first: every finding to fix (builder) or to check;
+//                  --where stays short (500 characters at most, refused over it, never cut): findings go in that file
 //                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it.
 //                  [--lessons N] the top N lessons for the run's tag ride along as hints (default 5, 0 for none),
 //                  fenced as data too; a lesson counts as used once per run
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
 //                  [--approves <label>] the option that approves a step only the person may approve (extend)
-//   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready finish-line question (ship with follow-ups,
-//                  one more round, stop); next acts on the person's pick
+//   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready question next names, the finish line
+//                  (ship with follow-ups, one more round, stop) or, with reason "same-files: <file>", same files
+//                  (change the bar, simplify the design, accept as is, one more round); next acts on the person's pick
+//                  The time budget pauses while a question to the person is open (ask to its answer).
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
 //                  [--confirm "their words"] with --by person only: the person said this; never without their words
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
@@ -164,7 +168,8 @@ import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
-import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SEVERITIES, stats } from './lib/rules.mjs';
+import { allows, decide, decideUnit, earlySummary, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, stats } from './lib/rules.mjs';
+import { usedMinutes } from './lib/clock.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
@@ -216,7 +221,7 @@ const FLAGS = {
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
-  brief: ['role', 'quote', 'source', 'where', 'playbook', 'lessons'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
+  brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS,
 };
 // Notes about one unit (#45): scoped with --unit, shown on its page.
@@ -235,7 +240,7 @@ function applyStops(st) {
       const unit = st.units.find((x) => x.id === u.id); const last = unit.rounds.at(-1);
       const open = openFindings(last);
       unit.status = 'pass'; unit.shipped = { answer: u.answer, round: unit.rounds.length, score: last?.score ?? null, findings: open.length, at: now() };
-      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: shipped with follow-ups (score ${last?.score ?? 'none'}), the person's choice at the finish line (${u.answer}); ${open.length} open finding${open.length === 1 ? '' : 's'} filed as follow-ups`, at: now() });
+      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: shipped with follow-ups (score ${last?.score ?? 'none'}), the person's choice at ${u.at ?? 'the finish line'} (${u.answer}); ${open.length} open finding${open.length === 1 ? '' : 's'} filed as follow-ups`, at: now() });
       for (const f of open) st.notes.push({ kind: 'follow-up', unit: unit.id, shipped: u.answer, text: `${unit.id} (shipped, ${f.severity}${f.by === 'critic' ? '' : `, ${f.by}`}): ${f.text}`, at: now() });
       log(unit, 'ship', `shipped with follow-ups (${u.answer})`);
       stopped.set(u.id, { id: u.id, action: 'done', step: 'merge', reason: `shipped with follow-ups (${u.answer})` }); changed = true;
@@ -245,7 +250,8 @@ function applyStops(st) {
       if (lifted) unit.extraRounds = (unit.extraRounds ?? 0) + 1;
       const q = (st.notes ?? []).filter((n) => n.kind === 'question')[Number(u.answer.slice(1)) - 1];
       const a = q?.history?.at(-1);
-      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: one more round${lifted ? ` (now ${roundCap(unit, st)})` : ''}, the person's choice at the finish line (${u.answer} answered "${a?.choices?.[0] ?? ''}" via ${a?.via ?? 'unknown'}${a?.confirm ? `, their words: "${String(a.confirm).slice(0, 200)}"` : ''}); the same-gap and no-progress rules still apply`, at: now() });
+      const what = u.choice && u.choice !== SAME_FILES.round ? `${u.choice.toLowerCase()}, then one more round` : 'one more round';
+      st.notes.push({ kind: 'decision', answers: u.answer, text: `${unit.id}: ${what}${lifted ? ` (now ${roundCap(unit, st)})` : ''}, the person's choice at ${u.at ?? 'the finish line'} (${u.answer} answered "${a?.choices?.[0] ?? ''}" via ${a?.via ?? 'unknown'}${a?.confirm ? `, their words: "${String(a.confirm).slice(0, 200)}"` : ''}); the same-gap and no-progress rules still apply`, at: now() });
       log(unit, 'extend', `one more round (${u.answer})`);
       changed = true;
     }
@@ -460,7 +466,7 @@ function writtenBy(run, s, cmd) {
   };
 }
 
-// The finish line's ready question (lib/rules.mjs), logged on the unit only when `next` asks for it.
+// The ready question next names for the unit (lib/rules.mjs): the finish line, or same files. Logged on the unit only when `next` asks for it.
 function askFinish(run, o) {
   if (typeof o.finish !== 'string') throw new Error('--finish takes the unit: ask <run> --finish <unit>');
   for (const k of ['question', 'header', 'option', 'multi', 'unit', 'approves']) if (o[k] !== undefined) throw new Error(`--${k} does not go with --finish: the question is ready-made`);
@@ -469,11 +475,36 @@ function askFinish(run, o) {
     const u = unitOf(st, o.finish);
     const d = decideUnit(u, st, Date.now());
     if (d.action !== 'ask-person' || d.asked) throw new Error(`ask --finish refused: next says "${d.action}"${d.asked ? ` (already asked as ${d.asked})` : ''} for ${u.id}`);
-    const q = finishQuestion(u);
+    const q = d.question ?? finishQuestion(u);
     id = ask(st, { question: q.question, header: q.header, option: q.options, unit: u.id });
-    st.notes.filter((n) => n.kind === 'question').at(-1).finish = true;
+    const note = st.notes.filter((n) => n.kind === 'question').at(-1);
+    if (Array.isArray(d.files)) note.sameFiles = d.files; else note.finish = true;
   }, { unit: String(o.finish) });
   return { ...s, asked: id };
+}
+
+// A brief is never cut silently (the reins-flight retro: fix rounds lost their finding lists to a cut --where).
+// A --where over the limit is refused; the findings go in a file the brief names (--findings-file).
+const WHERE_MAX = 500;
+function briefWhere(value) {
+  const where = optText(value, Infinity);
+  if (where && where.length > WHERE_MAX) throw new Error(`--where is ${where.length} characters, over the ${WHERE_MAX} limit: keep --where to the worktree or branch and put the findings in a file, passed with --findings-file <path>`);
+  return where;
+}
+// --playbook is refused over its limit too, never cut.
+const PLAYBOOK_MAX = 300;
+function briefPlaybook(value) {
+  const playbook = optText(value, Infinity);
+  if (playbook && playbook.length > PLAYBOOK_MAX) throw new Error(`--playbook is ${playbook.length} characters, over the ${PLAYBOOK_MAX} limit: keep it to the playbook's name or path`);
+  return playbook;
+}
+function findingsFile(value) {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || !value.trim()) throw new Error('--findings-file takes a path');
+  if (/[\u0000-\u001f\u007f]/.test(value)) throw new Error('--findings-file: the path has a control character');
+  const path = resolve(value);
+  if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`--findings-file: no file ${path}`);
+  return path.replace(/\\/g, '/');
 }
 
 const commands = {
@@ -552,7 +583,7 @@ const commands = {
     return change(run, 'unit.specialist', (s) => {
       const u = unitOf(s, unit);
       if (['pass', 'stopped'].includes(u.status)) throw new Error(`add-specialist refused: ${u.id} is ${u.status}; a specialist joins before the unit's verdict`);
-      if ((Date.now() - Date.parse(s.createdAt)) / 60_000 > s.budget.maxMinutes) throw new Error('add-specialist refused: the time budget is spent; it stops new critics');
+      if (usedMinutes(s, Date.now()) > s.budget.maxMinutes) throw new Error('add-specialist refused: the time budget is spent; it stops new critics');
       if ((u.specialists ?? []).includes(who)) throw new Error(`${u.id} already has specialist ${who}`);
       u.specialists = [...(u.specialists ?? []), who];
       (u.specialistFrom ??= {})[who] = u.rounds.length + 1;
@@ -879,8 +910,9 @@ const commands = {
         if (q.unit !== u.id) throw new Error(`--answer: ${q.id} ${q.unit ? `is about ${q.unit}` : 'names no unit'}; the question must name ${u.id} (ask … --unit ${u.id})`);
         if (['used', 'decided'].includes(q.status)) throw new Error(`ship refused: ${q.id} is already ${q.status}; ask again`);
         const qi = +q.id.slice(1) - 1;
-        const finish = s.notes.filter((n) => n.kind === 'question')[qi]?.finish === true;
-        const why = answerRefusal(finish ? { ...q, approves: FINISH.ship } : q);
+        const asked = s.notes.filter((n) => n.kind === 'question')[qi];
+        const ready = asked?.finish === true ? FINISH.ship : Array.isArray(asked?.sameFiles) ? SAME_FILES.accept : null;
+        const why = answerRefusal(ready ? { ...q, approves: ready } : q);
         if (why) throw new Error(`ship refused: ${why}`);
         if (q.answer.at < since) throw new Error(`ship refused: ${q.id} was answered before ${u.id}'s last verdict; ask again`);
         written((st) => st?.notes?.filter((n) => n.kind === 'question')[qi]?.history?.[q.history.length - 1], ['answer'], `${q.id}'s answer`);
@@ -1207,7 +1239,7 @@ const commands = {
         try { markUsed(lessons, run); } catch { /* a locked or read-only lessons file never blocks a brief */ }
       }
     }
-    process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: optText(o.where, 500), playbook: optText(o.playbook, 300), env })}\n`);
+    process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: briefWhere(o.where), findingsFile: findingsFile(o['findings-file']), playbook: briefPlaybook(o.playbook), env })}\n`);
     return null;
   },
   // The one-line status a lead posts in the chat (references/commands/run.md); with no run, one line per run:
