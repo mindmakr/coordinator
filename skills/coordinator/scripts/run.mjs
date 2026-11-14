@@ -74,7 +74,7 @@
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
 //                  [--unit U] (person: a note from the person about one unit; decision, follow-up, info: scoped to that unit,
 //                  shown on its page) [--confirm] (person: their words, pasted)
-//   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P]
+//   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P (300 characters at most, refused over it)]
 //                  [--findings-file F] the brief says to read F in full first: every finding to fix (builder) or to check;
 //                  --where stays short (500 characters at most, refused over it, never cut): findings go in that file
 //                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it.
@@ -490,6 +490,13 @@ function briefWhere(value) {
   const where = optText(value, Infinity);
   if (where && where.length > WHERE_MAX) throw new Error(`--where is ${where.length} characters, over the ${WHERE_MAX} limit: keep --where to the worktree or branch and put the findings in a file, passed with --findings-file <path>`);
   return where;
+}
+// --playbook is refused over its limit too, never cut.
+const PLAYBOOK_MAX = 300;
+function briefPlaybook(value) {
+  const playbook = optText(value, Infinity);
+  if (playbook && playbook.length > PLAYBOOK_MAX) throw new Error(`--playbook is ${playbook.length} characters, over the ${PLAYBOOK_MAX} limit: keep it to the playbook's name or path`);
+  return playbook;
 }
 function findingsFile(value) {
   if (value === undefined) return null;
@@ -1232,7 +1239,7 @@ const commands = {
         try { markUsed(lessons, run); } catch { /* a locked or read-only lessons file never blocks a brief */ }
       }
     }
-    process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: briefWhere(o.where), findingsFile: findingsFile(o['findings-file']), playbook: optText(o.playbook, 300), env })}\n`);
+    process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: briefWhere(o.where), findingsFile: findingsFile(o['findings-file']), playbook: briefPlaybook(o.playbook), env })}\n`);
     return null;
   },
   // The one-line status a lead posts in the chat (references/commands/run.md); with no run, one line per run:

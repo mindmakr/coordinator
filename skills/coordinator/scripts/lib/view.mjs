@@ -65,8 +65,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     asks: qs, personNotes,
     timeLeft: timeLeft(run, plan, nowMs),
     budget: [
-      // Minutes while a question to the person is open do not count (lib/clock.mjs).
-      { name: 'time', used: Math.round(usedMinutes(run, end)), max: run.budget.maxMinutes, unit: 'min', ...(Math.round(pausedMinutes(run, end)) ? { note: `${Math.round(pausedMinutes(run, end))} min paused while the person decided` } : {}) },
+      // Minutes while a question to the person is open and no unit is at work do not count (lib/clock.mjs).
+      { name: 'time', used: Math.round(usedMinutes(run, end)), max: run.budget.maxMinutes, unit: 'min', ...(Math.round(pausedMinutes(run, end)) ? { note: `${Math.round(pausedMinutes(run, end))} min paused while the person decided and no unit was at work` } : {}) },
       { name: 'units', used: run.units.length, max: run.budget.maxUnits, unit: '' },
       { name: 'added after freeze', used: run.addedAfterFreeze ?? 0, max: run.budget.maxAdded, unit: '' },
       { name: 'integration rounds', used: integ.length, max: run.budget.maxRounds, unit: '' },

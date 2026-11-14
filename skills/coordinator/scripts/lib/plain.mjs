@@ -60,7 +60,7 @@ export function estimate(run, plan, nowMs) {
   if (run.closed) return { state: 'closed' };
   // A state with no time budget (hand-made or trimmed) has no end: the estimate alone counts.
   const max = run.budget?.maxMinutes;
-  // Minutes while a question to the person is open do not count (lib/clock.mjs).
+  // Minutes while a question to the person is open and no unit is at work do not count (lib/clock.mjs).
   const left = typeof max === 'number' ? max - usedMinutes(run, nowMs) : Infinity;
   if (left <= 0) return { state: 'spent' };
   const ds = tryMinutes(run);

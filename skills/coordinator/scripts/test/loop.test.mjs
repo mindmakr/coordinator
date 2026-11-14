@@ -1,7 +1,7 @@
 // What the reins-flight retro changed in the loop (run coord-retro-fixes, unit u1):
 // the clock pauses while the person decides, two failing rounds in the same files ask
-// the person whatever the cause tags say, no progress reads the lowest critic of each
-// round, and a brief is never cut silently.
+// the person whatever the cause tags say, no progress compares each critic with its own
+// earlier best, and a brief is never cut silently.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { allows, decide, decideUnit, findingFile } from '../lib/rules.mjs';
+import { allows, decide, decideUnit, findingFile, sameFile } from '../lib/rules.mjs';
 import { pausedMinutes, usedMinutes } from '../lib/clock.mjs';
 import { estimate } from '../lib/plain.mjs';
 import { eta } from '../lib/progress.mjs';
@@ -57,13 +57,13 @@ test('a run near its time budget that waited two hours on an open question start
   const v = view(r, plan, nowMs);
   const time = v.budget.find((b) => b.name === 'time');
   assert.equal(time.used, 235);
-  assert.match(textView(v), /time 235\/240 min \(120 min paused while the person decided\)/);
+  assert.match(textView(v), /time 235\/240 min \(120 min paused while the person decided and no unit was at work\)/);
   assert.equal(Math.round(estimate(r, plan, nowMs).budgetLeft), 5);
   assert.notEqual(eta(r, plan, nowMs).text, 'the time budget is spent');
 });
 
-// B5: no progress reads the lowest score across the general critic and every specialist.
-test('no progress uses the lowest critic: one critic rising while a specialist stays flat is no progress', () => {
+// B5: no progress compares the general critic and every specialist each with its own earlier best.
+test('no progress per critic: one critic rising while a specialist stays flat is no progress', () => {
   const sp = (score) => ({ security: { verdict: 'fail', severity: 'high', gap: 'token in log', score } });
   const rounds = [
     fail(1, { score: 5, cause: 'one', specialists: sp(4) }),
@@ -165,4 +165,56 @@ test('brief refuses a --where over the limit, naming --findings-file, and names 
   const c = cli('brief', 'bf', 'a', '--role', 'critic', '--where', 'worktree D:/x', '--findings-file', file).out;
   assert.ok(c.includes(`Read ${shown} in full first: it lists every finding to check.`), c);
   assert.match(cli('brief', 'bf', 'a', '--role', 'builder', '--findings-file', join(dir, 'missing.md')).err, /--findings-file: no file/);
+});
+
+// Round 2 of u1: no progress compares each critic with its own earlier best.
+test('no progress compares like with like: a specialist joining at round 2 with every critic rising is progress', () => {
+  const sp = (score) => ({ security: { verdict: 'fail', severity: 'medium', gap: 'g', score } });
+  const rounds = [
+    fail(1, { score: 6, cause: 'one' }),
+    fail(2, { score: 8, cause: 'two', specialists: sp(5) }),
+    fail(3, { score: 9, cause: 'three', specialists: sp(6) }),
+  ];
+  assert.equal(decideUnit(unit(rounds), run([]), T0).action, 'build', 'the specialist has no earlier score to compare with');
+  // One critic flat for two rounds after its earlier best is still no progress.
+  const flat = [fail(1, { score: 6, cause: 'one', specialists: sp(5) }), fail(2, { score: 8, cause: 'two', specialists: sp(5) }), fail(3, { score: 9, cause: 'three', specialists: sp(4) })];
+  assert.match(decideUnit(unit(flat), run([]), T0).reason, /^no progress/);
+  // The general critic alone, flat for two rounds: no progress, as before.
+  const general = [fail(1, { score: 6, cause: 'one' }), fail(2, { score: 6, cause: 'two' }), fail(3, { score: 5, cause: 'three' })];
+  assert.match(decideUnit(unit(general), run([]), T0).reason, /^no progress/);
+});
+
+// The lead's decision: the clock pauses only while a question is open AND no unit is building or judging.
+test('an open question while another unit builds or is judged does not pause the clock', () => {
+  const busy = { ...unit([], { id: 'u2', status: 'judging' }), log: [{ kind: 'start', text: 'try 1', at: at(120) }, { kind: 'built', text: '', at: at(150) }] };
+  const done = { ...unit([fail(1, { at: at(110) })], { id: 'u3' }), log: [{ kind: 'start', text: 'try 1', at: at(60) }, { kind: 'verdict', text: 'fail', at: at(110) }] };
+  const r = run([unit(), busy, done], { notes: [question(100, null)] });
+  // Open from 100 to 200; u3 builds 60 to 110, u2 builds and is judged from 120 on: paused 110 to 120 only.
+  assert.equal(pausedMinutes(r, T0 + 200 * MIN), 10);
+  assert.equal(usedMinutes(r, T0 + 200 * MIN), 190);
+  // Once u2 has its verdict at 170, the rest of the open question pauses again.
+  const judged = { ...busy, status: 'open', rounds: [fail(1, { at: at(170) })], log: [...busy.log, { kind: 'verdict', text: 'fail', at: at(170) }] };
+  assert.equal(pausedMinutes(run([unit(), judged, done], { notes: [question(100, null)] }), T0 + 200 * MIN), 40);
+  // show's time line says the same minutes.
+  assert.match(textView(view(r, decide(r, T0 + 200 * MIN), T0 + 200 * MIN)), /\(10 min paused while the person decided and no unit was at work\)/);
+});
+
+test('a finding path that ends the other at a folder boundary is the same file', () => {
+  assert.ok(sameFile('flight.ts', 'packages/reins/src/flight.ts'));
+  assert.ok(sameFile('packages/reins/src/flight.ts', 'src/flight.ts'));
+  assert.ok(!sameFile('light.ts', 'packages/reins/src/flight.ts'), 'not a part of a name');
+  assert.ok(!sameFile('a/flight.ts', 'b/flight.ts'));
+  const rounds = [
+    fail(1, { cause: 'x', findings: [{ severity: 'high', text: 'flight.ts:104 drops a span' }] }),
+    fail(2, { cause: 'y', findings: [{ severity: 'medium', text: 'packages/reins/src/flight.ts:385 still drops it' }] }),
+  ];
+  assert.equal(decideUnit(unit(rounds), run([]), T0).reason, 'same-files: packages/reins/src/flight.ts');
+});
+
+test('brief refuses a --playbook over 300 characters instead of cutting it', () => {
+  ok('init', 'pb', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'pb', 'a', '--bar', 'b');
+  const r = cli('brief', 'pb', 'a', '--role', 'builder', '--playbook', 'p'.repeat(301));
+  assert.equal(r.code, 1);
+  assert.match(r.err, /--playbook is 301 characters, over the 300 limit/);
+  assert.equal(cli('brief', 'pb', 'a', '--role', 'builder', '--playbook', 'p'.repeat(300)).code, 0, '300 characters still fit');
 });

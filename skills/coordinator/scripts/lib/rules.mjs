@@ -54,7 +54,7 @@ export function earlySummary(unit) {
 
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
-// The time budget's clock: paused while a question to the person is open (lib/clock.mjs).
+// The time budget's clock: paused while a question to the person is open and no unit is building or judging (lib/clock.mjs).
 const spent = (run, nowMs) => usedMinutes(run, nowMs) > run.budget.maxMinutes;
 
 // Severity of a finding (the critic's reply, references/briefs.md). Only high and medium fail a round;
@@ -129,6 +129,10 @@ export function findingFile(text) {
   return file;
 }
 
+// Two finding paths name the same file when they are equal or one ends with the other at a
+// folder boundary: "flight.ts:104" and "packages/reins/src/flight.ts:385" (critics cite either).
+export const sameFile = (a, b) => a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+
 // The files a failing round's high and medium findings name, from the general critic and every specialist.
 const failingFiles = (round) => new Set(openFindings(round).filter((f) => FAILING.includes(f.severity)).map((f) => findingFile(f.text)).filter(Boolean));
 
@@ -156,8 +160,9 @@ export function sameFilesQuestion(unit, files) {
 function sameFilesLine(unit, run) {
   const fails = unit.rounds.filter((r) => r.verdict === 'fail').slice(-2);
   if (fails.length < 2 || unit.rounds.at(-1) !== fails[1]) return null;
-  const later = failingFiles(fails[1]);
-  const files = [...failingFiles(fails[0])].filter((f) => later.has(f)).sort();
+  const later = [...failingFiles(fails[1])];
+  // A file both rounds name, by its longer (more exact) path.
+  const files = [...new Set([...failingFiles(fails[0])].flatMap((a) => later.filter((b) => sameFile(a, b)).map((b) => (b.length >= a.length ? b : a))))].sort();
   if (!files.length) return null;
   const reason = `same-files: ${files.join(', ')}`;
   const q = readyAsked(unit, run);
@@ -170,11 +175,26 @@ function sameFilesLine(unit, run) {
   return { action: 'one-more', answer: q.id, choice: pick, at: 'the same-files question' };
 }
 
-// Per round, the lowest score across the general critic and every specialist: one critic rising
-// while another stays flat is not progress.
-export function lowestScore(round) {
-  const all = [round?.score, ...Object.values(round?.specialists ?? {}).map((m) => m?.score)].filter((s) => typeof s === 'number');
-  return all.length ? Math.min(...all) : null;
+// No progress, like with like: each critic (the general one and every specialist) is compared
+// with its own earlier scores. It is no progress when a critic with more than NO_PROGRESS_ROUNDS
+// scores has not beaten its own earlier best in its last NO_PROGRESS_ROUNDS: one critic rising
+// while another stays flat is not progress. A critic with no earlier score (a specialist that
+// joined later) is not compared yet, and a specialist that last scored before the last
+// NO_PROGRESS_ROUNDS rounds no longer counts.
+export function flatCritic(rounds) {
+  const series = new Map(); // null: the general critic
+  rounds.forEach((r, i) => {
+    const add = (name, s) => { if (typeof s === 'number') { if (!series.has(name)) series.set(name, []); series.get(name).push({ i, s }); } };
+    add(null, r?.score);
+    for (const [name, m] of Object.entries(r?.specialists ?? {})) add(name, m?.score);
+  });
+  for (const [name, list] of series) {
+    if (list.length <= NO_PROGRESS_ROUNDS) continue;
+    if (name !== null && list.at(-1).i < rounds.length - NO_PROGRESS_ROUNDS) continue;
+    const before = Math.max(...list.slice(0, -NO_PROGRESS_ROUNDS).map((x) => x.s));
+    if (list.slice(-NO_PROGRESS_ROUNDS).every((x) => x.s <= before)) return name ?? 'general';
+  }
+  return null;
 }
 
 // When every other unit has passed or stopped, and this one failed from round 2 on (or scored
@@ -244,9 +264,7 @@ export function decideUnit(unit, run, nowMs) {
   const same = !!prev && sameGap(prev, last);
   const newStrategy = (unit.strategyAt ?? -1) >= rounds.length;
   const stuck = same && !newStrategy && (unit.strategyChanges ?? 0) >= MAX_STRATEGY_CHANGES;
-  const scores = rounds.map(lowestScore).filter((s) => typeof s === 'number');
-  const before = scores.length > NO_PROGRESS_ROUNDS ? Math.max(...scores.slice(0, -NO_PROGRESS_ROUNDS)) : null;
-  const flat = !same && before !== null && scores.slice(-NO_PROGRESS_ROUNDS).every((s) => s <= before);
+  const flat = !same && flatCritic(rounds) !== null;
   if (!stuck && !flat) { const ask = sameFilesLine(unit, run) ?? finishLine(unit, run); if (ask) return ask; }
   if (rounds.length >= roundCap(unit, run)) return stop('budget: rounds');
   if (same) {
