@@ -39,6 +39,8 @@ export const KINDS = {
   // The person paused the run by hand, and resumed it (run.mjs pause / resume, #132).
   'run.pause': { unit: 'none', payload: changes },
   'run.resume': { unit: 'none', payload: changes },
+  // A window claimed the run as its lead, or took it over from a gone lead (lib/lead.mjs).
+  'lead.claim': { unit: 'none', payload: changes },
   'unit.add': { unit: 'required', payload: changes },
   'unit.start': { unit: 'required', payload: changes },
   'unit.beat': { unit: 'required', payload: changes },

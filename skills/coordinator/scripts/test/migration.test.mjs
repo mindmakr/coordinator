@@ -82,7 +82,11 @@ for (const src of sources) {
       const pulled = cli(other, 'pull', run, '--from', pit);
       assert.equal(pulled.code, 0, `${run} pull: ${pulled.err}`);
       const there = readRun(join(other, 'runs', run));
-      assert.equal(there.seq, log.events.length);
+      // An open run made before runs recorded a lead is claimed by its first lead step (push), and the claim travels.
+      const pushedLog = parseLog(readFileSync(join(rd, 'events.jsonl'))).events;
+      assert.equal(pushedLog.some((e) => e.kind === 'lead.claim'), !closed, `${run}: claimed only while open`);
+      assert.deepEqual(replay(pushedLog), readRun(rd).state);
+      assert.equal(there.seq, pushedLog.length);
       assert.deepEqual(there.state.units.map((u) => u.id), units);
       assert.equal(cli(other, 'show', run).code, 0);
     }

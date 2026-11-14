@@ -4,7 +4,7 @@ The coordinator is plain `SKILL.md` folders and Node scripts, so any tool that r
 
 ## The rules for every tool
 
-**Runs go only through `run.mjs`.** A lead in any tool records every step with `node <skill>/scripts/run.mjs …`. It never writes `state.json`, `events.jsonl` or anything else under `.coordinator/` by hand: a hand edit is recorded as `state.edited` and never counts as an approval, and a tool with no copy of the scripts cannot keep a run at all (`/coordinator:doctor` flags it). Leads in several tools may work on the same project and machine at once: each write takes the run's lock, and the run register (`hud.md`) takes its own.
+**Runs go only through `run.mjs`.** A lead in any tool records every step with `node <skill>/scripts/run.mjs …`. It never writes `state.json`, `events.jsonl` or anything else under `.coordinator/` by hand: a hand edit is recorded as `state.edited` and never counts as an approval, and a tool with no copy of the scripts cannot keep a run at all (`/coordinator:doctor` flags it). Leads in several tools may work on the same project and machine at once: each write takes the run's lock, and the run register (`hud.md`) takes its own. Each run has one lead window: lead steps from any other are refused (`durability.md`, One lead).
 
 **Say which tool you are.** Each write records the tool that made it. Pass `--harness <name>` on any `run.mjs` command, or set `COORDINATOR_HARNESS` for the session. Without either, the scripts guess from the environment, in this order:
 
@@ -18,6 +18,8 @@ The coordinator is plain `SKILL.md` folders and Node scripts, so any tool that r
 | anything else | | `unknown` |
 
 A tool's own marker wins over the editor it runs in: Gemini CLI in Antigravity's terminal is `gemini`. The guess is best effort; the flag and the variable always win. Any other short lowercase name is kept as given.
+
+**Say which window leads.** The lead id comes from the tool's own window id where one is verified (Claude Code only, so far); Codex, Gemini CLI, Antigravity, Cursor and any other tool pass `--lead <id>` on each lead step, or set `COORDINATOR_LEAD` once where the shell keeps it. `init` (or `run.mjs lead <run>`) prints the id to pass. Such a tool's lead counts as gone only by the quiet rule (`durability.md`, One lead).
 
 **Give the run the name you use.** `run.mjs init <run> --alias "payday-onboarding-filter" …` records what you call it, and the pages show it beside the id, so a run stored as `payday-1275-onboarding` is still found by that name.
 

@@ -42,7 +42,17 @@
 //   Cost (start, built, verdict, foldin): [--tokens-in N --tokens-out N --minutes M --cost "0.42 USD"], what the harness
 //                  reported for that launch; stats, show and the HUD sum them per unit, model and run ("not recorded" when missing)
 //   --accept-open (init, add, behave): keep a goal, bar or behaviour line that reads open-ended (lib/openbar.mjs), recorded as a bar note
+//   One lead per run (lib/lead.mjs, references/durability.md "One lead"): the lead steps (init, add, add-specialist,
+//                  start, reset, verdict, strategy, extend, freeze, foldin, ship, integrate, close, ask, use-answer, pause,
+//                  resume, push, pull, and next when it records a stop) are refused from any window but the run's lead.
+//                  The first lead step claims a run that has none (event lead.claim). Every lead step takes
+//                  [--lead ID] (or COORDINATOR_LEAD) where the tool gives no window id of its own, and
+//                  [--takeover [--reason R]]: takes a gone lead's run; a lead still active needs --reason and the person's yes
+//   run.mjs lead <run> [--takeover --reason R] [--lead ID]   who leads the run, since when, last active (minutes ago and
+//                  local time); claims the run when it has no lead or its lead is gone (logged "took over from <id>: <why>")
 //   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
+//                  a unit being built or judged whose last beat is younger than the stale minutes keeps its agent:
+//                  start refuses unless [--takeover --reason R], logged on the unit
 //                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
 //                  after a try failed on a model below strong, a model below strong needs [--force-model "reason"]
 //   run.mjs beat <run> <unit> [--text T]     builder or critic still working (T: the milestone, e.g. "pushed"); on an open unit
@@ -188,6 +198,8 @@ import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
 import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
+import { claim, claimText, decideLead, identity, LEAD_STEPS, leadInfo, machineId, secondBuilder, touch, windowAlive } from './lib/lead.mjs';
+import { agoText } from './lib/progress.mjs';
 import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
 import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
 import { pathToFileURL } from 'node:url';
@@ -230,8 +242,11 @@ const FLAGS = {
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
-  push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'],
+  push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'], lead: ['lead', 'takeover', 'reason'],
 };
+// Lead steps (lib/lead.mjs) all take --lead and --takeover; --reason is the takeover's reason where the step has none of its own.
+const OWN_REASON = new Set(Object.keys(FLAGS).filter((c) => c !== 'lead' && FLAGS[c].includes('reason')));
+for (const c of LEAD_STEPS) FLAGS[c] = [...new Set([...(FLAGS[c] ?? []), 'lead', 'takeover', 'reason'])];
 // Notes about one unit (#45): scoped with --unit, shown on its page.
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
@@ -428,9 +443,45 @@ function load(run) {
 
 // Every change: one event of `kind` in the run's log, locked and atomic, refused
 // on a closed run, with the snapshot and workbench refreshed in the same lock.
+// During a lead step on this run, refused unless this window leads it; a change it makes marks the lead active.
 function change(run, kind, mutate, { closedOk = false, unit = null } = {}) {
   if (!exists(run)) throw new Error(`no run: ${run}`);
-  return updateRun(runDir(run), { kind, unit, by: BY }, (s) => { if (s.closed && !closedOk) throw new Error(`run ${run} is closed`); mutate(s); }, derived);
+  return updateRun(runDir(run), { kind, unit, by: BY }, (s) => {
+    if (s.closed && !closedOk) throw new Error(`run ${run} is closed`);
+    const mine = LEAD && LEAD.run === s.id && !s.closed;
+    if (mine) {
+      const d = decideLead(s, LEAD.me, { nowMs: Date.now(), alive: leadAlive });
+      if (d.action !== 'lead') throw new Error(d.message ?? `run ${run} has no lead yet: run.mjs lead ${run} claims it`);
+    }
+    const before = mine ? JSON.stringify(s) : null;
+    mutate(s);
+    if (mine && JSON.stringify(s) !== before) touch(s, now());
+  }, derived);
+}
+
+// One lead per run (lib/lead.mjs). LEAD: this window while one of its lead steps runs; CLAIMED: what a claim prints.
+let LEAD = null; let CLAIMED = null;
+const leadAlive = (lead) => windowAlive(pidAlive, () => machineId(registryHome()))(lead);
+const takeoverOf = (o) => {
+  if (o.takeover !== undefined && o.takeover !== true) throw new Error('--takeover takes no value; give --reason R');
+  return o.takeover === true;
+};
+// Before a lead step: claim the run when it has no lead (or takes over a gone one with --takeover), refuse when
+// another window leads it. write: false checks only (pull: a claim written first would fork the log from the copy).
+function leadStep(run, o, { write = true, claimGone = false } = {}) {
+  const me = identity(BY.harness, { flag: o.lead });
+  const opts = () => ({ nowMs: Date.now(), alive: leadAlive, takeover: takeoverOf(o), reason: typeof o.reason === 'string' ? optText(o.reason, 300) : null, claimGone });
+  const first = decideLead(load(run), me, opts());
+  if (first.action === 'refuse') throw new Error(first.message);
+  if (first.action === 'claim' && write) {
+    updateRun(runDir(run), { kind: 'lead.claim', by: BY }, (s) => {
+      const d = decideLead(s, me, opts()); // again, under the lock: another window may have claimed it since
+      if (d.action === 'refuse') throw new Error(d.message);
+      if (d.action === 'claim') CLAIMED = claimText(me, claim(s, me, { harness: BY.harness, at: now(), from: d.from, why: d.why, machine: me.pid ? machineId(registryHome()) : null }), BY.harness);
+    }, derived);
+  }
+  LEAD = { run: safeId(run, 'run'), me };
+  return me;
 }
 
 function unitOf(s, id) {
@@ -558,7 +609,9 @@ const commands = {
       fresh.theme = f;
     }
     const warning = openCheck([{ what: 'the goal', text: fresh.goal }, { what: 'the bar', text: fresh.bar }], o['accept-open'], fresh.notes);
-    const made = updateRun(runDir(run), { kind: 'run.init', by: BY }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    updateRun(runDir(run), { kind: 'run.init', by: BY }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    leadStep(run, o); // the window that starts the run leads it
+    const made = load(run);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
     for (const c of parents) markParent(c, run);
     // push needs to know whether the repo is public; say where to put it now, not at the first pit stop (#66).
@@ -631,14 +684,24 @@ const commands = {
     if (force && !model) throw new Error('--force-model goes with --model');
     if (o['force-start'] !== undefined && o['force-start'] !== true) throw new Error('--force-start takes no value; give --reason R');
     const early = o['force-start'] === true ? text(o.reason, 'reason (starting before the specialists marked the round)', 300) : null;
-    if (!early && o.reason !== undefined) throw new Error('--reason goes with --force-start');
+    const takeover = takeoverOf(o);
+    if (!early && !takeover && o.reason !== undefined) throw new Error('--reason goes with --force-start or --takeover');
     const cfg = routing(baseDir('project'));
     return change(run, 'unit.start', (s) => {
       const paused = pausedRefusal(s, 'start'); // a paused run starts no unit (#132)
       if (paused) throw new Error(paused);
       const u = unitOf(s, unit);
-      // A new build ends the round: a specialist mark still to come could no longer be recorded.
-      if (early) {
+      // No second builder on a working unit (lib/lead.mjs): its agent keeps it while it beats.
+      const busy = secondBuilder(u, s, Date.now());
+      if (busy && !takeover) throw new Error(busy);
+      if (takeover && ['building', 'judging'].includes(u.status)) {
+        const d = decideUnit(u, s, Date.now()); // a takeover skips only the wait for the working agent, never a stop
+        if (!s.frozen || !['wait', 'judge', 'check-stale'].includes(d.action)) throw new Error(`start --takeover refused: next says "${d.action}"${d.reason ? ` (${d.reason})` : ''} for ${u.id}`);
+        const why = text(o.reason, `reason (why ${u.id} gets a new builder while ${u.status === 'building' ? 'its builder' : 'its critic'} may still work)`, 300);
+        const last = agoText(u.heartbeatAt ?? s.createdAt, Date.now()) ?? 'not recorded';
+        s.notes.push({ kind: 'decision', text: `${u.id}: started try ${u.rounds.length + 1} while ${u.status} (last beat ${last}): ${why}`, at: now() });
+        log(u, 'start', `took over from the ${u.status === 'building' ? 'builder' : 'critic'} (last beat ${last}): ${why}`);
+      } else if (early) {
         const d = decideUnit(u, s, Date.now());
         if (!s.frozen || d.action !== 'wait' || !d.specialists) throw new Error(`--force-start refused: next says "${d.action}" for ${u.id}; it only skips a wait for specialist marks`);
         s.notes.push({ kind: 'decision', text: `${u.id}: started try ${u.rounds.length + 1} before ${d.specialists.join(', ')} marked round ${u.rounds.length}; their findings on it are lost: ${early}`, at: now() });
@@ -1236,12 +1299,37 @@ const commands = {
   // until nothing changes; each stop is reported once, here.
   // Past the time budget, looking changes nothing (#132): the stops are worked out in memory, reported
   // with recorded: false, and recorded by close.
-  next([run]) {
+  // Who leads the run; claims it when it has none or its lead is gone (the step /coordinator:status runs).
+  // A lead still active is only reported, unless --takeover --reason (after the person's yes).
+  lead([run], o) {
+    const s = load(run);
+    const report = (st, extra = {}) => {
+      const i = leadInfo(st, Date.now(), { alive: leadAlive });
+      return { run: st.id, you: !!i && st.lead.id === me.id, ...(i ? { tool: i.tool, since: i.since, lastActive: i.lastActive, ...(i.gone ? { gone: i.goneText } : {}) } : { tool: null }), ...extra };
+    };
+    const me = identity(BY.harness, { flag: o.lead });
+    if (s.closed) return report(s, { closed: true });
+    const takeover = takeoverOf(o);
+    const d = decideLead(s, me, { nowMs: Date.now(), alive: leadAlive, takeover, reason: typeof o.reason === 'string' ? optText(o.reason, 300) : null, claimGone: true });
+    if (d.action === 'refuse') {
+      if (takeover) throw new Error(d.message);
+      return report(s, { step: `this window does not lead ${s.id}: leave its lead steps to that window; with the person's yes, run.mjs lead ${s.id} --takeover --reason R takes it over now` });
+    }
+    if (d.action === 'lead') return report(s, { id: me.id });
+    leadStep(run, o, { claimGone: true });
+    const claimed = CLAIMED; CLAIMED = null;
+    return report(load(run), { ...(claimed ?? {}), id: me.id });
+  },
+  next([run], o = {}) {
     let stopped; let s = load(run);
     const expired = !s.closed && spent(s, Date.now());
     // Expired: applyStops changes the loaded state in memory only; it is never saved.
     if (expired) stopped = applyStops(s);
-    else s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
+    else {
+      // Recording a stop is a lead step (lib/lead.mjs); reading what to do next is not.
+      if (!s.closed && applyStops(load(run)).size) leadStep(run, o);
+      s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
+    }
     const plan = decide(s);
     const cfg = routing(baseDir('project'));
     const suggest = (u) => { const e = u.action === 'build' ? escalation(cfg, unitOf(s, u.id)) : null; return e ? { ...u, model: e.model, modelWhy: e.why } : u; };
@@ -1259,11 +1347,15 @@ const commands = {
     // The per-launch caps the lead passes to the agent it launches for this step (guardrails.md).
     const caps = launchCaps(s);
     const launch = (u) => (caps && ['build', 'judge', 'fold-in'].includes(u.action) ? { ...u, launch: { ...(caps.minutes ? { minutes: caps.minutes } : {}), ...(caps.cost ? { cost: `${caps.cost.amount} ${caps.cost.currency}` } : {}) } } : u);
-    const units = plan.units.map((u) => (stopped.has(u.id) ? { ...stopped.get(u.id), ...(expired ? { recorded: false } : {}) } : launch(early(how(sync(suggest(u)))))));
+    // A unit at work: its last beat, worked out here in minutes and local time (never a bare UTC time to convert).
+    const beat = (u) => { const x = unitOf(s, u.id); return ['building', 'judging'].includes(x.status) ? { ...u, lastBeat: agoText(x.heartbeatAt ?? s.createdAt, Date.now()) } : u; };
+    const units = plan.units.map((u) => (stopped.has(u.id) ? { ...stopped.get(u.id), ...(expired ? { recorded: false } : {}) } : beat(launch(early(how(sync(suggest(u))))))));
     const paused = pauseNote(s); // a paused run starts nothing: its build and judge steps wait (lib/pause.mjs)
     const outcome = { stopped: 'stopped', 'done-with-gaps': 'partial', done: 'done' }[plan.decision];
+    const led = s.closed ? null : leadInfo(s, Date.now(), { alive: leadAlive });
     return {
       decision: paused ? 'paused' : plan.decision, ...(paused ? { paused } : {}), units,
+      ...(led ? { lead: { tool: led.tool, lastActive: led.lastActive, ...(led.gone ? { gone: led.goneText } : {}) } } : {}),
       ...(expired ? { spent: { text: 'the time budget is spent: next recorded nothing', step: outcome ? `run.mjs close ${s.id} --outcome ${outcome} records the stops above` : 'a critic started inside the time budget may still return its verdict; then close records the stops' } } : {}),
     };
   },
@@ -1306,7 +1398,7 @@ const commands = {
     for (const l of lines) console.log(l);
     return null;
   },
-  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s) }))); return null; },
+  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s), alive: leadAlive }))); return null; },
   // Reads under the lock so it never renders a half-applied change; also refreshes the elapsed time.
   hud([run]) {
     if (!exists(run)) throw new Error(`no run: ${run}`);
@@ -1479,10 +1571,18 @@ for (let i = 0; i < argv.length; i++) {
 }
 let BY = null;
 try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|lead|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
 if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
+  // One lead per run (lib/lead.mjs): claim or refuse before a lead step changes anything. init claims once the run
+  // exists; next only when it would record a stop; pull checks without writing. Closed runs have no lead.
+  if (LEAD_STEPS.has(cmd) || cmd === 'lead') {
+    if (opt.reason !== undefined && !OWN_REASON.has(cmd) && !takeoverOf(opt)) throw new Error('--reason goes with --takeover');
+    const run = pos[0];
+    if (!['init', 'next', 'lead'].includes(cmd) && typeof run === 'string' && isSafeId(run) && exists(run) && !load(run).closed) leadStep(run, opt, { write: cmd !== 'pull' });
+  }
   const out = await commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }, null, 2));
+  const claimed = (o) => (CLAIMED && o && typeof o === 'object' && !Array.isArray(o) ? { ...o, claim: CLAIMED } : o);
+  if (out !== null) console.log(JSON.stringify(claimed(out.id === undefined || ['models', 'next', 'lead', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }), null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **One lead per run, and no second builder on a working unit (`run.mjs lead`, `lib/lead.mjs`; design `docs/design/one-boss.md` 5.1, 5.2).** A run records the window that leads it (`lead.claim`: an id, the tool, the time; never a host or user name). Claude Code's id is a hash of its window's session id; other tools pass `--lead <id>` or set `COORDINATOR_LEAD`, or get a random id the claim prints. Lead steps (`init`, `add`, `start`, `verdict`, `close`, `push` and the rest) from any other window are refused, naming the lead's tool and when it was last active; beats, builds, evidence, agents' notes, reads and answers never are. A lead that has been quiet for the run's stale minutes, or whose Claude Code window has ended, is taken over by `run.mjs lead <run>` or `--takeover`; while it is active a takeover needs `--takeover --reason`, and every takeover is logged. `start` on a unit whose builder or critic beat within the stale minutes is refused unless `--takeover --reason`, logged on the unit. `show`, `next`, `status-line`, `lead` and the refusals print each age as minutes ago plus local time and zone ("52 min ago (14:05 local, UTC+3)"). Older runs load and replay unchanged; their first lead step claims them.
+
 ## 1.6.1 (2026-11-14)
 Four fixes to the run state: a run can be paused by hand, a specialist's fail no longer forces a false general fail, behaviour text is never cut, and a brief sent as a file still counts under its role and round.
 
