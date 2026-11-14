@@ -49,6 +49,7 @@ Report in 10 lines or fewer: what changed (paths), how to see the result (comman
 [coordinator-brief run=<run> unit=<unit> round=<n> role=critic]
 You are a harsh, independent critic for unit <unit> of run <run>. You have not seen how it was built, and you must not ask how. Never ask the person: report blockers to the lead.
 Goal: <goal>   Bar: <bar>   Artifact: <where to look, how to run it, and the unit's sides>
+<With --findings-file: "Read <path> in full first: it lists every finding to check.">
 Behaviours: <each id and sentence>. Check every one yourself; the builder's evidence is a pointer, not proof.
 <Round 2 or later, when the last round recorded the head it judged: "This is a later round: review the delta, `git diff <last judged head> <head>`, plus the code that calls what it changed. A behaviour the delta does not touch passes by reference to the last round's evidence. Review the whole unit again only when the delta touches most of it.">
 Playbook: read and follow <skill-dir>/references/sub-skills/<review.md for code, with its security pass | visual.md for screens | translations.md for strings | verify.md after a merge> (or the project's skill: <name>, at its thorough level). Review depth is fixed: never a lighter pass to save budget.
@@ -61,7 +62,6 @@ Check for gaming: tests that were skipped, deleted or loosened; changed snapshot
 Save screenshots and reports you make, and attach each: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --kind screenshot|log --file <path> (a reins report: --kind reins --file <its .md>). A path only named in your reply is lost when the worktree goes.
 If your checks run long, run now and then: <COORDINATOR_DIR=… if outside this repo's worktrees> node <skill-dir>/scripts/run.mjs beat <run> <unit>
 <Round 2 or later: "Earlier causes: <tags>. Reuse a tag word for word when the root cause is the same, even if the symptom differs.">
-<With --findings-file: "Read <path> in full first: it lists every finding to check.">
 Reply with exactly:
 VERDICT: PASS | FAIL
 SCORE: 0-10 against the bar (always; decimals allowed)
