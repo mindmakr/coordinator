@@ -9,7 +9,7 @@ Pass these to `run.mjs init`. They are written into the run and enforced by `run
 | Option | Default | Stops |
 |---|---|---|
 | `--max-rounds` | 4 | a unit after this many critic rounds |
-| `--max-minutes` | 240 | every unit once this many minutes of the run's clock have passed since init; the clock pauses only while a question to the person is open and no unit of the run is building or judging |
+| `--max-minutes` | 240 | every unit once this many minutes of the run's clock have passed since init; the clock pauses while the run is paused by hand (`pause` to `resume`), and while a question to the person is open and no unit of the run is building or judging |
 | `--max-units` | 6 | adding units beyond this number |
 | `--max-added` | 2 | units added after `freeze` (scope creep) |
 | `--stale-minutes` | 45 | marks an in-progress unit with no heartbeat as stale |
@@ -19,6 +19,10 @@ Pass these to `run.mjs init`. They are written into the run and enforced by `run
 The launch caps are passed on, not enforced live: `next` lists them as `launch` on each build, judge and fold-in step, and the brief tells the agent to stop and report near them. The harness reports a launch's figures afterwards (`--minutes`, `--cost` on `start`, `built`, `verdict`, `foldin`), and one over a cap is noted on its unit for the retro. Set them in `budgets.launchMinutes` and `budgets.launchCost` to apply to every run.
 
 **The clock pauses while the person decides and nothing else runs.** Only a question logged with `run.mjs ask` pauses it, so log every question to the person with `ask`, in the chat or not. A minute does not count toward `--max-minutes` when a question to the person is open (from its `ask` to its first answer, or the lead's decision that closed it) and no unit of the run is building or judging: not in `next`'s time check, `show`'s time line or the ETA. A unit at work while the question is open keeps the clock running, because the run is still working. Overlapping questions count once. So a round the person approves can still run in the run that asked.
+
+**The clock stops while the run is paused.** When the person stops the work (overnight, a PC restart), record it: `run.mjs pause <run> --reason "…"`, and `run.mjs resume <run>` when they say to go on. No minute in between counts toward `--max-minutes`, whatever runs meanwhile. While paused, `next` says so and how to resume and starts no unit, and `start` is refused; `show` and the dashboard say Paused. A second `pause`, or `resume` on a run that is not paused, is refused.
+
+**Looking never stops a run.** Past the time budget, `next` records nothing: it lists the units it would stop (`recorded: false`) and the `close` that records those stops. Stops from verdicts (rounds, same gap, no progress) are recorded by `next` as before.
 
 Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run.
 

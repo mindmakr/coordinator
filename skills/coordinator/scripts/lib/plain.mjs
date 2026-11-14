@@ -169,7 +169,8 @@ function then(u, d) {
     case 'check-stale': return 'next the lead checks on the silent agent';
     case 'change-strategy': return 'next a different approach, then another try';
     case 'build': return u.rounds.length ? 'next another try' : 'next the first build';
-    case 'wait': return u.after && d.reason?.startsWith('after') ? 'starts when it passes' : 'next a critic checks it when the builder finishes';
+    case 'wait': if (d.paused) return 'it waits until the run resumes';
+      return u.after && d.reason?.startsWith('after') ? 'starts when it passes' : 'next a critic checks it when the builder finishes';
     default: return '';
   }
 }

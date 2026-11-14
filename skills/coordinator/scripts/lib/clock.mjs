@@ -3,7 +3,8 @@
 // closed it), AND no unit of the run is building or judging, do not count: the person deciding
 // is not the run working, but a unit at work is. One run waited hours on a question and its
 // clock ran out meanwhile (the reins-flight retro). Overlapping questions count once. Pure: lib/rules.mjs (next), lib/plain.mjs (the estimate and ETA) and lib/view.mjs
-// (show's time line) all read it, so they agree.
+// (show's time line) all read it, so they agree. Minutes while the run is paused by hand
+// (run.mjs pause to resume, lib/pause.mjs) never count, whatever runs meanwhile (#132).
 import { runTimeline } from './timeline.mjs';
 
 const MINUTE = 60_000;
@@ -60,6 +61,20 @@ function busySpans(run, atMs) {
   return spans;
 }
 
+// The [from, to] spans, in ms, of every pause by hand before atMs, cut at atMs; one still open runs to atMs.
+function pauseSpans(run, atMs) {
+  const start = Date.parse(run.createdAt);
+  const spans = [];
+  for (const p of Array.isArray(run.pauses) ? run.pauses : []) {
+    const from = Math.max(Date.parse(p?.from), start);
+    if (!Number.isFinite(from) || from >= atMs) continue;
+    const end = Date.parse(p.to);
+    const to = Number.isFinite(end) ? Math.min(end, atMs) : atMs;
+    if (to > from) spans.push([from, to]);
+  }
+  return spans;
+}
+
 // The union of spans, sorted and merged.
 function union(spans) {
   const out = [];
@@ -70,17 +85,36 @@ function union(spans) {
   return out;
 }
 
-// Minutes up to atMs during which at least one question to the person was open and no unit was
-// building or judging.
-export function pausedMinutes(run, atMs) {
-  const busy = union(busySpans(run, atMs));
-  let total = 0;
-  for (const [from, to] of union(openSpans(run, atMs))) {
-    total += to - from;
-    for (const [b0, b1] of busy) total -= Math.max(0, Math.min(to, b1) - Math.max(from, b0));
+// What is left of spans once the merged, sorted cuts are taken out.
+function minus(spans, cuts) {
+  const out = [];
+  for (const [a, b] of spans) {
+    let from = a;
+    for (const [c0, c1] of cuts) {
+      if (c1 <= from || c0 >= b) continue;
+      if (c0 > from) out.push([from, c0]);
+      from = Math.max(from, c1);
+    }
+    if (from < b) out.push([from, b]);
   }
-  return total / MINUTE;
+  return out;
 }
+
+const total = (spans) => union(spans).reduce((n, [from, to]) => n + to - from, 0) / MINUTE;
+
+// The paused minutes up to atMs, in parts: `held` while the run was paused by hand, `asked` while a
+// question to the person was open and no unit was building or judging, outside those pauses, and
+// `total` (each minute once).
+export function pauseParts(run, atMs) {
+  const holds = union(pauseSpans(run, atMs));
+  const open = union(openSpans(run, atMs));
+  const asked = open.length ? minus(minus(open, union(busySpans(run, atMs))), holds) : [];
+  return { held: total(holds), asked: total(asked), total: total([...holds, ...asked]) };
+}
+
+// Minutes up to atMs that count toward no budget: paused by hand, or a question to the person
+// open while no unit was building or judging.
+export const pausedMinutes = (run, atMs) => pauseParts(run, atMs).total;
 
 // Minutes of the time budget used at atMs: since the run began, less the paused minutes.
 export const usedMinutes = (run, atMs) => Math.max(0, (atMs - Date.parse(run.createdAt)) / MINUTE - pausedMinutes(run, atMs));
