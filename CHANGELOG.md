@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The PC dashboard outlives its window and takes every run's answers (design one-boss 5.4).** `run.mjs dashboard` now starts the server detached, with its output in `~/.coordinator/dashboard.log`, so it keeps serving when the session or shell that started it ends; `--foreground` keeps the old behaviour. Its front page starts with **Needs you**: every open question of every registered run, labelled with its project, run and task, each with an answer form. An answer is written by `run.mjs answer` in that project's state folder, by person, via the dashboard; the token, the same-origin check and the register decide what may be written, and a refused post writes nothing. The detached dashboard runs in `~/.coordinator` (so the folder it was started from can be removed), takes no tokens or session ids from the starting session, records its skill version and says when a running one is from another version; its answers wait on a run's lock without freezing the page and are checked again under that lock.
+
 ## 1.6.1 (2026-11-14)
 Four fixes to the run state: a run can be paused by hand, a specialist's fail no longer forces a false general fail, behaviour text is never cut, and a brief sent as a file still counts under its role and round.
 

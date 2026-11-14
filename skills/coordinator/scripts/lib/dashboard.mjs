@@ -1,9 +1,11 @@
 // Every run on this PC (lib/registry.mjs), for the global dashboard (`run.mjs
 // dashboard`, `/coordinator:dashboard`), the "This PC" section of the coordinator
 // page and `run.mjs list --all`. Runs of other projects are read from their own
-// state folders, read-only: a page here never writes, and a path names a project
-// only by its key in the register, never by a folder.
-//   GET /                                       this PC: every registered run, grouped by project
+// state folders, read-only, and a path names a project only by its key in the register,
+// never by a folder. The one write is an answer from the front page's Needs you
+// (lib/pcanswer.mjs), recorded by `run.mjs answer` in that project's state folder.
+//   GET /                                       this PC: Needs you, then every registered run, grouped by project
+//   POST /answer (key, run, q, choice, other)   an answer to an open question of a registered run
 //   GET /p/<key>/run/<run>[/unit/<u>|/maps|/report|/retro]   one run's pages, read-only
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { loadRunsIn } from './selfdata.mjs';
@@ -11,13 +13,14 @@ import { basename, join } from 'node:path';
 import { linkedRuns } from './chain.mjs';
 import { loadRun } from './events.mjs';
 import { harnessName, origin, versionWarning } from './harness.mjs';
-import { hud, originLine, progressBar, statusChip } from './hud.mjs';
+import { hud, originLine, progressBar, questionItem, statusChip } from './hud.mjs';
 import { repoFromText } from './links.mjs';
 import { mapsPage } from './mapspage.mjs';
 import { ageText } from './age.mjs';
 import { blk, chip, esc, page, stamp, when } from './parts.mjs';
 import { runStatus } from './progress.mjs';
-import { projectName } from './questions.mjs';
+import { needsAnchor } from './pcanswer.mjs';
+import { projectName, questions } from './questions.mjs';
 import { byProject, findEntry, registryFile, registryHome } from './registry.mjs';
 import { reportPages } from './report/cli.mjs';
 import { decide } from './rules.mjs';
@@ -35,7 +38,8 @@ const count = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function readEntry(e, nowMs) {
   try {
     const s = loadRun(runDirOf(e));
-    return { ...e, title: e.title ?? s.goal, alias: s.alias ?? e.alias, startedAt: s.createdAt ?? null, status: runStatus(s, s.closed ? null : decide(s, nowMs), { nowMs }), origin: origin(s) };
+    const open = s.closed ? [] : questions(s, { project: projectName(e.stateDir) }).filter((q) => q.open);
+    return { ...e, title: e.title ?? s.goal, alias: s.alias ?? e.alias, startedAt: s.createdAt ?? null, status: runStatus(s, s.closed ? null : decide(s, nowMs), { nowMs }), origin: origin(s), questions: open, repo: s.repo ?? null };
   } catch (err) { return { ...e, error: `unreadable: ${err.message}` }; }
 }
 
@@ -92,11 +96,30 @@ export function pcSection(m, ctx) {
       + `<p class="cause" style="overflow-wrap:anywhere">${esc(g.project)}</p><ul class="plain run-rows">${[...g.runs].sort((a, b) => activeFirst(a) - activeFirst(b)).map((r) => runItem(r, ctx, pc.now)).join('')}</ul></section>`).join('');
 }
 
+// Needs you: every open question of every registered run, by project and run, each labelled with its
+// project, run and task (questionLabel). ctx.answerForm ({ token }): the PC dashboard's answer form;
+// without it the options are listed, read-only.
+export function needsSection(pc, ctx = {}) {
+  const groups = pc.groups.map((g) => ({ ...g, asking: g.runs.filter((r) => r.questions?.length) })).filter((g) => g.asking.length);
+  if (!groups.length) return '<div class="needs calm">Nothing needs you on this PC.</div>';
+  const runBlock = (r) => {
+    const form = ctx.answerForm ? { ...ctx.answerForm, fields: [['key', r.key], ['run', r.run]] } : null;
+    const href = ctx.pcHref ? ctx.pcHref(r.key, r.run) : null;
+    const name = href ? `<a href="${esc(href)}">${esc(r.run)}</a>` : esc(r.run);
+    const anchor = needsAnchor(r.key, r.run);
+    return `<div class="needs" id="${esc(anchor)}" data-a="${esc(anchor)}"><b>${name}</b>${r.alias ? ` <span class="cause">“${esc(r.alias)}”</span>` : ''}`
+      + `<ul>${r.questions.map((q) => questionItem(q, form, r.repo, `${r.key}-${r.run}-`)).join('')}</ul></div>`;
+  };
+  return groups.map((g) => `<section class="card" data-a="needs-g-${esc(g.key)}"><h3><span>${esc(g.name)}</span>`
+    + `<span class="cause">${count(g.asking.reduce((n, r) => n + r.questions.length, 0), 'open question')}</span></h3>${g.asking.map(runBlock).join('')}</section>`).join('');
+}
+
 // The global dashboard's home page.
 export function pcPage(pc, nowMs, ctx) {
   const tools = [...new Set(pc.groups.flatMap((g) => g.runs.map((r) => r.origin?.harness).filter(Boolean)))].map(harnessName);
   const body = [
     blk('head', `<header class="run"><h1>Coordinator · this PC</h1><span class="meta">${count(pc.runs, 'run')} in ${count(pc.groups.length, 'project')}${tools.length ? ` · from ${esc(tools.join(', '))}` : ''} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
+    `<h2 id="pc-needs" data-a="h-pc-needs">Needs you</h2>${blk('pc-needs', needsSection(pc, ctx), 'section', ' aria-labelledby="pc-needs"')}`,
     `<h2 id="self-pc" data-a="h-pc">Runs on this PC</h2>${blk('self-pc', pcSection({ pc }, ctx), 'section', ' class="self" aria-labelledby="self-pc"')}`,
   ].join('\n');
   return page({ title: 'This PC', body, ctx, path: '/' });
@@ -108,7 +131,7 @@ function projectCtx(live, key, id, home) {
   const base = `/p/${key}/run/${encodeURIComponent(id)}`;
   return {
     live, theme: null, run: null, store: id, base, home: `${base}?${t}`, embed: null, readOnly: true,
-    readOnlyHint: 'Read-only here. Answer in that run\'s own dashboard (run.mjs serve), or in the lead\'s chat.',
+    readOnlyHint: 'Read-only here. Answer an open question under Needs you on the This PC page, in that run\'s own dashboard (run.mjs serve), or in the lead\'s chat.',
     maps: `${base}/maps?${t}`, report: `${base}/report?${t}`, retro: `${base}/retro?${t}`,
     unitHref: (u) => `${base}/unit/${encodeURIComponent(u)}?${t}`,
     artHref: () => null, // stored files of other projects stay on disk: the page says "file kept locally"
