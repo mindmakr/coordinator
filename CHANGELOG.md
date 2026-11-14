@@ -1,6 +1,7 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 (2026-11-14)
+Coordinator asks the person when a loop is stuck, checks a bar can be met before it loops, never cuts a brief silently, pauses its clock while only the person is awaited, and trims the fixed prompt prefix per project. Lucid Coding carries the lessons.
 
 - Each run card on the This PC dashboard shows when the run started, when it ended or should end, and its age (#134).
 - **A per-project trim of the fixed prompt prefix (`scripts/prefix.mjs`, `references/context.md`, rule 7).** Every agent turn re-sends the names and descriptions of every enabled plugin and skill. `prefix.mjs report` lists what loads for a project (plugins from the user, project and local settings, user skills including linked folders, MCP servers by name) with counts and description characters. `draft` prints a `.claude/settings.local.json` for that project, merged into the existing file, that turns off the plugins and skills not kept (coordinator, what the project's own config names, and `--keep`); the claude.ai sync and connector keys only with `--claude-ai`. `write --confirm` writes it and adds it to `.git/info/exclude` (a project in a repository subfolder too) and says whether git now ignores it; it refuses without `--confirm` and never writes the user-level settings. `draft` and `write` refuse a local file that is not a JSON object (bad JSON, a trailing comma) rather than write over it; a byte order mark is read. `init` offers it as a question, doctor has a `prefix` line that warns on many skills with no trim, and the retro records the prefix size run on run.
