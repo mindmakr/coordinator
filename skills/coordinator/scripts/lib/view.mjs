@@ -11,14 +11,26 @@ import { runTimeline, unitTimeline } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
 import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
 import { runStatus } from './progress.mjs';
-import { pausedMinutes, usedMinutes } from './clock.mjs';
+import { pauseParts, usedMinutes } from './clock.mjs';
+import { openPause, resumeStep } from './pause.mjs';
 
 const ACTIVE = ['build', 'judge', 'change-strategy', 'check-stale', 'fold-in', 'ask-person'];
 
 const label = (d) => (d ? `${d.action}${d.reason ? `: ${d.reason}` : ''}${d.phase ? ` (${d.phase})` : ''}` : '');
 
+// The time line's note: the minutes that did not count, and why.
+function pausedNote(run, end) {
+  const p = pauseParts(run, end);
+  const parts = [
+    ...(Math.round(p.held) ? [`${Math.round(p.held)} min on pause`] : []),
+    ...(Math.round(p.asked) ? [`${Math.round(p.asked)} min paused while the person decided and no unit was at work`] : []),
+  ];
+  return parts.length ? { note: parts.join(', ') } : {};
+}
+
 function nextStep(run, plan) {
   if (run.closed) return `nothing: closed as ${run.closed.outcome}`;
+  if (openPause(run)) return `paused: ${resumeStep(run)} when the person says to go on`;
   switch (plan.decision) {
     case 'split': return 'add units, then freeze';
     case 'integrate': return 'send the integrator';
@@ -54,7 +66,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
       behaviours: goalBehaviours, evidence: run.goalEvidence ?? [],
       met: goalBehaviours.length ? !unmet(goalBehaviours).length : (run.closed?.outcome ?? plan.decision) === 'done',
     }, bar: run.bar, fence: run.fence,
-    phase: run.closed ? `closed: ${run.closed.outcome}` : plan.decision,
+    phase: run.closed ? `closed: ${run.closed.outcome}` : openPause(run) ? 'paused' : plan.decision,
     // The plain status word, progress and ETA (lib/progress.mjs), the same everywhere.
     status: runStatus(run, plan, { nowMs, runs: linked ? [...linked.values()].filter((r) => r && Array.isArray(r.units)) : [run] }),
     retroPending: retroPending(run, plan.decision), // every unit decided and no retro note yet (lib/retro.mjs)
@@ -65,8 +77,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     asks: qs, personNotes,
     timeLeft: timeLeft(run, plan, nowMs),
     budget: [
-      // Minutes while a question to the person is open and no unit is at work do not count (lib/clock.mjs).
-      { name: 'time', used: Math.round(usedMinutes(run, end)), max: run.budget.maxMinutes, unit: 'min', ...(Math.round(pausedMinutes(run, end)) ? { note: `${Math.round(pausedMinutes(run, end))} min paused while the person decided and no unit was at work` } : {}) },
+      // Minutes paused by hand, or while a question to the person is open and no unit is at work, do not count (lib/clock.mjs).
+      { name: 'time', used: Math.round(usedMinutes(run, end)), max: run.budget.maxMinutes, unit: 'min', ...pausedNote(run, end) },
       { name: 'units', used: run.units.length, max: run.budget.maxUnits, unit: '' },
       { name: 'added after freeze', used: run.addedAfterFreeze ?? 0, max: run.budget.maxAdded, unit: '' },
       { name: 'integration rounds', used: integ.length, max: run.budget.maxRounds, unit: '' },
@@ -94,6 +106,8 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         sync: syncs.has(u.id) ? syncStep(run.id, u.id, syncs.get(u.id), u.status === 'pass') : null,
         scores: u.rounds.map((r) => ({ score: typeof r.score === 'number' ? r.score : null, verdict: r.verdict })),
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
+        // A round the general critic passed and a specialist failed (#126): who failed it, and the general verdict and score.
+        failedBy: u.status !== 'pass' && last?.failedBy ? { specialists: last.failedBy, general: last.general ?? null, score: typeof last.score === 'number' ? last.score : null } : null,
         evidence: last?.evidence ?? null,
         next: label(d),
         personNotes: personNotes.filter((n) => n.unit === u.id),
@@ -132,6 +146,9 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
 export const trend = (scores) => scores.map((s) => (s.score === null ? '–' : String(s.score))).join(' → ');
 
 // The compact text HUD: the situation first, then a dozen lines of detail.
+// "failed by specialist money (general critic: pass, 9)": the critic that failed a round the general critic passed.
+const failedByText = (f) => `failed by specialist ${f.specialists.join(', ')} (general critic: ${f.general ?? 'pass'}${f.score === null ? '' : `, ${f.score}`})`;
+
 export function text(v) {
   const w = Math.max(4, ...v.units.map((u) => u.id.length)) + 2;
   const budget = v.budget.map((b) => `${b.name} ${b.used}/${b.max}${b.unit ? ` ${b.unit}` : ''}${b.note ? ` (${b.note})` : ''}`).join(' · ');
@@ -156,7 +173,7 @@ export function text(v) {
     const bs = u.behaviours.length ? ` · behaviours ${u.behaviours.filter((b) => b.status === 'pass').length}/${u.behaviours.length}` : '';
     lines.push(`${u.id.padEnd(w)}${(u.shipped ? 'shipped' : u.status).padEnd(10)}${`${u.rounds}/${u.maxRounds}`.padEnd(7)}${(trend(u.scores) || '–').padEnd(18)}${u.next}${bs}`);
     lines.push(`${' '.repeat(w)}${u.attention ? `[${u.attentionLabel.toLowerCase()}] ` : ''}${clip(u.sentence, 160)}`);
-    if (u.gap) lines.push(`${' '.repeat(w)}└ ${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
+    if (u.gap) lines.push(`${' '.repeat(w)}└ ${u.failedBy ? `${failedByText(u.failedBy)}: ` : ''}${clip(u.gap, 100)}${u.cause ? ` [cause: ${clip(u.cause, 40)}]` : ''}`);
     if (u.early) lines.push(`${' '.repeat(w)}◦ ${clip(u.early.text, 200)}`);
     if (u.sync) lines.push(`${' '.repeat(w)}⇄ ${clip(u.sync, 200)}`);
     if (u.chainText) lines.push(`${' '.repeat(w)}↔ ${clip(u.chainText, 200)}`);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hud } from '../lib/hud.mjs';
+import { hud, scoreChart } from '../lib/hud.mjs';
 import { decide } from '../lib/rules.mjs';
 import { text, view } from '../lib/view.mjs';
 
@@ -192,4 +192,13 @@ test('every state has words: in chips, unit page, Depends on rows, map tooltips 
   assert.match(snap, /Waiting for <a class="ulink" href="runs\/r1\/units\/Api\.html">Api<\/a>/);
   assert.match(selfPage(m, now, liveCtx({ token: 'k', nonce: 'n' }, 'r1')), /Waiting for <a class="ulink" href="\/unit\/Api\?t=k">Api<\/a>/);
   assert.match(selfPage(m, now, liveCtx({ token: 'k', nonce: 'n' }, 'other')), /Waiting for <a class="ulink" href="\/run\/r1\/unit\/Api\?t=k">Api<\/a>/);
+});
+
+test('a try a specialist failed names the specialist in its dot label', () => {
+  const html = scoreChart([
+    { n: 1, verdict: 'fail', score: 6, gap: 'g' },
+    { n: 2, verdict: 'fail', score: 9, failedBy: ['money', 'security'], gap: 'rounds half up', general: 'pass' },
+  ]);
+  assert.match(html, /<title>Try 1: failed, 6\/10 — g<\/title>/);
+  assert.match(html, /<title>Try 2: failed by specialist money, security, 9\/10 — rounds half up<\/title>/);
 });

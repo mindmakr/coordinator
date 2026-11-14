@@ -28,7 +28,7 @@ export function originLine(o) {
 }
 
 // The run's status word as a chip, coloured by kind (lib/progress.mjs runStatus).
-const STATUS_CLS = { running: 's-working', waiting: 's-needs-you', finishing: 's-finishing' };
+const STATUS_CLS = { running: 's-working', paused: 's-needs-you', waiting: 's-needs-you', finishing: 's-finishing' };
 export const statusChip = (st) => chip(st.word, st.concluded ? cls(st.outcome) : STATUS_CLS[st.kind]);
 // Units done out of total as a compact bar with its words; a screen reader hears the words.
 export function progressBar(st, small = false) {
@@ -100,7 +100,7 @@ function bar(used, max, tone = '', title = '') {
 }
 
 // What one try came to, for a dot's tooltip and screen readers.
-const tryLabel = (r) => `Try ${r.n}: ${r.verdict === 'pass' ? 'passed' : 'failed'}${typeof r.score === 'number' ? `, ${r.score}/10` : ''}${r.verdict === 'pass' ? '' : (r.cause || r.gap) ? ` — ${clip(r.cause || r.gap, 70)}` : ''}`;
+const tryLabel = (r) => `Try ${r.n}: ${r.verdict === 'pass' ? 'passed' : r.failedBy?.length ? `failed by specialist ${r.failedBy.join(', ')}` : 'failed'}${typeof r.score === 'number' ? `, ${r.score}/10` : ''}${r.verdict === 'pass' ? '' : (r.cause || r.gap) ? ` — ${clip(r.cause || r.gap, 70)}` : ''}`;
 
 // Scores per try on a 0-10 scale, one focusable dot per try coloured by verdict.
 // One try reads better as words than as a lone dot.

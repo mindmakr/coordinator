@@ -6,6 +6,7 @@ import { unmet } from './rules.mjs';
 
 export const ID = /^[A-Z]{1,2}\d{1,3}$/i;
 const MAX = 30;
+export const TEXT_MAX = 500;
 const now = () => new Date().toISOString();
 
 const listOf = (s, unit) => (unit ? (unit.behaviours ??= []) : (s.goalBehaviours ??= []));
@@ -14,6 +15,14 @@ const nextId = (list, prefix) => `${prefix}${list.reduce((n, b) => Math.max(n, +
 function checkId(id) {
   if (!ID.test(String(id))) throw new Error(`behaviour id must look like B1 or G2, got: ${id}`);
   return String(id).toUpperCase();
+}
+
+// Behaviour text is refused over its limit, never cut (#128): a cut line carries a
+// half sentence into every brief after it.
+function behaviourText(t) {
+  const words = text(t, 'text', Infinity);
+  if (words.length > TEXT_MAX) throw new Error(`behaviour text is ${words.length} characters, over the ${TEXT_MAX} limit: split it into two behaviours`);
+  return words;
 }
 
 // Adds, rewords (back to unchecked) or removes one behaviour. Returns its id.
@@ -28,7 +37,7 @@ export function behave(s, unit, { id, text: t, remove = false }) {
   }
   const bid = id === undefined ? nextId(list, unit ? 'B' : 'G') : checkId(id);
   const found = list.find((b) => b.id === bid);
-  const words = text(t, 'text', 500);
+  const words = behaviourText(t);
   if (found) Object.assign(found, { text: words, status: 'unchecked', evidence: null, at: now() });
   else {
     if (list.length >= MAX) throw new Error(`${MAX} behaviours at most`);

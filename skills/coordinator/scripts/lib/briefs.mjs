@@ -66,7 +66,10 @@ export function buildBrief(run, o) {
   const u = o.unit ? run.units.find((x) => x.id === o.unit) : null;
   if (o.role !== 'integrator' && !u) throw new Error(`unknown unit ${o.unit ?? '(none given)'}`);
   const last = u?.rounds.at(-1);
-  if (o.role === 'builder' && last && last.verdict === 'fail') quotes.unshift({ source: `critic, round ${u.rounds.length}`, text: `Gap: ${last.gap ?? ''}\nEvidence: ${last.evidence ?? ''}` });
+  // A round a specialist failed while the general critic passed it (#126) quotes that specialist's gap and evidence.
+  const by = last?.failedBy ?? [];
+  const evidence = by.length ? by.map((n) => last.specialists?.[n]?.evidence).filter(Boolean).join('; ') : last?.evidence;
+  if (o.role === 'builder' && last && last.verdict === 'fail') quotes.unshift({ source: `${by.length ? `specialist ${by.join(', ')}` : 'critic'}, round ${u.rounds.length}`, text: `Gap: ${last.gap ?? ''}\nEvidence: ${evidence ?? ''}` });
   if (o.role === 'critic' && u?.rounds.length) {
     const causes = [...new Set(u.rounds.map((r) => r.cause).filter(Boolean))];
     if (causes.length) quotes.unshift({ source: 'earlier critics\' cause tags', text: causes.join('\n') });

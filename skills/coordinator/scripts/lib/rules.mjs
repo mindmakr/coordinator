@@ -5,6 +5,7 @@ import { chainUnits } from './chain.mjs';
 import { doubtful, fromPerson } from './approval.mjs';
 import { strategyHint } from './strategy.mjs';
 import { usedMinutes } from './clock.mjs';
+import { held } from './pause.mjs';
 
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
@@ -55,20 +56,36 @@ export function earlySummary(unit) {
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
 // The time budget's clock: paused while a question to the person is open and no unit is building or judging (lib/clock.mjs).
-const spent = (run, nowMs) => usedMinutes(run, nowMs) > run.budget.maxMinutes;
+export const spent = (run, nowMs) => usedMinutes(run, nowMs) > run.budget.maxMinutes;
 
 // Severity of a finding (the critic's reply, references/briefs.md). Only high and medium fail a round;
 // low and nit ride on a pass as fold-ins (`verdict pass --fold`).
 export const SEVERITIES = ['high', 'medium', 'low', 'nit'];
 export const FAILING = ['high', 'medium'];
 
+// A general pass on a build a required specialist failed (#126): the round closes as failed by
+// those specialists, with their gap, cause and worst severity; the general critic's own verdict
+// and score stay on the round as given. Null when no specialist mark failed.
+export function specialistFailure(marks) {
+  const failed = Object.entries(marks ?? {}).filter(([, m]) => m?.verdict === 'fail');
+  if (!failed.length) return null;
+  const causes = failed.map(([, m]) => m.cause).filter(Boolean);
+  return {
+    failedBy: failed.map(([n]) => n),
+    gap: failed.length === 1 ? failed[0][1].gap : failed.map(([n, m]) => `${n}: ${m.gap}`).join('; '),
+    cause: causes.length === failed.length ? causes.join(' + ') : null,
+    severity: SEVERITIES.find((x) => failed.some(([, m]) => m.severity === x)) ?? 'high',
+  };
+}
+
 // Every finding still open after a round: the general critic's gap and FINDINGS, and every
-// specialist's (a failing specialist's gap included). A finding with no severity (an older
+// specialist's (a failing specialist's gap included; a round failed by a specialist carries
+// no general gap, its gap is the specialist's). A finding with no severity (an older
 // round, a terse critic) counts as high: the finish line never guesses in favour of shipping.
 export function openFindings(round) {
   if (!round || round.verdict !== 'fail') return [];
   const one = (by, severity, text) => ({ by, severity: SEVERITIES.includes(severity) ? severity : 'high', text: String(text ?? '') });
-  const out = [one('critic', round.severity, round.gap)];
+  const out = round.failedBy ? [] : [one('critic', round.severity, round.gap)];
   for (const f of round.findings ?? []) out.push(one('critic', f?.severity, f?.text));
   for (const [name, m] of Object.entries(round.specialists ?? {})) {
     if (m?.verdict === 'fail') out.push(one(name, m.severity, m.gap));
@@ -226,7 +243,10 @@ function finishLine(unit, run) {
 const judgingInTime = (unit, run) => unit.status === 'judging' && typeof unit.judgingAt === 'string'
   && usedMinutes(run, Date.parse(unit.judgingAt)) <= run.budget.maxMinutes;
 
-export function decideUnit(unit, run, nowMs) {
+// A paused run (run.mjs pause, lib/pause.mjs) starts no agent: those steps wait until it resumes.
+export const decideUnit = (unit, run, nowMs) => held(run, unitStep(unit, run, nowMs));
+
+function unitStep(unit, run, nowMs) {
   const { budget } = run;
   if (unit.status === 'pass') {
     // A pass that carries fold-ins waits for their targeted check (`run.mjs foldin`), then merges.
@@ -372,7 +392,20 @@ export function stats(runs) {
     shipped, shippedShare: total ? Math.round((shipped / total) * 100) / 100 : null,
     suggestedMaxRounds: p80 === null ? null : Math.min(8, p80 + 1),
     ...escapeTotals(runs),
+    ...failedRounds(runs),
   };
+}
+
+// Which critic failed each failed round: the general critic, or the specialists that failed a
+// round the general critic passed (#126), with the general critic's own verdict and score.
+function failedRounds(runs) {
+  const failedRoundsBy = {}; const specialistFails = [];
+  for (const run of runs) for (const u of run.units ?? []) for (const r of u.rounds ?? []) {
+    if (r.verdict !== 'fail') continue;
+    for (const k of r.failedBy ? r.failedBy.map((n) => `specialist ${n}`) : ['general']) failedRoundsBy[k] = (failedRoundsBy[k] ?? 0) + 1;
+    if (r.failedBy) specialistFails.push({ run: run.id, unit: u.id, round: r.n, failedBy: r.failedBy, general: r.general ?? null, score: typeof r.score === 'number' ? r.score : null });
+  }
+  return { failedRoundsBy, specialistFails };
 }
 
 // Behaviours that keep a unit (or the goal) from passing: failing or not yet checked.

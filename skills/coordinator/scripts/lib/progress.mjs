@@ -5,10 +5,11 @@ import { decide } from './rules.mjs';
 import { questions } from './questions.mjs';
 import { gapsModel } from './gaps.mjs';
 import { clip, duration, estimate } from './plain.mjs';
+import { openPause, resumeStep } from './pause.mjs';
 
 const MINUTE = 60_000;
 const FINISHING = ['integrate', 'done', 'done-with-gaps', 'stopped'];
-export const KINDS = { running: 'Running', waiting: 'Waiting on you', finishing: 'Finishing', concluded: 'Concluded' };
+export const KINDS = { running: 'Running', paused: 'Paused', waiting: 'Waiting on you', finishing: 'Finishing', concluded: 'Concluded' };
 const DELIVERED_SHOWN = 6;
 
 // "21:40", or "Sat 09:10" when it is not today, in this machine's time zone.
@@ -24,6 +25,12 @@ export function eta(run, plan, nowMs, timeZone) {
   const e = estimate(run, plan, nowMs);
   if (e.state === 'closed') return { minutes: 0, readyAt: null, text: 'finished', short: 'finished' };
   if (e.state === 'spent') return { minutes: 0, readyAt: null, text: 'the time budget is spent', short: 'time budget spent' };
+  // Paused by hand (lib/pause.mjs): the clock is stopped, so there is no ready time until it resumes.
+  const p = openPause(run);
+  if (p) {
+    const left = e.state === 'estimate' ? Math.round(Math.min(e.minutes, e.budgetLeft)) : null;
+    return { minutes: left, readyAt: null, paused: true, text: `paused since ${clock(Date.parse(p.from), nowMs, timeZone)}: the clock is stopped${left === null ? '' : `; about ${duration(left)} left once resumed`}`, short: 'clock stopped' };
+  }
   if (e.state !== 'estimate') return { minutes: null, readyAt: null, text: 'no estimate yet', short: 'no estimate yet' };
   // The time budget ends the run first when the estimate runs past it.
   const capped = e.minutes > e.budgetLeft;
@@ -69,11 +76,13 @@ export function runStatus(run, plan = null, { nowMs = Date.now(), runs = null, t
   const finish = run.closed ? [] : plan.units.filter((d) => d.action === 'ask-person' && !asked.has(d.id))
     .map((d) => ({ id: d.id, text: Array.isArray(d.files) ? `same files failing for ${d.id} (${d.files.join(', ')}): change the bar, simplify the design, accept it as is, or one more round` : `finish line for ${d.id}: ship with follow-ups, one more round, or stop` }));
   const needsYou = [...open.map((q) => ({ id: q.id, text: clip(q.header || q.text, 140) })), ...finish];
-  const kind = run.closed ? 'concluded' : needsYou.length ? 'waiting' : FINISHING.includes(plan.decision) ? 'finishing' : 'running';
+  const pause = run.closed ? null : openPause(run);
+  const kind = run.closed ? 'concluded' : pause ? 'paused' : needsYou.length ? 'waiting' : FINISHING.includes(plan.decision) ? 'finishing' : 'running';
   const outcome = run.closed?.outcome ?? null;
   const word = outcome ? `Concluded: ${outcome}` : KINDS[kind];
   const t = eta(run, plan, nowMs, timeZone);
-  const doing = current.length ? current.map((c) => `${c.phase} ${c.id} round ${c.round}`).join(', ')
+  const doing = pause ? `paused since ${clock(Date.parse(pause.from), nowMs, timeZone)}${pause.reason ? `: ${clip(pause.reason, 120)}` : ''} (${resumeStep(run)} to go on)`
+    : current.length ? current.map((c) => `${c.phase} ${c.id} round ${c.round}`).join(', ')
     : kind === 'waiting' ? 'waiting on you'
       : kind === 'finishing' ? (plan.decision === 'integrate' ? 'integration check next' : 'closing next')
         : plan.decision === 'split' ? 'planning units' : 'nothing in progress';
