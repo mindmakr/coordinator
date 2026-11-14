@@ -136,6 +136,8 @@
 
   // Times: the viewer's locale and zone. Relative within 24 h, local date-time otherwise;
   // the full local time with its zone on hover. The datetime attribute stays ISO (filters read data-at).
+  // class="abs": always the local date-time (a card's start and end). class="age": how long since
+  // that time, kept current (lib/age.mjs).
   const full = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' });
   const short = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const rel = typeof Intl.RelativeTimeFormat === 'function' ? new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }) : null;
@@ -143,7 +145,8 @@
     const t = Date.parse(el.getAttribute('datetime')); if (Number.isNaN(t)) return;
     const s = Math.round((t - Date.now()) / 1000); const a = Math.abs(s);
     let text;
-    if (!rel || a >= 86400) text = short.format(t);
+    if (el.classList.contains('age')) text = ageText(Date.now() - t);
+    else if (el.classList.contains('abs') || !rel || a >= 86400) text = short.format(t);
     else if (a < 45) text = rel.format(0, 'second');
     else if (a < 3600) text = rel.format(Math.round(s / 60), 'minute');
     else text = rel.format(Math.round(s / 3600), 'hour');

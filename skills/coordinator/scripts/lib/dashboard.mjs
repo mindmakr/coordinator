@@ -14,7 +14,8 @@ import { harnessName, origin, versionWarning } from './harness.mjs';
 import { hud, originLine, progressBar, statusChip } from './hud.mjs';
 import { repoFromText } from './links.mjs';
 import { mapsPage } from './mapspage.mjs';
-import { blk, chip, esc, page, stamp } from './parts.mjs';
+import { ageText } from './age.mjs';
+import { blk, chip, esc, page, stamp, when } from './parts.mjs';
 import { runStatus } from './progress.mjs';
 import { byProject, findEntry, registryFile, registryHome } from './registry.mjs';
 import { reportPages } from './report/cli.mjs';
@@ -33,7 +34,7 @@ const count = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function readEntry(e, nowMs) {
   try {
     const s = loadRun(runDirOf(e));
-    return { ...e, title: e.title ?? s.goal, alias: s.alias ?? e.alias, status: runStatus(s, s.closed ? null : decide(s, nowMs), { nowMs }), origin: origin(s) };
+    return { ...e, title: e.title ?? s.goal, alias: s.alias ?? e.alias, startedAt: s.createdAt ?? null, status: runStatus(s, s.closed ? null : decide(s, nowMs), { nowMs }), origin: origin(s) };
   } catch (err) { return { ...e, error: `unreadable: ${err.message}` }; }
 }
 
@@ -43,10 +44,24 @@ export function pcModel(entries, { nowMs = Date.now(), here = null, read = true 
   const light = (e) => ({ ...e, origin: { line: e.startedIn ? `started in ${harnessName(e.startedIn)}` : 'tool not recorded', later: e.harness ? `last written in ${harnessName(e.harness)} · skill ${e.skill ?? 'unknown'}` : null, warning: versionWarning(e.skill) } });
   const groups = byProject(entries).map((g) => ({ ...g, name: basename(g.project), runs: g.runs.map((e) => (read ? readEntry(e, nowMs) : light(e))) }));
   const here_ = here ? groups.find((g) => g.runs.some((r) => r.stateDir === here) || g.stateDir === here) : null;
-  return { groups, here: here_?.key ?? null, runs: entries.length, version: VERSION, file: registryFile() };
+  return { groups, here: here_?.key ?? null, runs: entries.length, version: VERSION, file: registryFile(), now: nowMs };
 }
 
-function runItem(r, ctx) {
+// When a run started, when it ended or should end, and its age (start to now). Start and end show
+// as clock times; the live page keeps the age current (lib/live.client.js, class "abs" and "age").
+const valid = (iso) => typeof iso === 'string' && !Number.isNaN(Date.parse(iso));
+function timesLine(r, st, nowMs) {
+  if (!valid(r.startedAt)) return '';
+  const from = Date.parse(r.startedAt);
+  const age = `<time datetime="${esc(r.startedAt)}" class="age" title="${esc(when(r.startedAt))}">${esc(ageText(nowMs - from))}</time>`;
+  let end;
+  if (st ? st.concluded : r.closed) end = valid(st?.closedAt) ? `ended ${stamp(st.closedAt, 'abs')} (took ${esc(ageText(Date.parse(st.closedAt) - from))})` : 'ended, time not recorded';
+  else if (valid(st?.eta?.readyAt)) end = `ending about ${stamp(st.eta.readyAt, 'abs')}`;
+  else end = `ending: ${esc(st?.eta?.short ?? 'no estimate yet')}`;
+  return `<p class="cause times">started ${stamp(r.startedAt, 'abs')} · ${end} · age ${age}</p>`;
+}
+
+function runItem(r, ctx, nowMs = Date.now()) {
   const href = ctx.pcHref ? ctx.pcHref(r.key, r.run) : null;
   const name = href ? `<a href="${esc(href)}">${esc(r.run)}</a>` : esc(r.run);
   const alias = r.alias ? ` <span class="cause">“${esc(r.alias)}”</span>` : '';
@@ -59,7 +74,7 @@ function runItem(r, ctx) {
   const body = st.concluded ? `<p class="say">${esc(String(st.reason).replace(/\.*$/, ''))}.</p>`
     : `<p class="say"><b>${esc(st.progress)}</b> · ${esc(st.doing)}</p>${progressBar(st, true)}<p class="cause">${esc(st.eta.text)}</p>`;
   return `<li class="card run-row${st.concluded ? ' fin' : ''}" data-a="pc-${esc(r.key)}-${esc(r.run)}"><h3><span>${name}${alias}</span>${statusChip(st)}</h3>`
-    + `${r.title ? `<p class="cause">${esc(r.title)}</p>` : ''}${body}${originLine({ ...r.origin, alias: null })}<p class="cause">last written ${stamp(r.lastSeen)}</p></li>`;
+    + `${timesLine(r, st, nowMs)}${r.title ? `<p class="cause">${esc(r.title)}</p>` : ''}${body}${originLine({ ...r.origin, alias: null })}<p class="cause">last written ${stamp(r.lastSeen)}</p></li>`;
 }
 
 const activeFirst = (r) => (r.status ? (r.status.concluded ? 1 : 0) : (r.closed ? 1 : 0));
@@ -73,7 +88,7 @@ export function pcSection(m, ctx) {
   const active = (g) => g.runs.filter((r) => (r.status ? !r.status.concluded : !r.closed)).length;
   return `<p class="meta">${count(pc.runs, 'run')} in ${count(pc.groups.length, 'project')} on this PC, from every tool that ran the coordinator. This dashboard is skill ${esc(pc.version)}.</p>`
     + groups.map((g) => `<section class="card" data-a="pcg-${esc(g.key)}"><h3><span>${esc(g.name)}${g.key === pc.here ? ' <span class="cause">this project</span>' : ''}</span><span class="cause">${active(g)} active · ${g.runs.length} in all</span></h3>`
-      + `<p class="cause" style="overflow-wrap:anywhere">${esc(g.project)}</p><ul class="plain run-rows">${[...g.runs].sort((a, b) => activeFirst(a) - activeFirst(b)).map((r) => runItem(r, ctx)).join('')}</ul></section>`).join('');
+      + `<p class="cause" style="overflow-wrap:anywhere">${esc(g.project)}</p><ul class="plain run-rows">${[...g.runs].sort((a, b) => activeFirst(a) - activeFirst(b)).map((r) => runItem(r, ctx, pc.now)).join('')}</ul></section>`).join('');
 }
 
 // The global dashboard's home page.
