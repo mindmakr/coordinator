@@ -65,7 +65,7 @@ test('p1: a string longer than the event schema allows is refused with a reason,
     await t.app.ingest.syncInstallation(66);
     const run = await t.db.run(66, 99, 'r1');
     assert.match(run.error, /longer than 65536/);
-    assert.equal(run.seq, 7, 'the last good state is kept');
+    assert.equal(run.seq, 8, 'the last good state is kept');
   } finally { await t.close(); }
 });
 
@@ -75,7 +75,7 @@ test('p1: reading runs in a worker; one that runs past its time limit is an erro
   try { assert.match((await slow.readLog('r1', log)).error, /took longer than/); } finally { await slow.close(); }
   const p = parser();
   try {
-    assert.equal((await p.readLog('r1', log)).seq, 7);
+    assert.equal((await p.readLog('r1', log)).seq, 8);
     assert.match((await p.readLog('r1', Buffer.from('{"bad"'))).error, /line 1/);
     assert.deepEqual((await p.readJson('lessons', Buffer.from('[{"text":"DB_PASSWORD=SuperSecret99"}, 3]'))).value, [{ text: '[redacted]' }]);
     assert.match((await p.readJson('config', Buffer.from('{'))).error, /JSON/);

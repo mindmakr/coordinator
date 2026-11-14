@@ -176,6 +176,9 @@ const line = (seq, kind, unit, payload) => validateEvent({ v: V, seq, at: new Da
 // by: { harness, skill } (lib/harness.mjs). Every event that changes something
 // also sets the state's `writer` to it, as one more op: older copies of the
 // skill read the line as an ordinary change, so the log stays readable to them.
+// mutate's second argument, mark(kind, unit), ends one event there: what changed so far
+// is appended as an event of that kind, and the rest as `kind`. All of them, or none
+// when mutate throws, are written together (a lead's claim and its step: lib/lead.mjs).
 export function updateRun(dir, { kind, unit = null, by = null }, mutate, after) {
   const file = join(dir, STATE);
   return withLock(file, () => {
@@ -185,20 +188,31 @@ export function updateRun(dir, { kind, unit = null, by = null }, mutate, after) 
     const add = (k, payload, u = null) => { seq++; lines.push(`${JSON.stringify(line(seq, k, u, payload))}\n`); };
     if (cur?.legacy) add('run.imported', { state: cur.state, from: STATE });
     if (cur?.edited) { const ops = diff(replay(cur.log.events), cur.state); if (ops.length) add('state.edited', { ops }); }
-    const before = cur?.state ?? null;
+    let before = cur?.state ?? null;
     const work = before === null ? null : clone(before);
-    let next = canonical(mutate(work) ?? work);
+    // One event from `before` to `next`; returns the state it leaves (with its writer).
+    const emit = (k, u, next) => {
+      const ops = diff(before, next);
+      if (by && before !== null && ops.length) {
+        const w = canonical(by);
+        if (!equal(next.writer, w)) next = canonical({ ...next, writer: w });
+        const i = ops.findIndex((o) => o.path.length === 1 && o.path[0] === 'writer');
+        if (i >= 0) ops.splice(i, 1);
+        ops.push({ op: 'set', path: ['writer'], value: w });
+      }
+      if (ops.length) add(k, { ops }, u);
+      before = next;
+      return next;
+    };
+    const mark = (k, u = null) => {
+      if (work === null) throw new Error('mark: a new run has no earlier event');
+      const next = emit(k, u, canonical(work));
+      if (by) work.writer = clone(next.writer);
+    };
+    let next = canonical(mutate(work, mark) ?? work);
     if (next === null) throw new Error('a run cannot be empty');
     if (by && before === null) next = canonical({ ...next, startedBy: by, writer: by });
-    const ops = diff(before, next);
-    if (by && before !== null && ops.length) {
-      const w = canonical(by);
-      if (!equal(next.writer, w)) next = canonical({ ...next, writer: w });
-      const i = ops.findIndex((o) => o.path.length === 1 && o.path[0] === 'writer');
-      if (i >= 0) ops.splice(i, 1);
-      ops.push({ op: 'set', path: ['writer'], value: w });
-    }
-    if (ops.length) add(kind, { ops }, unit);
+    next = emit(kind, unit, next);
     if (lines.length || cur?.rebuilt || cur?.edited) {
       const buf = Buffer.concat([cur?.log?.buf ?? Buffer.alloc(0), Buffer.from(lines.join(''))]);
       if (lines.length) writeAtomic(join(dir, EVENTS), buf);

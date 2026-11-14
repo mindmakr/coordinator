@@ -98,18 +98,29 @@ export function writeFolder(root, files) {
   for (const [p, b] of files) { mkdirSync(dirname(join(root, p)), { recursive: true }); writeFileSync(join(root, p), b); }
 }
 
-// The environment of the demo lead's run.mjs: the copy's state folder, and never the person's run
-// register (lib/registry.mjs): the copies are throwaway. A COORDINATOR_HOME already set (the tests') is kept.
+// The demo lead's own lead id (lib/lead.mjs): one fixed id for its copies, never a person's window.
+export const DEMO_LEAD = 'coordinator-demo-lead';
+// The environment of the demo lead's run.mjs: the copy's state folder, the demo lead's id, and never the
+// person's run register (lib/registry.mjs): the copies are throwaway. A COORDINATOR_HOME already set (the tests') is kept.
 export const leadEnv = (base, env = process.env) => ({
-  PATH: env.PATH ?? '', SystemRoot: env.SystemRoot ?? '', COORDINATOR_DIR: base, COORDINATOR_REGISTRY: 'off',
+  PATH: env.PATH ?? '', SystemRoot: env.SystemRoot ?? '', COORDINATOR_DIR: base, COORDINATOR_REGISTRY: 'off', COORDINATOR_LEAD: DEMO_LEAD,
   ...(env.COORDINATOR_HOME ? { COORDINATOR_HOME: env.COORDINATOR_HOME } : {}),
 });
+const lead = (p, args) => spawnSync(process.execPath, [RUN_MJS, ...args], { cwd: p.root, env: leadEnv(p.base), encoding: 'utf8' });
+const lastLine = (r) => String(r.stderr).trim().split('\n').at(-1);
 
-// The lead asks a question on a copied run, with the skill's own CLI (the copy only).
+// The demo lead takes its own copy of a run over in the open: run.mjs lead logs "took over from <id>: <why>"
+// (a copy keeps the lead of the run it copies, a window that is not the demo's). Only ever on a copy.
+export function leadClaims(p, run) {
+  const r = lead(p, ['lead', run.id, '--takeover', '--reason', 'the demo lead works on its own throwaway copy of this run']);
+  if (r.status !== 0) throw new Error(`the demo lead could not claim its copy: ${lastLine(r)}`);
+  return JSON.parse(r.stdout);
+}
+
+// The lead asks a question on a copied run, with the skill's own CLI (the copy only), as the copy's lead.
 export function leadAsks(p, run, { question, header, options }) {
-  const r = spawnSync(process.execPath, [RUN_MJS, 'ask', run.id, '--question', question, '--header', header, ...options.flatMap((o) => ['--option', o])], {
-    cwd: p.root, env: leadEnv(p.base), encoding: 'utf8',
-  });
-  if (r.status !== 0) throw new Error(`the lead could not ask: ${String(r.stderr).trim().split('\n').at(-1)}`);
+  leadClaims(p, run);
+  const r = lead(p, ['ask', run.id, '--question', question, '--header', header, ...options.flatMap((o) => ['--option', o])]);
+  if (r.status !== 0) throw new Error(`the lead could not ask: ${lastLine(r)}`);
   return JSON.parse(r.stdout).asked;
 }

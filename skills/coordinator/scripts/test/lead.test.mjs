@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { updateRun } from '../lib/events.mjs';
 import { NAMES } from '../lib/harness.mjs';
-import { claim, decideLead, goneWhy, identity, LEAD_STEPS, leadInfo, machineId, SESSION_VARS, secondBuilder, windowAlive } from '../lib/lead.mjs';
+import { claim, claimText, decideLead, goneWhy, identity, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, SESSION_VARS, secondBuilder, stale, windowAlive } from '../lib/lead.mjs';
 import { agoText, zone } from '../lib/progress.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -85,10 +85,11 @@ test('B2, B3: the lead decides; others are refused while it is active, and take 
   assert.deepEqual(decideLead(run({ ...other, id: 'me' }), me, { nowMs: NOW }), { action: 'lead' });
   const active = decideLead(run(other), me, { nowMs: NOW, timeZone: 'Asia/Riyadh' });
   assert.equal(active.action, 'refuse');
-  assert.equal(active.message, "run r is led by another window (Claude Code, last active 12 min ago (13:53 local, UTC+3)); /coordinator:status r takes it over once that window has been quiet for 45 min, or now with the person's yes: --takeover --reason R. If you are that window, pass the --lead id its claim printed (or set COORDINATOR_LEAD).");
+  assert.equal(active.message, "run r is led by another window (Claude Code, last active 12 min ago (13:53 local, UTC+3)); leave its lead steps to it. Once it has been quiet for 45 min, run.mjs lead r takes it over; to take it over now, only with the person's yes: run.mjs lead r --takeover --reason R. If you are that window, pass the --lead id its claim printed (or set COORDINATOR_LEAD in this window's shell).");
   assert.equal(decideLead(run(other), { id: 'x', source: 'session' }, { nowMs: NOW }).message.includes('pass the --lead'), false, 'a session id cannot be passed');
-  assert.match(decideLead(run(other), me, { nowMs: NOW, takeover: true }).message, /still active .*needs --takeover --reason R, and only after the person says yes/);
-  const forced = decideLead(run(other), me, { nowMs: NOW, takeover: true, reason: 'the person said yes', timeZone: 'UTC' });
+  // A lead step's --takeover (claimGone) never takes an active lead; only run.mjs lead --takeover --reason (force) does.
+  assert.equal(decideLead(run(other), me, { nowMs: NOW, claimGone: true }).action, 'refuse');
+  const forced = decideLead(run(other), me, { nowMs: NOW, force: 'the person said yes', timeZone: 'UTC' });
   assert.deepEqual(forced, { action: 'claim', from: 'old', why: 'the person said yes (its lead was still active: Claude Code, last active 12 min ago (10:53 local, UTC))' });
   // A unit beat keeps the lead active, as its own lead steps do.
   const quiet = { ...other, at: iso(50), since: iso(50) };
@@ -97,20 +98,32 @@ test('B2, B3: the lead decides; others are refused while it is active, and take 
   const gone = decideLead(run(quiet), me, { nowMs: NOW, timeZone: 'UTC' });
   assert.equal(gone.action, 'refuse'); assert.match(gone.message, /lead is gone \(Claude Code, last active 50 min ago \(10:15 local, UTC\); quiet for over 45 min\): run.mjs lead r takes it over/);
   assert.deepEqual(decideLead(run(quiet), me, { nowMs: NOW, claimGone: true, timeZone: 'UTC' }), { action: 'claim', from: 'old', why: 'quiet for over 45 min; last active 50 min ago (10:15 local, UTC)' });
-  assert.equal(decideLead(run(quiet), me, { nowMs: NOW, takeover: true }).action, 'claim');
+  assert.deepEqual(decideLead(run(quiet), me, { nowMs: NOW, force: 'moved', timeZone: 'UTC' }), { action: 'claim', from: 'old', why: 'moved (quiet for over 45 min; last active 50 min ago (10:15 local, UTC))' });
   // The window's process, where the tool gives one and it was recorded on this PC.
   const pid = { ...other, pid: 77, machine: 'm1' };
   const here = (alive) => windowAlive(() => alive, () => 'm1');
-  assert.equal(goneWhy(run(pid), NOW, here(false)), 'ended');
-  assert.equal(goneWhy(run(pid), NOW, here(true)), null);
-  assert.equal(goneWhy(run({ ...pid, at: iso(60), since: iso(60) }), NOW, here(true)), 'quiet', 'a live (maybe reused) pid falls back to the quiet rule');
-  assert.equal(goneWhy(run(pid), NOW, windowAlive(() => false, () => 'm2')), null, 'a pid from another PC says nothing');
-  assert.equal(leadInfo(run(pid), NOW, { alive: here(false) }).goneText, 'its window has ended');
+  assert.equal(goneWhy(run(pid), NOW, here(false)), null, 'active inside the stale minutes, whatever the pid says (a resumed window has a new one)');
+  const quietPid = { ...pid, at: iso(60), since: iso(60) };
+  assert.equal(goneWhy(run(quietPid), NOW, here(false)), 'ended');
+  assert.equal(goneWhy(run(quietPid), NOW, here(true)), 'quiet', 'a live (maybe reused) pid cannot keep a quiet lead');
+  assert.equal(goneWhy(run(quietPid), NOW, windowAlive(() => false, () => 'm2')), 'quiet', 'a pid from another PC says nothing');
+  assert.equal(leadInfo(run(quietPid), NOW, { alive: here(false) }).goneText, 'its window has ended');
+  assert.equal(windowAlive(() => false, () => null)(pid, 'r'), null, 'no id for this PC: nothing recorded here');
   // A takeover is logged.
   const s = run(other);
   claim(s, me, { harness: 'codex', at: iso(0), from: 'old', why: 'quiet since 10:15' });
   assert.deepEqual(s.lead, { id: 'me', harness: 'codex', since: iso(0), at: iso(0), from: 'old' });
   assert.deepEqual(s.notes, [{ kind: 'decision', text: 'took over from old: quiet since 10:15', at: iso(0) }]);
+  // A lead step by the same lead records its window's process again; another lead is never touched.
+  const mine = { id: 'me', harness: 'claude-code', since: iso(30), at: iso(30), pid: 11, machine: 'mm' };
+  assert.equal(stale(mine, { id: 'me', pid: 11 }, 'mm'), false);
+  assert.equal(stale(mine, { id: 'me', pid: 12 }, 'mm'), true, 'a resumed window: a new process');
+  assert.equal(stale(mine, { id: 'other', pid: 12 }, 'mm'), false);
+  const r2 = run({ ...mine });
+  refresh(r2, { id: 'me', pid: 12 }, { at: iso(0), machine: 'mm' });
+  assert.deepEqual(r2.lead, { ...mine, pid: 12, at: iso(0) });
+  refresh(r2, { id: 'me' }, { at: iso(0) });
+  assert.equal(r2.lead.pid, undefined, 'no process given: none kept');
   assert.deepEqual([...LEAD_STEPS].sort(), ['add', 'add-specialist', 'ask', 'close', 'extend', 'foldin', 'freeze', 'init', 'integrate', 'next', 'pause', 'pull', 'push', 'reset', 'resume', 'ship', 'start', 'strategy', 'use-answer', 'verdict']);
 });
 
@@ -128,6 +141,11 @@ test('this PC\'s id is random, made once, and never a host or user name', () => 
   const id = machineId(home);
   assert.match(id, /^[0-9a-f]{16}$/); assert.equal(machineId(home), id);
   assert.ok(!id.includes(hostname().toLowerCase()));
+  assert.equal(machineId(mkdtempSync(join(dir, 'home-')), { create: false }), null, 'a check never makes one');
+  // A run records a value of its own, so runs pushed from different repos cannot be linked to one PC by it.
+  assert.match(runMachine(id, 'r1'), /^[0-9a-f]{16}$/);
+  assert.notEqual(runMachine(id, 'r1'), runMachine(id, 'r2')); assert.notEqual(runMachine(id, 'r1'), id);
+  assert.equal(runMachine(id, 'r1'), runMachine(id, 'r1'));
 });
 
 test('B1: init claims the run; the claim names the id, the tool and the time, never a host or user name', () => {
@@ -138,7 +156,9 @@ test('B1: init claims the run; the claim names the id, the tool and the time, ne
   const ev = events('b1');
   assert.deepEqual(ev.map((e) => e.kind), ['run.init', 'lead.claim']);
   const lead = state('b1').lead;
-  assert.equal(lead.id, r.out.claim.id); assert.equal(lead.harness, 'claude-code'); assert.equal(lead.pid, process.pid); assert.match(lead.machine, /^[0-9a-f]{16}$/);
+  assert.equal(lead.id, r.out.claim.id); assert.equal(lead.harness, 'claude-code'); assert.equal(lead.pid, process.pid);
+  const pc = machineId(process.env.COORDINATOR_HOME, { create: false });
+  assert.equal(lead.machine, runMachine(pc, 'b1'), 'this run\'s own value for the PC'); assert.notEqual(lead.machine, pc, 'never the PC\'s id itself');
   assert.ok(Date.now() - Date.parse(lead.since) < 60_000);
   const log = readFileSync(join(runDir('b1'), 'events.jsonl'), 'utf8');
   for (const secret of [sid, hostname(), userInfo().username]) assert.equal(log.toLowerCase().includes(secret.toLowerCase()), false, `the log never holds ${secret === sid ? 'the raw session id' : 'a host or user name'}`);
@@ -154,7 +174,8 @@ test('B1, B6: a tool with no window id gets a random id it must pass; a run made
   assert.equal(r.code, 0, r.err);
   const id = r.out.claim.id;
   assert.match(id, /^[0-9a-f]{12}$/);
-  assert.match(r.out.claim.pass, new RegExp(`pass --lead ${id} on every lead step of this run, or set COORDINATOR_LEAD=${id}`));
+  assert.match(r.out.claim.pass, new RegExp(`pass --lead ${id} on every lead step of this run, or set COORDINATOR_LEAD=${id} in this window's shell only, never in a profile file`));
+  assert.doesNotMatch(claimText({ id: 'x', source: 'random' }, {}, 'codex').pass, /where your shell keeps it/);
   const again = as(null, 'add', 'b6', 'u1', '--bar', 'b', '--harness', 'gemini');
   assert.equal(again.code, 1, 'without its id it is any other window'); assert.match(again.err, /pass the --lead id its claim printed/);
   assert.equal(as(null, 'add', 'b6', 'u1', '--bar', 'b', '--harness', 'gemini', '--lead', id).code, 0);
@@ -177,6 +198,7 @@ test('B2: lead steps from another window are refused; worker steps, reads, answe
   const q = A('ask', 'b2', '--question', 'Ship?', '--header', 'Ship', '--option', 'Yes|now', '--option', 'No|later');
   assert.equal(q.code, 0, q.err);
   const before = events('b2').length;
+  const unitBefore = JSON.stringify(state('b2').units);
   const steps = [['add', 'b2', 'u3', '--bar', 'b'], ['add-specialist', 'b2', 'u1', 'security', '--reason', 'r'], ['start', 'b2', 'u2'], ['reset', 'b2', 'u1', '--reason', 'r'],
     ['verdict', 'b2', 'u1', 'pass', '--evidence', 'e'], ['strategy', 'b2', 'u1', '--text', 't'], ['extend', 'b2', 'u1', '--rounds', '1', '--reason', 'r'], ['freeze', 'b2'],
     ['foldin', 'b2', 'u1', '--head', 'abc1234', '--evidence', 'e'], ['ship', 'b2', 'u1', '--merge', 'https://x/pull/1', '--reason', 'r'], ['integrate', 'b2', 'pass'],
@@ -185,9 +207,17 @@ test('B2: lead steps from another window are refused; worker steps, reads, answe
   for (const s of steps) {
     const r = B(...s);
     assert.equal(r.code, 1, `${s[0]} refused`);
-    assert.match(r.err, new RegExp(`run b2 is led by another window \\(Codex, last active ${LOCAL.source.split('|')[1]}\\); /coordinator:status b2 takes it over once that window has been quiet for 30 min`), `${s[0]}: ${r.err}`);
+    assert.match(r.err, new RegExp(`run b2 is led by another window \\(Codex, last active ${LOCAL.source.split('|')[1]}\\); leave its lead steps to it\\. Once it has been quiet for 30 min, run\\.mjs lead b2 takes it over; to take it over now, only with the person's yes: run\\.mjs lead b2 --takeover --reason R`), `${s[0]}: ${r.err}`);
   }
+  // A lead step's --takeover never takes an active lead, and a step's own --reason is no takeover reason.
+  for (const s of [['add', 'b2', 'u3', '--bar', 'b', '--takeover'], ['reset', 'b2', 'u1', '--reason', 'r', '--takeover'], ['pause', 'b2', '--reason', 'r', '--takeover'],
+    ['close', 'b2', '--outcome', 'stopped', '--reason', 'r', '--takeover'], ['start', 'b2', 'u1', '--takeover', '--reason', 'its builder crashed']]) {
+    const r = B(...s);
+    assert.equal(r.code, 1, `${s.join(' ')} refused`); assert.match(r.err, /run\.mjs lead b2 --takeover --reason R/, `${s[0]}: ${r.err}`);
+  }
+  assert.match(B('freeze', 'b2', '--reason', 'r', '--takeover').err, /unknown option --reason/, 'a step with no reason of its own takes none');
   assert.equal(events('b2').length, before, 'nothing written');
+  assert.equal(JSON.stringify(state('b2').units), unitBefore, 'u1 kept its builder');
   // Never refused.
   for (const s of [['beat', 'b2', 'u1', '--text', 'pushed'], ['evidence', 'b2', 'u1', '--kind', 'log', '--text', 'x'], ['note', 'b2', '--kind', 'info', '--text', 'agent note'],
     ['built', 'b2', 'u1', '--report', 'done'], ['show', 'b2'], ['status-line', 'b2'], ['questions', 'b2'], ['list'], ['next', 'b2'], ['lead', 'b2'],
@@ -214,7 +244,7 @@ test('B3: a gone lead is taken over by run.mjs lead or --takeover, and the takeo
   assert.equal(seen.code, 0); assert.equal(seen.out.you, false); assert.equal(seen.out.claimed, undefined); assert.equal(seen.out.tool, 'Codex');
   assert.match(seen.out.lastActive, LOCAL); assert.match(seen.out.step, /--takeover --reason R/);
   assert.equal(seen.out.id, undefined, 'another window\'s id is not printed');
-  assert.equal(B('lead', 'b3', '--takeover').code, 1);
+  assert.match(B('lead', 'b3', '--takeover').err, /reason \(why this window takes the run over/);
   assert.equal(B('lead', 'b3', '--reason', 'x').code, 1, '--reason goes with --takeover');
   assert.equal(A('lead', 'b3').out.you, true);
   // Quiet: the next window takes it over without asking.
@@ -231,23 +261,74 @@ test('B3: a gone lead is taken over by run.mjs lead or --takeover, and the takeo
   // The old window stops instead of competing.
   const old = A('add', 'b3', 'u3', '--bar', 'b');
   assert.equal(old.code, 1); assert.match(old.err, /led by another window \(Antigravity, last active under a minute ago/);
-  // While the lead is active, --takeover --reason (after the person's yes), logged with the reason.
-  const forced = A('add', 'b3', 'u3', '--bar', 'b', '--takeover', '--reason', 'the person moved to this window');
-  assert.equal(forced.code, 0, forced.err); assert.equal(forced.out.claim.tookOverFrom, 'lead-b');
+  // While the lead is active, only run.mjs lead --takeover --reason (after the person's yes), logged with the reason.
+  assert.match(A('add', 'b3', 'u3', '--bar', 'b', '--takeover').err, /run\.mjs lead b3 --takeover --reason R/);
+  const forced = A('lead', 'b3', '--takeover', '--reason', 'the person moved to this window');
+  assert.equal(forced.code, 0, forced.err); assert.equal(forced.out.tookOverFrom, 'lead-b'); assert.equal(forced.out.you, true);
   assert.match(state('b3').notes.at(-1).text, /^took over from lead-b: the person moved to this window \(its lead was still active: Antigravity, last active/);
+  assert.equal(A('add', 'b3', 'u3', '--bar', 'b').code, 0);
   // A gone lead: a lead step with --takeover claims it too.
   age('b3', 10);
+  const n = events('b3').length;
   const step = B('freeze', 'b3', '--takeover');
   assert.equal(step.code, 0, step.err); assert.equal(state('b3').lead.id, 'lead-b'); assert.equal(state('b3').frozen, true);
+  assert.deepEqual(events('b3').slice(n).map((e) => e.kind), ['lead.claim', 'run.freeze'], 'the claim, then the step');
 });
 
-test('B3: a window that has ended (its tool gave its process) is gone at once', () => {
+test('the claim is written with its step or not at all: a step that fails leaves the old lead', () => {
+  make(A, 'b5', '--stale-minutes', '5');
+  A('add', 'b5', 'u1', '--bar', 'b'); A('freeze', 'b5'); A('start', 'b5', 'u1');
+  age('b5', 10);
+  const n = events('b5').length;
+  const bad = B('start', 'b5', 'u1', '--takeover');
+  assert.equal(bad.code, 1); assert.match(bad.err, /reason \(why u1 gets a new builder/);
+  assert.equal(events('b5').length, n, 'nothing written'); assert.equal(state('b5').lead.id, 'lead-a');
+  const ok = B('start', 'b5', 'u1', '--takeover', '--reason', 'its builder went quiet with its window');
+  assert.equal(ok.code, 0, ok.err); assert.equal(ok.out.claim.tookOverFrom, 'lead-a');
+  assert.deepEqual(events('b5').slice(n).map((e) => e.kind), ['lead.claim', 'unit.start']);
+  // init checks its --lead before it writes: a bad one leaves no run, and the retry works.
+  assert.match(as(null, 'init', 'b5i', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--lead', 'not ok').err, /--lead takes the lead id/);
+  assert.equal(as(null, 'show', 'b5i').code, 1, 'no run made');
+  make(A, 'b5i');
+});
+
+test('init --continues and add --continues respect the parent run\'s lead', () => {
+  make(A, 'p1', '--stale-minutes', '5'); A('add', 'p1', 'u1', '--bar', 'b');
+  const refused = B('init', 'c1', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--continues', 'p1:u1');
+  assert.equal(refused.code, 1); assert.match(refused.err, /--continues p1:u1: run p1 is led by another window \(Codex, last active /);
+  assert.equal(B('show', 'c1').code, 1, 'no run made'); assert.equal(state('p1').units[0].continuedIn, undefined, 'the parent is untouched');
+  make(B, 'c2'); assert.match(B('add', 'c2', 'u1', '--bar', 'b', '--continues', 'p1:u1').err, /--continues p1:u1: run p1 is led by another window/);
+  assert.equal(A('init', 'c3', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--continues', 'p1:u1').code, 0, 'its own lead may');
+  // A gone lead is no bar: the link is all it writes there.
+  make(A, 'p2', '--stale-minutes', '5'); A('add', 'p2', 'u1', '--bar', 'b'); age('p2', 10);
+  const ok = B('init', 'c4', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--continues', 'p2:u1');
+  assert.equal(ok.code, 0, ok.err); assert.equal(state('p2').lead.id, 'lead-a', 'the parent\'s lead is not taken');
+});
+
+test('a resumed Claude Code window (same session, new process) keeps its run', () => {
+  const sid = 'resumed-window-session';
+  const dead = spawnSync(process.execPath, ['-e', '']).pid;
+  const cc = (pid, ...a) => withEnv({ CLAUDE_CODE_SESSION_ID: sid, CLAUDE_PID: String(pid), COORDINATOR_LEAD: undefined }, ...a);
+  assert.equal(cc(dead, 'init', 'rs', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'claude-code').code, 0);
+  // Resumed: its old process has ended, but it led a moment ago; another window does not take the run.
+  const seen = B('lead', 'rs');
+  assert.equal(seen.code, 0); assert.equal(seen.out.claimed, undefined); assert.equal(seen.out.gone, undefined);
+  // Its next lead step records the new process.
+  assert.equal(cc(process.pid, 'add', 'rs', 'u1', '--bar', 'b').code, 0);
+  assert.equal(state('rs').lead.pid, process.pid);
+  assert.equal(B('lead', 'rs').out.claimed, undefined);
+  assert.equal(B('add', 'rs', 'u2', '--bar', 'b').code, 1);
+});
+
+test('B3: a window that has ended (its tool gave its process) is gone once its run is quiet, and the log says it ended', () => {
   const dead = spawnSync(process.execPath, ['-e', '']).pid;
   const sid = 'dead-window-session';
-  const r = withEnv({ CLAUDE_CODE_SESSION_ID: sid, CLAUDE_PID: String(dead), COORDINATOR_LEAD: undefined }, 'init', 'b3p', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'claude-code');
+  const r = withEnv({ CLAUDE_CODE_SESSION_ID: sid, CLAUDE_PID: String(dead), COORDINATOR_LEAD: undefined }, 'init', 'b3p', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'claude-code', '--stale-minutes', '5');
   assert.equal(r.code, 0, r.err);
+  assert.equal(B('lead', 'b3p').out.claimed, undefined, 'active by its last step');
+  age('b3p', 10);
   const seen = B('lead', 'b3p');
-  assert.equal(seen.out.claimed, true, seen.err); assert.match(state('b3p').notes.at(-1).text, /^took over from [0-9a-f]{12}: its window has ended; last active under a minute ago/);
+  assert.equal(seen.out.claimed, true, seen.err); assert.match(state('b3p').notes.at(-1).text, /^took over from [0-9a-f]{12}: its window has ended; last active 10 min ago/);
 });
 
 test('B4, B5: start on a unit at work is refused unless --takeover --reason, logged on the unit; show, next and status-line print local ages', () => {
@@ -258,6 +339,10 @@ test('B4, B5: start on a unit at work is refused unless --takeover --reason, log
   assert.match(again.err, new RegExp(`start refused: u1 is being built, last beat ${LOCAL.source.split('|')[1]}, younger than the run's 45 stale minutes; a second builder would work on the same task`));
   assert.match(A('start', 'b4', 'u1', '--takeover').err, /reason \(why u1 gets a new builder/);
   assert.match(A('start', 'b4', 'u1', '--reason', 'x').err, /--reason goes with --force-start or --takeover/);
+  // Another window cannot: the run's active lead refuses it, naming the step that takes the run over.
+  const other = B('start', 'b4', 'u1', '--takeover', '--reason', 'x');
+  assert.equal(other.code, 1); assert.match(other.err, /run\.mjs lead b4 --takeover --reason R/);
+  assert.equal(state('b4').lead.id, 'lead-a');
   const took = A('start', 'b4', 'u1', '--takeover', '--reason', 'its builder crashed with the window');
   assert.equal(took.code, 0, took.err);
   const u = state('b4').units[0];
@@ -273,4 +358,10 @@ test('B4, B5: start on a unit at work is refused unless --takeover --reason, log
   const next = A('next', 'b4').out;
   assert.match(next.units[0].lastBeat, LOCAL); assert.equal(next.lead.tool, 'Codex'); assert.match(next.lead.lastActive, LOCAL);
   assert.match(A('status-line', 'b4').raw, /checking u1 round 1, last beat under a minute ago \(\d\d:\d\d local, UTC[^)]*\)/);
+  // A run with no lead yet (made before leads): the window that claims it in this step takes no busy unit.
+  updateRun(runDir('b4'), { kind: 'note' }, (s) => { delete s.lead; });
+  const n = events('b4').length;
+  const fresh = B('start', 'b4', 'u1', '--takeover', '--reason', 'x');
+  assert.equal(fresh.code, 1); assert.match(fresh.err, /start --takeover refused: u1 is being judged, and this window did not lead run b4 before this step\. Taking over the run comes first, as its own step: run\.mjs lead b4/);
+  assert.equal(events('b4').length, n, 'nothing written, not even the claim');
 });

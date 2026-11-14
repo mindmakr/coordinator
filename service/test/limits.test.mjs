@@ -44,10 +44,10 @@ test('the periodic resync picks up a push whose webhook never arrived', async ()
   const t = await world({ runs: { r1: log } });
   try {
     await t.app.resyncAll();
-    assert.equal((await t.db.runs(7, 70))[0].seq, 7);
+    assert.equal((await t.db.runs(7, 70))[0].seq, 8);
     t.gh.setFiles('acme/web', stateFiles({ r1: note(log, 'later') }, { repos: ['acme/mobile'] })); // no delivery
     await t.app.resyncAll();
-    assert.equal((await t.db.runs(7, 70))[0].seq, 8, 'healed without a webhook');
+    assert.equal((await t.db.runs(7, 70))[0].seq, 9, 'healed without a webhook');
   } finally { await t.close(); }
 });
 
