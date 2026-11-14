@@ -45,13 +45,14 @@ function nextStep(run, plan) {
 }
 
 // linked: the runs this one continues or was continued in (lib/chain.mjs linkedRuns); without them a chain still shows, its other runs as "not here".
-export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null } = {}) {
+// project: the project's name for each question's label (lib/questions.mjs questionLabel); the hosted service passes the repo's name.
+export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null, project = null } = {}) {
   const end = run.closed ? Date.parse(run.closed.at) : nowMs;
   const next = new Map(plan.units.map((u) => [u.id, u]));
   const integ = run.integration?.rounds ?? [];
   const notes = run.notes ?? [];
   const pick = (kind) => notes.filter((n) => n.kind === kind).map((n) => n.text);
-  const qs = questions(run);
+  const qs = questions(run, { project });
   const personNotes = notes.filter((n) => n.kind === 'person').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at }));
   const timeline = runTimeline(run).reverse();
   const goalBehaviours = run.goalBehaviours ?? [];
@@ -60,7 +61,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
   const dots = new Map(run.units.map((u) => [u.id, dotState(u, next.get(u.id), run.closed ? [] : qs)]));
   const brief = (id) => { const x = run.units.find((y) => y.id === id); const st = dots.get(id); return { id, title: x?.title ?? null, status: x?.status ?? null, dot: st ?? null, badge: x ? stateBadge(st, x, next.get(id)) : null }; };
   return {
-    id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo, origin: origin(run),
+    id: run.id, tag: run.tag, goal: run.goal, repo: run.repo ?? repo, project, origin: origin(run),
     continues: Array.isArray(run.continues) ? run.continues : [],
     goalCheck: {
       behaviours: goalBehaviours, evidence: run.goalEvidence ?? [],
@@ -127,11 +128,11 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     next: nextStep(run, plan),
     decisions: pick('decision'),
     // Only open questions are "questions"; the rest are answered: by the person or the lead, or closed by a decision note.
-    questions: qs.filter((q) => q.open).map((q) => `${q.id}: ${q.text}${q.recommend ? ` · recommended: ${q.recommend}` : ''}`),
+    questions: qs.filter((q) => q.open).map((q) => ({ id: q.id, label: q.label, text: `${q.id}: ${q.text}${q.recommend ? ` · recommended: ${q.recommend}` : ''}` })),
     answeredQuestions: qs.filter((q) => !q.open).map((q) => {
       const d = notes.filter((n) => n.kind === 'decision' && n.answers === q.id).at(-1) ?? null;
       return {
-        id: q.id, title: q.header || clip(String(q.text).split('\n')[0], 90), status: q.status,
+        id: q.id, label: q.label, title: q.header || clip(String(q.text).split('\n')[0], 90), status: q.status,
         answer: q.answer ? answerText(q.answer) : (d?.text ?? ''), by: q.answer ? q.answer.by : 'lead', at: q.answer?.at ?? d?.at ?? null,
         decision: d && (!q.answer || d.text !== answerText(q.answer)) ? d.text : null,
       };
@@ -153,9 +154,9 @@ export function text(v) {
   const w = Math.max(4, ...v.units.map((u) => u.id.length)) + 2;
   const budget = v.budget.map((b) => `${b.name} ${b.used}/${b.max}${b.unit ? ` ${b.unit}` : ''}${b.note ? ` (${b.note})` : ''}`).join(' · ');
   const needs = v.needsYou.length
-    ? v.needsYou.map((q, i) => `${i ? ' '.repeat(11) : 'needs you  '}${q.id}: ${clip(q.text, 120)}${q.recommend ? ` → recommended: ${clip(q.recommend, 80)}` : ''}`)
+    ? v.needsYou.flatMap((q, i) => [`${i ? ' '.repeat(11) : 'needs you  '}${q.label}`, `${' '.repeat(11)}${q.id}: ${clip(q.text, 120)}${q.recommend ? ` → recommended: ${clip(q.recommend, 80)}` : ''}`])
     : ['needs you  nothing'];
-  const answered = v.answered.map((q) => `answered   ${q.id}: ${clip(answerText(q.answer), 100)} (by ${q.answer.by}; the lead has not used it yet)`);
+  const answered = v.answered.flatMap((q) => [`answered   ${q.label}`, `${' '.repeat(11)}${q.id}: ${clip(answerText(q.answer), 100)} (by ${q.answer.by}; the lead has not used it yet)`]);
   const lines = [
     `${v.id} [${v.tag}] · ${v.status.word} · started ${v.started.slice(0, 16).replace('T', ' ')}`,
     ...statusLines(v.status),

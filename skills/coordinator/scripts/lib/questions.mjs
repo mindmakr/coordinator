@@ -2,8 +2,10 @@
 // answer page (lib/serve.mjs), and notes the person adds. A question is a
 // `question` note, numbered q1, q2, … in the order asked, so questions logged
 // by older versions with `note --kind question` keep their ids and still load.
+import { basename, dirname } from 'node:path';
 import { clip } from './plain.mjs';
 import { oneOf, optText, text } from './args.mjs';
+import { maskSecrets } from './secrets.mjs';
 
 export const HEADER_MAX = 12;
 export const OTHER = '__other'; // the "Other" radio on the answer page
@@ -87,7 +89,8 @@ export function personNote(s, { text: t, unit, via = undefined, confirm = false 
 export const answerText = (a) => (a ? [...a.choices, ...(a.other ? [`"${a.other}"`] : [])].join(', ') : '');
 
 // Every question with its state: open, answered (waiting for the lead), used, or decided.
-export function questions(run) {
+// project: the project's name (projectName), shown first in each question's label.
+export function questions(run, { project = null } = {}) {
   return asked(run).map((n, i) => {
     const id = `q${i + 1}`;
     const history = n.history ?? [];
@@ -95,9 +98,31 @@ export function questions(run) {
     return {
       id, text: n.text, header: n.header ?? null, options: n.options ?? [], multi: !!n.multi, unit: n.unit ?? null,
       recommend: n.recommend ?? null, approves: n.approves ?? null, at: n.at, answer: history.at(-1) ?? null, history, usedAt: n.usedAt ?? null,
-      status, open: status === 'open',
+      status, open: status === 'open', label: questionLabel(run, n.unit ?? null, project),
     };
   });
+}
+
+// Where a question comes from, so the person knows which run they answer (design one-boss 5.3):
+// "<project> · <run name> (<run id>)", then " › Task <unit id>: <unit title>" for a question on a unit.
+// Built here only: the lead never types it. Masked, control and direction characters removed, clipped.
+const NAME_MAX = 40;
+const TITLE_MAX = 60;
+const clean = (v) => (typeof v === 'string' ? maskSecrets(v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')).replace(/\s+/g, ' ').trim() : '');
+
+// The run's name: its alias, else its title (or goal), clipped.
+export const runName = (run) => clip(clean(run.alias) || clean(run.title) || clean(run.goal), NAME_MAX);
+
+// The project's name: the folder that holds `.coordinator/` (or the state folder's own name when COORDINATOR_DIR names another folder).
+export const projectName = (stateDir) => clean(basename(basename(stateDir) === '.coordinator' ? dirname(stateDir) : stateDir));
+
+export function questionLabel(run, unit = null, project = null) {
+  const name = runName(run);
+  const head = `${project ? `${clip(clean(project), NAME_MAX)} · ` : ''}${name ? `${name} ` : ''}(${clean(run.id)})`;
+  if (!unit) return head;
+  const u = (run.units ?? []).find((x) => x.id === unit);
+  const title = clip(clean(u?.title) || clean(u?.bar), TITLE_MAX);
+  return `${head} › Task ${clean(unit)}${title ? `: ${title}` : ''}`;
 }
 
 // One line per new or changed answer and per new note from the person, between

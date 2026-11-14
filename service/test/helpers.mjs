@@ -18,8 +18,9 @@ export const XSS = '<script>alert("x")</script>';
 
 // Builds run `id` with the CLI and returns its events.jsonl bytes.
 // links: GitHub refs for u1 ('acme/web#12' or a URL; a /pull/ URL is a PR); file: attach an evidence file to u1.
+// alias: the run's --alias; askUnit: also ask a question on u1 (its label names the task).
 // mapOut: an object that gets .map, the run's project map log (run.mjs map --pit-stop over a tiny project).
-export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = false, issues = [], prs = [], file = false, mapOut = null } = {}) {
+export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = false, issues = [], prs = [], file = false, mapOut = null, alias = null, askUnit = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'coord-svc-'));
   const cli = (...a) => {
     const r = spawnSync(process.execPath, [RUN_MJS, ...a], { cwd: dir, env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
@@ -27,9 +28,10 @@ export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = fals
     return r.stdout;
   };
   try {
-    cli('init', id, '--goal', goal, '--bar', 'tests pass', '--fence', 'web only', '--repo', 'acme/web');
+    cli('init', id, '--goal', goal, '--bar', 'tests pass', '--fence', 'web only', '--repo', 'acme/web', ...(alias ? ['--alias', alias] : []));
     cli('add', id, 'u1', '--bar', `the total is right <img src=x onerror=alert(1)>`, '--title', 'Totals');
     cli('ask', id, '--question', `Which total? ${XSS}`, '--header', 'Total', '--option', 'server|use the server total', '--option', 'client|sum on the client');
+    if (askUnit) cli('ask', id, '--question', 'Round to cents?', '--header', 'Rounding', '--option', 'yes|round half up', '--option', 'no|keep full precision', '--unit', 'u1');
     for (const x of issues) cli('link', id, 'u1', '--issue', x);
     for (const x of prs) cli('link', id, 'u1', '--pr', x);
     if (file) { const f = join(dir, 'run-log.txt'); writeFileSync(f, 'log'); cli('evidence', id, 'u1', '--file', f, '--kind', 'log', '--label', 'full log'); }
