@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.1 (2026-11-14)
+Four fixes to the run state: a run can be paused by hand, a specialist's fail no longer forces a false general fail, behaviour text is never cut, and a brief sent as a file still counts under its role and round.
+
+- **Pause and resume a run (`run.mjs pause <run> --reason R`, `run.mjs resume <run>`, #132).** The minutes between them count toward no budget, whatever runs meanwhile, and `show` gives the time spent on pause. While the run is paused, `next` says so and starts no unit, and `start` is refused. `next` on a run past its time budget no longer records anything: it lists the stops that `close` will record.
+- **A general pass is recorded as given when a specialist failed the build (#126).** Before, the general pass was refused, so the lead had to record a general fail the critic never gave. Now the round closes as failed by that specialist, with its gap, cause and severity, and keeps the general critic's verdict and score; `show`, `stats`, the unit page and the dashboard name the specialist.
+- **Behaviour text over 500 characters is refused, never cut (#128).** `behave` and `add --behaviour` refuse a longer text with its length and store nothing; before, the text was cut at 500 with no warning. Text of 500 characters is stored whole.
+- **`run.mjs brief --to <file>` writes the brief to a file (#131).** It prints a short prompt instead: the brief's marker line, then `Read "<file>" in full first`. `context.mjs` then counts the agent under its role and round, where a brief passed only by path counted it as unmarked.
+
 ## 1.6.0 (2026-11-14)
 Coordinator asks the person when a loop is stuck, checks a bar can be met before it loops, never cuts a brief silently, pauses its clock while only the person is awaited, and trims the fixed prompt prefix per project. Lucid Coding carries the lessons.
 

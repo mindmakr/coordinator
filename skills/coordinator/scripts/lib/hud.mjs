@@ -107,7 +107,7 @@ const tryLabel = (r) => `Try ${r.n}: ${r.verdict === 'pass' ? 'passed' : r.faile
 export function scoreChart(rounds) {
   if (!rounds.length) return '';
   const last = rounds.at(-1);
-  if (rounds.length === 1) return `<p class="cause score-one">${esc(last.verdict === 'pass' ? 'Passed on try 1' : 'Failed try 1')}${typeof last.score === 'number' ? ` (${last.score}/10)` : ''}${last.verdict !== 'pass' && (last.cause || last.gap) ? ` — ${esc(clip(last.cause || last.gap, 70))}` : ''}</p>`;
+  if (rounds.length === 1) return `<p class="cause score-one">${esc(last.verdict === 'pass' ? 'Passed on try 1' : `Failed try 1${last.failedBy?.length ? ` by specialist ${last.failedBy.join(', ')}` : ''}`)}${typeof last.score === 'number' ? ` (${last.score}/10)` : ''}${last.verdict !== 'pass' && (last.cause || last.gap) ? ` — ${esc(clip(last.cause || last.gap, 70))}` : ''}</p>`;
   const W = 120; const H = 32; const pad = 5;
   const x = (i) => pad + (i * (W - 2 * pad)) / (rounds.length - 1);
   const y = (sc) => H - pad - (sc / 10) * (H - 2 * pad);
