@@ -11,6 +11,8 @@ const MINUTE = 60_000;
 const FINISHING = ['integrate', 'done', 'done-with-gaps', 'stopped'];
 export const KINDS = { running: 'Running', paused: 'Paused', waiting: 'Waiting on you', finishing: 'Finishing', concluded: 'Concluded' };
 const DELIVERED_SHOWN = 6;
+// Every unit decided and the run not closed: the integration check or the close comes next ("Finishing").
+export const isFinishing = (run, plan) => !run.closed && FINISHING.includes(plan?.decision);
 
 // "21:40", or "Sat 09:10" when it is not today, in this machine's time zone.
 export function clock(ms, nowMs, timeZone) {
@@ -77,7 +79,7 @@ export function runStatus(run, plan = null, { nowMs = Date.now(), runs = null, t
     .map((d) => ({ id: d.id, text: Array.isArray(d.files) ? `same files failing for ${d.id} (${d.files.join(', ')}): change the bar, simplify the design, accept it as is, or one more round` : `finish line for ${d.id}: ship with follow-ups, one more round, or stop` }));
   const needsYou = [...open.map((q) => ({ id: q.id, text: clip(q.header || q.text, 140) })), ...finish];
   const pause = run.closed ? null : openPause(run);
-  const kind = run.closed ? 'concluded' : pause ? 'paused' : needsYou.length ? 'waiting' : FINISHING.includes(plan.decision) ? 'finishing' : 'running';
+  const kind = run.closed ? 'concluded' : pause ? 'paused' : needsYou.length ? 'waiting' : isFinishing(run, plan) ? 'finishing' : 'running';
   const outcome = run.closed?.outcome ?? null;
   const word = outcome ? `Concluded: ${outcome}` : KINDS[kind];
   const t = eta(run, plan, nowMs, timeZone);

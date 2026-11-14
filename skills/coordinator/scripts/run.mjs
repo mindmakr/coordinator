@@ -162,7 +162,10 @@
 //   run.mjs dashboard [--port P] [--open] [--foreground] | dashboard stop   the live page of every run on this PC
 //                  (default port 7480), detached so it outlives this window (--foreground: in this process), output
 //                  in ~/.coordinator/dashboard.log; a running one prints its link instead of starting another; its
-//                  Needs you answers any registered run's open questions (references/hud.md)
+//                  Waiting on you answers any registered run's open questions (references/hud.md)
+//   run.mjs waiting [--json]   what waits on you across every run on this PC, oldest first: open questions,
+//                  upstream proposals not filed, runs finished but not closed or waiting on their retro, paused
+//                  runs, an out-of-date plugin (from the last online doctor check); from disk only (lib/waiting.mjs)
 //   --harness NAME (any command): the tool running it (claude-code, codex, antigravity, gemini …); else
 //                  COORDINATOR_HARNESS, else detected. Every write stamps the run with it and the skill version
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
@@ -193,6 +196,7 @@ import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
 import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
 import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
+import { waitingList, waitingText } from './lib/waiting.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { childEnv, dashboardCaller, pcAnswer, VIA_ENV } from './lib/pcanswer.mjs';
 import { VERSION } from './lib/version.mjs';
@@ -234,7 +238,7 @@ const FLAGS = {
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
-  brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open', 'foreground'], list: ['all'], 'status-line': ['json'],
+  brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open', 'foreground'], list: ['all'], waiting: ['json'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'],
 };
 // Notes about one unit (#45): scoped with --unit, shown on its page.
@@ -1360,6 +1364,17 @@ const commands = {
     process.stdout.write(out.text);
     return null;
   },
+  // What waits on the person across every run on this PC (lib/waiting.mjs), oldest first: the same list as the PC dashboard's Waiting on you.
+  waiting(pos, o = {}) {
+    if (pos.length) throw new Error('usage: run.mjs waiting [--json]');
+    if (o.json !== undefined && o.json !== true) throw new Error('--json takes no value');
+    registerFolder();
+    const nowMs = Date.now();
+    const items = waitingList(readRegistry(), { nowMs });
+    if (o.json) return items;
+    process.stdout.write(waitingText(items, nowMs));
+    return null;
+  },
   list(_, o = {}) {
     if (o.all !== undefined) return listAll(o.all);
     if (!existsSync(runsDir())) return [];
@@ -1506,8 +1521,9 @@ function serveDashboard(port, o) {
       const t = `t=${encodeURIComponent(live.token)}`;
       const home = { path: '/', label: 'This PC', href: `/?${t}` };
       if (path === '/') {
-        const ctx = { live, theme: null, run: null, store: null, base: '', home: `/?${t}`, embed: null, readOnly: true, pages: [home], runHref: () => null, pcHref: (key, id) => `/p/${key}/run/${encodeURIComponent(id)}?${t}`, answerForm: { token: live.token } };
-        return pcPage(pcModel(readRegistry(), { here: null }), Date.now(), ctx);
+        const ctx = { live, theme: null, run: null, store: null, base: '', home: `/?${t}`, embed: null, readOnly: true, pages: [home], runHref: () => null, pcHref: (key, id, sub = '') => `/p/${key}/run/${encodeURIComponent(id)}${sub}?${t}`, answerForm: { token: live.token } };
+        const entries = readRegistry(); const nowMs = Date.now();
+        return pcPage(pcModel(entries, { here: null, nowMs }), nowMs, ctx, waitingList(entries, { nowMs }));
       }
       return projectPage(path, live, readRegistry(), home);
     },
@@ -1593,7 +1609,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 let BY = null;
 try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
+if (!commands[cmd]) { console.error('usage: run.mjs init|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|waiting|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
 if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
