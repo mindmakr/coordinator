@@ -42,7 +42,7 @@ const age = (r, min) => updateRun(runDir(r), { kind: 'note' }, (s) => {
   if (s.lead) { s.lead.at = t; s.lead.since = t; }
   s.createdAt = t; for (const u of s.units) if (u.heartbeatAt) u.heartbeatAt = t;
 });
-const LOCAL = /\d+ min ago \(\d\d:\d\d local, UTC[+-]?[\d:]*\)|under a minute ago \(\d\d:\d\d local, UTC[+-]?[\d:]*\)/;
+const LOCAL = /\d+ min ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\)|under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\)/;
 const make = (who, r, ...extra) => { const x = who('init', r, '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'codex', ...extra); assert.equal(x.code, 0, x.err); return x; };
 const NOW = Date.parse('2026-11-14T11:05:00.000Z');
 const iso = (min) => new Date(NOW - min * 60_000).toISOString();
@@ -268,13 +268,13 @@ test('B3: a gone lead is taken over by run.mjs lead or --takeover, and the takeo
   // Quiet: the next window takes it over without asking.
   age('b3', 10);
   const refused = B('add', 'b3', 'u2', '--bar', 'b');
-  assert.equal(refused.code, 1); assert.match(refused.err, /lead is gone \(Codex, last active 10 min ago \(\d\d:\d\d local, UTC[^)]*\); quiet for over 5 min\): run.mjs lead b3 takes it over/);
+  assert.equal(refused.code, 1); assert.match(refused.err, /lead is gone \(Codex, last active 10 min ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[^)]*\); quiet for over 5 min\): run.mjs lead b3 takes it over/);
   const took = B('lead', 'b3', '--harness', 'antigravity');
   assert.equal(took.code, 0, took.err);
   assert.equal(took.out.claimed, true); assert.equal(took.out.you, true); assert.equal(took.out.tookOverFrom, 'lead-a'); assert.equal(took.out.tool, 'Antigravity');
   const s = state('b3');
   assert.equal(s.lead.id, 'lead-b'); assert.equal(s.lead.from, 'lead-a');
-  assert.match(s.notes.at(-1).text, /^took over from lead-a: quiet for over 5 min; last active 10 min ago \(\d\d:\d\d local, UTC/);
+  assert.match(s.notes.at(-1).text, /^took over from lead-a: quiet for over 5 min; last active 10 min ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC/);
   assert.equal(events('b3').at(-1).kind, 'lead.claim');
   // The old window stops instead of competing.
   const old = A('add', 'b3', 'u3', '--bar', 'b');
@@ -377,17 +377,17 @@ test('B4, B5: start on a unit at work is refused unless --takeover --reason, log
   assert.equal(took.code, 0, took.err);
   const u = state('b4').units[0];
   assert.equal(u.status, 'building');
-  assert.match(u.log.findLast((e) => e.kind === 'start' && e.text.startsWith('took over')).text, /^took over from the builder \(last beat under a minute ago \(\d\d:\d\d local, UTC[^)]*\)\): its builder crashed with the window$/);
+  assert.match(u.log.findLast((e) => e.kind === 'start' && e.text.startsWith('took over')).text, /^took over from the builder \(last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[^)]*\)\): its builder crashed with the window$/);
   A('built', 'b4', 'u1');
   assert.match(A('start', 'b4', 'u1').err, /u1 is being judged/);
   // Ages, from the script, in local time.
   const show = A('show', 'b4').raw;
-  assert.match(show, /^lead {7}Codex · since under a minute ago \(\d\d:\d\d local, UTC[^)]*\) · last active under a minute ago \(\d\d:\d\d local, UTC[^)]*\)$/m);
-  assert.match(show, /^ +last beat under a minute ago \(\d\d:\d\d local, UTC[^)]*\)$/m);
-  assert.match(show, /· started under a minute ago \(\d\d:\d\d local, UTC/);
+  assert.match(show, /^lead {7}Codex · since under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[^)]*\) · last active under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[^)]*\)$/m);
+  assert.match(show, /^ +last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[^)]*\)$/m);
+  assert.match(show, /· started under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC/);
   const next = A('next', 'b4').out;
   assert.match(next.units[0].lastBeat, LOCAL); assert.equal(next.lead.tool, 'Codex'); assert.match(next.lead.lastActive, LOCAL);
-  assert.match(A('status-line', 'b4').raw, /checking u1 round 1, last beat under a minute ago \(\d\d:\d\d local, UTC[^)]*\)/);
+  assert.match(A('status-line', 'b4').raw, /checking u1 round 1, last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[^)]*\)/);
   // A run with no lead yet (made before leads): the window that claims it in this step takes no busy unit.
   updateRun(runDir('b4'), { kind: 'note' }, (s) => { delete s.lead; });
   const n = events('b4').length;
