@@ -82,7 +82,8 @@ function upstreamItems(p, out) {
     const times = list.map((g) => g.at).filter(valid).sort((a, b) => Date.parse(a) - Date.parse(b));
     out.push({
       project: p.name, key: p.key, run: id, name: s ? runName(s) || null : null, kind: 'upstream', what: WHAT.upstream,
-      text: `${plural(list.length, 'upstream proposal')} not filed: ${clip(list[0].text.replace(/\s+/g, ' '), 140)}${list.length > 1 ? ` (and ${list.length - 1} more)` : ''}`,
+      // Several: the count only, the list carries each one. One: its text, no list.
+      text: list.length > 1 ? `${plural(list.length, 'upstream proposal')} not filed` : `1 upstream proposal not filed: ${clip(list[0].text.replace(/\s+/g, ' '), 140)}`,
       items: list.map((g) => ({ id: g.id, text: clip(g.text.replace(/\s+/g, ' '), 300) })),
       since: times[0] ?? null, link: runPath(p.key, id, '/retro'), fix: 'file them upstream (references/upstream.md), then note "filed upstream: <links>" on the run',
     });
@@ -120,10 +121,11 @@ export function waitingList(entries, { nowMs = Date.now(), home = registryHome()
 // `run.mjs waiting`: one line per item, oldest first, then the count.
 export function waitingText(items, nowMs = Date.now()) {
   if (!items.length) return 'Nothing waits on you.\n';
-  const lines = items.map((x) => {
+  const agos = items.map((x) => (x.since ? `${ageText(nowMs - Date.parse(x.since))} ago` : 'since unknown'));
+  const width = Math.max(...agos.map((a) => a.length));
+  const lines = items.map((x, i) => {
     const where = x.run ? `${x.project} · ${x.name ? `${x.name} ` : ''}(${x.run})` : 'this PC';
-    const ago = x.since ? `${ageText(nowMs - Date.parse(x.since))} ago` : 'since unknown';
-    return `${ago.padEnd(14)} ${where}  [${x.what}] ${x.text}${x.fix ? `  → ${x.fix}` : ''}`;
+    return `${agos[i].padEnd(width)} ${where}  [${x.what}] ${x.text}${x.fix ? `  → ${x.fix}` : ''}`;
   });
   return `${lines.join('\n')}\n${plural(items.length, 'item')} waiting on you\n`;
 }

@@ -64,7 +64,8 @@ test('B1: questions with their label, upstream per run, unclosed, retro pending,
 
   const up = by('upstream', 'upstream');
   assert.equal(up.items.length, 2, 'both proposals of the run, one item; the plain retro note is a lesson');
-  assert.match(up.text, /^2 upstream proposals not filed: upstream: board\.mjs drops labels \(and 1 more\)$/);
+  assert.equal(up.text, '2 upstream proposals not filed', 'the summary says how many; the first proposal is in the list, not repeated here');
+  assert.ok(!up.text.includes('board.mjs'), 'no duplicate of the first proposal in the summary');
   assert.equal(up.since, at(4), 'since the oldest proposal');
   assert.equal(up.link, '/p/k1/run/upstream/retro');
   assert.ok(!items.some((x) => x.run === 'filed'), 'a run that records its proposals filed upstream has none (lib/gaps.mjs)');
@@ -189,4 +190,12 @@ test('B2, B3: run.mjs waiting and the PC front page show the same list, oldest f
   const out = ok(cli('beta', ['waiting', '--json'])).out;
   assert.equal(out.at(-1).kind, 'plugin', 'newest last');
   assert.match(out.at(-1).text, /99.0.0 is out/);
+});
+
+test('B5: the age column pads to the longest age, so long ages keep the lines aligned', () => {
+  const now = Date.parse('2026-11-14T12:00:00Z');
+  const item = (since, text) => ({ project: 'p', key: 'k', run: 'r1', name: null, kind: 'paused', what: 'paused', text, since, link: null, fix: null });
+  const lines = waitingText([item('2026-11-13T23:28:00Z', 'a'), item('2026-11-14T11:59:00Z', 'b'), item(null, 'c')], now).split('\n').slice(0, 3);
+  const col = lines.map((l) => l.indexOf('p ·'));
+  assert.ok(col.every((c) => c === col[0] && c > 0), `where starts in one column: ${JSON.stringify(lines)}`);
 });
