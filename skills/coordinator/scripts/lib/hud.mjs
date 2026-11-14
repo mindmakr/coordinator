@@ -51,6 +51,8 @@ export function statusBlock(st, ctx = null) {
     + `${progressBar(st)}<p class="meta">${esc(st.eta.text[0].toUpperCase() + st.eta.text.slice(1))}.</p></section>`;
 }
 const pct = (used, max) => (max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0);
+// The line above a question that names its project, run and task (lib/questions.mjs questionLabel).
+export const qLabel = (q) => (q.label ? `<p class="qlabel" title="Which run and task this question comes from">${esc(q.label)}</p>` : '');
 const TIMELINE_MAX = 300;
 const EMBED_MAX = 150 * 1024;
 
@@ -163,7 +165,7 @@ export function questionItem(q, live, repo = null) {
   const changes = q.history.length - 1;
   const ans = q.answer ? `<p class="ans"><b>Answer:</b> ${esc(answerText(q.answer))} <span class="cause">by ${esc(q.answer.by)}, ${stamp(q.answer.at)}${changes > 0 ? `, changed ${changes} ${changes === 1 ? 'time' : 'times'}` : ''}</span></p>` : '';
   const body = live && ['open', 'answered'].includes(q.status) ? answerForm(q, live) : optionList(q);
-  return `<li class="q" id="${esc(q.id)}" data-a="q-${esc(q.id)}">${head}${rec}${ans}${body}</li>`;
+  return `<li class="q" id="${esc(q.id)}" data-a="q-${esc(q.id)}">${qLabel(q)}${head}${rec}${ans}${body}</li>`;
 }
 
 // The unit's own links (--link at add, then each `run.mjs link`), http(s) only.
@@ -241,8 +243,8 @@ function list(title, items, repo) {
 
 // Open questions only, counted; answered ones in a dimmed, collapsed group with the answer first.
 function questionsCard(v, repo) {
-  const open = v.questions.length ? grows(`<ul>${keyed(v.questions, (t) => `l-Questions-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None open.</p>';
-  const done = v.answeredQuestions.map((q) => `<li data-a="aq-${esc(q.id)}"><b>${esc(q.id)}</b> ${esc(q.title)}`
+  const open = v.questions.length ? grows(`<ul>${keyed(v.questions, (q) => `l-Questions-${hash(`${q.label}|${q.text}`)}`).map(([q, k]) => `<li data-a="${k}">${qLabel(q)}${linkify(q.text, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None open.</p>';
+  const done = v.answeredQuestions.map((q) => `<li data-a="aq-${esc(q.id)}">${qLabel(q)}<b>${esc(q.id)}</b> ${esc(q.title)}`
     + `<p class="ans"><b>Answered:</b> ${linkify(q.answer, repo)} <span class="cause">— by ${q.by === 'person' ? 'you' : esc(q.by)}${q.at ? `, ${stamp(q.at)}` : ''}</span></p>`
     + `${q.decision ? `<p class="cause">Decision: ${linkify(q.decision, repo)}</p>` : ''}</li>`).join('');
   return `<section class="card" data-a="list-Questions"><h3>Questions <span class="chip" title="open questions">${v.questions.length}</span></h3>${open}`

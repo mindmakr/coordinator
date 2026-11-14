@@ -17,6 +17,7 @@ import { mapsPage } from './mapspage.mjs';
 import { ageText } from './age.mjs';
 import { blk, chip, esc, page, stamp, when } from './parts.mjs';
 import { runStatus } from './progress.mjs';
+import { projectName } from './questions.mjs';
 import { byProject, findEntry, registryFile, registryHome } from './registry.mjs';
 import { reportPages } from './report/cli.mjs';
 import { decide } from './rules.mjs';
@@ -131,7 +132,7 @@ export function projectPage(path, live, entries, home, nowMs = Date.now()) {
   if (!e || !isSafeId(id) || !existsSync(runDirOf(e))) return null;
   const s = loadRun(runDirOf(e));
   const sibling = (x) => { try { return isSafeId(x) && existsSync(runDirOf(e, x)) ? loadRun(runDirOf(e, x)) : null; } catch { return null; } };
-  const v = view(s, decide(s, nowMs), nowMs, { repo: s.repo ?? repoFromText(JSON.stringify(s)), linked: linkedRuns(s, sibling) });
+  const v = view(s, decide(s, nowMs), nowMs, { repo: s.repo ?? repoFromText(JSON.stringify(s)), linked: linkedRuns(s, sibling), project: projectName(e.stateDir) });
   const ctx = { ...projectCtx(live, key, id, home), project: basename(e.project) };
   if (rest === '/maps') return mapsPage(v, nowMs, ctx);
   if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDirOf(e), ctx, rest.slice(1), sourceOf(e.stateDir))[0][1];

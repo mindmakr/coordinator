@@ -92,10 +92,11 @@
 //                  (ship with follow-ups, one more round, stop) or, with reason "same-files: <file>", same files
 //                  (change the bar, simplify the design, accept as is, one more round); next acts on the person's pick
 //                  The time budget pauses while a question to the person is open (ask to its answer) and no unit is building or judging.
+//                  Prints the question's label: "<project> · <run name> (<run id>)", plus " › Task <unit>: <title>" on a unit (lib/questions.mjs questionLabel).
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
 //                  [--confirm "their words"] with --by person only: the person said this; never without their words
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
-//   run.mjs questions <run>         every question with its options, answer, history and status
+//   run.mjs questions <run>         every question with its options, answer, history and status, and its label
 //   run.mjs study <run> --topic T --area security|design|stack|other --text "what it learned" --source URL … [--lesson id …] [--by agent]
 //                  one side study while the run waits (capped per run by --study-budget); lessons it added go in with lessons.mjs add --source
 //   run.mjs self [--json] [--html]  the coordinator's own view across every run here (age, learning, memory, stats,
@@ -207,7 +208,7 @@ import { mapsPage } from './lib/mapspage.mjs';
 import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
 import { BENCH_FLAGS, BENCH_REPEAT, benchCommand, benchHelp } from './lib/ceb/cli.mjs';
 import { hasRetro, retroCommand } from './lib/retro.mjs';
-import { answer, answerText, ask, events, find, fromForm, personNote, questions, useAnswer } from './lib/questions.mjs';
+import { answer, answerText, ask, events, find, fromForm, personNote, projectName, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
 import { gapsCheckFile, loadRuns, loadSelf, selfVersion } from './lib/selfdata.mjs';
@@ -303,7 +304,7 @@ const themeFor = (s) => { const t = settings().theme; return loadTheme(themeFile
 function derived(s) {
   const plan = decide(s);
   writeAtomic(join(runsDir(), s.id, 'workbench.md'), render(s, plan));
-  const v = view(s, plan, Date.now(), { repo: repoFor(s), linked: linkedOf(s) });
+  const v = view(s, plan, Date.now(), { repo: repoFor(s), linked: linkedOf(s), project: project() });
   const theme = themeFor(s);
   writeAtomic(hudFile(s.id), hud(v, Date.now(), staticCtx(runDir(s.id), 0, theme)));
   const calls = readCalls(runDir(s.id)); // per-unit function calls (map/calls/), when computed
@@ -381,6 +382,9 @@ const list = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim().re
 
 const exists = (run) => existsSync(stateFile(run)) || existsSync(join(runDir(run), EVENTS));
 // The runs this one continues or was continued in (lib/chain.mjs), for the pages; a missing one shows as "not here".
+// The project in each question's label: the folder that holds .coordinator/ (lib/questions.mjs projectName).
+const project = () => projectName(baseDir('project'));
+const labelOf = (s, id) => questions(s, { project: project() }).find((q) => q.id === id)?.label ?? null;
 const linkedOf = (s) => linkedRuns(s, (id) => (isSafeId(id) && exists(id) ? loadRun(runDir(id)) : null));
 
 // Checks a --continues target: an earlier run of this folder, with that unit, not passed,
@@ -488,7 +492,7 @@ function askFinish(run, o) {
     const note = st.notes.filter((n) => n.kind === 'question').at(-1);
     if (Array.isArray(d.files)) note.sameFiles = d.files; else note.finish = true;
   }, { unit: String(o.finish) });
-  return { ...s, asked: id };
+  return { ...s, asked: id, label: labelOf(s, id) };
 }
 
 // A brief is never cut silently (the reins-flight retro: fix rounds lost their finding lists to a cut --where).
@@ -1086,14 +1090,14 @@ const commands = {
   },
   ask([run], o) {
     if (o.finish !== undefined) return askFinish(run, o);
-    let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id };
+    let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id, label: labelOf(s, id) };
   },
   answer([run, id], o) {
     if (o.confirm !== undefined && o.by !== 'person') throw new Error('--confirm needs an explicit --by person');
     return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person', via: 'cli', confirm: o.confirm === true ? '' : o.confirm }));
   },
   'use-answer'([run, id]) { return change(run, 'answer.used', (s) => useAnswer(s, id)); },
-  questions([run]) { return questions(load(run)).map(({ open, ...q }) => q); },
+  questions([run]) { return questions(load(run), { project: project() }).map(({ open, ...q }) => q); },
   serve([run], o) {
     load(run);
     const write = (kind, fn) => (form) => { let anchor; change(run, kind, (s) => { anchor = fn(s, form); }, { unit: form.get('unit') || null }); return anchor; };
@@ -1114,7 +1118,7 @@ const commands = {
         if (m && !isSafeId(id)) return null;
         if (m && !exists(id)) return null;
         const s = load(id);
-        const v = view(s, decide(s), Date.now(), { repo: repoFor(s), linked: linkedOf(s) });
+        const v = view(s, decide(s), Date.now(), { repo: repoFor(s), linked: linkedOf(s), project: project() });
         const ctx = liveCtx(live, run, themeFor(s), id === run ? null : id);
         ctx.has = (file) => storedPath(runDir(id), file) !== null;
         ctx.calls = readCalls(runDir(id));
@@ -1306,7 +1310,7 @@ const commands = {
     for (const l of lines) console.log(l);
     return null;
   },
-  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s) }))); return null; },
+  show([run]) { const s = load(run); process.stdout.write(textView(view(s, decide(s), Date.now(), { linked: linkedOf(s), project: project() }))); return null; },
   // Reads under the lock so it never renders a half-applied change; also refreshes the elapsed time.
   hud([run]) {
     if (!exists(run)) throw new Error(`no run: ${run}`);
@@ -1484,5 +1488,5 @@ if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console
 try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   const out = await commands[cmd](pos, opt);
-  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }, null, 2));
+  if (out !== null) console.log(JSON.stringify(out.id === undefined || ['models', 'next', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

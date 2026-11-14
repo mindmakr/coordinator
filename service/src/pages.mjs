@@ -179,7 +179,8 @@ export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null) {
   return withBar(page({ title: repo.fullName, body, ctx, path: ctx.base }), user, repo.fullName);
 }
 
-const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName }), gh); };
+// project: the repo's name, first in each question's label (the skill's questionLabel, through runView), as a local run shows its folder's name.
+const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName, project: repo.fullName.split('/').pop() }), gh); };
 
 export function runPage(user, repo, row, nowMs = Date.now(), gh = []) {
   return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row, user)), user, repo.fullName);
