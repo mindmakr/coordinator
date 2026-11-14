@@ -84,6 +84,8 @@
 //                  prints the brief; each quoted file is fenced as data, and the goal, bar and fence follow it.
 //                  [--lessons N] the top N lessons for the run's tag ride along as hints (default 5, 0 for none),
 //                  fenced as data too; a lesson counts as used once per run
+//                  [--to F] writes the whole brief to F and prints a short prompt instead: the brief's marker line,
+//                  then `Read "F" in full first`, so context.mjs still counts the agent under its role and round
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
 //                  [--approves <label>] the option that approves a step only the person may approve (extend)
 //   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready question next names, the finish line
@@ -171,7 +173,7 @@ import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mj
 import { prismRefusal } from './lib/prismreport.mjs';
 import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
-import { buildBrief } from './lib/briefs.mjs';
+import { briefPrompt, buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
 import { allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
 import { usedMinutes } from './lib/clock.mjs';
@@ -227,7 +229,7 @@ const FLAGS = {
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
-  brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
+  brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open'], list: ['all'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'],
 };
 // Notes about one unit (#45): scoped with --unit, shown on its page.
@@ -511,6 +513,16 @@ function findingsFile(value) {
   const path = resolve(value);
   if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`--findings-file: no file ${path}`);
   return path.replace(/\\/g, '/');
+}
+
+// brief --to: where the whole brief is written (context.md, rule 8).
+function briefTo(value) {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || !value.trim()) throw new Error('--to takes a file path');
+  if (/[\u0000-\u001f\u007f]/.test(value)) throw new Error('--to: the path has a control character');
+  const path = resolve(value);
+  if (existsSync(path) && !statSync(path).isFile()) throw new Error(`--to: ${path} is not a file`);
+  return path;
 }
 
 const commands = {
@@ -1262,6 +1274,7 @@ const commands = {
       if (!existsSync(f) || !statSync(f).isFile()) throw new Error(`--quote: no file ${f}`);
       return { source: labels[i] ?? basename(f), text: readFileSync(f, 'utf8') };
     });
+    const to = briefTo(o.to); // a bad --to fails before anything is marked used
     const env = process.env.COORDINATOR_DIR ? commands.where().env : '';
     // What past runs taught rides along in every builder and critic brief (references/learning.md).
     const top = num(o.lessons, 5, 0, 20);
@@ -1272,7 +1285,11 @@ const commands = {
         try { markUsed(lessons, run); } catch { /* a locked or read-only lessons file never blocks a brief */ }
       }
     }
-    process.stdout.write(`${buildBrief(load(run), { role: o.role, unit, quotes, where: briefWhere(o.where), findingsFile: findingsFile(o['findings-file']), playbook: briefPlaybook(o.playbook), env })}\n`);
+    const brief = `${buildBrief(load(run), { role: o.role, unit, quotes, where: briefWhere(o.where), findingsFile: findingsFile(o['findings-file']), playbook: briefPlaybook(o.playbook), env })}\n`;
+    if (!to) { process.stdout.write(brief); return null; }
+    // Passed by file: the whole brief goes to the file, and the prompt printed for the agent starts with its marker line.
+    writeAtomic(to, brief);
+    process.stdout.write(`${briefPrompt(brief, to.replace(/\\/g, '/'))}\n`);
     return null;
   },
   // The one-line status a lead posts in the chat (references/commands/run.md); with no run, one line per run:
