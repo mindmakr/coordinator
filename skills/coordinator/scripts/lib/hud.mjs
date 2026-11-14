@@ -28,7 +28,7 @@ export function originLine(o) {
 }
 
 // The run's status word as a chip, coloured by kind (lib/progress.mjs runStatus).
-const STATUS_CLS = { running: 's-working', waiting: 's-needs-you', finishing: 's-finishing' };
+const STATUS_CLS = { running: 's-working', paused: 's-needs-you', waiting: 's-needs-you', finishing: 's-finishing' };
 export const statusChip = (st) => chip(st.word, st.concluded ? cls(st.outcome) : STATUS_CLS[st.kind]);
 // Units done out of total as a compact bar with its words; a screen reader hears the words.
 export function progressBar(st, small = false) {

@@ -36,6 +36,9 @@ export const KINDS = {
   'run.integrate': { unit: 'none', payload: changes },
   'run.stop': { unit: 'none', payload: changes },
   'run.close': { unit: 'none', payload: changes },
+  // The person paused the run by hand, and resumed it (run.mjs pause / resume, #132).
+  'run.pause': { unit: 'none', payload: changes },
+  'run.resume': { unit: 'none', payload: changes },
   'unit.add': { unit: 'required', payload: changes },
   'unit.start': { unit: 'required', payload: changes },
   'unit.beat': { unit: 'required', payload: changes },
