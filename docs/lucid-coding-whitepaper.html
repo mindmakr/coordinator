@@ -316,10 +316,10 @@
       <h3>What Coordinator now does</h3>
       <ul>
         <li><strong>Same files, ask the person.</strong> When a unit's last two failing rounds both have serious findings in the same file, the run asks the person, whatever the cause words say: change the bar, simplify the design, accept it as is with follow-ups, or one more round.</li>
-        <li><strong>No progress counts the lowest critic.</strong> A round's score is the lowest across the general critic and every specialist (a second critic, such as the security critic), so one critic rising does not hide another standing still.</li>
+        <li><strong>No progress means no critic beat its own best.</strong> The general critic and each specialist (a second critic, such as the security critic) are each compared with their own earlier best score. When none of them beats its own best, that is no progress, so one critic rising does not hide another standing still. A critic that is new this round, or has gone stale, is left out.</li>
         <li><strong>A bar check before the build.</strong> Before the bar is frozen (agreed and locked before the build), the lead checks that each behaviour can be met at all. An "exactly once" or "never" across parties that share no state is rewritten per party, with the duplicate stated.</li>
         <li><strong>A value question at round 3.</strong> Before a unit's third round, the lead asks whether the failing behaviour is worth another round to the person who will use the work, and asks the person when the answer is not clearly yes. A finding that needs a design change goes to the person as a question.</li>
-        <li><strong>The clock pauses while the person decides.</strong> Time spent waiting for an answer does not count against the time budget, so the round the person approves can still run.</li>
+        <li><strong>The clock pauses while the person decides.</strong> The clock pauses only while no unit is at work (no builder or critic running), so time spent waiting only on the person does not count against the time budget, and the round the person approves can still run.</li>
         <li><strong>No silent brief cut.</strong> A brief that is too long is refused, not cut. The findings go in a file the agent reads in full, and a fix round fixes every listed finding.</li>
       </ul>
     </section>
