@@ -4,6 +4,7 @@
 import { chainUnits } from './chain.mjs';
 import { doubtful, fromPerson } from './approval.mjs';
 import { strategyHint } from './strategy.mjs';
+import { usedMinutes } from './clock.mjs';
 
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
@@ -53,6 +54,8 @@ export function earlySummary(unit) {
 
 const stop = (reason) => ({ action: 'stop', reason });
 const minutes = (from, nowMs) => (nowMs - Date.parse(from)) / 60_000;
+// The time budget's clock: paused while a question to the person is open (lib/clock.mjs).
+const spent = (run, nowMs) => usedMinutes(run, nowMs) > run.budget.maxMinutes;
 
 // Severity of a finding (the critic's reply, references/briefs.md). Only high and medium fail a round;
 // low and nit ride on a pass as fold-ins (`verdict pass --fold`).
@@ -92,16 +95,86 @@ export function finishQuestion(unit) {
   };
 }
 
-// The finish-line question on this unit asked since its last verdict, with its latest answer
-// and whether the lead already acted on it (a decision note that answers it).
-function finishAsked(unit, run) {
+// The ready question (the finish line, or same files) on this unit asked since its last verdict, with
+// its kind, its latest answer and whether the lead already acted on it (a decision note that answers it).
+// One per verdict: once either is asked, the other waits for the next verdict.
+function readyAsked(unit, run) {
   const since = unit.rounds.at(-1)?.at ?? '';
   const notes = run.notes ?? [];
   const qs = notes.filter((n) => n.kind === 'question');
-  const i = qs.findLastIndex((n) => n.finish === true && n.unit === unit.id && n.at >= since);
+  const i = qs.findLastIndex((n) => (n.finish === true || Array.isArray(n.sameFiles)) && n.unit === unit.id && n.at >= since);
   if (i < 0) return null;
   const id = `q${i + 1}`;
-  return { id, answer: qs[i].history?.at(-1) ?? null, applied: notes.some((n) => n.kind === 'decision' && n.answers === id) };
+  return { id, kind: qs[i].finish === true ? 'finish' : 'same-files', answer: qs[i].history?.at(-1) ?? null, applied: notes.some((n) => n.kind === 'decision' && n.answers === id) };
+}
+
+// Why the person's answer to a ready question does not count yet, as an ask-person step; null when it does.
+function unclearAnswer(q, prefix = '') {
+  const a = q.answer;
+  if (!a) return { action: 'ask-person', asked: q.id, reason: `${prefix}waiting for the person's answer to ${q.id}` };
+  if (!fromPerson(a) || a.other || a.choices.length !== 1) return { action: 'ask-person', asked: q.id, reason: `${prefix}${q.id}'s answer is not one option picked by the person` };
+  if (a.confirm && doubtful(a.confirm)) return { action: 'ask-person', asked: q.id, reason: `${prefix}${q.id}'s confirmed words do not clearly say it: "${a.confirm.slice(0, 120)}" (no, not, but, if, maybe or a question); ask again` };
+  return null;
+}
+
+// The file a finding names, from its first word: "src/a.ts:12 …" (references/briefs.md, FINDINGS:
+// <severity> <file:line> <what>). Quotes, backticks, a line or range (":12", ":12-30", "#L12") and
+// a leading "./" go; backslashes become slashes. Null when the first word is not a path.
+export function findingFile(text) {
+  const first = String(text ?? '').trim().split(/\s+/)[0] ?? '';
+  const word = first.replace(/^[`'"(\[]+/, '').replace(/[`'")\],;.]+$/, '').replace(/\\/g, '/');
+  const file = word.replace(/(?:#L\d+\S*|:\d+(?:[-–:,]\d+)*:?)$/, '').replace(/^\.\//, '');
+  // A path has a folder, or a name and an extension ("a.ts"); "Totals." or "e.g." is a word.
+  if (/^[a-z]+:\/\//i.test(file) || !/^(?:[^/]*[\p{L}\p{N}][^/]*\/.*[\p{L}\p{N}]|[^/]{2,}\.\p{L}[\p{L}\p{N}]{0,7})$/u.test(file)) return null;
+  return file;
+}
+
+// The files a failing round's high and medium findings name, from the general critic and every specialist.
+const failingFiles = (round) => new Set(openFindings(round).filter((f) => FAILING.includes(f.severity)).map((f) => findingFile(f.text)).filter(Boolean));
+
+// The ready question when two failing rounds kept hitting the same files, and the answers it takes.
+export const SAME_FILES = { bar: 'Change the bar', simplify: 'Simplify the design', accept: 'Accept as is', round: 'One more round' };
+export function sameFilesQuestion(unit, files) {
+  const fails = unit.rounds.filter((r) => r.verdict === 'fail').slice(-2);
+  const where = files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more` : files.join(', ');
+  return {
+    header: 'Same files',
+    question: `${unit.id} failed review twice in a row (scores ${fails.map((r) => r.score ?? 'none').join(' then ')}), and both times the serious problems were in the same place: ${where}. Each fix moved the problem instead of closing it, which often means the target cannot be met as written, not that the code is careless. Change what this unit must meet, simplify its design, accept it as it is, or try one more round?`,
+    options: [
+      `${SAME_FILES.bar}|rewrite what this unit must meet so it can be met, then build again`,
+      `${SAME_FILES.simplify}|build a simpler approach to the same goal, then review again`,
+      `${SAME_FILES.accept}|ship it as reviewed; every open finding becomes a follow-up`,
+      `${SAME_FILES.round}|one more build and review as it is; the usual stop rules still apply`,
+    ],
+  };
+}
+
+// When a unit's two most recent failing rounds both have high or medium findings in a common file,
+// the person decides, whatever the cause tags say (the reins-flight retro: five rounds in the same
+// few hundred lines, a new cause tag each round, so the same-gap rule never fired). Their pick:
+// "Accept as is" ships with follow-ups; any other is one more round, recorded like extend.
+function sameFilesLine(unit, run) {
+  const fails = unit.rounds.filter((r) => r.verdict === 'fail').slice(-2);
+  if (fails.length < 2 || unit.rounds.at(-1) !== fails[1]) return null;
+  const later = failingFiles(fails[1]);
+  const files = [...failingFiles(fails[0])].filter((f) => later.has(f)).sort();
+  if (!files.length) return null;
+  const reason = `same-files: ${files.join(', ')}`;
+  const q = readyAsked(unit, run);
+  if (!q) return { action: 'ask-person', reason, files, question: sameFilesQuestion(unit, files) };
+  if (q.kind !== 'same-files' || q.applied) return null; // the finish line was asked first, or the pick was recorded
+  const unclear = unclearAnswer(q, `${reason}; `);
+  if (unclear) return { ...unclear, files };
+  const pick = q.answer.choices[0];
+  if (pick === SAME_FILES.accept) return { action: 'ship', answer: q.id, at: 'the same-files question' };
+  return { action: 'one-more', answer: q.id, choice: pick, at: 'the same-files question' };
+}
+
+// Per round, the lowest score across the general critic and every specialist: one critic rising
+// while another stays flat is not progress.
+export function lowestScore(round) {
+  const all = [round?.score, ...Object.values(round?.specialists ?? {}).map((m) => m?.score)].filter((s) => typeof s === 'number');
+  return all.length ? Math.min(...all) : null;
 }
 
 // When every other unit has passed or stopped, and this one failed from round 2 on (or scored
@@ -117,14 +190,13 @@ function finishLine(unit, run) {
   const open = openFindings(last);
   if (!open.some((f) => f.severity === 'medium') || open.some((f) => f.severity === 'high')) return null;
   if (!run.units.every((x) => x.id === unit.id || ['pass', 'stopped'].includes(x.status))) return null;
-  const q = finishAsked(unit, run);
+  const q = readyAsked(unit, run);
   if (!q) return { action: 'ask-person', question: finishQuestion(unit) };
+  if (q.kind !== 'finish') return null; // the same-files question was asked for this verdict
   if (q.applied) return null; // "one more round" was recorded: the usual rules decide from here
-  const a = q.answer;
-  if (!a) return { action: 'ask-person', asked: q.id, reason: `waiting for the person's answer to ${q.id}` };
-  if (!fromPerson(a) || a.other || a.choices.length !== 1) return { action: 'ask-person', asked: q.id, reason: `${q.id}'s answer is not one option picked by the person` };
-  if (a.confirm && doubtful(a.confirm)) return { action: 'ask-person', asked: q.id, reason: `${q.id}'s confirmed words do not clearly say it: "${a.confirm.slice(0, 120)}" (no, not, but, if, maybe or a question); ask again` };
-  const pick = a.choices[0];
+  const unclear = unclearAnswer(q);
+  if (unclear) return unclear;
+  const pick = q.answer.choices[0];
   if (pick === FINISH.ship) return { action: 'ship', answer: q.id };
   if (pick === FINISH.stop) return stop(`the person chose stop (${q.id})`);
   return { action: 'one-more', answer: q.id };
@@ -132,7 +204,7 @@ function finishLine(unit, run) {
 
 // A critic that started (built recorded) inside the time budget may still return its verdict (#45).
 const judgingInTime = (unit, run) => unit.status === 'judging' && typeof unit.judgingAt === 'string'
-  && (Date.parse(unit.judgingAt) - Date.parse(run.createdAt)) / 60_000 <= run.budget.maxMinutes;
+  && usedMinutes(run, Date.parse(unit.judgingAt)) <= run.budget.maxMinutes;
 
 export function decideUnit(unit, run, nowMs) {
   const { budget } = run;
@@ -144,7 +216,7 @@ export function decideUnit(unit, run, nowMs) {
   }
   if (unit.status === 'stopped') return { action: 'stopped', reason: unit.stopReason };
   // Time first: nothing, including waiting, outlives the run's budget; only a critic already at work may finish.
-  if (minutes(run.createdAt, nowMs) > budget.maxMinutes) {
+  if (spent(run, nowMs)) {
     if (!judgingInTime(unit, run)) return stop('budget: time');
     if (minutes(unit.heartbeatAt ?? unit.judgingAt, nowMs) > budget.staleMinutes) return { action: 'check-stale', phase: 'judging', reason: 'the critic started inside the time budget' };
     return { action: 'judge', reason: 'the critic started inside the time budget' };
@@ -172,10 +244,10 @@ export function decideUnit(unit, run, nowMs) {
   const same = !!prev && sameGap(prev, last);
   const newStrategy = (unit.strategyAt ?? -1) >= rounds.length;
   const stuck = same && !newStrategy && (unit.strategyChanges ?? 0) >= MAX_STRATEGY_CHANGES;
-  const scores = rounds.map((r) => r.score).filter((s) => typeof s === 'number');
+  const scores = rounds.map(lowestScore).filter((s) => typeof s === 'number');
   const before = scores.length > NO_PROGRESS_ROUNDS ? Math.max(...scores.slice(0, -NO_PROGRESS_ROUNDS)) : null;
   const flat = !same && before !== null && scores.slice(-NO_PROGRESS_ROUNDS).every((s) => s <= before);
-  if (!stuck && !flat) { const finish = finishLine(unit, run); if (finish) return finish; }
+  if (!stuck && !flat) { const ask = sameFilesLine(unit, run) ?? finishLine(unit, run); if (ask) return ask; }
   if (rounds.length >= roundCap(unit, run)) return stop('budget: rounds');
   if (same) {
     if (newStrategy) return { action: 'build', reason: 'new strategy recorded', gap: last.gap };
@@ -207,8 +279,7 @@ export function noProgress(unit) {
 // stopped any other unit ends with gaps: the late pass was not the last of its work.
 function lateIntegration(run, units) {
   if (units.some((u) => u.reason === 'budget: time')) return false;
-  const end = Date.parse(run.createdAt) + run.budget.maxMinutes * 60_000;
-  const after = (r) => Date.parse(r?.at) > end;
+  const after = (r) => usedMinutes(run, Date.parse(r?.at)) > run.budget.maxMinutes;
   const latePass = run.units.some((u) => u.status === 'pass' && after(u.rounds.at(-1)));
   return latePass && !(run.integration?.rounds ?? []).some(after);
 }
@@ -222,7 +293,7 @@ export function decide(run, nowMs = Date.now()) {
   const integ = run.integration?.rounds ?? [];
   if (integ.at(-1)?.verdict === 'pass') return { decision: 'done', units };
   const repeated = integ.length >= 2 && sameGap(integ.at(-1), integ.at(-2));
-  if (integ.length >= run.budget.maxRounds || repeated || (minutes(run.createdAt, nowMs) > run.budget.maxMinutes && !lateIntegration(run, units))) {
+  if (integ.length >= run.budget.maxRounds || repeated || (spent(run, nowMs) && !lateIntegration(run, units))) {
     return { decision: 'done-with-gaps', units };
   }
   return { decision: 'integrate', units };

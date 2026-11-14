@@ -29,7 +29,8 @@ test('the text view shows units, score trend, budget with time, and the next ste
   const s = state();
   const out = text(view(s, decide(s, T0 + 30 * 60_000), T0 + 30 * 60_000));
   assert.match(out, /^r1 \[code\] · Waiting on you/); assert.match(out, /^phase {6}continue$/m);
-  assert.match(out, /time 30\/240 min/);
+  // The question asked at minute 15 is still open: the clock pauses from then (lib/clock.mjs).
+  assert.match(out, /time 15\/240 min \(15 min paused while the person decided\)/);
   assert.match(out, /units 2\/6/);
   assert.match(out, /api\s+open\s+2\/4\s+3 → 5\.5\s+build/);
   assert.match(out, /ui\s+open\s+0\/4\s+–\s+wait: after api/);
@@ -40,7 +41,7 @@ test('the text view shows units, score trend, budget with time, and the next ste
 test('a closed run counts time to its close, not to now', () => {
   const s = state({ closed: { outcome: 'partial', decision: 'continue', at: at(90) } });
   const v = view(s, decide(s, T0 + 999 * 60_000), T0 + 999 * 60_000);
-  assert.equal(v.budget[0].used, 90);
+  assert.equal(v.budget[0].used, 15, '90 minutes to the close, less the 75 the question stayed open');
   assert.equal(v.next, 'nothing: closed as partial');
   assert.doesNotMatch(hud(v), /http-equiv="refresh"/, 'a closed run stops refreshing');
 });

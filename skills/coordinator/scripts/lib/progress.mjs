@@ -67,7 +67,7 @@ export function runStatus(run, plan = null, { nowMs = Date.now(), runs = null, t
   const open = run.closed ? [] : questions(run).filter((q) => q.open);
   const asked = new Set(open.map((q) => q.unit).filter(Boolean));
   const finish = run.closed ? [] : plan.units.filter((d) => d.action === 'ask-person' && !asked.has(d.id))
-    .map((d) => ({ id: d.id, text: `finish line for ${d.id}: ship with follow-ups, one more round, or stop` }));
+    .map((d) => ({ id: d.id, text: Array.isArray(d.files) ? `same files failing for ${d.id} (${d.files.join(', ')}): change the bar, simplify the design, accept it as is, or one more round` : `finish line for ${d.id}: ship with follow-ups, one more round, or stop` }));
   const needsYou = [...open.map((q) => ({ id: q.id, text: clip(q.header || q.text, 140) })), ...finish];
   const kind = run.closed ? 'concluded' : needsYou.length ? 'waiting' : FINISHING.includes(plan.decision) ? 'finishing' : 'running';
   const outcome = run.closed?.outcome ?? null;

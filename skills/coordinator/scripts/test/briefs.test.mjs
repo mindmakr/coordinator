@@ -88,6 +88,9 @@ test('briefs keep context small: the context line in builder and critic, a fix r
     assert.match(text, /about 250k tokens/);
   }
   assert.ok(bld.includes(FIX_ROUND_LINE), 'a builder after a failed round is told it is a new agent');
+  // Every listed finding, not only the quoted gap (the reins-flight retro: fix rounds lost their finding lists).
+  assert.equal(FIX_ROUND_LINE, 'This is a fix round and you are a new agent. Fix every listed finding, the quoted gap first. Read the unit\'s diff and only the files the findings name.');
+  assert.ok(!bld.includes('the whole task'), 'the quoted gap is no longer the whole task');
   assert.ok(doc.includes(FIX_ROUND_LINE));
   assert.ok(crit.includes(SUITE_CITE_LINE) && doc.includes(SUITE_CITE_LINE));
   const first = buildBrief({ ...run, units: [{ ...run.units[0], rounds: [] }] }, { role: 'builder', unit: 'web', quotes: [] });

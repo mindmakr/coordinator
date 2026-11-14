@@ -1,6 +1,8 @@
 // Plain words for a run: the situation, what needs the person, a rough time
 // left, and one sentence per unit. Pure functions over the state and the plan
 // (lib/rules.mjs decide), read by lib/view.mjs.
+import { usedMinutes } from './clock.mjs';
+
 const MINUTE = 60_000;
 const IN_PROGRESS = ['building', 'judging'];
 
@@ -58,7 +60,8 @@ export function estimate(run, plan, nowMs) {
   if (run.closed) return { state: 'closed' };
   // A state with no time budget (hand-made or trimmed) has no end: the estimate alone counts.
   const max = run.budget?.maxMinutes;
-  const left = typeof max === 'number' ? max - (nowMs - Date.parse(run.createdAt)) / MINUTE : Infinity;
+  // Minutes while a question to the person is open do not count (lib/clock.mjs).
+  const left = typeof max === 'number' ? max - usedMinutes(run, nowMs) : Infinity;
   if (left <= 0) return { state: 'spent' };
   const ds = tryMinutes(run);
   if (!ds.length) return { state: 'none', budgetLeft: left };
@@ -160,7 +163,7 @@ function then(u, d) {
   switch (d?.action) {
     case 'done': return d.step === 'merge' ? 'its fold-ins are checked; next it merges' : 'nothing left to do';
     case 'fold-in': return 'next a quick check of its fold-ins, then it merges';
-    case 'ask-person': return 'next the person decides: ship, one more round, or stop';
+    case 'ask-person': return d.reason?.startsWith('same-files') ? 'next the person decides: change the bar, simplify the design, accept it as is, or one more round' : 'next the person decides: ship, one more round, or stop';
     case 'stopped': case 'stop': return 'it goes in the report as stopped';
     case 'judge': return 'next a critic checks it';
     case 'check-stale': return 'next the lead checks on the silent agent';
