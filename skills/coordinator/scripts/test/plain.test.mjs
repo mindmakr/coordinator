@@ -49,8 +49,8 @@ test('needs you lists open questions with the recommendation, and is calm when t
   ];
   r = render(state({ notes }));
   assert.deepEqual(r.v.needsYou.map((q) => q.id), ['q1']);
-  assert.match(r.html, /<div class="needs"><b>Needs you<\/b><ul><li class="q" id="q1" data-a="q-q1"><p class="qtext"><b>q1<\/b> Merge u1 now\?<\/p><p class="rec">Recommended: yes, the review says READY<\/p>/);
-  assert.match(r.txt, /^needs you {2}q1: Merge u1 now\? → recommended: yes, the review says READY$/m);
+  assert.match(r.html, /<div class="needs"><b>Needs you<\/b><ul><li class="q" id="q1" data-a="q-q1"><p class="qlabel" title="Which run and task this question comes from">g \(r1\)<\/p><p class="qtext"><b>q1<\/b> Merge u1 now\?<\/p><p class="rec">Recommended: yes, the review says READY<\/p>/);
+  assert.match(r.txt, /^needs you {2}g \(r1\)\n {11}q1: Merge u1 now\? → recommended: yes, the review says READY$/m);
   assert.match(r.txt, /open {4}1 questions/);
   assert.match(r.html, /<b>q2<\/b> Use UTC\?<p class="ans"><b>Answered:<\/b> UTC it is /, 'a decided question shows its answer, not as open');
   assert.equal(render(state({ notes, closed: { outcome: 'partial', at: at(50) } })).v.needsYou.length, 0, 'a closed run needs nobody');
