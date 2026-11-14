@@ -166,8 +166,8 @@
 //   --harness NAME (any command): the tool running it (claude-code, codex, antigravity, gemini …); else
 //                  COORDINATOR_HARNESS, else detected. Every write stamps the run with it and the skill version
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { execFileSync, spawn as spawnProcess } from 'node:child_process';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, truncateSync } from 'node:fs';
+import { execFile, spawn as spawnProcess } from 'node:child_process';
 import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
@@ -194,7 +194,8 @@ import { harnessOf, stamp } from './lib/harness.mjs';
 import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
 import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dashboardCaller, pcAnswer, VIA_ENV } from './lib/pcanswer.mjs';
+import { childEnv, dashboardCaller, pcAnswer, VIA_ENV } from './lib/pcanswer.mjs';
+import { VERSION } from './lib/version.mjs';
 import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
 import { pull, push, VISIBILITY_HINT } from './lib/statesync.mjs';
 import { bellConfig, listen } from './lib/doorbell.mjs';
@@ -1102,7 +1103,12 @@ const commands = {
     const dash = process.env[VIA_ENV] !== undefined;
     if (dash && !dashboardCaller(process.env[VIA_ENV], readDashboardRecord(), process.ppid)) throw new Error(`${VIA_ENV} is set, but this process was not started by the running PC dashboard`);
     if (dash && (o.by !== 'person' || o.confirm !== undefined)) throw new Error('an answer from the PC dashboard is --by person, with no --confirm');
-    return change(run, 'answer', (s) => answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person', via: dash ? 'dashboard' : 'cli', confirm: o.confirm === true ? '' : o.confirm }));
+    return change(run, 'answer', (s) => {
+      // The dashboard checked the question was open before starting this process; check again under the run's
+      // lock, so an answer that landed in between is never overwritten from the PC page.
+      if (dash) { const q = questions(s).find((x) => x.id === id); if (!q?.open) throw new Error(`${id} is no longer open (${q?.status ?? 'not asked'}); nothing written`); }
+      answer(s, id, { choices: o.choice ?? [], other: o.other === true ? null : o.other, by: o.by ?? 'person', via: dash ? 'dashboard' : 'cli', confirm: o.confirm === true ? '' : o.confirm });
+    });
   },
   'use-answer'([run, id]) { return change(run, 'answer.used', (s) => useAnswer(s, id)); },
   questions([run]) { return questions(load(run), { project: project() }).map(({ open, ...q }) => q); },
@@ -1180,7 +1186,8 @@ const commands = {
       return null;
     }
     if (verb !== undefined) throw new Error('usage: run.mjs dashboard [--port P] [--open] [--foreground] | dashboard stop');
-    registerFolder();
+    // The detached child runs in the register's folder, not a project: the command that started it registered already.
+    if (!process.env[DETACHED_ENV]) registerFolder();
     if (o.open !== undefined && o.open !== true) throw new Error('--open takes no value');
     if (o.foreground !== undefined && o.foreground !== true) throw new Error('--foreground takes no value');
     const port = num(o.port, DASHBOARD_PORT, 1, 65_535);
@@ -1190,7 +1197,11 @@ const commands = {
       answers(old.url).then((ok) => {
         if (!ok) return fresh();
         if (o.open) openBrowser(old.url);
-        console.log(JSON.stringify({ url: old.url, pid: old.pid, reused: true, note: 'a dashboard is already running; stop it with run.mjs dashboard stop' }));
+        // One started by another copy of the skill is reused, never stopped here: say so, and how to restart it.
+        const other = old.version !== VERSION;
+        console.log(JSON.stringify({ url: old.url, pid: old.pid, reused: true, version: old.version ?? null, note: other
+          ? `a dashboard from ${old.version ? `skill ${old.version}` : 'an older skill'} is already running; this is ${VERSION}. To run this one: run.mjs dashboard stop, then run.mjs dashboard`
+          : 'a dashboard is already running; stop it with run.mjs dashboard stop' }));
         return null;
       });
       return null;
@@ -1460,25 +1471,28 @@ function openBrowser(url) {
 // The PC dashboard (run.mjs dashboard): its record, its log, the server itself and the detached start.
 const RUN_MJS = fileURLToPath(import.meta.url);
 const DETACHED_ENV = 'COORDINATOR_DASHBOARD_DETACHED'; // set by startDashboard for its child: no token in the log
-const LOG_MAX = 1024 * 1024; // a longer dashboard.log starts again at the next start
+const LOG_MAX = 1024 * 1024; // a longer dashboard.log starts again, at a start or while the dashboard runs
 const dashboardFile = () => join(registryHome(), 'dashboard.json');
+const dashboardLog = () => join(registryHome(), 'dashboard.log');
 function readDashboardRecord() { try { return JSON.parse(readFileSync(dashboardFile(), 'utf8')); } catch { return null; } }
 
 // An answer from the front page's Needs you: checked first (lib/pcanswer.mjs), then recorded by
 // `run.mjs answer` in that project's state folder, the same locked code as on the CLI, as given via the dashboard.
+// Async, so a run whose lock is busy never freezes the page for the other runs; the POST is answered when it ends.
+// The child gets only childEnv: no session tokens or ids, and it is stamped as the dashboard, not the starting tool.
 function answerFromPc(form, token) {
   const t = pcAnswer(readRegistry(), form);
-  try {
-    execFileSync(process.execPath, [RUN_MJS, ...t.args], {
+  return new Promise((done, fail) => {
+    execFile(process.execPath, [RUN_MJS, ...t.args], {
       cwd: existsSync(t.entry.project) ? t.entry.project : t.entry.stateDir,
-      env: { ...process.env, COORDINATOR_DIR: t.entry.stateDir, [VIA_ENV]: token },
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 60_000,
+      env: childEnv(process.env, { COORDINATOR_DIR: t.entry.stateDir, [VIA_ENV]: token }),
+      encoding: 'utf8', windowsHide: true, timeout: 60_000,
+    }, (e, _out, err) => {
+      if (!e) return done(t.anchor);
+      const why = String(err ?? '').split(/\r?\n/).reverse().find((l) => l.startsWith('error: '));
+      return fail(new Error(why ? why.slice('error: '.length) : 'the answer was not recorded'));
     });
-  } catch (e) {
-    const why = String(e.stderr ?? '').split(/\r?\n/).reverse().find((l) => l.startsWith('error: '));
-    throw new Error(why ? why.slice('error: '.length) : 'the answer was not recorded');
-  }
-  return t.anchor;
+  });
 }
 
 // Serves the PC dashboard in this process and records { pid, port, url } in dashboard.json (0600).
@@ -1500,12 +1514,18 @@ function serveDashboard(port, o) {
   });
   const ready = ({ server, url, token: made }) => {
     token = made;
-    writeAtomic(rec, `${JSON.stringify({ pid: process.pid, port: server.address().port, url, at: now() })}\n`);
+    writeAtomic(rec, `${JSON.stringify({ pid: process.pid, port: server.address().port, url, version: VERSION, at: now() })}\n`);
     try { chmodSync(rec, 0o600); } catch { /* not on this file system */ }
     const drop = () => { try { if (JSON.parse(readFileSync(rec, 'utf8')).pid === process.pid) rmSync(rec); } catch { /* gone */ } };
     process.on('exit', drop);
     for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
-    if (process.env[DETACHED_ENV]) { console.log(JSON.stringify({ started: true, pid: process.pid, port: server.address().port, at: now() })); return; }
+    if (process.env[DETACHED_ENV]) {
+      // Keep dashboard.log short while the dashboard runs for days. Its stdout is that file opened for append,
+      // so emptying it in place is safe: the next line lands at the new end.
+      setInterval(() => { try { if (statSync(dashboardLog()).size > LOG_MAX) truncateSync(dashboardLog(), 0); } catch { /* gone */ } }, 60_000).unref();
+      console.log(JSON.stringify({ started: true, pid: process.pid, port: server.address().port, cwd: process.cwd(), version: VERSION, at: now() }));
+      return;
+    }
     if (o.open) openBrowser(url);
     console.log(JSON.stringify({ url, note: 'every run on this PC; local only; stop with run.mjs dashboard stop' }));
   };
@@ -1517,16 +1537,22 @@ function serveDashboard(port, o) {
 
 // Starts the PC dashboard as a detached process (no console window on Windows), its output in
 // dashboard.log, and prints its link once the link answers. The child records itself in dashboard.json.
+// It runs in the register's folder, so it never holds the caller's folder (often a worktree) open, and it
+// gets only childEnv from this session.
 function startDashboard(port, o) {
-  const log = join(registryHome(), 'dashboard.log');
+  const log = dashboardLog();
   mkdirSync(registryHome(), { recursive: true });
   let size = 0; try { size = statSync(log).size; } catch { /* none yet */ }
-  const fd = openSync(log, size > LOG_MAX ? 'w' : 'a', 0o600);
+  if (size > LOG_MAX) truncateSync(log, 0);
+  // A raw file handle, not lib/store.mjs: the log is the detached child's own stdout and stderr, which must be
+  // a file descriptor (a pipe would die with this process, and a hidden window on Windows needs a handle).
+  // Opened for append, so the child's in-place trim (serveDashboard) is safe.
+  const fd = openSync(log, 'a', 0o600);
   try { chmodSync(log, 0o600); } catch { /* not on this file system */ }
   let child;
   try {
     child = spawnProcess(process.execPath, [RUN_MJS, 'dashboard', '--foreground', ...(o.port !== undefined ? ['--port', String(port)] : [])], {
-      detached: true, windowsHide: true, stdio: ['ignore', fd, fd], cwd: process.cwd(), env: { ...process.env, [DETACHED_ENV]: '1' },
+      detached: true, windowsHide: true, stdio: ['ignore', fd, fd], cwd: registryHome(), env: childEnv(process.env, { [DETACHED_ENV]: '1' }),
     });
   } finally { closeSync(fd); }
   let exited = false;

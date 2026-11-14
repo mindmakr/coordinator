@@ -3,15 +3,17 @@
 // in that project's state folder, with the page's token and origin required and nothing written on a refusal.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { needsSection, pcModel } from '../lib/dashboard.mjs';
-import { loadRun } from '../lib/events.mjs';
-import { dashboardCaller, pcAnswer, VIA_ENV } from '../lib/pcanswer.mjs';
+import { loadRun, updateRun } from '../lib/events.mjs';
+import { childEnv, dashboardCaller, DASHBOARD_HARNESS, pcAnswer, VIA_ENV } from '../lib/pcanswer.mjs';
+import { answer } from '../lib/questions.mjs';
+import { VERSION } from '../lib/version.mjs';
 import { readRegistry } from '../lib/registry.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,8 +21,8 @@ const tmp = mkdtempSync(join(tmpdir(), 'coord-pcans-'));
 const home = join(tmp, 'home');
 const state = (name) => join(tmp, name, '.coordinator');
 const env = (name, extra = {}) => ({ ...process.env, COORDINATOR_DIR: state(name), COORDINATOR_HOME: home, COORDINATOR_REGISTRY: 'on', COORDINATOR_HARNESS: '', ...extra });
-const cli = (name, args, extra) => {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd: tmp, env: env(name, extra), encoding: 'utf8' });
+const cli = (name, args, extra, cwd = tmp) => {
+  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd, env: env(name, extra), encoding: 'utf8' });
   let out = null; try { out = JSON.parse(r.stdout); } catch { /* text */ }
   return { code: r.status, out, raw: r.stdout, err: r.stderr };
 };
@@ -38,7 +40,7 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { 
 test.after(() => {
   // Never leave a dashboard behind: stop the one this file started, if it is still up.
   try { const rec = JSON.parse(readFileSync(join(home, 'dashboard.json'), 'utf8')); if (alive(rec.pid)) process.kill(rec.pid); } catch { /* none */ }
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 test('pcAnswer: builds the run.mjs answer arguments for an open question, and refuses everything else', () => {
@@ -64,6 +66,10 @@ test('pcAnswer: builds the run.mjs answer arguments for an open question, and re
   refused({ key: e.key, run: 'ra', q: qa }, /give an answer/);
   refused({ key: e.key, run: 'ra', q: qa, choice: '__other', other: '   ' }, /give an answer/);
   refused({ key: e.key, run: 'ra', q: qa, choice: '__other', other: 'x'.repeat(1001) }, /1000 characters/);
+  // A single-select question takes one pick: a forged post with two is refused, never cut to the first.
+  refused({ key: e.key, run: 'ra', q: qa, choice: ['Yes', 'No'] }, /takes one answer/);
+  refused({ key: e.key, run: 'ra', q: qa, choice: ['No', 'Yes'] }, /takes one answer/);
+  refused({ key: e.key, run: 'ra', q: qa, choice: ['Yes', '__other'], other: 'later' }, /takes one answer/);
   // Not open: answered (waiting for the lead) or closed run.
   assert.equal(cli('alpha', ['answer', 'ra', qa, '--choice', 'No', '--by', 'lead']).code, 0);
   refused({ key: e.key, run: 'ra', q: qa, choice: 'Yes' }, /is not open \(answered\)/);
@@ -78,6 +84,12 @@ test('dashboardCaller: only a child of the recorded dashboard pid, handed its to
   assert.equal(dashboardCaller('abc_DEF-12é', rec, 4242), false, 'same length in characters, not in bytes');
   assert.equal(dashboardCaller('abc_DEF-123', null, 4242), false, 'no record');
   assert.equal(dashboardCaller('abc_DEF-123', { pid: 4242, url: 'not a url' }, 4242), false);
+});
+
+test('childEnv: the dashboard and its answer children get no session tokens or ids, and are stamped as the dashboard', () => {
+  const env = childEnv({ PATH: '/bin', Path: 'C:\\bin', SystemRoot: 'C:\\Windows', USERPROFILE: 'C:\\u', TEMP: 'C:\\t', COORDINATOR_HOME: '/h', COORDINATOR_REGISTRY: 'on',
+    GITHUB_TOKEN: 'ghp_x', GH_TOKEN: 'x', ANTHROPIC_API_KEY: 'sk-x', CLAUDE_CODE_SESSION_ID: 's', CLAUDECODE: '1', COORDINATOR_DIR: '/other', COORDINATOR_HARNESS: 'codex', NODE_OPTIONS: '--require x' }, { COORDINATOR_DIR: '/state' });
+  assert.deepEqual(env, { PATH: '/bin', Path: 'C:\\bin', SystemRoot: 'C:\\Windows', USERPROFILE: 'C:\\u', TEMP: 'C:\\t', COORDINATOR_HOME: '/h', COORDINATOR_REGISTRY: 'on', COORDINATOR_HARNESS: DASHBOARD_HARNESS, COORDINATOR_DIR: '/state' });
 });
 
 test('Needs you: every open question of every registered run, labelled, each with its own answer form', () => {
@@ -100,19 +112,35 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
   const qg = setup('gamma', 'rg', 'Gamma');
   const qd = setup('delta', 'rd', 'Delta');
   const port = await freePort();
-  // The starting process exits once the link answers; the dashboard keeps serving.
-  const started = cli('gamma', ['dashboard', '--port', String(port)]);
+  // The starting process exits once the link answers; the dashboard keeps serving. It is started from a
+  // folder of its own (a worktree, say), which the dashboard must not hold open.
+  const starter = join(tmp, 'starter');
+  mkdirSync(starter);
+  const started = cli('gamma', ['dashboard', '--port', String(port)], {}, starter);
   assert.equal(started.code, 0, started.err);
   const { url, pid, log } = started.out;
   assert.match(url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/\\?t=`));
   assert.equal(log, join(home, 'dashboard.log'));
   try {
     assert.ok(alive(pid), 'the dashboard outlives the command that started it');
-    assert.equal(JSON.parse(readFileSync(join(home, 'dashboard.json'), 'utf8')).pid, pid);
+    const rec = JSON.parse(readFileSync(join(home, 'dashboard.json'), 'utf8'));
+    assert.deepEqual([rec.pid, rec.version], [pid, VERSION], 'the record names the pid and the skill version');
+    const line = readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).findLast((l) => l?.started && l.pid === pid);
+    assert.equal(resolve(line.cwd), resolve(home), 'the dashboard runs in the register folder, not the caller\'s');
+    rmSync(starter, { recursive: true });
+    assert.ok(!existsSync(starter), 'the folder it was started from can be removed while it runs');
     assert.doesNotMatch(readFileSync(log, 'utf8'), /\?t=/, 'the log holds no token');
     const again = cli('delta', ['dashboard']);
     assert.equal(again.out.reused, true);
     assert.equal(again.out.url, url);
+    assert.doesNotMatch(again.out.note, /skill/, 'same version: no restart hint');
+    // One started by another copy of the skill is reused, with how to restart it; never stopped by this call.
+    writeFileSync(join(home, 'dashboard.json'), JSON.stringify({ ...rec, version: '1.5.0' }));
+    const older = cli('delta', ['dashboard']);
+    assert.equal(older.out.reused, true);
+    assert.match(older.out.note, /skill 1\.5\.0 is already running; this is .*dashboard stop, then run\.mjs dashboard/);
+    assert.ok(alive(pid));
+    writeFileSync(join(home, 'dashboard.json'), JSON.stringify(rec));
 
     const page = await (await fetch(url)).text();
     assert.match(page, /<h2 id="pc-needs"[^>]*>Needs you<\/h2>/);
@@ -156,6 +184,9 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
       assert.deepEqual([ag.choices, ag.by, ag.via], [['Yes'], 'person', 'dashboard']);
       const ad = qOf('delta', 'rd', qd).history.at(-1);
       assert.deepEqual([ad.other, ad.by, ad.via], ['after the demo', 'person', 'dashboard']);
+      const lastEvent = (name, run) => JSON.parse(readFileSync(join(state(name), 'runs', run, 'events.jsonl'), 'utf8').trim().split('\n').at(-1));
+      assert.equal(loadRun(join(state('gamma'), 'runs', 'rg')).writer.harness, DASHBOARD_HARNESS, 'stamped as the dashboard, not the tool that started it');
+      assert.equal(lastEvent('delta', 'rd').kind, 'answer');
       // Answered now, so no longer open: a second answer from the PC page is refused.
       assert.equal((await post({ key: key('rg'), run: 'rg', q: qg, choice: 'No' })).status, 400);
       assert.deepEqual(qOf('gamma', 'rg', qg).history.length, 1);
@@ -163,7 +194,27 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
       assert.match(heard, /answer q\d+ \(u1\) by person: "after the demo"/, 'the run\'s watch hears it');
       const after = await (await fetch(url)).text();
       assert.doesNotMatch(after, /Ship gamma\?|Ship delta\?/, 'answered questions leave Needs you');
-    } finally { watch.kill(); }
+    } finally {
+      // Wait for the watch to end before the after-hook removes its folder (Windows holds a running process's folder).
+      const gone = new Promise((r) => { if (watch.exitCode !== null || watch.signalCode !== null) r(); else watch.once('exit', r); });
+      watch.kill();
+      await gone;
+    }
+
+    // An answer that lands while the dashboard's answer waits on the run's lock is never overwritten: the
+    // dashboard's child checks again under the lock. Meanwhile the page still serves (the wait is async).
+    const qe = setup('gamma', 're', 'Race');
+    const lock = join(state('gamma'), 'runs', 're', 'state.json.lock');
+    writeFileSync(lock, 'held by the test');
+    const pending = post({ key: readRegistry({ home }).find((x) => x.run === 're').key, run: 're', q: qe, choice: 'Yes' });
+    await new Promise((r) => setTimeout(r, 600));
+    assert.equal((await fetch(url)).status, 200, 'the page answers while an answer waits on a lock');
+    unlinkSync(lock);
+    updateRun(join(state('gamma'), 'runs', 're'), { kind: 'answer', by: { harness: 'test', skill: VERSION } }, (s) => { answer(s, qe, { choices: ['No'], by: 'lead', via: 'cli' }); });
+    const raced = await pending;
+    assert.equal(raced.status, 400);
+    assert.match(await raced.text(), /no longer open/);
+    assert.deepEqual(qOf('gamma', 're', qe).history.map((h) => [h.choices, h.by]), [[['No'], 'lead']], 'the earlier answer stands');
 
     // A run.mjs answer that claims the dashboard but was not started by it is refused.
     const forged = cli('gamma', ['answer', 'rg', setup('gamma', 'rg2', 'Again'), '--choice', 'Yes', '--by', 'person'], { [VIA_ENV]: token });

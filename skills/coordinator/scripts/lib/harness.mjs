@@ -7,7 +7,7 @@
 // is a best guess; --harness or COORDINATOR_HARNESS always win (references/harnesses.md).
 import { VERSION } from './version.mjs';
 
-export const NAMES = { 'claude-code': 'Claude Code', codex: 'Codex', antigravity: 'Antigravity', gemini: 'Gemini CLI', cursor: 'Cursor', unknown: 'an unknown tool' };
+export const NAMES = { 'claude-code': 'Claude Code', codex: 'Codex', antigravity: 'Antigravity', gemini: 'Gemini CLI', cursor: 'Cursor', dashboard: 'the PC dashboard', unknown: 'an unknown tool' };
 const SLUG = /^[a-z][a-z0-9-]{0,31}$/;
 
 // What the environment says, in this order: a tool's own marker beats the editor it runs in

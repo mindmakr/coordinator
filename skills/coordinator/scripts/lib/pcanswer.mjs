@@ -17,6 +17,18 @@ import { isSafeId } from './store.mjs';
 
 // The variable the dashboard sets for its `run.mjs answer` child: its own token.
 export const VIA_ENV = 'COORDINATOR_VIA_DASHBOARD';
+// The harness name an answer given on the PC dashboard is stamped with: the person answered in a browser,
+// not as the tool that started the dashboard.
+export const DASHBOARD_HARNESS = 'dashboard';
+// The only variables the detached dashboard and its answer children get from the session that started it:
+// enough to find node, the user's folders and temp, and the register. No tokens, no session ids.
+const KEEP = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
+  'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'COORDINATOR_HOME', 'COORDINATOR_REGISTRY']);
+export function childEnv(env, extra = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) if (KEEP.has(k.toUpperCase()) && typeof v === 'string') out[k] = v;
+  return { ...out, COORDINATOR_HARNESS: DASHBOARD_HARNESS, ...extra };
+}
 const KEY = /^[0-9a-f]{12}$/;
 const QID = /^q[1-9][0-9]{0,4}$/;
 const OTHER_MAX = 1000;
@@ -38,11 +50,13 @@ export function pcAnswer(entries, form, { load = loadRun } = {}) {
   const labels = q.options.map((o) => o.label);
   const choice = form.getAll('choice');
   for (const c of choice) if (c !== OTHER && !labels.includes(c)) throw new Error(`${id} has no option "${clip(c, 60)}"`);
+  // A single-select question takes one pick: checked before fromForm, which would keep only the first.
+  const picked = choice.filter((c) => c !== OTHER);
+  if (!q.multi && (picked.length > 1 || (picked.length && choice.includes(OTHER)))) throw new Error(`${id} takes one answer`);
   const { choices, other } = fromForm(q, choice, form.get('other'));
   const free = typeof other === 'string' && other.trim() ? other : null;
   if (free && free.length > OTHER_MAX) throw new Error(`the answer is ${OTHER_MAX} characters at most`);
   if (!choices.length && !free) throw new Error('give an answer: pick an option or write your own');
-  if (!q.multi && choices.length + (free ? 1 : 0) > 1) throw new Error(`${id} takes one answer`);
   // --name=value: a value that starts with "--" stays a value, never a flag.
   const args = ['answer', run, id, ...choices.map((c) => `--choice=${c}`), ...(free ? [`--other=${free}`] : []), '--by', 'person'];
   return { entry: e, run, id, args, anchor: needsAnchor(key, run) };
