@@ -89,6 +89,9 @@
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
 //                  [--unit U] (person: a note from the person about one unit; decision, follow-up, info: scoped to that unit,
 //                  shown on its page) [--confirm] (person: their words, pasted)
+//                  [--asking dialog|dashboard] (decision: the person's intake answer on how questions are asked in this run;
+//                  it wins over the project's "asking" setting, and ask prints the mode in force; a lead step:
+//                  refused from another window, takes [--lead ID] [--takeover]; every other note is a worker step)
 //   run.mjs brief <run> [<unit>] --role builder|critic|integrator [--quote file … --source label …] [--where W] [--playbook P (300 characters at most, refused over it)]
 //                  [--findings-file F] the brief says to read F in full first: every finding to fix (builder) or to check;
 //                  --where stays short (500 characters at most, refused over it, never cut): findings go in that file
@@ -103,7 +106,8 @@
 //                  (ship with follow-ups, one more round, stop) or, with reason "same-files: <file>", same files
 //                  (change the bar, simplify the design, accept as is, one more round); next acts on the person's pick
 //                  The time budget pauses while a question to the person is open (ask to its answer) and no unit is building or judging.
-//                  Prints the question's label: "<project> · <run name> (<run id>)", plus " › Task <unit>: <title>" on a unit (lib/questions.mjs questionLabel).
+//                  Prints the question's label: "<project> · <run name> (<run id>)", plus " › Task <unit>: <title>" on a unit (lib/questions.mjs questionLabel),
+//                  and the asking mode in force: asking { mode: dialog|dashboard, from: run|project|default } (lib/questions.mjs askingMode)
 //   run.mjs answer <run> qN [--choice label …] [--other T] [--by person|lead]   changeable until used
 //                  [--confirm "their words"] with --by person only: the person said this; never without their words
 //   run.mjs use-answer <run> qN     the lead acted on the answer: it can no longer change
@@ -205,7 +209,7 @@ import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
 import { normPath, pendingSyncs, syncStep } from './lib/overlap.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
-import { claim, claimText, decideLead, identity, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, secondBuilder, stale, windowAlive } from './lib/lead.mjs';
+import { claim, claimText, decideLead, identity, isLeadStep, LEAD_FORMS, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, secondBuilder, stale, windowAlive } from './lib/lead.mjs';
 import { agoText } from './lib/progress.mjs';
 import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
 import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
@@ -229,7 +233,7 @@ import { mapsPage } from './lib/mapspage.mjs';
 import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
 import { BENCH_FLAGS, BENCH_REPEAT, benchCommand, benchHelp } from './lib/ceb/cli.mjs';
 import { hasRetro, retroCommand } from './lib/retro.mjs';
-import { answer, answerText, ask, events, find, fromForm, personNote, projectName, questions, useAnswer } from './lib/questions.mjs';
+import { ASKING, answer, answerText, ask, askingMode, events, find, fromForm, personNote, projectName, questions, useAnswer } from './lib/questions.mjs';
 import { serve } from './lib/serve.mjs';
 import { selfModel, selfText } from './lib/self.mjs';
 import { gapsCheckFile, loadRuns, loadSelf, selfVersion } from './lib/selfdata.mjs';
@@ -249,14 +253,15 @@ const FLAGS = {
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', ...COST_FLAGS],
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
-  link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm'],
+  link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm', 'asking'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open', 'foreground'], list: ['all'], waiting: ['json'], 'status-line': ['json'],
   push: ['to', 'message'], pull: ['from'], bench: BENCH_FLAGS, pause: ['reason'], lead: ['lead', 'takeover', 'reason'],
 };
 // Lead steps (lib/lead.mjs) all take --lead and --takeover (claims a gone lead's run). A step's own --reason is never a
 // takeover's reason: only run.mjs lead <run> --takeover --reason R takes over a lead that is still active.
-for (const c of LEAD_STEPS) FLAGS[c] = [...new Set([...(FLAGS[c] ?? []), 'lead', 'takeover'])];
+// note takes them too, for its one lead form (note --asking, LEAD_FORMS); any other note refuses them.
+for (const c of [...LEAD_STEPS, ...Object.keys(LEAD_FORMS)]) FLAGS[c] = [...new Set([...(FLAGS[c] ?? []), 'lead', 'takeover'])];
 // Notes about one unit (#45): scoped with --unit, shown on its page.
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
@@ -584,7 +589,7 @@ function askFinish(run, o) {
     const note = st.notes.filter((n) => n.kind === 'question').at(-1);
     if (Array.isArray(d.files)) note.sameFiles = d.files; else note.finish = true;
   }, { unit: String(o.finish) });
-  return { ...s, asked: id, label: labelOf(s, id) };
+  return { ...s, asked: id, label: labelOf(s, id), asking: askingMode(s, settings()) };
 }
 
 // A brief is never cut silently (the reins-flight retro: fix rounds lost their finding lists to a cut --where).
@@ -1133,6 +1138,7 @@ const commands = {
   },
   note([run], o) {
     const kind = oneOf(o.kind, ['situation', 'decision', 'follow-up', 'retro', 'question', 'bar', 'info', 'person', 'escape'], '--kind');
+    if (o.asking === undefined && (o.lead !== undefined || o.takeover !== undefined)) throw new Error('--lead and --takeover go with --asking: any other note is a worker step');
     if (o.confirm !== undefined && (kind !== 'person' || o.confirm !== true)) throw new Error('--confirm takes no value and goes with --kind person');
     if (kind === 'person') return change(run, 'note', (s) => personNote(s, { text: o.text, unit: o.unit, via: 'cli', confirm: o.confirm === true }), { unit: typeof o.unit === 'string' ? o.unit : null });
     if (kind === 'escape') {
@@ -1147,6 +1153,8 @@ const commands = {
     if (o.unit !== undefined && !UNIT_NOTES.includes(kind)) throw new Error(`--unit goes with --kind ${['person', 'escape', ...UNIT_NOTES].join(', ')} (or ask)`);
     if (o.recommend !== undefined && kind !== 'question') throw new Error('--recommend goes with --kind question');
     if (o.answers !== undefined && kind !== 'decision') throw new Error('--answers goes with --kind decision');
+    if (o.asking !== undefined && (kind !== 'decision' || o.unit !== undefined)) throw new Error('--asking goes with --kind decision, on the run (no --unit)');
+    const askMode = o.asking === undefined ? undefined : oneOf(o.asking, ASKING, '--asking');
     return change(run, kind === 'question' ? 'question' : 'note', (s) => {
       const note = { kind, ...(o.unit !== undefined ? { unit: unitOf(s, String(o.unit)).id } : {}), text: text(o.text, 'text', kind === 'situation' ? 400 : 1000), at: now() };
       if (o.recommend !== undefined) note.recommend = text(o.recommend, 'recommend', 300);
@@ -1156,6 +1164,7 @@ const commands = {
         if (!m || +m[1] < 1 || +m[1] > asked) throw new Error(`--answers must name a logged question (q1-q${asked})`);
         note.answers = o.answers;
       }
+      if (askMode !== undefined) { s.askMode = askMode; note.asking = askMode; }
       s.notes.push(note);
     }, { closedOk: ['follow-up', 'retro'].includes(kind), unit: typeof o.unit === 'string' ? safeId(o.unit, 'unit') : null });
   },
@@ -1204,7 +1213,7 @@ const commands = {
   },
   ask([run], o) {
     if (o.finish !== undefined) return askFinish(run, o);
-    let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id, label: labelOf(s, id) };
+    let id; const s = change(run, 'question', (st) => { id = ask(st, o); }, { unit: typeof o.unit === 'string' ? o.unit : null }); return { ...s, asked: id, label: labelOf(s, id), asking: askingMode(s, settings()) };
   },
   answer([run, id], o) {
     if (o.confirm !== undefined && o.by !== 'person') throw new Error('--confirm needs an explicit --by person');
@@ -1759,12 +1768,13 @@ try {
   const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
   // One lead per run (lib/lead.mjs): a lead step from another window is refused before it changes anything; a
   // claim it needs is written with its change (change()). init checks and claims itself; next only when it would
-  // record a stop; pull checks and never writes a claim. Closed runs have no lead.
-  if (LEAD_STEPS.has(cmd) && !['init', 'next'].includes(cmd)) {
+  // record a stop; pull checks and never writes a claim; note only in its lead form (note --asking). Closed runs
+  // have no lead.
+  if (isLeadStep(cmd, opt) && !['init', 'next'].includes(cmd)) {
     const run = pos[0];
     if (typeof run === 'string' && isSafeId(run) && exists(run) && !load(run).closed) leadCheck(run, opt);
   }
   const out = await commands[cmd](pos, opt);
   const claimed = (o) => (CLAIMED && o && typeof o === 'object' && !Array.isArray(o) ? { ...o, claim: CLAIMED } : o);
-  if (out !== null) console.log(JSON.stringify(claimed(out.id === undefined || ['models', 'next', 'lead', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }), null, 2));
+  if (out !== null) console.log(JSON.stringify(claimed(out.id === undefined || ['models', 'next', 'lead', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.asking ? { asking: out.asking } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }), null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

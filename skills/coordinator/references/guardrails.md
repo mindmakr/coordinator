@@ -58,7 +58,7 @@ Full suites run again and again under load made late critic rounds three to six 
 - **The value question at round 3.** Before sending a unit's third round, ask yourself: is the behaviour that keeps failing worth another round to the person who will use the work? If the answer is not clearly yes, ask the person, while there is still budget to act on it. One run spent a third of its budget on a corner case nobody would have chosen.
 - **A design change goes to the person.** When a finding can only be answered by changing the design (a new mechanism, a hand-over between parts, a changed rule), ask the person, with the designs as options and what each costs. The lead does not pick a design itself: in one run, a design the lead chose to answer round 2 made the code that rounds 3 to 5 failed on.
 
-Log both with `run.mjs ask` (only a logged question pauses the clock) and follow `commands/run.md` step 1.7: the situation in plain words, why it matters, each option as a consequence. The clock is paused while they are open, as long as no unit of the run is building or judging (Budget).
+Log both with `run.mjs ask` (only a logged question pauses the clock), ask them as `commands/run.md` (Asking) says, and follow its step 1.7: the situation in plain words, why it matters, each option as a consequence. The clock is paused while they are open, as long as no unit of the run is building or judging (Budget).
 
 ## The fence (staying on task)
 
@@ -67,9 +67,25 @@ Log both with `run.mjs ask` (only a logged question pauses the clock) and follow
 - A new unit after freeze needs `--reason`, and is refused past `--max-added`. If you hit the cap, log the extra work as a follow-up (`note --kind follow-up`) and carry on: it goes in the report.
 - The lead does not build "while waiting". It reads the state and answers questions.
 
-## Actions that need a person
+## Without asking, and what still asks
 
-Merging, deploying, a push to a protected or release branch, a force push, deleting data or branches, schema changes on shared databases, spending or new paid services, messages to people or public posts, and changing CI. Ask once through the question tool (`commands/run.md` step 1.7), with the evidence, and record the answer with `run.mjs note --kind decision`. A standing permission the person gave for this run, such as "merge when the review says READY", is recorded the same way and applies only to this run.
+Other files link here; the list lives only here.
+
+**The lead does these without asking.** It says what it did in the chat, and the run's log records the run steps.
+
+- Start the PC dashboard (`run.mjs dashboard`).
+- Restart a builder or critic that went quiet (`next` says `check-stale`), once per unit per round. When the same unit goes quiet again in that round, it asks.
+- Take over a run whose lead is gone (`run.mjs lead <run>`; `durability.md`, One lead).
+- Close a run, and run its retro first (`commands/run.md` step 4), only when no unit is stopped (every unit passed; a unit the person chose to ship counts as passed) and the final check passed. `next` saying `done` is not enough: it also says `done` when one unit passed and another stopped. Check it in `S/run.mjs show <run>` (no unit's status is `stopped`) and in `S/run.mjs waiting` (it lists a finished run that has a stopped unit or a final check not passed). Otherwise, ask.
+
+**The lead still asks the person for these:**
+
+- a new run (its up-front questions, `commands/run.md` step 1);
+- taking over from a lead that is still active;
+- closing a run with a stopped unit, or whose final check did not pass (`next` says `done-with-gaps` or `stopped`, or `done` with a stopped unit);
+- merging, releasing, publishing, deploying, a push to a protected or release branch, a force push, deleting data or branches, schema changes on shared databases, spending or new paid services, messages to people, public posts, filing upstream (the retro's upstream proposals count as posting: they wait under Waiting on you until the person says go), and changing CI.
+
+Ask once (`commands/run.md`, Asking), with the evidence, and record the answer with `run.mjs note --kind decision`. A standing permission the person gave for this run, such as "merge when the review says READY", is recorded the same way and applies only to this run.
 
 ## Safety
 

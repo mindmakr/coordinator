@@ -12,13 +12,15 @@
 //   models      false (routing off) or { strong, critic, specialist, visual-critic, integrator,
 //               builder, researcher, mechanical, or a task class: model name }
 //   helpers     small models for small jobs (lib/helpers.mjs, references/helpers.md)
+//   asking      dialog | dashboard: how the lead asks the person (lib/questions.mjs askingMode; dialog when unset)
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { launchCostProblem } from './cost.mjs';
 import { checkHelpers } from './helpers.mjs';
+import { ASKING } from './questions.mjs';
 
-export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'service', 'theme', 'budgets', 'merge', 'models', 'helpers'];
+export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'service', 'theme', 'budgets', 'merge', 'models', 'helpers', 'asking'];
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 const name = (v) => typeof v === 'string' && v.trim() !== '' && !v.startsWith('-');
 const BRANCH = /^[A-Za-z0-9._/-]{1,100}$/;
@@ -73,6 +75,7 @@ export function checkSettings(s, project) {
   for (const k of Object.keys(s)) if (!KEYS.includes(k)) bad(k, `unknown key "${k}" (known: ${KEYS.join(', ')})`, 'warn');
   if (s.visibility !== undefined && !['private', 'internal', 'public'].includes(s.visibility)) bad('visibility', 'visibility must be private, internal or public');
   if (s.state !== undefined && !['local', 'repo'].includes(s.state)) bad('state', 'state must be local or repo');
+  if (s.asking !== undefined && !ASKING.includes(s.asking)) bad('asking', `asking must be ${ASKING.join(' or ')}`);
   for (const k of ['stateRepo', 'remote', 'branch']) if (s[k] !== undefined && !name(s[k])) bad(k, `${k} must be a non-empty string`);
   if (s.branch !== undefined && ['main', 'master', 'HEAD'].includes(s.branch)) bad('branch', `run state never goes to ${s.branch}`);
   if (s.visibility === 'public' && s.state !== 'local' && !s.stateRepo) bad('stateRepo', 'the repo is public: set stateRepo to a private companion repo, or state to local');

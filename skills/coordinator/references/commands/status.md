@@ -10,4 +10,7 @@ Answer "how are we getting on?" from the state, not from memory, and pick a run 
    - what is running, and who is running it;
    - what is stopped, and why;
    - whether anything needs the person. Usually nothing does: say so.
-5. **Resume:** if the lead lost context, carry on with `S/run.mjs next <run>` exactly as in `run.md` step 3. The intake answers are already in the run's notes, so don't ask them again.
+5. **Resume:** if the lead lost context, or this is a new window, first find out who leads the run: `S/run.mjs lead <run>`. It prints the lead, since when and when it was last active, in minutes and this PC's time. Never work out an age from a timestamp in the log.
+   - **No lead, or the lead is gone:** it claims the run for this window; taking over a gone lead is logged as "took over from <id>: <why>". Do not ask; say so in one line. When a lead counts as gone is defined in `references/durability.md` (One lead, Gone).
+   - **Another window still leads it:** leave the run to that window. Never start a second lead, a builder or a critic for it. Answer the person from `status-line` and `show` only. Take it over only after the person says yes: `S/run.mjs lead <run> --takeover --reason "<their words>"` (`references/guardrails.md`, Without asking).
+   - **This window leads it** (now or after a takeover): follow the Resume steps in `references/durability.md`, run `S/run.mjs waiting` as at intake (items older than a day, at most once per window per day: `run.md`, Intake), then carry on with `S/run.mjs next <run>` exactly as in `run.md` step 3. The intake answers are already in the run's notes, so don't ask them again.

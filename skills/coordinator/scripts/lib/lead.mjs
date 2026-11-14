@@ -14,6 +14,13 @@ import { withLock, writeAtomic } from './store.mjs';
 // (beat, built, evidence, an agent's note), read-only steps, answers and person notes are never lead steps.
 export const LEAD_STEPS = new Set(['init', 'add', 'add-specialist', 'start', 'reset', 'verdict', 'strategy', 'extend', 'freeze',
   'foldin', 'ship', 'integrate', 'close', 'ask', 'use-answer', 'pause', 'resume', 'push', 'pull', 'next']);
+// Steps that are lead steps in one form only: a note that sets how the run asks the person (note --asking) is the
+// lead's, every other note is a worker step. Such a step takes --lead and --takeover in that form only.
+export const LEAD_FORMS = { note: (o) => o.asking !== undefined };
+// Whether `cmd` with options `o` is a lead step (run.mjs checks next separately, when it records a stop).
+export function isLeadStep(cmd, o = {}) {
+  return LEAD_STEPS.has(cmd) || Boolean(LEAD_FORMS[cmd]?.(o));
+}
 
 // Tools whose own window id and window process were checked on a real install (references/harnesses.md).
 // Add a tool here only once its variables are verified: a guessed name could make two windows one lead.
