@@ -179,7 +179,9 @@ const line = (seq, kind, unit, payload) => validateEvent({ v: V, seq, at: new Da
 // mutate's second argument, mark(kind, unit), ends one event there: what changed so far
 // is appended as an event of that kind, and the rest as `kind`. All of them, or none
 // when mutate throws, are written together (a lead's claim and its step: lib/lead.mjs).
-export function updateRun(dir, { kind, unit = null, by = null }, mutate, after) {
+// then: { kind, unit, mutate } changes the state once more after that, as one more event in
+// the same write (a new run's run.init and its lead.claim: run.mjs init).
+export function updateRun(dir, { kind, unit = null, by = null, then = null }, mutate, after) {
   const file = join(dir, STATE);
   return withLock(file, () => {
     const cur = readRun(dir);
@@ -213,6 +215,7 @@ export function updateRun(dir, { kind, unit = null, by = null }, mutate, after) 
     if (next === null) throw new Error('a run cannot be empty');
     if (by && before === null) next = canonical({ ...next, startedBy: by, writer: by });
     next = emit(kind, unit, next);
+    if (then) { const w = clone(next); then.mutate(w); next = emit(then.kind, then.unit ?? null, canonical(w)); }
     if (lines.length || cur?.rebuilt || cur?.edited) {
       const buf = Buffer.concat([cur?.log?.buf ?? Buffer.alloc(0), Buffer.from(lines.join(''))]);
       if (lines.length) writeAtomic(join(dir, EVENTS), buf);

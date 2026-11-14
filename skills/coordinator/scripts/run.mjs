@@ -452,11 +452,14 @@ function load(run) {
 // During a lead step on this run (LEAD), refused unless this window leads it; a claim the step needs is written
 // with it, as its own lead.claim event, in the same lock: both or neither. A change it makes marks the lead
 // active and records this window's process again (a resumed window has a new one).
-function change(run, kind, mutate, { closedOk = false, unit = null } = {}) {
+// leadWhen: { o, when(s) }: this change is a lead step only when when(s) holds on the locked state (next, when it
+// records a stop); the check is made there, in the same locked write as the change.
+function change(run, kind, mutate, { closedOk = false, unit = null, leadWhen = null } = {}) {
   if (!exists(run)) throw new Error(`no run: ${run}`);
   let claimed = null;
   const out = updateRun(runDir(run), { kind, unit, by: BY }, (s, mark) => {
     if (s.closed && !closedOk) throw new Error(`run ${run} is closed`);
+    if (leadWhen && !LEAD && !s.closed && leadWhen.when(s)) leadCheck(run, leadWhen.o, s);
     const mine = LEAD && LEAD.run === s.id && !s.closed;
     if (mine) claimed = leadOf(s, mark);
     const before = mine ? JSON.stringify(s) : null;
@@ -474,7 +477,7 @@ function change(run, kind, mutate, { closedOk = false, unit = null } = {}) {
 // before this step); CLAIMED: what a claim prints.
 let LEAD = null; let CLAIMED = null;
 // This PC's value for a run (lib/lead.mjs runMachine): read only when checking, made when a lead is recorded.
-const hereFor = (run, create) => { const m = machineId(registryHome(), { create }); return m ? runMachine(m, run) : null; };
+const hereFor = (run, create) => { const m = machineId(registryHome(), { create }); return m ? runMachine(m, projectKey(baseDir('project')), run) : null; };
 const machineFor = (run, me) => (me.pid ? hereFor(run, true) : null);
 const leadAlive = (lead, run) => windowAlive(pidAlive, (r) => hereFor(r, false))(lead, run);
 const takeoverOf = (o) => {
@@ -484,10 +487,11 @@ const takeoverOf = (o) => {
 // Before a lead step changes anything: who this window is (a bad --lead stops it here), and whether it may lead
 // the run. Refuses at once when it may not; writes nothing (change() writes the claim with the step).
 // --takeover claims a gone lead's run, never an active one (run.mjs lead --takeover --reason R does that).
-function leadCheck(run, o) {
+// s: the run's state when the caller already holds it (under the lock).
+function leadCheck(run, o, s = null) {
   const me = identity(BY.harness, { flag: o.lead });
   const opts = () => ({ nowMs: Date.now(), alive: leadAlive, claimGone: takeoverOf(o) });
-  const first = decideLead(load(run), me, opts());
+  const first = decideLead(s ?? load(run), me, opts());
   if (first.action === 'refuse') throw new Error(first.message);
   LEAD = { run: safeId(run, 'run'), me, opts, led: first.action === 'lead' };
   return LEAD;
@@ -502,7 +506,7 @@ function leadOf(s, mark = null) {
   mark?.('lead.claim');
   return claimText(LEAD.me, lead, BY.harness);
 }
-// A claim on its own (init, push, run.mjs lead): one lead.claim event.
+// A claim on its own (push, run.mjs lead): one lead.claim event.
 function claimNow(run) {
   let claimed = null;
   updateRun(runDir(run), { kind: 'lead.claim', by: BY }, (s) => { claimed = leadOf(s); }, derived);
@@ -646,9 +650,11 @@ const commands = {
     const me = identity(BY.harness, { flag: o.lead });
     if (takeoverOf(o)) throw new Error('--takeover: a new run has no lead to take over');
     for (const c of parents) parentLead(c, o);
-    updateRun(runDir(run), { kind: 'run.init', by: BY }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    // The window that starts the run leads it: run.init and its lead.claim are written together, or neither.
     LEAD = { run, me, opts: () => ({ nowMs: Date.now(), alive: leadAlive }), led: false };
-    claimNow(run); // the window that starts the run leads it
+    let claimed = null;
+    updateRun(runDir(run), { kind: 'run.init', by: BY, then: { kind: 'lead.claim', mutate: (s) => { claimed = leadOf(s); } } }, (s) => { if (s) throw new Error(`run exists: ${run}`); return fresh; }, derived);
+    if (claimed) CLAIMED = claimed;
     const made = load(run);
     if (routeOn !== undefined) setRouting(baseDir('project'), routeOn); // only once the run exists
     for (const c of parents) markParent(c, run);
@@ -1355,7 +1361,13 @@ const commands = {
     if (s.closed) return report(s, { closed: true });
     const d = decideLead(s, me, { nowMs: Date.now(), alive: leadAlive, claimGone: true, force });
     if (d.action === 'refuse') return report(s, { step: `this window does not lead ${s.id}: leave its lead steps to that window; with the person's yes, run.mjs lead ${s.id} --takeover --reason R takes it over now` });
-    if (d.action === 'lead') return report(s, { id: me.id });
+    if (d.action === 'lead') {
+      // Its own lead (the step /coordinator:status runs): records this window's process again, so a resumed
+      // window that has only run this step does not look ended.
+      const machine = machineFor(s.id, me);
+      if (stale(s.lead, me, machine)) updateRun(runDir(run), { kind: 'lead.claim', by: BY }, (st) => refresh(st, me, { at: now(), machine }), derived);
+      return report(load(run), { id: me.id });
+    }
     LEAD = { run: safeId(run, 'run'), me, opts: () => ({ nowMs: Date.now(), alive: leadAlive, claimGone: true, force }), led: false };
     claimNow(run);
     const claimed = CLAIMED; CLAIMED = null;
@@ -1367,9 +1379,9 @@ const commands = {
     // Expired: applyStops changes the loaded state in memory only; it is never saved.
     if (expired) stopped = applyStops(s);
     else {
-      // Recording a stop is a lead step (lib/lead.mjs); reading what to do next is not.
-      if (!s.closed && applyStops(load(run)).size) leadCheck(run, o);
-      s = change(run, 'run.stop', (st) => { stopped = applyStops(st); });
+      // Recording a stop is a lead step (lib/lead.mjs); reading what to do next is not. Whether it records
+      // one is decided on the locked state, with the lead check, in the same write as the stop.
+      s = change(run, 'run.stop', (st) => { stopped = applyStops(st); }, { leadWhen: { o, when: (st) => applyStops(structuredClone(st)).size > 0 } });
     }
     const plan = decide(s);
     const cfg = routing(baseDir('project'));
@@ -1570,6 +1582,8 @@ const commands = {
   },
   pull([run], o) {
     safeId(run, 'run');
+    // Checked as a lead step (refused while another window actively leads the run), but never claims, even with
+    // --takeover against a gone lead: a claim here would fork the local log from the copy. The next lead step claims.
     return pull({ run, dir: runDir(run), base: baseDir('project'), project: projectDir(), from: o.from, after: derived, restore: { map: mapRestore(runDir(run)) } });
   },
   stats(_, o) {

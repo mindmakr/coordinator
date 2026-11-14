@@ -6,9 +6,10 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { updateRun } from '../lib/events.mjs';
+import { parseLog, replay, updateRun } from '../lib/events.mjs';
 import { NAMES } from '../lib/harness.mjs';
-import { claim, claimText, decideLead, goneWhy, identity, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, SESSION_VARS, secondBuilder, stale, windowAlive } from '../lib/lead.mjs';
+import { blankPid, claim, claimText, decideLead, ENDED_MINUTES, goneWhy, identity, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, SESSION_VARS, secondBuilder, stale, windowAlive } from '../lib/lead.mjs';
+import { projectKey } from '../lib/registry.mjs';
 import { agoText, zone } from '../lib/progress.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -102,12 +103,27 @@ test('B2, B3: the lead decides; others are refused while it is active, and take 
   // The window's process, where the tool gives one and it was recorded on this PC.
   const pid = { ...other, pid: 77, machine: 'm1' };
   const here = (alive) => windowAlive(() => alive, () => 'm1');
-  assert.equal(goneWhy(run(pid), NOW, here(false)), null, 'active inside the stale minutes, whatever the pid says (a resumed window has a new one)');
-  const quietPid = { ...pid, at: iso(60), since: iso(60) };
+  // B3 (the owner's q1): a window that has ended is gone after 10 quiet minutes, well inside the stale minutes.
+  assert.equal(ENDED_MINUTES, 10);
+  const endedAt = (min) => ({ ...pid, at: iso(min), since: iso(min) });
+  assert.equal(goneWhy(run(endedAt(11)), NOW, here(false)), 'ended', 'an ended window, quiet for 11 min');
+  assert.equal(goneWhy(run(endedAt(9)), NOW, here(false)), null, 'not gone at 9 min: a resumed window may still act');
+  assert.equal(goneWhy(run(endedAt(30), { units: [{ id: 'u', heartbeatAt: iso(4) }] }), NOW, here(false)), null, 'a unit beat inside the 10 min keeps it');
+  assert.equal(goneWhy(run(endedAt(11)), NOW, here(true)), null, 'a live window uses only the quiet rule');
+  assert.equal(goneWhy(run(endedAt(11)), NOW, windowAlive(() => false, () => 'm2')), null, 'a pid from another PC says nothing');
+  assert.equal(goneWhy(run(endedAt(11)), NOW), null, 'nor does an unknown one');
+  const quietPid = endedAt(60);
   assert.equal(goneWhy(run(quietPid), NOW, here(false)), 'ended');
   assert.equal(goneWhy(run(quietPid), NOW, here(true)), 'quiet', 'a live (maybe reused) pid cannot keep a quiet lead');
-  assert.equal(goneWhy(run(quietPid), NOW, windowAlive(() => false, () => 'm2')), 'quiet', 'a pid from another PC says nothing');
-  assert.equal(leadInfo(run(quietPid), NOW, { alive: here(false) }).goneText, 'its window has ended');
+  assert.equal(goneWhy(run(quietPid), NOW, windowAlive(() => false, () => 'm2')), 'quiet');
+  assert.equal(leadInfo(run(endedAt(11)), NOW, { alive: here(false) }).goneText, 'its window has ended and it has been quiet for over 10 min');
+  // While its window's process can be checked here, the refusal names both rules.
+  assert.match(decideLead(run(endedAt(5)), me, { nowMs: NOW, alive: here(true), timeZone: 'UTC' }).message, /Once its window has closed and it has been quiet for 10 min \(or, whatever its window does, for 45 min\), run\.mjs lead r takes it over/);
+  // A resumed window (same session, new pid) that acts stays the lead: its step records the new process.
+  const resumed = run(endedAt(9));
+  assert.equal(decideLead(resumed, { id: 'old', pid: 99 }, { nowMs: NOW, alive: here(false) }).action, 'lead');
+  refresh(resumed, { id: 'old', pid: 99 }, { at: iso(0), machine: 'm1' });
+  assert.equal(goneWhy(resumed, NOW + 11 * 60_000, windowAlive((p) => p === 99, () => 'm1')), null, 'its new window runs');
   assert.equal(windowAlive(() => false, () => null)(pid, 'r'), null, 'no id for this PC: nothing recorded here');
   // A takeover is logged.
   const s = run(other);
@@ -143,9 +159,10 @@ test('this PC\'s id is random, made once, and never a host or user name', () => 
   assert.ok(!id.includes(hostname().toLowerCase()));
   assert.equal(machineId(mkdtempSync(join(dir, 'home-')), { create: false }), null, 'a check never makes one');
   // A run records a value of its own, so runs pushed from different repos cannot be linked to one PC by it.
-  assert.match(runMachine(id, 'r1'), /^[0-9a-f]{16}$/);
-  assert.notEqual(runMachine(id, 'r1'), runMachine(id, 'r2')); assert.notEqual(runMachine(id, 'r1'), id);
-  assert.equal(runMachine(id, 'r1'), runMachine(id, 'r1'));
+  assert.match(runMachine(id, 'p1', 'r1'), /^[0-9a-f]{16}$/);
+  assert.notEqual(runMachine(id, 'p1', 'r1'), runMachine(id, 'p1', 'r2')); assert.notEqual(runMachine(id, 'p1', 'r1'), id);
+  assert.notEqual(runMachine(id, 'p1', 'r1'), runMachine(id, 'p2', 'r1'), 'the same run id in two repos: two values');
+  assert.equal(runMachine(id, 'p1', 'r1'), runMachine(id, 'p1', 'r1'));
 });
 
 test('B1: init claims the run; the claim names the id, the tool and the time, never a host or user name', () => {
@@ -158,7 +175,7 @@ test('B1: init claims the run; the claim names the id, the tool and the time, ne
   const lead = state('b1').lead;
   assert.equal(lead.id, r.out.claim.id); assert.equal(lead.harness, 'claude-code'); assert.equal(lead.pid, process.pid);
   const pc = machineId(process.env.COORDINATOR_HOME, { create: false });
-  assert.equal(lead.machine, runMachine(pc, 'b1'), 'this run\'s own value for the PC'); assert.notEqual(lead.machine, pc, 'never the PC\'s id itself');
+  assert.equal(lead.machine, runMachine(pc, projectKey(dir), 'b1'), 'this run\'s own value for the PC'); assert.notEqual(lead.machine, pc, 'never the PC\'s id itself');
   assert.ok(Date.now() - Date.parse(lead.since) < 60_000);
   const log = readFileSync(join(runDir('b1'), 'events.jsonl'), 'utf8');
   for (const secret of [sid, hostname(), userInfo().username]) assert.equal(log.toLowerCase().includes(secret.toLowerCase()), false, `the log never holds ${secret === sid ? 'the raw session id' : 'a host or user name'}`);
@@ -313,22 +330,34 @@ test('a resumed Claude Code window (same session, new process) keeps its run', (
   // Resumed: its old process has ended, but it led a moment ago; another window does not take the run.
   const seen = B('lead', 'rs');
   assert.equal(seen.code, 0); assert.equal(seen.out.claimed, undefined); assert.equal(seen.out.gone, undefined);
-  // Its next lead step records the new process.
-  assert.equal(cc(process.pid, 'add', 'rs', 'u1', '--bar', 'b').code, 0);
+  // Its own run.mjs lead (the step /coordinator:status runs) records the new process.
+  const n = events('rs').length;
+  const mine = cc(process.pid, 'lead', 'rs');
+  assert.equal(mine.out.you, true, mine.err); assert.equal(state('rs').lead.pid, process.pid);
+  assert.equal(events('rs').at(-1).kind, 'lead.claim'); assert.equal(events('rs').length, n + 1);
+  assert.equal(cc(process.pid, 'lead', 'rs').code, 0); assert.equal(events('rs').length, n + 1, 'nothing new to record: nothing written');
+  // So do its lead steps.
+  assert.equal(cc(dead, 'add', 'rs', 'u1', '--bar', 'b').code, 0);
+  assert.equal(state('rs').lead.pid, dead);
+  assert.equal(cc(process.pid, 'add', 'rs', 'u3', '--bar', 'b').code, 0);
   assert.equal(state('rs').lead.pid, process.pid);
   assert.equal(B('lead', 'rs').out.claimed, undefined);
   assert.equal(B('add', 'rs', 'u2', '--bar', 'b').code, 1);
 });
 
-test('B3: a window that has ended (its tool gave its process) is gone once its run is quiet, and the log says it ended', () => {
+test('B3: a window that has ended (its tool gave its process) is gone after 10 quiet minutes, well inside the stale minutes, and the log says it ended', () => {
   const dead = spawnSync(process.execPath, ['-e', '']).pid;
   const sid = 'dead-window-session';
-  const r = withEnv({ CLAUDE_CODE_SESSION_ID: sid, CLAUDE_PID: String(dead), COORDINATOR_LEAD: undefined }, 'init', 'b3p', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'claude-code', '--stale-minutes', '5');
+  const r = withEnv({ CLAUDE_CODE_SESSION_ID: sid, CLAUDE_PID: String(dead), COORDINATOR_LEAD: undefined }, 'init', 'b3p', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'claude-code');
   assert.equal(r.code, 0, r.err);
   assert.equal(B('lead', 'b3p').out.claimed, undefined, 'active by its last step');
-  age('b3p', 10);
+  age('b3p', 9);
+  const early = B('lead', 'b3p');
+  assert.equal(early.out.claimed, undefined, 'not gone at 9 min'); assert.equal(early.out.gone, undefined);
+  assert.match(B('add', 'b3p', 'u9', '--bar', 'b').err, /Once its window has closed and it has been quiet for 10 min \(or, whatever its window does, for 45 min\)/);
+  age('b3p', 11);
   const seen = B('lead', 'b3p');
-  assert.equal(seen.out.claimed, true, seen.err); assert.match(state('b3p').notes.at(-1).text, /^took over from [0-9a-f]{12}: its window has ended; last active 10 min ago/);
+  assert.equal(seen.out.claimed, true, seen.err); assert.match(state('b3p').notes.at(-1).text, /^took over from [0-9a-f]{12}: its window has ended and it has been quiet for over 10 min; last active 11 min ago/);
 });
 
 test('B4, B5: start on a unit at work is refused unless --takeover --reason, logged on the unit; show, next and status-line print local ages', () => {
@@ -364,4 +393,30 @@ test('B4, B5: start on a unit at work is refused unless --takeover --reason, log
   const fresh = B('start', 'b4', 'u1', '--takeover', '--reason', 'x');
   assert.equal(fresh.code, 1); assert.match(fresh.err, /start --takeover refused: u1 is being judged, and this window did not lead run b4 before this step\. Taking over the run comes first, as its own step: run\.mjs lead b4/);
   assert.equal(events('b4').length, n, 'nothing written, not even the claim');
+});
+
+test('init writes run.init and its lead.claim in one write; a failing claim leaves no run', () => {
+  const d = mkdtempSync(join(dir, 'one-write-'));
+  assert.throws(() => updateRun(d, { kind: 'run.init', then: { kind: 'lead.claim', mutate: () => { throw new Error('refused'); } } }, () => ({ id: 'x', units: [] })), /refused/);
+  assert.throws(() => readFileSync(join(d, 'events.jsonl')), /ENOENT/, 'neither event written');
+  updateRun(d, { kind: 'run.init', then: { kind: 'lead.claim', mutate: (s) => { s.lead = { id: 'a', since: iso(0), at: iso(0) }; } } }, () => ({ id: 'x', units: [] }));
+  const ev = readFileSync(join(d, 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  assert.deepEqual(ev.map((e) => e.kind), ['run.init', 'lead.claim']);
+});
+
+test('push keeps the lead\'s window process off the copy: every lead.pid is blanked, and the copy still replays', () => {
+  const d = mkdtempSync(join(dir, 'blank-'));
+  updateRun(d, { kind: 'run.init' }, () => ({ id: 'x', units: [] }));
+  updateRun(d, { kind: 'lead.claim' }, (s) => { s.lead = { id: 'a', since: iso(5), at: iso(5), pid: 4242, machine: 'm' }; });
+  updateRun(d, { kind: 'lead.claim' }, (s) => { s.lead.pid = 4343; s.lead.at = iso(1); });
+  updateRun(d, { kind: 'lead.claim' }, (s) => { delete s.lead.pid; delete s.lead.machine; });
+  updateRun(d, { kind: 'lead.claim' }, (s) => { s.lead = { id: 'b', since: iso(0), at: iso(0), pid: 4444, machine: 'm' }; });
+  const raw = readFileSync(join(d, 'events.jsonl'), 'utf8');
+  const masked = raw.split('\n').filter(Boolean).map((l) => `${JSON.stringify(blankPid(JSON.parse(l)))}\n`).join('');
+  for (const pid of ['4242', '4343', '4444']) { assert.ok(raw.includes(pid)); assert.equal(masked.includes(pid), false, `no ${pid} in the copy`); }
+  const s = replay(parseLog(Buffer.from(masked), 'masked').events);
+  assert.deepEqual(s.lead, { id: 'b', since: iso(0), at: iso(0), pid: null, machine: 'm' });
+  assert.equal(windowAlive(() => false, () => 'm')(s.lead, 'x'), null, 'a blank process says nothing');
+  const note = { kind: 'note', payload: { ops: [{ op: 'set', path: ['notes'], value: [] }] } };
+  assert.deepEqual(blankPid(note), note);
 });
