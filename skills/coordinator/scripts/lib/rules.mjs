@@ -179,8 +179,8 @@ function sameFilesLine(unit, run) {
 // with its own earlier scores. It is no progress when a critic with more than NO_PROGRESS_ROUNDS
 // scores has not beaten its own earlier best in its last NO_PROGRESS_ROUNDS: one critic rising
 // while another stays flat is not progress. A critic with no earlier score (a specialist that
-// joined later) is not compared yet, and a specialist that last scored before the last
-// NO_PROGRESS_ROUNDS rounds no longer counts.
+// joined later) is not compared yet, and a critic (general or specialist) that last scored
+// before the last NO_PROGRESS_ROUNDS rounds no longer counts.
 export function flatCritic(rounds) {
   const series = new Map(); // null: the general critic
   rounds.forEach((r, i) => {
@@ -190,7 +190,7 @@ export function flatCritic(rounds) {
   });
   for (const [name, list] of series) {
     if (list.length <= NO_PROGRESS_ROUNDS) continue;
-    if (name !== null && list.at(-1).i < rounds.length - NO_PROGRESS_ROUNDS) continue;
+    if (list.at(-1).i < rounds.length - NO_PROGRESS_ROUNDS) continue;
     const before = Math.max(...list.slice(0, -NO_PROGRESS_ROUNDS).map((x) => x.s));
     if (list.slice(-NO_PROGRESS_ROUNDS).every((x) => x.s <= before)) return name ?? 'general';
   }

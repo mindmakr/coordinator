@@ -4,6 +4,8 @@
 // is not the run working, but a unit at work is. One run waited hours on a question and its
 // clock ran out meanwhile (the reins-flight retro). Overlapping questions count once. Pure: lib/rules.mjs (next), lib/plain.mjs (the estimate and ETA) and lib/view.mjs
 // (show's time line) all read it, so they agree.
+import { unitTimeline } from './timeline.mjs';
+
 const MINUTE = 60_000;
 
 // The [from, to] spans, in ms, of every question open before atMs, cut at atMs.
@@ -26,27 +28,30 @@ function openSpans(run, atMs) {
   return spans;
 }
 
-// The [from, to] spans, in ms, while a unit was building or judging, cut at atMs: from each
-// `start` in its log to the next verdict, ship, reset or start. A span still open ends at atMs
-// while the unit is building or judging, else at the last thing its log recorded.
-const ENDS = new Set(['verdict', 'ship', 'reset', 'start']);
+// The [from, to] spans, in ms, while a unit was building or judging, cut at atMs, read from what
+// the CLI records (the unit's timeline, lib/timeline.mjs): a span opens at a `start` in the
+// unit's log and closes at that try's verdict (the round, u.rounds[].at), a reset, a stop, a ship
+// or the next start. A span still open runs to atMs while the unit is building or judging; on an
+// idle unit (a log cut short) it ends at its last sign of work (start, built or a heartbeat),
+// never at a later evidence or link entry. An early review closes nothing: the unit still builds.
+const CLOSES = new Set(['verdict pass', 'verdict fail', 'reset', 'stop', 'ship', 'start']);
+const WORK = new Set(['start', 'beat', 'built']);
 function busySpans(run, atMs) {
   const spans = [];
   for (const u of run.units ?? []) {
-    let from = null;
+    let from = null; let lastWork = null;
     const close = (to) => { if (from !== null && Math.min(to, atMs) > from) spans.push([from, Math.min(to, atMs)]); from = null; };
-    let last = null;
-    for (const e of u?.log ?? []) {
-      const t = Date.parse(e?.at);
-      if (!Number.isFinite(t)) continue;
-      last = t;
-      if (ENDS.has(e.kind)) close(t);
-      if (e.kind === 'start' && t < atMs) from = t;
+    for (const e of unitTimeline(run, u.id)) {
+      const t = Date.parse(e.at);
+      if (!Number.isFinite(t) || t >= atMs) continue;
+      if (CLOSES.has(e.label)) close(t);
+      if (e.label === 'start') from = t;
+      if (from !== null && WORK.has(e.label)) lastWork = t;
     }
     const working = u?.status === 'building' || u?.status === 'judging';
     // A unit at work whose log lost its start: busy since its last heartbeat or the critic's start.
     if (working && from === null) { const t = Date.parse(u.judgingAt ?? u.heartbeatAt); if (Number.isFinite(t) && t < atMs) from = t; }
-    close(working ? atMs : (last ?? atMs));
+    close(working ? atMs : (lastWork ?? atMs));
   }
   return spans;
 }

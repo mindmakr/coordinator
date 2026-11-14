@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { allows, decide, decideUnit, findingFile, sameFile } from '../lib/rules.mjs';
+import { allows, decide, decideUnit, findingFile, flatCritic, sameFile } from '../lib/rules.mjs';
 import { pausedMinutes, usedMinutes } from '../lib/clock.mjs';
 import { estimate } from '../lib/plain.mjs';
 import { eta } from '../lib/progress.mjs';
@@ -187,16 +187,54 @@ test('no progress compares like with like: a specialist joining at round 2 with 
 // The lead's decision: the clock pauses only while a question is open AND no unit is building or judging.
 test('an open question while another unit builds or is judged does not pause the clock', () => {
   const busy = { ...unit([], { id: 'u2', status: 'judging' }), log: [{ kind: 'start', text: 'try 1', at: at(120) }, { kind: 'built', text: '', at: at(150) }] };
-  const done = { ...unit([fail(1, { at: at(110) })], { id: 'u3' }), log: [{ kind: 'start', text: 'try 1', at: at(60) }, { kind: 'verdict', text: 'fail', at: at(110) }] };
+  // The shape run.mjs writes: the log holds start and built; the verdict lives only in u.rounds[].at.
+  const done = { ...unit([fail(1, { at: at(110) })], { id: 'u3' }), log: [{ kind: 'start', text: 'try 1', at: at(60) }, { kind: 'built', text: '', at: at(100) }] };
   const r = run([unit(), busy, done], { notes: [question(100, null)] });
-  // Open from 100 to 200; u3 builds 60 to 110, u2 builds and is judged from 120 on: paused 110 to 120 only.
+  // Open from 100 to 200; u3 builds and is judged 60 to 110, u2 from 120 on: paused 110 to 120 only.
   assert.equal(pausedMinutes(r, T0 + 200 * MIN), 10);
   assert.equal(usedMinutes(r, T0 + 200 * MIN), 190);
   // Once u2 has its verdict at 170, the rest of the open question pauses again.
-  const judged = { ...busy, status: 'open', rounds: [fail(1, { at: at(170) })], log: [...busy.log, { kind: 'verdict', text: 'fail', at: at(170) }] };
+  const judged = { ...busy, status: 'open', rounds: [fail(1, { at: at(170) })] };
   assert.equal(pausedMinutes(run([unit(), judged, done], { notes: [question(100, null)] }), T0 + 200 * MIN), 40);
   // show's time line says the same minutes.
   assert.match(textView(view(r, decide(r, T0 + 200 * MIN), T0 + 200 * MIN)), /\(10 min paused while the person decided and no unit was at work\)/);
+});
+
+// B3 on the state the CLI really writes: start, built, verdict fail, evidence, ask, answer, start.
+// The CLI stamps the real time, so the test then moves each recorded time onto the scenario's minutes.
+test('through the CLI: the paused minutes stay excluded after the approved round starts, and evidence on an idle unit does not end the pause', () => {
+  ok('init', 'ck', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'ck', 'a', '--bar', 'b'); ok('freeze', 'ck');
+  build('ck', 'a');
+  ok('verdict', 'ck', 'a', 'fail', '--score', '5', '--gap', 'g', '--evidence', 'e', '--severity', 'high');
+  const file = join(dir, 'probe.log'); writeFileSync(file, 'log\n');
+  ok('evidence', 'ck', 'a', '--kind', 'log', '--file', file);
+  const q = ok('ask', 'ck', '--question', 'One more round?', '--header', 'Round', '--option', 'Yes|one more', '--option', 'No|stop', '--unit', 'a').asked;
+  ok('answer', 'ck', q, '--choice', 'Yes', '--by', 'person', '--confirm', 'yes, one more round');
+  ok('start', 'ck', 'a');
+  const s = state('ck');
+  const u = s.units[0];
+  assert.deepEqual(u.log.map((e) => e.kind), ['start', 'built', 'evidence', 'start'], 'no verdict entry in the log: it lives in rounds');
+  assert.equal(u.status, 'building');
+  // 230 of 240 minutes used when the question opens; the person answers two hours later.
+  s.createdAt = at(0); s.budget.maxMinutes = 240;
+  [0, 190, 260, 356].forEach((m, i) => { u.log[i].at = at(m); });
+  u.rounds[0].at = at(200); u.heartbeatAt = at(356); delete u.judgingAt;
+  const asked = s.notes.find((n) => n.kind === 'question');
+  asked.at = at(230); asked.history[0].at = at(350);
+  // The evidence at 260, on a unit idle since its verdict at 200, does not end the pause.
+  assert.equal(pausedMinutes(s, T0 + 355 * MIN), 120);
+  // Four minutes into the approved round the paused minutes are still excluded: not stopped for time.
+  assert.equal(usedMinutes(s, T0 + 360 * MIN), 240);
+  assert.notDeepEqual(decideUnit(u, s, T0 + 360 * MIN), { action: 'stop', reason: 'budget: time' });
+  assert.equal(decide(s, T0 + 360 * MIN).decision, 'continue');
+});
+
+// A stale critic, the general one as much as a specialist, no longer counts toward no progress.
+test('no progress ignores a general critic that last scored before the last two rounds', () => {
+  const sec = (score) => ({ specialists: { security: { verdict: 'fail', severity: 'medium', gap: 'g', score } } });
+  const rounds = [{ score: 6 }, { score: 5 }, { score: 5 }, sec(3), sec(4), sec(5)];
+  assert.equal(flatCritic(rounds), null, 'the general critic is stale; the specialist rises');
+  assert.equal(flatCritic([...rounds.slice(0, 3), { score: 5, ...sec(3) }]), 'general', 'a general critic still scoring is compared');
 });
 
 test('a finding path that ends the other at a folder boundary is the same file', () => {
