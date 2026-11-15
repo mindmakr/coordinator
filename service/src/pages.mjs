@@ -1,20 +1,26 @@
 // Server-side pages from the read model, drawn by the skill's own renderers
 // (hud, unitPage, selfPage, page) so a run looks the same here as on the
-// local dashboard. No scripts. The run and unit pages carry the answer and
+// local dashboard. The only scripts are the theme's and the panels' memory
+// (lib/parts.mjs), allowed by `nonce`: made per response by the server, which
+// sends the same nonce in its CSP header. The run and unit pages carry the answer and
 // note forms (c12), posting to /run/<run>/answer|note; disabled, with the
 // reason, for people who cannot push to the repo. Every
 // string from a run is escaped by those renderers; the few bits drawn here use
 // the same esc().
-import { blk, chip, decide, esc, hud, mapsPage, page, projectMapPage, runView, selfModel, selfPage, stamp, unitPage } from './core.mjs';
+import { blk, chip, decide, esc, hud, mapsPage, page, projectMapPage, reportPage, retroModel, retroPage, runTabs, runView, selfModel, selfPage, stamp, touchedBy, unitPage } from './core.mjs';
 
 const enc = encodeURIComponent;
 export const repoBase = (fullName) => `/r/${fullName.split('/').map(enc).join('/')}`;
 
-// Extra pages, by path segment. scope 'repo': /r/<owner>/<repo>/<id>, render(user, repo, rows, nowMs);
-// scope 'run': /r/<owner>/<repo>/run/<run>/<id>, render(user, repo, row, nowMs), shown when has(row).
+// Extra pages, by path segment. scope 'repo': /r/<owner>/<repo>/<id>, render(user, repo, rows, nowMs, nonce);
+// scope 'run': /r/<owner>/<repo>/run/<run>/<id>, render(user, repo, row, nowMs, nonce, runs), shown when has(row);
+// runs: the repo's runs with their state, read only for a page with others: true. A run's tab row is
+// runTabs (lib/hud.mjs), the same as on the local dashboard.
 export const REPO_PAGES = {
-  coordinator: { scope: 'repo', label: 'Coordinator', render: (user, repo, rows, nowMs) => coordinatorPage(user, repo, rows, nowMs) },
-  map: { scope: 'run', label: 'Project map', has: (row) => !!(row.map || row.mapError), render: (user, repo, row) => projectMapView(user, repo, row) },
+  coordinator: { scope: 'repo', label: 'Coordinator', render: (user, repo, rows, nowMs, nonce) => coordinatorPage(user, repo, rows, nowMs, nonce) },
+  map: { scope: 'run', label: 'Project map', has: (row) => !!(row.map || row.mapError), render: (user, repo, row, nowMs, nonce) => projectMapView(user, repo, row, nonce) },
+  report: { scope: 'run', label: 'Report', has: () => true, render: (user, repo, row, nowMs, nonce) => reportView(user, repo, row, nowMs, nonce) },
+  retro: { scope: 'run', label: 'Retro', has: () => true, others: true, render: (user, repo, row, nowMs, nonce, runs) => retroView(user, repo, row, nowMs, nonce, runs) },
 };
 
 export const READ_ONLY_HINT = 'Answer on the run’s page, or in the chat with the lead.';
@@ -22,25 +28,29 @@ export const READ_ONLY_HINT = 'Answer on the run’s page, or in the chat with t
 // c12: the forms for a viewer whose push access was checked (user.write: { ok, reason }).
 const formFor = (user, runBase) => (user?.write && runBase ? { token: user.csrf, tokenName: 'csrf', post: runBase, disabled: user.write.ok ? null : user.write.reason } : null);
 
-function ctxFor(fullName, run = null, row = null, user = null) {
+// A run's pages: the breadcrumb Projects / repo / run, and the run's tabs (runTabs). A repo's pages: its own tabs.
+// nonce: this response's, for the theme's and the panels' scripts; none, no script.
+function ctxFor(fullName, run = null, row = null, user = null, nonce = null) {
   const base = repoBase(fullName);
   const runBase = run ? `${base}/run/${enc(run)}` : null;
   const form = formFor(user, runBase);
+  const mapHref = runBase && row && REPO_PAGES.map.has(row) ? `${runBase}/map` : null;
   return {
-    live: null, form, theme: null, run, store: run, base: runBase ?? base, home: runBase ?? base, embed: null, readOnly: !form,
+    live: null, nonce, form, theme: null, run, store: run, base: runBase ?? base, home: runBase ?? base, embed: null, readOnly: !form,
     readOnlyHint: READ_ONLY_HINT,
     maps: runBase ? `${runBase}/maps` : null,
-    mapHref: runBase && row && REPO_PAGES.map.has(row) ? `${runBase}/map` : null,
+    report: runBase ? `${runBase}/report` : null,
+    retro: runBase ? `${runBase}/retro` : null,
+    mapHref,
+    ...(runBase ? { pc: { label: 'Projects', href: '/' }, project: fullName.split('/').pop(), projectHref: base } : {}),
     runHref: (id) => `${base}/run/${enc(id)}`,
     unitHref: (id) => `${runBase}/unit/${enc(id)}`,
     // Evidence files never leave the person's machine (durability.md): shown as "file kept locally".
     artHref: () => null,
-    pages: [
+    pages: runBase ? runTabs({ base: runBase, href: (p) => `${runBase}${p}`, map: mapHref }) : [
       { path: '/', label: 'Projects', href: '/' },
       ALERTS,
       { path: base, label: fullName, href: base },
-      ...(run ? [{ path: runBase, label: run, href: runBase }, { path: `${runBase}/maps`, label: 'Maps', href: `${runBase}/maps` }] : []),
-      ...(run && row ? Object.entries(REPO_PAGES).filter(([, p]) => p.scope === 'run' && p.has(row)).map(([id, p]) => ({ path: `${runBase}/${id}`, label: p.label, href: `${runBase}/${id}` })) : []),
       ...Object.entries(REPO_PAGES).filter(([, p]) => p.scope === 'repo').map(([id, p]) => ({ path: id === 'coordinator' ? '/coordinator' : `${base}/${id}`, label: p.label, href: `${base}/${id}` })),
     ],
   };
@@ -70,13 +80,14 @@ export function withGitHub(v, gh = []) {
 
 // c12: Alerts (the person's own settings, /alerts) beside Projects for anyone signed in.
 const ALERTS = { path: '/alerts', label: 'Alerts', href: '/alerts' };
-const plainCtx = (user = null) => ({ live: null, theme: null, embed: null, pages: [{ path: '/', label: 'Projects', href: '/' }, ...(user ? [ALERTS] : [])] });
+const plainCtx = (user = null, nonce = null) => ({ live: null, nonce, theme: null, embed: null, pages: [{ path: '/', label: 'Projects', href: '/' }, ...(user ? [ALERTS] : [])] });
 
-// Who is signed in, and the only two forms: sign out and (on a repo) sync now.
+// Who is signed in, and the only two forms: sign out and (on a repo) sync now. On a repo's pages it also links
+// Alerts, which a run's tab row (runTabs, the local dashboard's) does not carry.
 function bar(user, repo = null) {
   if (!user) return '<p class="meta"><a href="/login">Sign in with GitHub</a></p>';
   const sync = repo ? `<form method="post" action="${esc(repoBase(repo))}/sync" style="display:inline"><input type="hidden" name="csrf" value="${esc(user.csrf)}"><button type="submit">Sync now</button></form> ` : '';
-  return `<div class="row" style="margin:0 0 12px"><span>Signed in as <b>${esc(user.login)}</b>${user.write ? (user.write.ok ? ' · can answer' : ' · read-only') : ''}</span><span>${sync}`
+  return `<div class="row" style="margin:0 0 12px"><span>Signed in as <b>${esc(user.login)}</b>${user.write ? (user.write.ok ? ' · can answer' : ' · read-only') : ''}${repo ? ' · <a href="/alerts">Alerts</a>' : ''}</span><span>${sync}`
     + `<form method="post" action="/logout" style="display:inline"><input type="hidden" name="csrf" value="${esc(user.csrf)}"><button type="submit">Sign out</button></form></span></div>`;
 }
 const withBar = (html, user, repo) => html.replace('<main id="app">', () => `<main id="app">${bar(user, repo)}`);
@@ -133,7 +144,7 @@ export function landing() {
   return page({ title: 'Sign in', body, ctx: plainCtx(), path: '/' });
 }
 
-export function projectsPage(user, repos, { counts = new Map(), installUrl = null } = {}) {
+export function projectsPage(user, repos, { counts = new Map(), installUrl = null, nonce = null } = {}) {
   const cards = repos.map((r) => {
     const c = counts.get(`${r.installationId}:${r.id}`) ?? { runs: 0, open: 0, needs: 0 };
     return `<div class="card" data-a="p-${esc(r.fullName)}"><h3><a href="${esc(repoBase(r.fullName))}">${esc(r.fullName)}</a>${c.needs ? chip(`${c.needs} need you`, 'fail') : ''}</h3>`
@@ -142,14 +153,14 @@ export function projectsPage(user, repos, { counts = new Map(), installUrl = nul
   const none = `<p class="empty">No projects yet. A project appears here once the Coordinator App is installed on its repo and a run has been pushed to its coordinator-state branch${installUrl ? ` (<a href="${esc(installUrl)}">install the App</a>)` : ''}.</p>`;
   const body = blk('head', '<header class="run"><h1>Projects</h1><span class="meta">repos you can read on GitHub</span></header>')
     + blk('projects', cards || none, 'div', ' class="grid"');
-  return withBar(page({ title: 'Projects', body, ctx: plainCtx(user), path: '/' }), user);
+  return withBar(page({ title: 'Projects', body, ctx: plainCtx(user, nonce), path: '/' }), user);
 }
 
 export const RUNS_PAGE = 30; // finished runs on one page of a repo's run list
 
 // paging ({ page, size, total }): `rows` holds every open and unreadable run and one page of the finished ones.
-export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null) {
-  const ctx = ctxFor(repo.fullName);
+export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null, nonce = null) {
+  const ctx = ctxFor(repo.fullName, null, null, null, nonce);
   const cards = rows.map((row) => {
     if (!row.state) return `<div class="card"><h3>${esc(row.runId)}${chip('unreadable', 'fail')}</h3><p class="meta">${esc(row.error ?? '')}</p></div>`;
     const s = runState(row);
@@ -182,23 +193,40 @@ export function runsPage(user, repo, rows, nowMs = Date.now(), paging = null) {
 // project: the repo's name, first in each question's label (the skill's questionLabel, through runView), as a local run shows its folder's name.
 const viewOf = (repo, row, nowMs, gh) => { const s = runState(row); return withGitHub(runView(s, decide(s), nowMs, { repo: repo.fullName, project: repo.fullName.split('/').pop() }), gh); };
 
-export function runPage(user, repo, row, nowMs = Date.now(), gh = []) {
-  return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row, user)), user, repo.fullName);
+export function runPage(user, repo, row, nowMs = Date.now(), gh = [], nonce = null) {
+  return withBar(hud(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row, user, nonce)), user, repo.fullName);
 }
 
-export function unitView(user, repo, row, unitId, nowMs = Date.now(), gh = []) {
-  const html = unitPage(viewOf(repo, row, nowMs, gh), unitId, nowMs, ctxFor(repo.fullName, row.runId, row, user));
+export function unitView(user, repo, row, unitId, nowMs = Date.now(), gh = [], nonce = null) {
+  const html = unitPage(viewOf(repo, row, nowMs, gh), unitId, nowMs, ctxFor(repo.fullName, row.runId, row, user, nonce));
   return html === null ? null : withBar(html, user, repo.fullName);
 }
 
-export function mapsView(user, repo, row, nowMs = Date.now(), gh = []) {
-  return withBar(mapsPage(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row)), user, repo.fullName);
+export function mapsView(user, repo, row, nowMs = Date.now(), gh = [], nonce = null) {
+  return withBar(mapsPage(viewOf(repo, row, nowMs, gh), nowMs, ctxFor(repo.fullName, row.runId, row, null, nonce)), user, repo.fullName);
+}
+
+// The run's report, from its state alone: the draft and quality files a local run writes never leave its machine.
+export function reportView(user, repo, row, nowMs = Date.now(), nonce = null) {
+  const s = runState(row);
+  const ctx = ctxFor(repo.fullName, row.runId, row, null, nonce);
+  return withBar(reportPage(viewOf(repo, row, nowMs, []), nowMs, ctx, { report: s.report ?? null, draft: null, quality: null }), user, repo.fullName);
+}
+
+// The run's retro. runs: the repo's runs; the closed ones give the budget suggestion, as on the local dashboard.
+export function retroView(user, repo, row, nowMs = Date.now(), nonce = null, runs = []) {
+  const s = runState(row);
+  const v = viewOf(repo, row, nowMs, []);
+  const closed = (runs ?? []).map(runState).filter((r) => r?.closed);
+  const m = retroModel(s, { lessons: (repo.lessons ?? []).map((l) => ({ ...l, scope: 'project' })), closed });
+  return withBar(retroPage(m, v, nowMs, ctxFor(repo.fullName, row.runId, row, null, nonce), v.retroPending ?? false), user, repo.fullName);
 }
 
 // The run's project map (lib/map/page.mjs), from the copy the run pushed. A log that never
 // replayed shows why, as the local dashboard does; one that broke later keeps the last good map.
-export function projectMapView(user, repo, row) {
-  const ctx = ctxFor(repo.fullName, row.runId, row);
+// "Touched by this run" from the run's state (touchedBy): only the map's snapshot is kept here, not its log.
+export function projectMapView(user, repo, row, nonce = null) {
+  const ctx = { ...ctxFor(repo.fullName, row.runId, row, null, nonce), touched: touchedBy(runState(row)?.units ?? []) };
   if (!row.map) {
     const body = `<a class="back" href="${esc(ctx.home)}">← ${esc(row.runId)} dashboard</a><header class="run"><h1>Project map · not readable</h1></header>`
       + `<div class="needs"><p><b>The map's log could not be read.</b></p><p>${esc(row.mapError ?? '')}</p></div>`;
@@ -209,10 +237,10 @@ export function projectMapView(user, repo, row) {
   return withBar(html.replace('<main id="app">', () => `<main id="app">${note}`), user, repo.fullName);
 }
 
-export function coordinatorPage(user, repo, rows, nowMs = Date.now()) {
+export function coordinatorPage(user, repo, rows, nowMs = Date.now(), nonce = null) {
   const runs = rows.map(runState).filter(Boolean);
   const m = selfModel({ runs, lessons: { global: [], project: repo.lessons ?? [] }, context: null, current: null, nowMs });
-  return withBar(selfPage(m, nowMs, ctxFor(repo.fullName)), user, repo.fullName);
+  return withBar(selfPage(m, nowMs, ctxFor(repo.fullName, null, null, null, nonce)), user, repo.fullName);
 }
 
 // action (optional): trusted HTML the caller built, e.g. a one-button form, shown under the text.

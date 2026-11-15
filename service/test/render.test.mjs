@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { makeRun, signIn, startApp, stateFiles, XSS } from './helpers.mjs';
+import { makeRun, scripts, signIn, startApp, stateFiles, XSS } from './helpers.mjs';
 
 async function world() {
   const t = await startApp();
@@ -13,16 +13,19 @@ async function world() {
   return t;
 }
 
-const PAGES = ['/', '/r/acme/web', '/r/acme/web/run/r1', '/r/acme/web/run/r1/unit/u1', '/r/acme/web/coordinator', '/r/acme/web/run/r2'];
+const PAGES = ['/', '/r/acme/web', '/r/acme/web/run/r1', '/r/acme/web/run/r1/unit/u1', '/r/acme/web/run/r1/maps', '/r/acme/web/run/r1/report', '/r/acme/web/run/r1/retro', '/r/acme/web/coordinator', '/r/acme/web/run/r2'];
 
-test('every page escapes run text, carries no script, and sends a strict CSP and no-store', async () => {
+test('every page escapes run text, runs only the theme and panel scripts by a nonce per response, and sends a strict CSP and no-store', async () => {
   const t = await world();
   try {
     for (const p of PAGES) {
       const r = await t.get(p);
       assert.equal(r.status, 200, p);
       const html = await r.text();
-      assert.equal(/<script/i.test(html), false, `${p}: no script tag at all`);
+      const sc = scripts(html, r.headers.get('content-security-policy'));
+      assert.equal(sc.tags, 2, `${p}: two scripts, the theme's and the panels' memory`);
+      assert.ok(sc.tagged, `${p}: each script carries the nonce the header and the page's CSP name`);
+      assert.doesNotMatch(r.headers.get('content-security-policy'), /connect-src|unsafe-inline'[^;]*script/, `${p}: the scripts connect nowhere`);
       assert.equal(html.includes('<img src=x'), false, `${p}: no raw markup from the run`);
       assert.match(r.headers.get('content-security-policy'), /default-src 'none'.*form-action 'self'.*frame-ancestors 'none'/);
       assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -40,6 +43,30 @@ test('every page escapes run text, carries no script, and sends a strict CSP and
     const list = await (await t.get('/r/acme/web')).text();
     assert.match(list, /r1/); assert.match(list, /r2/);
     assert.equal(list.includes(XSS), false);
+  } finally { await t.close(); }
+});
+
+test('each response has its own nonce; run pages carry the breadcrumb Projects / repo / run and the panels to remember', async () => {
+  const t = await world();
+  try {
+    const nonces = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await t.get('/r/acme/web/run/r1');
+      const html = await r.text();
+      const sc = scripts(html, r.headers.get('content-security-policy'));
+      assert.ok(sc.tagged); nonces.push(sc.nonce);
+      assert.match(html, /<body data-run="r1" data-path="\/r\/acme\/web\/run\/r1">/, 'the panels\' memory is keyed by run and page');
+      assert.match(html, /<details class="panel"[^>]* data-d="/, 'panels the memory restores');
+      assert.match(html, /<nav class="crumbs" aria-label="Breadcrumb">.*?<a href="\/">Projects<\/a>.*?<a href="\/r\/acme\/web">web<\/a>.*?<span class="here" aria-current="location">r1<\/span>/s);
+    }
+    assert.equal(new Set(nonces).size, 3, 'a fresh nonce per response');
+    for (const n of nonces) assert.match(n, /^[A-Za-z0-9_-]{22}$/, '16 random bytes');
+    const report = await (await t.get('/r/acme/web/run/r1/report')).text();
+    assert.match(report, /<a href="\/r\/acme\/web\/run\/r1\/report" aria-current="page">Report<\/a>/);
+    const retro = await (await t.get('/r/acme/web/run/r1/retro')).text();
+    assert.match(retro, /<a href="\/r\/acme\/web\/run\/r1\/retro" aria-current="page">Retro<\/a>/);
+    const unit = await (await t.get('/r/acme/web/run/r1/unit/u1')).text();
+    assert.match(unit, /<a href="\/r\/acme\/web\/run\/r1#unit-list" aria-current="page">Units<\/a>/, 'a unit page marks Units');
   } finally { await t.close(); }
 });
 

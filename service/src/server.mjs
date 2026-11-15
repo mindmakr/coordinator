@@ -2,9 +2,9 @@
 // server; every response carries a strict CSP and no-store, every POST from a
 // browser needs the session's CSRF token and this site's Origin, and webhook
 // and sign-in routes are rate limited per client address.
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import { REPO, isSafeId, questions } from './core.mjs';
+import { REPO, csp, isSafeId, questions } from './core.mjs';
 import { access as makeAccess } from './access.mjs';
 import { ingester } from './ingest.mjs';
 import { trail } from './trail.mjs';
@@ -36,6 +36,10 @@ const WRITE_ROUTES = new Set(['answer', 'note']); // c12: POST /r/<owner>/<repo>
 const BACK = /^\/unit\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const MAX_REPOS_PER_VIEW = 20; // distinct linked repos whose access is checked for one page view
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+// The projects, repo and run pages run the theme's and the panels' scripts (lib/parts.mjs) by a nonce made for
+// each response; the page's own CSP (csp() in its meta tag) names the same one.
+const newNonce = () => randomBytes(16).toString('base64url');
+const scriptCsp = (nonce) => ({ 'Content-Security-Policy': `${csp(null, false, nonce)}; frame-ancestors 'none'` });
 const ROUTE = /^\/r\/([^/]+)\/([^/]+)(?:\/([a-z][a-z-]{0,30})|\/run\/([^/]+)(?:\/unit\/([^/]+)|\/(maps)|\/([a-z][a-z-]{0,30}))?)?\/?$/;
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -279,8 +283,9 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
     if (run !== null && WRITE_ROUTES.has(runKind)) return writeRoute(req, res, user, repo, run, runKind);
     if (req.method !== 'GET') return notFound(res, user);
     const n = now();
+    const nonce = newNonce();
     // Both list pages draw every run from its state; neither uses a run's project map, so it is not read.
-    if (kind) return html(res, 200, REPO_PAGES[kind].render(user, repo, await db.runSummaries(repo.installationId, repo.id, { state: true }), n));
+    if (kind) return html(res, 200, REPO_PAGES[kind].render(user, repo, await db.runSummaries(repo.installationId, repo.id, { state: true }), n, nonce), scriptCsp(nonce));
     if (run === null) {
       // Every open and unreadable run, and one page of the finished ones: a repo with years of runs still draws quickly.
       const page = Math.min(Math.max(Number.parseInt(url.searchParams.get('finished') ?? '1', 10) || 1, 1), 1_000_000);
@@ -288,16 +293,21 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
         db.runSummaries(repo.installationId, repo.id, { state: true, finished: false }),
         db.finishedRuns(repo.installationId, repo.id, { limit: RUNS_PAGE, offset: (page - 1) * RUNS_PAGE }),
       ]);
-      return html(res, 200, runsPage(user, repo, [...live, ...fin.rows], n, { page, size: RUNS_PAGE, total: fin.total }));
+      return html(res, 200, runsPage(user, repo, [...live, ...fin.rows], n, { page, size: RUNS_PAGE, total: fin.total }, nonce), scriptCsp(nonce));
     }
     const row = await db.run(repo.installationId, repo.id, run);
     if (!row?.state) return notFound(res, user);
-    if (runKind) return REPO_PAGES[runKind].has(row) ? html(res, 200, REPO_PAGES[runKind].render(user, repo, row, n)) : notFound(res, user);
+    if (runKind) {
+      const p = REPO_PAGES[runKind];
+      if (!p.has(row)) return notFound(res, user);
+      const runs = p.others ? await db.runSummaries(repo.installationId, repo.id, { state: true }) : null;
+      return html(res, 200, p.render(user, repo, row, n, nonce, runs), scriptCsp(nonce));
+    }
     const gh = await githubEvents(user, repo, row.state);
     // c12: the run and unit pages carry the answer and note forms, disabled with the reason for readers.
     const viewer = !maps && !row.state.closed ? { ...user, write: await writes.canWrite(user, repo) } : user;
-    const out = maps ? mapsView(user, repo, row, n, gh) : unit === null ? runPage(viewer, repo, row, n, gh) : unitView(viewer, repo, row, unit, n, gh);
-    return out === null ? notFound(res, user) : html(res, 200, out);
+    const out = maps ? mapsView(user, repo, row, n, gh, nonce) : unit === null ? runPage(viewer, repo, row, n, gh, nonce) : unitView(viewer, repo, row, unit, n, gh, nonce);
+    return out === null ? notFound(res, user) : html(res, 200, out, scriptCsp(nonce));
   }
 
   // c12: an answer or a note from the HUD, committed to the state branch with the person's own token.
@@ -354,7 +364,8 @@ export function createApp({ config, db, gh, log, now = Date.now, senders = null 
       counts.set(`${r.installationId}:${r.id}`, { runs: rows.length, open: open.length, needs });
     }
     const installUrl = config.github.appSlug ? `${config.github.web}/apps/${encodeURIComponent(config.github.appSlug)}/installations/new` : null;
-    return html(res, 200, projectsPage(user, repos, { counts, installUrl }));
+    const nonce = newNonce();
+    return html(res, 200, projectsPage(user, repos, { counts, installUrl, nonce }), scriptCsp(nonce));
   }
 
   async function handle(req, res) {
