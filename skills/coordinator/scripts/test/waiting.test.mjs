@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { looseEnds, needsSection, pcModel, pcPage, pcVersion } from '../lib/dashboard.mjs';
 import { doctorFile, doctorRecord, readDoctorRecord, saveDoctorRecord } from '../lib/doctorrecord.mjs';
 import { readRegistry } from '../lib/registry.mjs';
@@ -131,7 +132,7 @@ const home = join(tmp, 'home');
 const stateOf = (name) => join(tmp, name, '.coordinator');
 const env = (name) => ({ ...process.env, COORDINATOR_DIR: stateOf(name), COORDINATOR_HOME: home, COORDINATOR_REGISTRY: 'on', COORDINATOR_HARNESS: '' });
 const cli = (name, args) => {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd: tmp, env: env(name), encoding: 'utf8' });
+  const r = runSync(args, { cwd: tmp, env: env(name) });
   let out = null; try { out = JSON.parse(r.stdout); } catch { /* text */ }
   return { code: r.status, out, raw: r.stdout, err: r.stderr };
 };

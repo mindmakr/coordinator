@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { prismCheck, realExec } from '../lib/doctor.mjs';
 import { allowed, detect } from '../lib/gaming.mjs';
 import { evidenceList } from '../lib/parts.mjs';
@@ -17,7 +18,7 @@ const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'coordinator-prism-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 const run = (...args) => {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { env: { ...process.env, COORDINATOR_DIR: join(dir, 'state') }, encoding: 'utf8' });
+  const r = runSync(args, { env: { ...process.env, COORDINATOR_DIR: join(dir, 'state') } });
   return { code: r.status, out: r.stdout ? JSON.parse(r.stdout) : null, err: r.stderr };
 };
 const state = (r) => JSON.parse(readFileSync(join(dir, 'state', 'runs', r, 'state.json'), 'utf8'));

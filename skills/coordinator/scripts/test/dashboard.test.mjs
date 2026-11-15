@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { artifact } from '../lib/evidence.mjs';
 import { hud } from '../lib/hud.mjs';
 import { linkify } from '../lib/links.mjs';
@@ -26,7 +27,7 @@ after(async () => {
 });
 
 const json = (s) => { try { return JSON.parse(s); } catch { return s; } };
-const run = (...a) => { const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8', cwd: dir }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
+const run = (...a) => { const r = runSync(a, { env, cwd: dir }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
 const runDir = (r) => join(dir, 'state', 'runs', r);
 const state = (r) => JSON.parse(readFileSync(join(runDir(r), 'state.json'), 'utf8'));
 const setup = (r, ...init) => { run('init', r, '--goal', 'g', '--bar', 'b', '--fence', 'f', ...init); run('add', r, 'u1', '--bar', 'b'); run('add', r, 'u2', '--bar', 'b'); run('freeze', r); };

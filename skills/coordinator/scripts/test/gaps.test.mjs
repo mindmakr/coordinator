@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { closeGap, gapHaystack, gapId, gaps, gapsModel, gapsText, parseGapId } from '../lib/gaps.mjs';
 import { findMatches } from '../lib/highlight.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
@@ -16,7 +17,7 @@ const dir = mkdtempSync(join(tmpdir(), 'coordinator-gaps-'));
 const env = { ...process.env, COORDINATOR_DIR: join(dir, 'state') };
 after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
 const json = (s) => { try { return JSON.parse(s); } catch { return s; } };
-const run = (...a) => { const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8', cwd: dir }); return { code: r.status, out: json(r.stdout), raw: r.stdout, err: r.stderr }; };
+const run = (...a) => { const r = runSync(a, { env, cwd: dir }); return { code: r.status, out: json(r.stdout), raw: r.stdout, err: r.stderr }; };
 
 const T0 = '2026-11-01T10:00:00.000Z';
 const at = (min) => new Date(Date.parse(T0) + min * 60_000).toISOString();

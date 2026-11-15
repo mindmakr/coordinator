@@ -13,7 +13,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { loadRunsIn } from './selfdata.mjs';
 import { basename, join } from 'node:path';
 import { linkedRuns } from './chain.mjs';
-import { loadRun } from './events.mjs';
+import { loadRun, peekRun } from './events.mjs';
 import { harnessName, origin, versionWarning } from './harness.mjs';
 import { hud, originLine, questionItem, runTabs, statusChip } from './hud.mjs';
 import { linkify, repoFromText } from './links.mjs';
@@ -47,7 +47,7 @@ const blockedIn = (s) => (s.closed ? [] : s.units.filter((u) => u.after && !['pa
 // One registered run, read now: its status (lib/progress.mjs), origin (lib/harness.mjs) and blocked units, or why it could not be read.
 function readEntry(e, nowMs) {
   try {
-    const s = loadRun(runDirOf(e));
+    const s = peekRun(runDirOf(e));
     const open = s.closed ? [] : questions(s, { project: projectName(e.stateDir) }).filter((q) => q.open);
     return { ...e, title: e.title ?? s.goal, alias: s.alias ?? e.alias, startedAt: s.createdAt ?? null, status: runStatus(s, s.closed ? null : decide(s, nowMs), { nowMs }), origin: origin(s), questions: open, blocked: blockedIn(s), repo: s.repo ?? null };
   } catch (err) { return { ...e, error: `unreadable: ${err.message}` }; }

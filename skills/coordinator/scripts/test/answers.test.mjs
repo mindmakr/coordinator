@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { hud } from '../lib/hud.mjs';
 import { events, questions } from '../lib/questions.mjs';
 import { decide } from '../lib/rules.mjs';
@@ -19,7 +20,7 @@ const children = [];
 after(() => { for (const c of children) c.kill(); rmSync(dir, { recursive: true, force: true }); });
 
 const json = (s) => { try { return JSON.parse(s); } catch { return s; } };
-const run = (...a) => { const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8' }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
+const run = (...a) => { const r = runSync(a, { env }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
 const state = (r) => JSON.parse(readFileSync(join(dir, 'runs', r, 'state.json'), 'utf8'));
 const setup = (r) => { run('init', r, '--goal', 'g', '--bar', 'b', '--fence', 'f'); run('add', r, 'u1', '--bar', 'b'); run('add', r, 'u2', '--bar', 'b'); run('freeze', r); };
 const ask = (r, ...extra) => run('ask', r, '--question', 'Merge u1 now?', '--header', 'Merge', '--option', 'Yes|the review says READY', '--option', 'No|wait for a second review', ...extra);
@@ -33,10 +34,12 @@ function child(args) {
     buf += d; const parts = buf.split('\n'); buf = parts.pop();
     for (const l of parts) { lines.push(l); for (const w of [...waiters]) if (w.test(l)) { waiters.splice(waiters.indexOf(w), 1); w.ok(l); } }
   });
-  const until = (re, ms = 8000) => new Promise((ok, fail) => {
+  // ms: a guard against a hang only; on a loaded machine lines come late, so it is long.
+  const until = (re, ms = 120_000) => new Promise((ok, fail) => {
     const hit = lines.find((l) => re.test(l)); if (hit) return ok(hit);
-    const w = { test: (l) => re.test(l), ok }; waiters.push(w);
-    setTimeout(() => fail(new Error(`no line matching ${re} in: ${lines.join(' | ')}`)), ms);
+    // The guard is cleared when the line comes, so it never holds the test process open.
+    const timer = setTimeout(() => fail(new Error(`no line matching ${re} in: ${lines.join(' | ')}`)), ms);
+    const w = { test: (l) => re.test(l), ok: (l) => { clearTimeout(timer); ok(l); } }; waiters.push(w);
   });
   return { c, lines, until };
 }
@@ -44,7 +47,7 @@ function child(args) {
 function post(url, path, body, headers = {}) {
   const u = new URL(url);
   return new Promise((ok, fail) => {
-    const req = request({ host: u.hostname, port: u.port, path, method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers } }, (res) => {
+    const req = request({ host: u.hostname, port: u.port, path, method: 'POST', agent: false, headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers } }, (res) => {
       let data = ''; res.on('data', (d) => { data += d; }); res.on('end', () => ok({ status: res.statusCode, headers: res.headers, body: data }));
     });
     req.on('error', fail); req.end(body);
@@ -52,7 +55,7 @@ function post(url, path, body, headers = {}) {
 }
 const get = (url, headers = {}) => new Promise((ok, fail) => {
   const u = new URL(url);
-  request({ host: u.hostname, port: u.port, path: u.pathname + u.search, headers }, (res) => {
+  request({ host: u.hostname, port: u.port, path: u.pathname + u.search, agent: false, headers }, (res) => {
     let data = ''; res.on('data', (d) => { data += d; }); res.on('end', () => ok({ status: res.statusCode, headers: res.headers, body: data }));
   }).on('error', fail).end();
 });

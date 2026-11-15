@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { atLeast, cheapCriticRefusal, family, judgeAllowed, normalize, route, whoUnit } from '../lib/models.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -15,7 +16,7 @@ const dirs = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
 function folder() { const d = mkdtempSync(join(tmpdir(), 'coordinator-models-')); dirs.push(d); return d; }
 function cli(dir, ...args) {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+  const r = runSync(args, { env: { ...process.env, COORDINATOR_DIR: dir } });
   let out = null; try { out = JSON.parse(r.stdout || 'null'); } catch { out = r.stdout; }
   return { code: r.status, out, err: r.stderr };
 }
@@ -154,7 +155,7 @@ test('models --role critic with a unit gives the answer verdict would: a pinned 
   const dir = folder(); const ok = okIn(dir);
   ok('init', 'k', '--goal', 'g', '--bar', 'b', '--fence', 'f');
   ok('add', 'k', 'ui', '--bar', 'the list filters as you type');
-  ok('add', 'k', 'theme', '--bar', 'the page reads its colours', '--behaviour', 'Given the theme tokens, when the page loads, then every colour comes from them');
+  ok('add', 'k', 'theme', '--bar', 'the page reads its colours', '--behaviour', 'Given the theme tokens, when the page loads, then every colour comes from them', '--open', 'the colours are the theme file tokens');
   ok('add', 'k', 'pay', '--bar', 'the totals add up', '--specialist', 'money', '--reason', 'pay');
   ok('freeze', 'k');
   // Unpinned unit: the cheaper critic, and verdict takes it.

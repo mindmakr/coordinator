@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { planCheck, refsToCheck } from '../lib/gapcheck.mjs';
 import { gaps } from '../lib/gaps.mjs';
 import { selfModel } from '../lib/self.mjs';
@@ -121,7 +122,7 @@ test('cli: --dry-run changes nothing; --check writes the closures and the merge 
   writeFileSync(join(dir, 'table.json'), JSON.stringify(TABLE));
   const bin = fakeBin(); const log = join(dir, 'gh.log'); writeFileSync(log, '');
   const env = { ...process.env, COORDINATOR_DIR: state, FAKE_GH_TABLE: join(dir, 'table.json'), FAKE_GH_LOG: log, PATH: `${bin}${delimiter}${process.env.PATH}` };
-  const run = (e, ...a) => { const x = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env: e, encoding: 'utf8', cwd: dir }); return { code: x.status, out: (() => { try { return JSON.parse(x.stdout); } catch { return x.stdout; } })(), err: x.stderr }; };
+  const run = (e, ...a) => { const x = runSync(a, { env: e, cwd: dir }); return { code: x.status, out: (() => { try { return JSON.parse(x.stdout); } catch { return x.stdout; } })(), err: x.stderr }; };
   const before = readFileSync(join(runDir, 'state.json'), 'utf8');
 
   const dry = run(env, 'gaps', '--check', '--dry-run');

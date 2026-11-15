@@ -21,16 +21,45 @@ export function safeId(id, what = 'id') {
 // The project's state lives beside the MAIN checkout, so a builder in any git
 // worktree of the same repo reaches the lead's runs. COORDINATOR_DIR overrides
 // both scopes (tests, a critic in a separate clone, a shared location).
-let projectRoot;
-function mainCheckout() {
-  if (projectRoot === undefined) {
-    try {
-      // Plain --git-common-dir (any git version) may be relative to the cwd.
-      const common = resolve(execFileSync('git', ['rev-parse', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
-      projectRoot = basename(common) === '.git' ? dirname(common) : process.cwd();
-    } catch { projectRoot = process.cwd(); }
+// The git common folder (the main checkout's .git) for cwd, read from the files git itself reads, without starting
+// git (every run.mjs call needs it; a git process costs ~20 ms): the nearest .git folder, or a worktree's .git file
+// ("gitdir: …") and that folder's commondir. Undefined when git must be asked: GIT_DIR and friends set, or a .git
+// that reads oddly. null: no .git up to the root.
+export function gitCommonDir(cwd = process.cwd(), env = process.env) {
+  if (env.GIT_DIR || env.GIT_COMMON_DIR || env.GIT_WORK_TREE || env.GIT_CEILING_DIRECTORIES || env.GIT_DISCOVERY_ACROSS_FILESYSTEM) return undefined;
+  for (let dir = resolve(cwd); ; dir = dirname(dir)) {
+    const dot = join(dir, '.git');
+    let st = null; try { st = statSync(dot); } catch { /* none here */ }
+    if (st?.isDirectory()) return existsSync(join(dot, 'HEAD')) ? dot : undefined;
+    if (st?.isFile()) {
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dot, 'utf8'));
+      if (!m) return undefined;
+      const gitdir = resolve(dir, m[1]);
+      if (!existsSync(join(gitdir, 'HEAD'))) return undefined;
+      let common = gitdir; try { common = resolve(gitdir, readFileSync(join(gitdir, 'commondir'), 'utf8').trim()); } catch { /* a submodule or a plain gitdir */ }
+      return common;
+    }
+    if (dirname(dir) === dir) return null;
   }
-  return projectRoot;
+}
+
+// Cached per working folder: a process that calls the CLI in process (the tests) may ask from several.
+const projectRoots = new Map();
+function mainCheckout() {
+  const cwd = process.cwd();
+  if (!projectRoots.has(cwd)) {
+    let root = cwd;
+    let common = gitCommonDir(cwd);
+    if (common === undefined) {
+      try {
+        // Plain --git-common-dir (any git version) may be relative to the cwd.
+        common = resolve(cwd, execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
+      } catch { common = null; /* not a git checkout: the folder itself */ }
+    }
+    if (common && basename(common) === '.git') root = dirname(common);
+    projectRoots.set(cwd, root);
+  }
+  return projectRoots.get(cwd);
 }
 
 // The project's folder (the main checkout), where COORDINATOR.md and the git remote live.
@@ -65,6 +94,32 @@ export function withLock(file, fn) {
   try { return fn(); } finally {
     try { if (readFileSync(lock, 'utf8') === stamp) unlinkSync(lock); } catch { /* already gone */ }
   }
+}
+
+// A lock held for as long as a long job runs (a full test suite), not seconds like withLock: it records who holds
+// it (info, with this process's pid) and is taken over only when that process is gone, never for its age. Waits
+// up to waitMs (onWait(holder) is told once), then throws. Returns the function that releases it.
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+export function holdLock(file, info = {}, { waitMs = 60 * 60_000, onWait = null, alive = pidAlive } = {}) {
+  mkdirSync(dirname(file), { recursive: true });
+  const stamp = JSON.stringify({ ...info, pid: process.pid, at: new Date().toISOString(), nonce: Math.random() });
+  const deadline = Date.now() + waitMs;
+  let told = false;
+  for (let wait = 50; ; wait = Math.min(wait * 2, 1000)) {
+    try { const fd = openSync(file, 'wx'); writeSync(fd, stamp); closeSync(fd); break; } catch (e) {
+      if (!['EEXIST', 'EPERM', 'EACCES'].includes(e.code)) throw e;
+      let holder = null;
+      try { holder = JSON.parse(readFileSync(file, 'utf8')); } catch { /* being written or removed */ }
+      if (holder && Number.isInteger(holder.pid) && !alive(holder.pid)) {
+        try { if (readFileSync(file, 'utf8') === JSON.stringify(holder)) unlinkSync(file); } catch { /* taken meanwhile */ }
+        continue;
+      }
+      if (holder && !told) { told = true; onWait?.(holder); }
+      if (Date.now() > deadline) throw new Error(`lock busy: ${file}${holder ? ` (held by pid ${holder.pid} since ${holder.at})` : ''}`);
+      pause(wait);
+    }
+  }
+  return () => { try { if (readFileSync(file, 'utf8') === stamp) unlinkSync(file); } catch { /* already gone */ } };
 }
 
 export function readJson(file, fallback) {

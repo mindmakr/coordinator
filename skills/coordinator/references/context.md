@@ -34,7 +34,7 @@ Check: `resumedAgents` in `S/context.mjs` counts the agents that were given a se
 
 ### 2. Every agent has a context budget, and the lead keeps its own
 
-At about 250k tokens an agent stops, writes a handover note (what is done, what is left, the files that matter, the commands that work) and reports. The lead starts a fresh agent with the note as its brief. The lead has a budget too: at about 300k it compacts, or hands over to a new session at the end of a batch of issues, with the run's own state as the handover (`durability.md`, Resume). **The lead checks, not only knows:** at each batch of notices (rule 5), before acting on it, it reads its own context size (the harness's context meter, or `lead` in `S/context.mjs` on the session's transcript folder), and at about 300k it compacts or hands over first. One run's lead knew the rule and reached 430k without checking.
+At about 250k tokens an agent stops, writes a handover note (what is done, what is left, the files that matter, the commands that work) and reports. The lead starts a fresh agent with the note as its brief. The lead has a budget too: at about 300k it compacts, or hands over to a new session at the end of a batch of issues, with the run's own state as the handover (`durability.md`, Resume). **The lead checks, not only knows:** at each batch of notices (rule 5), before acting on it, it reads its own context size (the harness's context meter, or `lead` in `S/context.mjs` on the session's transcript folder), and at about 300k it compacts or hands over first. One run's lead knew the rule and reached 430k without checking. So `next` checks it too: it reads the lead window's own transcript (usage numbers only, never its text; Claude Code's by its session id, or the file `COORDINATOR_TRANSCRIPT` names), warns at 250k (`context` in its output), and over 300k refuses every lead step until the window compacts or the lead records `note <run> --kind decision --text "handover: …"`.
 
 The lead lives longest, so each token in its context is paid for more often than any other. Keeping it lean is the lead's own job, for the whole run:
 
@@ -48,6 +48,8 @@ Why: builders ended between 340k and 920k and never compacted. The lead re-read 
 Check: the largest contexts in `S/context.mjs` (`largest`, `lead`). Over the budget with `compactions: 0` is a miss.
 
 ### 3. One critic per round, and later rounds review the delta
+
+Enforced from round 2: when `built --head` finds the delta since the last reviewed head under 200 changed lines, `next` names one critic (`critics: 1`), the unit's specialist if it has one, with the general checks in its brief, else the general critic. Its verdict closes the round (a specialist records it with `--specialist <name>`); any other verdict on that round is refused.
 
 A round has one general critic. A second critic joins only for a risk area: money, stored amounts, security, auth, migrations (`review.md`, Specialist critic), and a visual critic runs once per unit, not once per round (`visual.md`). From round 2 each critic reviews only the delta since the last judged head (`review.md`, Delta review).
 

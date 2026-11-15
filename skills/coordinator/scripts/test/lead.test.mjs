@@ -6,6 +6,7 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { parseLog, replay, updateRun } from '../lib/events.mjs';
 import { NAMES } from '../lib/harness.mjs';
 import { blankPid, claim, claimText, decideLead, ENDED_MINUTES, goneWhy, identity, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, SESSION_VARS, secondBuilder, stale, windowAlive } from '../lib/lead.mjs';
@@ -22,13 +23,13 @@ const json = (s) => { try { return JSON.parse(s); } catch { return s; } };
 function as(lead, ...a) {
   const env = { ...base };
   if (lead === null) delete env.COORDINATOR_LEAD; else env.COORDINATOR_LEAD = lead;
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8' });
+  const r = runSync(a, { env });
   return { code: r.status, out: json(r.stdout), raw: r.stdout, err: r.stderr };
 }
 const withEnv = (extra, ...a) => {
   const env = { ...base, ...extra };
   for (const [k, v] of Object.entries(extra)) if (v === undefined) delete env[k];
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8' });
+  const r = runSync(a, { env });
   return { code: r.status, out: json(r.stdout), raw: r.stdout, err: r.stderr };
 };
 const A = (...a) => as('lead-a', ...a);

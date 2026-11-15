@@ -4,7 +4,7 @@
 // snapshot, or a hash that does not match, rebuilds the state from the events.
 // The format is in references/durability.md.
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { V, validRun, validSnapshot, validateEvent } from './eventschema.mjs';
 import { withLock, writeAtomic } from './store.mjs';
@@ -166,13 +166,34 @@ export function readRun(dir) {
   return { state: replay(log.events), seq: n, log, rebuilt: true };
 }
 
+// A run for the pages that only show it (the coordinator page, the PC dashboard): the snapshot alone, without
+// reading and hashing the log, when it was written after the log's last change (every write appends the event, then
+// rewrites the snapshot, in one lock). Anything else (no snapshot, an older one, one that does not parse or validate)
+// reads the run in full (readRun). Never used for a change: updateRun always reads the log.
+export function peekRun(dir) {
+  const file = join(dir, STATE);
+  try {
+    const snapAt = statSync(file).mtimeMs;
+    let logAt = -1; try { logAt = statSync(join(dir, EVENTS)).mtimeMs; } catch { /* a legacy run: no log */ }
+    if (logAt >= 0 && snapAt >= logAt) {
+      const snap = JSON.parse(readFileSync(file, 'utf8'));
+      if (isObj(snap) && validSnapshot(snap[META])) {
+        const { [META]: _, ...body } = snap;
+        const state = canonical(body);
+        if (validRun(state) === null) return state;
+      }
+    }
+  } catch { /* fall through to the full read */ }
+  return loadRun(dir);
+}
+
 export const snapshotText = (state, seq, buf) => `${JSON.stringify(canonical({ ...state, [META]: { v: V, seq, sha256: sha256(buf), stateSha256: stateHash(state) } }))}\n`;
 const line = (seq, kind, unit, payload) => validateEvent({ v: V, seq, at: new Date().toISOString(), kind, ...(unit ? { unit } : {}), payload }, `new event ${seq}`);
 
 // Change a run under its lock: `mutate` gets the state (null for a new run) and
 // may change it or return a new one. The difference is appended as one event
 // of `kind`, then the snapshot is rewritten; both writes are atomic. A change
-// that changes nothing writes nothing. `after` runs in the same lock.
+// that changes nothing writes nothing. `after` runs in the same lock, after a write.
 // by: { harness, skill } (lib/harness.mjs). Every event that changes something
 // also sets the state's `writer` to it, as one more op: older copies of the
 // skill read the line as an ordinary change, so the log stays readable to them.
@@ -216,12 +237,14 @@ export function updateRun(dir, { kind, unit = null, by = null, then = null }, mu
     if (by && before === null) next = canonical({ ...next, startedBy: by, writer: by });
     next = emit(kind, unit, next);
     if (then) { const w = clone(next); then.mutate(w); next = emit(then.kind, then.unit ?? null, canonical(w)); }
+    // after (the pages, run.mjs derived) runs only when something was written: a call that changed nothing (most
+    // next calls) leaves the pages as they are.
     if (lines.length || cur?.rebuilt || cur?.edited) {
       const buf = Buffer.concat([cur?.log?.buf ?? Buffer.alloc(0), Buffer.from(lines.join(''))]);
       if (lines.length) writeAtomic(join(dir, EVENTS), buf);
       writeAtomic(file, snapshotText(next, seq, buf));
+      after?.(next);
     }
-    after?.(next);
     return next;
   });
 }

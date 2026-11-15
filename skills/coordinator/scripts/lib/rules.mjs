@@ -6,6 +6,7 @@ import { doubtful, fromPerson } from './approval.mjs';
 import { strategyHint } from './strategy.mjs';
 import { usedMinutes } from './clock.mjs';
 import { held } from './pause.mjs';
+import { batchWait } from './followups.mjs';
 
 export const MAX_STRATEGY_CHANGES = 1;
 const NO_PROGRESS_ROUNDS = 2;
@@ -41,7 +42,23 @@ export const roundCap = (unit, run) => run.budget.maxRounds + (Number.isInteger(
 
 // The specialists required on round n (1-based). One added later (`run.mjs add-specialist`) is
 // required from the next build on, never on a round that closed before it was added (#45).
-export const requiredOn = (unit, n) => (unit.specialists ?? []).filter((name) => (unit.specialistFrom?.[name] ?? 1) <= n);
+// One critic on a small delta (the perf plan, cause E: two strong critics found the same issue on a small fix): from
+// round 2, a build whose delta since the last reviewed head is under SMALL_DELTA lines changed gets one critic, the
+// unit's specialist when it has one (the general checks folded into its brief), else the general critic. Its verdict
+// closes the round; no other critic's verdict or mark is taken on it. Needs built --head (the delta is measured then).
+export const SMALL_DELTA = 200;
+export function oneCritic(unit, limit = SMALL_DELTA) {
+  if (unit.status !== 'judging' || !unit.rounds?.length) return null;
+  const d = unit.delta;
+  if (!d || !unit.builtHead || d.to !== unit.builtHead || !Number.isInteger(d.lines) || d.lines >= limit) return null;
+  return { critic: (unit.specialists ?? [])[0] ?? 'general', lines: d.lines };
+}
+// The specialists required on round n: none on a one-critic round (the current one, or a closed one that was).
+export const requiredOn = (unit, n) => {
+  const solo = n === (unit.rounds?.length ?? 0) + 1 ? oneCritic(unit) : unit.rounds?.[n - 1]?.oneCritic;
+  if (solo) return [];
+  return (unit.specialists ?? []).filter((name) => (unit.specialistFrom?.[name] ?? 1) <= n);
+};
 
 // Early reviews (`verdict --early`, #66): a critic's look at work started before the unit's try did (a stacked
 // unit begun early). Never a round: no rule here reads them. These are the ones since the last formal round.
@@ -119,7 +136,7 @@ function readyAsked(unit, run) {
   const since = unit.rounds.at(-1)?.at ?? '';
   const notes = run.notes ?? [];
   const qs = notes.filter((n) => n.kind === 'question');
-  const i = qs.findLastIndex((n) => (n.finish === true || Array.isArray(n.sameFiles)) && n.unit === unit.id && n.at >= since);
+  const i = qs.findLastIndex((n) => (n.finish === true || Array.isArray(n.sameFiles) || Array.isArray(n.sameBehaviours)) && n.unit === unit.id && n.at >= since);
   if (i < 0) return null;
   const id = `q${i + 1}`;
   return { id, kind: qs[i].finish === true ? 'finish' : 'same-files', answer: qs[i].history?.at(-1) ?? null, applied: notes.some((n) => n.kind === 'decision' && n.answers === id) };
@@ -192,6 +209,31 @@ function sameFilesLine(unit, run) {
   return { action: 'one-more', answer: q.id, choice: pick, at: 'the same-files question' };
 }
 
+// When the same behaviour failed in a unit's two most recent failing rounds, the person decides after the second,
+// not the third (the perf plan, cause D: one open-ended behaviour failed five critic checks, each a new loophole).
+// Same answers as same files: change the bar, simplify, accept as is (ships with follow-ups), one more round.
+export function sameBehaviourQuestion(unit, ids) {
+  const words = ids.map((id) => { const t = (unit.behaviours ?? []).find((b) => b.id === id)?.text ?? ''; return `${id}${t ? ` ("${t.length > 100 ? `${t.slice(0, 99)}…` : t}")` : ''}`; }).join(', ');
+  return { ...sameFilesQuestion(unit, []), header: 'Behaviour', question: `${unit.id} failed review twice, and both times on the same behaviour: ${words}. A behaviour that keeps failing in new ways usually cannot be met as written (it names no last case), not careless work. Change what this unit must meet, simplify its design, accept it as it is, or try one more round?` };
+}
+function sameBehaviourLine(unit, run) {
+  const fails = unit.rounds.filter((r) => r.verdict === 'fail').slice(-2);
+  if (fails.length < 2 || unit.rounds.at(-1) !== fails[1]) return null;
+  const failing = (r) => new Set((r.behaviours ?? []).filter((m) => m.status === 'fail').map((m) => m.id));
+  const before = failing(fails[0]);
+  const ids = [...failing(fails[1])].filter((id) => before.has(id)).sort();
+  if (!ids.length) return null;
+  const reason = `same-behaviour: ${ids.join(', ')}`;
+  const q = readyAsked(unit, run);
+  if (!q) return { action: 'ask-person', reason, behaviours: ids, question: sameBehaviourQuestion(unit, ids) };
+  if (q.kind !== 'same-files' || q.applied) return null;
+  const unclear = unclearAnswer(q, `${reason}; `);
+  if (unclear) return { ...unclear, behaviours: ids };
+  const pick = q.answer.choices[0];
+  if (pick === SAME_FILES.accept) return { action: 'ship', answer: q.id, at: 'the same-behaviour question' };
+  return { action: 'one-more', answer: q.id, choice: pick, at: 'the same-behaviour question' };
+}
+
 // No progress, like with like: each critic (the general one and every specialist) is compared
 // with its own earlier scores. It is no progress when a critic with more than NO_PROGRESS_ROUNDS
 // scores has not beaten its own earlier best in its last NO_PROGRESS_ROUNDS: one critic rising
@@ -244,7 +286,21 @@ const judgingInTime = (unit, run) => unit.status === 'judging' && typeof unit.ju
   && usedMinutes(run, Date.parse(unit.judgingAt)) <= run.budget.maxMinutes;
 
 // A paused run (run.mjs pause, lib/pause.mjs) starts no agent: those steps wait until it resumes.
-export const decideUnit = (unit, run, nowMs) => held(run, unitStep(unit, run, nowMs));
+export const decideUnit = (unit, run, nowMs) => held(run, overlapHeld(unit, run, unitStep(unit, run, nowMs)));
+
+// Units run in parallel unless their files meet (the perf plan, cause H: disjoint units waited on each other for
+// hours). A unit added with --paths that would build waits while a unit whose --paths overlap is being built;
+// units with separate paths build together. Paths are folder or file prefixes ("src/api", "web/a.ts").
+const normPath = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+export const pathsOverlap = (a = [], b = []) => a.some((x) => b.some((y) => {
+  const p = normPath(x); const q = normPath(y);
+  return p === q || p === '' || q === '' || p.startsWith(`${q}/`) || q.startsWith(`${p}/`);
+}));
+function overlapHeld(unit, run, d) {
+  if (d.action !== 'build' || !unit.paths?.length) return d;
+  const busy = run.units.filter((x) => x.id !== unit.id && x.status === 'building' && pathsOverlap(unit.paths, x.paths)).map((x) => x.id);
+  return busy.length ? { action: 'wait', reason: `paths overlap ${busy.join(', ')}, being built` } : d;
+}
 
 function unitStep(unit, run, nowMs) {
   const { budget } = run;
@@ -272,6 +328,9 @@ function unitStep(unit, run, nowMs) {
 
   const rounds = unit.rounds;
   const last = rounds.at(-1);
+  // The batch unit (lib/followups.mjs) builds last: after every other unit passed or stopped.
+  const batch = batchWait(unit, run);
+  if (batch) return batch;
   if (!last) return { action: 'build' };
   // After a general fail, wait for every required specialist to mark that round: a new build would
   // close it, and a finding still to come would be lost. Only rounds with a severity (this version
@@ -285,7 +344,7 @@ function unitStep(unit, run, nowMs) {
   const newStrategy = (unit.strategyAt ?? -1) >= rounds.length;
   const stuck = same && !newStrategy && (unit.strategyChanges ?? 0) >= MAX_STRATEGY_CHANGES;
   const flat = !same && flatCritic(rounds) !== null;
-  if (!stuck && !flat) { const ask = sameFilesLine(unit, run) ?? finishLine(unit, run); if (ask) return ask; }
+  if (!stuck && !flat) { const ask = sameBehaviourLine(unit, run) ?? sameFilesLine(unit, run) ?? finishLine(unit, run); if (ask) return ask; }
   if (rounds.length >= roundCap(unit, run)) return stop('budget: rounds');
   if (same) {
     if (newStrategy) return { action: 'build', reason: 'new strategy recorded', gap: last.gap };

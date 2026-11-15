@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { isLeadStep } from '../lib/lead.mjs';
 import { askingMode } from '../lib/questions.mjs';
 import { checkSettings } from '../lib/settings.mjs';
@@ -24,7 +25,7 @@ function project(settings) {
   const env = { ...process.env, COORDINATOR_DIR: dir, COORDINATOR_HOME: join(tmp, 'home') };
   // as(lead, …): the same step from the window whose lead id is `lead` (home.setup.mjs gives every test 'test-lead').
   const as = (lead, ...a) => {
-    const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { cwd: tmp, env: { ...env, COORDINATOR_LEAD: lead }, encoding: 'utf8' });
+    const r = runSync(a, { cwd: tmp, env: { ...env, COORDINATOR_LEAD: lead } });
     let out = r.stdout; try { out = JSON.parse(r.stdout); } catch { /* text */ }
     return { code: r.status, out, err: r.stderr };
   };

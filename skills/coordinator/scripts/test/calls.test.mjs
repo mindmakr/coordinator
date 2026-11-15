@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { scanFns } from '../lib/map/fns.mjs';
 import { callsText, link, scanAll, unitCalls } from '../lib/map/calls.mjs';
 import { diffRanges } from '../lib/map/calls-git.mjs';
@@ -239,7 +240,7 @@ test('cli: run.mjs calls records a unit, the unit page and the maps page show it
   const state = join(dir, 'state');
   mkdirSync(state);
   const env = { ...process.env, COORDINATOR_DIR: state };
-  const run = (...a) => spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8' });
+  const run = (...a) => runSync(a, { env });
   assert.equal(run('init', 'r1', '--goal', 'calls', '--bar', 'b', '--fence', 'f', '--repo', 'mindmakr/coordinator').status, 0);
   assert.equal(run('add', 'r1', 'u1', '--bar', 'b').status, 0);
   assert.match(run('calls', 'r1', 'u1', '--root', repo).stderr, /nothing recorded says what u1 changed/);

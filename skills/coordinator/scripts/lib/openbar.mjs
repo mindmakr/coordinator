@@ -50,3 +50,31 @@ export function openWarning(lines) {
   const each = open.map((l) => `${l.what} (${l.words.join(', ')})`).join('; ');
   return `check this line, it may be open-ended: ${each}. If it has no last case, state it as a closed list ("these six templates") or "every entry in <inventory>"; if it is fine, pass --accept-open (recorded). references/bar.md`;
 }
+
+// A behaviour is checked against a strict list (the perf plan, cause D: "never grants more than approved" failed
+// five critic rounds, each a new loophole). Unlike the gentle note above, these words are refused in a behaviour
+// (add --behaviour, behave, freeze) unless the line names its cases, or the lead passes --open "<why it can be
+// met>", which is logged: never, any, all, cannot, only, always, every.
+export const UNBOUNDED = ['never', 'any', 'all', 'cannot', 'only', 'always', 'every'];
+const UNBOUNDED_RE = new RegExp(`(?<![\\p{L}\\p{N}_'-])(?:${UNBOUNDED.join('|')})(?![\\p{L}\\p{N}_'-])`, 'giu');
+// Cases named: a closed-list word (listed, these, the following, …), a list after a colon ("in: A, B and C"), a
+// bracketed list "(A, B, C)", or numbered items "1) … 2) …".
+const LIST_AFTER_COLON = /:\s*[^,;:]+(?:,\s*[^,;:]+)+(?:,?\s+(?:and|or)\s+[^,;:]+)?|:\s*[^,;:]+\s+(?:and|or)\s+[^,;:]+/u;
+const BRACKET_LIST = /\([^()]*,[^()]*\)/u;
+const NUMBERED = /(?:^|\s)(?:\(?\d+\)|\d+\.)\s[\s\S]*?(?:^|\s)(?:\(?\d+\)|\d+\.)\s/u;
+
+// The unbounded words in a line (lower case, once each), or [] when there are none or the line names its cases.
+export function unboundedWords(line) {
+  const t = String(line ?? '');
+  const words = [...new Set([...t.matchAll(UNBOUNDED_RE)].map((m) => m[0].toLowerCase()))];
+  if (!words.length) return [];
+  if (CLOSED.test(t) || LIST_AFTER_COLON.test(t) || BRACKET_LIST.test(t) || NUMBERED.test(t)) return [];
+  return words;
+}
+
+// The refusal for behaviour lines ({ what, text, open }) that read unbounded and carry no --open reason, or null.
+export function unboundedRefusal(lines) {
+  const bad = lines.filter((l) => !l.open).map((l) => ({ ...l, words: unboundedWords(l.text) })).filter((l) => l.words.length);
+  if (!bad.length) return null;
+  return `refused: ${bad.map((l) => `${l.what} reads open-ended (${l.words.join(', ')})`).join('; ')}. Name its cases as a list ("for these three: A, B and C") so a critic can check each, or pass --open "<why it can be met as written>" (logged)`;
+}

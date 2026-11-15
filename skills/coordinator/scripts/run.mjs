@@ -138,6 +138,15 @@
 //   run.mjs watch <run> [--remote [--every S]]   one line per new or changed answer and per note from the person; never exits.
 //                  --remote also pulls the run from its state branch every S seconds (10-60, default 30), and at once
 //                  when the service's doorbell rings (COORDINATOR_SERVICE); lines starting "remote:" are about that link
+//   run.mjs suite <run> <unit> --head <sha> -- <test command …> | --result "<pass line>" [--fail]   the lead's full suite on
+//                  that head: the command runs under this machine's one suite lock and is recorded; critics of the head cite it
+//   run.mjs precheck <run> <unit> --base <ref> --head <ref>   mechanical checks of the diff (references/precheck.md), recorded;
+//                  exits 1 on a hit. built --head refuses a head with one unless --skip-precheck --reason R; built --base B runs it
+//   built … [--changelog "<line>"]   the unit's changelog line (units never edit CHANGELOG.md); run.mjs changelog <run> prints them all
+//   run.mjs followup <run> --text T --triage batch|P1|P2|P3|drop --reason R [--unit U]   batch items make one unit that builds last
+//   add … [--paths a,b] [--open "<why>"]; behave … [--open]; freeze … [--open]: a behaviour with never, any, all, cannot, only,
+//                  always or every is refused unless it lists its cases or --open says why it can be met (logged)
+//   run.mjs next --all     next for every open run this window leads
 //   run.mjs next <run>     prints what to do and records any stops; on a run past its time budget it records nothing and
 //                          lists the stops close will record (recorded: false); on a paused run it says how to resume
 //   run.mjs show <run>     prints the compact text HUD (status, progress, ETA, situation, needs you, units, budget, next step)
@@ -195,9 +204,8 @@
 //   --harness NAME (any command): the tool running it (claude-code, codex, antigravity, gemini …); else
 //                  COORDINATOR_HARNESS, else detected. Every write stamps the run with it and the skill version
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, lstatSync, rmSync, statSync, truncateSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, lstatSync, realpathSync, rmSync, statSync, truncateSync } from 'node:fs';
 import { execFile, spawn as spawnProcess } from 'node:child_process';
-import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
@@ -205,15 +213,21 @@ import { findFeatureMap, validateBehavioursAgainstFeatureMap } from './lib/featu
 import { applyPacketTransitionVerdict, attachUnitStatechart, behaviourSignature, checkBarFeasibility, readBoundedJsonFile, resolveAllowedRoots, resolveWorktreeRoot, syncStatechartStatuses } from './lib/statechart.mjs';
 import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { prismRefusal } from './lib/prismreport.mjs';
-import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { briefPrompt, buildBrief } from './lib/briefs.mjs';
-import { markUsed, topLessons } from './lib/lessonstore.mjs';
-import { afterFixIntegration, allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
+import { checksInForce, markUsed, topLessons } from './lib/lessonstore.mjs';
+import { afterFixIntegration, allows, decide, decideUnit, earlySummary, oneCritic, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
 import { usedMinutes } from './lib/clock.mjs';
 import { pauseNote, pausedRefusal, pauseRun, resumeRun } from './lib/pause.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
-import { openWarning } from './lib/openbar.mjs';
+import { openWarning, unboundedRefusal, unboundedWords as unboundedWordsOf } from './lib/openbar.mjs';
+import { holdLock } from './lib/store.mjs';
+import { recordSuite, runSuite, SHA, summaryLines } from './lib/suites.mjs';
+import { precheck, precheckRules, RULES as PRECHECK_RULES } from './lib/precheck.mjs';
+import { parseDiff } from './lib/gaming.mjs';
+import { addedFiles, changedLines, commitOf, diffText, fileAt, namedIn } from './lib/gitdiff.mjs';
+import { addFollowup } from './lib/followups.mjs';
+import { leadBudget } from './lib/leadctx.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
 import { answerRefusal, confirmRefusal, decisionRefusal, grantQuestion, namedRounds, noteRefusal } from './lib/approval.mjs';
@@ -225,48 +239,65 @@ import { harnessOf, stamp } from './lib/harness.mjs';
 import { claim, claimText, decideLead, identity, isLeadStep, LEAD_FORMS, LEAD_STEPS, leadInfo, machineId, refresh, runMachine, secondBuilder, stale, windowAlive } from './lib/lead.mjs';
 import { agoText } from './lib/progress.mjs';
 import { entryFor, projectKey, readRegistry, register, registryFile, registryHome } from './lib/registry.mjs';
-import { PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } from './lib/dashboard.mjs';
-import { waitingList, waitingText } from './lib/waiting.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { childEnv, dashboardCaller, pcAnswer, VIA_ENV } from './lib/pcanswer.mjs';
 import { VERSION } from './lib/version.mjs';
 import { EVENTS, loadRun, readRun, updateRun } from './lib/events.mjs';
-import { pull, push, VISIBILITY_HINT } from './lib/statesync.mjs';
-import { bellConfig, listen } from './lib/doorbell.mjs';
-import { remoteWatch } from './lib/remote.mjs';
 import { atLeast, byModel, cheapCriticRefusal, escalation, judgeAllowed, modelName, route, routing, setRouting, UNSPECIFIED } from './lib/models.mjs';
 import { baseDir, isSafeId, projectDir, safeId, withLock, writeAtomic } from './lib/store.mjs';
-import { hud, liveCtx, staticCtx } from './lib/hud.mjs';
 import { githubRef, inferRepo, REPO, repoFromText, webUrl } from './lib/links.mjs';
 import { activeHelpers, readSettings, settingsFile } from './lib/settings.mjs';
 import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
-import { unitPage } from './lib/unitpage.mjs';
-import { mapsPage } from './lib/mapspage.mjs';
-import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
 import { BENCH_FLAGS, BENCH_REPEAT, benchCommand, benchHelp } from './lib/ceb/cli.mjs';
-import { hasRetro, retroCommand } from './lib/retro.mjs';
 import { ASKING, answer, answerText, ask, askingMode, events, find, fromForm, personNote, projectName, questions, useAnswer } from './lib/questions.mjs';
-import { serve } from './lib/serve.mjs';
-import { selfModel, selfText } from './lib/self.mjs';
-import { gapsCheckFile, loadRuns, loadSelf, selfVersion } from './lib/selfdata.mjs';
-import { planCheck } from './lib/gapcheck.mjs';
 import { closeGap, gaps, gapsText, parseGapId } from './lib/gaps.mjs';
-import { selfPage } from './lib/selfpage.mjs';
-import { addStudy } from './lib/study.mjs';
 import { text as textView, view } from './lib/view.mjs';
-import { render } from './lib/workbench.mjs';
-import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } from './lib/map/index.mjs';
+
+// Modules only some commands need are loaded when one of them runs, so a read-only call (next, show, brief, …) does
+// not compile the page writers (every run.mjs call is a new process). PAGES: what derived() and the pages need,
+// loaded by main() before any command that may change a run; EXTRAS: what a few commands need (EXTRA_COMMANDS).
+let hud, liveCtx, staticCtx, unitPage, mapsPage, reportFor, reportPages, storeReport, selfPage, selfModel, selfText, gapsCheckFile, loadRuns, loadSelf, selfVersion, PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage, render, waitingList, waitingText, buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles;
+let serve, bellConfig, listen, remoteWatch, pull, push, VISIBILITY_HINT, planCheck, hasRetro, retroCommand, addStudy, adopt, table, httpGet;
+let pagesLoaded = null; let extrasLoaded = null;
+const loadPages = () => (pagesLoaded ??= Promise.all([
+    import('./lib/hud.mjs').then((x) => ({ hud, liveCtx, staticCtx } = x)),
+    import('./lib/unitpage.mjs').then((x) => ({ unitPage } = x)),
+    import('./lib/mapspage.mjs').then((x) => ({ mapsPage } = x)),
+    import('./lib/report/cli.mjs').then((x) => ({ reportFor, reportPages, storeReport } = x)),
+    import('./lib/selfpage.mjs').then((x) => ({ selfPage } = x)),
+    import('./lib/self.mjs').then((x) => ({ selfModel, selfText } = x)),
+    import('./lib/selfdata.mjs').then((x) => ({ gapsCheckFile, loadRuns, loadSelf, selfVersion } = x)),
+    import('./lib/dashboard.mjs').then((x) => ({ PROJECT_PAGE, pcModel, pcPage, pcVersion, projectPage } = x)),
+    import('./lib/workbench.mjs').then((x) => ({ render } = x)),
+    import('./lib/waiting.mjs').then((x) => ({ waitingList, waitingText } = x)),
+    import('./lib/map/index.mjs').then((x) => ({ build: buildMap, callsText, computeCalls, defaultDest, hasMap, mapAttach, mapHtml, mapNav, mapRestore, mapView, pitStop, readCalls, touchesOf, unitFiles } = x)),
+]));
+const loadExtras = () => (extrasLoaded ??= Promise.all([
+    import('./lib/serve.mjs').then((x) => ({ serve } = x)),
+    import('./lib/doorbell.mjs').then((x) => ({ bellConfig, listen } = x)),
+    import('./lib/remote.mjs').then((x) => ({ remoteWatch } = x)),
+    import('./lib/statesync.mjs').then((x) => ({ pull, push, VISIBILITY_HINT } = x)),
+    import('./lib/gapcheck.mjs').then((x) => ({ planCheck } = x)),
+    import('./lib/retro.mjs').then((x) => ({ hasRetro, retroCommand } = x)),
+    import('./lib/study.mjs').then((x) => ({ addStudy } = x)),
+    import('./lib/adopt.mjs').then((x) => ({ adopt, table } = x)),
+    import('node:http').then((x) => ({ get: httpGet } = x)),
+]));
+// Commands that never write a run (or, for next, write only a stop: it loads the pages itself when it records one).
+const NO_PAGES = new Set(['behaviours', 'questions', 'show', 'status-line', 'where', 'stats', 'models', 'brief', 'next', 'bench', 'changelog']);
+const EXTRA_COMMANDS = new Set(['init', 'close', 'adopt', 'serve', 'dashboard', 'watch', 'push', 'pull', 'gaps', 'gap', 'study', 'lead']);
 
 const FLAGS = {
   init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'max-launch-minutes', 'max-launch-cost', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
   extend: ['rounds', 'minutes', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', 'skip-feasibility', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open', 'feature-map', 'new-surface', 'statechart'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', 'reins-packet', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
-  integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', ...COST_FLAGS],
-  behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open', 'feature-map', 'new-surface', 'statechart'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
-  freeze: ['feature-map', 'new-surface', 'skip-feasibility', 'statechart'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open', 'open', 'paths', 'feature-map', 'new-surface', 'statechart'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', 'reins-packet', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
+  integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', 'base', 'changelog', 'skip-precheck', 'reason', ...COST_FLAGS],
+  behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open', 'open', 'feature-map', 'new-surface', 'statechart'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
+  freeze: ['feature-map', 'new-surface', 'skip-feasibility', 'statechart', 'open'],
+  suite: ['head', 'result', 'fail'], precheck: ['base', 'head'], changelog: [], followup: ['text', 'triage', 'reason', 'unit'], next: ['all'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm', 'asking'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'grant-minutes', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open', 'foreground'], list: ['all'], waiting: ['json'], 'status-line': ['json'],
@@ -278,7 +309,7 @@ const FLAGS = {
 for (const c of [...LEAD_STEPS, ...Object.keys(LEAD_FORMS)]) FLAGS[c] = [...new Set([...(FLAGS[c] ?? []), 'lead', 'takeover'])];
 // Notes about one unit (#45): scoped with --unit, shown on its page.
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
-const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
+const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT, suite: ['result'] };
 
 const featureMapRoot = () => resolveWorktreeRoot({ project: projectDir(), base: baseDir('project'), cwd: process.cwd() });
 function readJsonOpt(raw, { flag, allowInline = false, maxBytes, run = null } = {}) {
@@ -368,7 +399,7 @@ const hudFile = (run) => join(runsDir(), safeId(run, 'run'), 'hud.html');
 
 const runDir = (run) => join(runsDir(), safeId(run, 'run'));
 // The run's repo: --repo, else the project's GitHub remote, else the GitHub links already in the state.
-const repoFor = (s) => s.repo ?? inferRepo(projectDir()) ?? repoFromText(JSON.stringify(s));
+const repoFor = (s) => s.repo ?? inferRepo(projectDir(), { cacheFile: join(baseDir('project'), 'repo-cache.json') }) ?? repoFromText(JSON.stringify(s));
 // Settings from .coordinator/coordinator.json; a broken file means defaults here (doctor reports it).
 const asArg = (v) => (Number.isInteger(v) ? String(v) : undefined);
 const settings = () => readSettings(baseDir('project')).settings;
@@ -400,8 +431,9 @@ function writeSnapshot() {
   try {
     withLock(file, () => {
       const t = Date.now();
-      const m = { ...selfModel({ ...loadSelf(), current: null }), pc: pcModel(readRegistry(), { here: baseDir('project'), read: false }) };
-      const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html`, pcHref: staticPcHref };
+      const reg = readRegistry(); // once per snapshot: each read checks every entry's folder on disk
+      const m = { ...selfModel({ ...loadSelf(), current: null }), pc: pcModel(reg, { here: baseDir('project'), read: false }) };
+      const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html`, pcHref: staticPcHref(reg) };
       writeAtomic(file, selfPage(m, t, ctx));
     });
     return file;
@@ -417,8 +449,8 @@ function registerFolder() {
   }
 }
 // On disk, a registered run links to its own hud.html: beside this file, or a file: URL into its project.
-const staticPcHref = (key, run) => {
-  const e = readRegistry().find((x) => x.key === key && x.run === run);
+const staticPcHref = (reg) => (key, run) => {
+  const e = reg.find((x) => x.key === key && x.run === run);
   if (!e) return null;
   return projectKey(baseDir('project')) === key ? `runs/${encodeURIComponent(run)}/hud.html` : pathToFileURL(join(e.stateDir, 'runs', run, 'hud.html')).href;
 };
@@ -683,7 +715,7 @@ function askFinish(run, o) {
     const q = d.question ?? finishQuestion(u);
     id = ask(st, { question: q.question, header: q.header, option: q.options, unit: u.id });
     const note = st.notes.filter((n) => n.kind === 'question').at(-1);
-    if (Array.isArray(d.files)) note.sameFiles = d.files; else note.finish = true;
+    if (Array.isArray(d.behaviours)) note.sameBehaviours = d.behaviours; else if (Array.isArray(d.files)) note.sameFiles = d.files; else note.finish = true;
   }, { unit: String(o.finish) });
   return { ...s, asked: id, label: labelOf(s, id), asking: askingMode(s, settings()) };
 }
@@ -720,6 +752,39 @@ function briefTo(value) {
   const path = resolve(value);
   if (existsSync(path) && !statSync(path).isFile()) throw new Error(`--to: ${path} is not a file`);
   return path;
+}
+
+// --open "<why it can be met>": keeps a behaviour line that reads unbounded (lib/openbar.mjs unboundedRefusal), logged.
+const openReason = (v) => (v === undefined ? null : text(v === true ? undefined : v, 'open (why the line can be met as written)', 300));
+function keepOpen(s, u, id, why) {
+  if (!why) return;
+  const b = (u ? u.behaviours : s.goalBehaviours)?.find((x) => x.id === id);
+  if (!b || !unboundedWordsOf(b.text).length) return;
+  b.open = why;
+  s.notes.push({ kind: 'bar', ...(u ? { unit: u.id } : {}), text: `${u ? u.id : 'goal'} ${id} kept open-ended (${unboundedWordsOf(b.text).join(', ')}): ${why}`, at: now() });
+}
+
+// The command after -- on run.mjs suite (set by main), run as an argument list.
+let SUITE_ARGV = [];
+
+// precheck on base..head in the project's checkout (lib/precheck.mjs): the rules from the settings, the diff, the
+// files it adds, the test lists' text at head, and whether a test file at head names each new module.
+function runPrecheck(baseRef, headRef) {
+  const root = projectDir();
+  const rules = precheckRules(settings().precheck);
+  const base = commitOf(root, baseRef, 'base'); const head = commitOf(root, headRef, 'head');
+  const tests = new RegExp(rules.tests);
+  const lists = rules.testList.map((file) => ({ file, text: fileAt(root, head, file) ?? '' }));
+  const hits = precheck({ files: parseDiff(diffText(root, base, head)), added: addedFiles(root, base, head) }, rules, { lists, mentioned: (name) => namedIn(root, head, name, tests) });
+  return { base, head, hits };
+}
+
+// The delta a later round's critic reviews: lines changed since the last reviewed head (lib/rules.mjs oneCritic).
+function deltaOf(u, head) {
+  const from = u.rounds.at(-1)?.reviewedHead;
+  if (!from || !head) return null;
+  const lines = changedLines(projectDir(), from, head);
+  return Number.isInteger(lines) ? { from, to: head, lines } : null;
 }
 
 const commands = {
@@ -770,7 +835,11 @@ const commands = {
     // push needs to know whether the repo is public; say where to put it now, not at the first pit stop (#66).
     const st = settings();
     const setup = st.visibility === undefined && st.state !== 'local' && !st.stateRepo ? `before push: gh is asked whether this repo is public, and the push is refused when it cannot say. ${VISIBILITY_HINT(settingsFile(baseDir('project')))}` : null;
-    return Object.assign(made, warning ? { warning } : {}, setup ? { setup } : {});
+    // The checks the scripts enforce on this run, and the lessons made checks (lessons.mjs mark --check).
+    let off = [];
+    try { if (precheckRules(st.precheck).off.length === PRECHECK_RULES.length) off = ['precheck']; } catch { /* doctor reports a bad setting */ }
+    const checks = checksInForce([baseDir('project'), baseDir('global')], { off });
+    return Object.assign(made, warning ? { warning } : {}, setup ? { setup } : {}, { checks });
   },
   add([run, unit], o) {
     const cont = o.continues === undefined ? null : parentOf(o.continues, run, safeId(unit, 'unit'));
@@ -793,7 +862,12 @@ const commands = {
       const specialists = list(o.specialist).map((n) => safeId(n, 'specialist'));
       const u = { id: unit, bar: text(o.bar, 'bar'), ...(specialists.length ? { specialists } : {}), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
       s.units.push(u);
-      for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
+      const openWhy = openReason(o.open);
+      const refusal = unboundedRefusal((o.behaviour ?? []).map((b, i) => ({ what: `${unit} behaviour ${i + 1}`, text: b, open: openWhy })));
+      if (refusal) throw new Error(refusal);
+      for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); keepOpen(s, u, id, openWhy); }
+      const paths = list(o.paths);
+      if (paths.length) u.paths = paths;
       const fm = validateUnitSurfaceBar(u, o);
       attachUnitStatechart(u, fm, { rawStatechart: o.statechart !== undefined ? readJsonOpt(o.statechart, { flag: '--statechart', allowInline: true, run }) : null });
       if (cont) addContinues(s, u, cont);
@@ -847,6 +921,12 @@ const commands = {
         const feas = feasMap.get(u.id);
         if (feas) u.feasibility = feas;
       }
+      // Every behaviour reads closed, or carries its --open reason (lib/openbar.mjs unboundedRefusal).
+      const openWhy = openReason(o.open);
+      const lines = [...(s.goalBehaviours ?? []).map((b) => ({ u: null, b })), ...s.units.flatMap((u) => (u.behaviours ?? []).map((b) => ({ u, b })))];
+      const refusal = unboundedRefusal(lines.map(({ u, b }) => ({ what: `${u ? u.id : 'goal'} ${b.id}`, text: b.text, open: b.open ?? openWhy })));
+      if (refusal) throw new Error(`freeze ${refusal}`);
+      if (openWhy) for (const { u, b } of lines) if (!b.open) keepOpen(s, u, b.id, openWhy);
       s.frozen = true;
     });
   },
@@ -934,10 +1014,28 @@ const commands = {
     }, { unit });
   },
   built([run, unit], o) {
+    if (o.head !== undefined && (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head))) throw new Error('--head takes the commit the builder reported');
+    if (o.base !== undefined && o.head === undefined) throw new Error('--base goes with --head: the precheck runs on base..head');
+    const skip = o['skip-precheck'];
+    if (skip !== undefined && skip !== true) throw new Error('--skip-precheck takes no value; give the reason with --reason');
+    const skipWhy = skip === true ? text(o.reason, 'reason (why the precheck hits are kept)', 300) : null;
+    if (skip === undefined && o.reason !== undefined) throw new Error('--reason goes with --skip-precheck');
+    // A precheck run now (--base), or the one recorded for this head: built refuses a head with a hit (lib/precheck.mjs).
+    const fresh = typeof o.base === 'string' ? runPrecheck(o.base, o.head) : null;
+    const pre = load(run);
+    const head = fresh?.head ?? o.head?.toLowerCase();
+    // Lines changed since the last reviewed head: from round 2 a small delta gets one critic (lib/rules.mjs oneCritic).
+    const pu = pre.units.find((x) => x.id === unit);
+    const delta = pu && o.head ? deltaOf(pu, o.head.toLowerCase()) : null;
     return change(run, 'unit.built', (s) => {
       const u = unitOf(s, unit); if (u.status !== 'building') throw new Error(`unit ${unit} is ${u.status}, not building`); expect(s, u, 'built');
+      if (fresh) u.precheck = { base: fresh.base, head: fresh.head, hits: fresh.hits, at: now() };
+      const rec = u.precheck && head && (u.precheck.head.startsWith(head) || head.startsWith(u.precheck.head)) ? u.precheck : null;
+      if (rec?.hits.length && !skipWhy) throw new Error(`built refused: the precheck of ${rec.head.slice(0, 12)} has ${rec.hits.length} hit(s): ${rec.hits.map((h) => `${h.rule} ${h.file}`).join(', ')}. Fix them, or keep them with --skip-precheck --reason "…" (logged)`);
+      if (rec?.hits.length) s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: precheck hits kept on ${rec.head.slice(0, 12)} (${rec.hits.map((h) => h.rule).join(', ')}): ${skipWhy}`, at: now() });
+      if (o.changelog !== undefined) u.changelog = text(o.changelog === true ? undefined : o.changelog, 'changelog', 300);
+      if (delta) u.delta = delta; else delete u.delta;
       // The commit the builder reported: the reviewed head a fold-in must build on, unless the critic or detect names one.
-      if (o.head !== undefined && (typeof o.head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(o.head))) throw new Error('--head takes the commit the builder reported');
       u.status = 'judging'; u.heartbeatAt = now(); u.judgingAt = now(); u.report = optText(o.report, 2000); log(u, 'built', u.report ?? '');
       if (o.head !== undefined) u.builtHead = o.head.toLowerCase(); else delete u.builtHead;
       addCost(s, u, costEntry(o, { step: 'built', role: 'builder', model: u.builtBy && u.builtBy !== UNSPECIFIED ? u.builtBy : null, at: now() }));
@@ -957,7 +1055,10 @@ const commands = {
       const list = u ? (u.behaviours ?? []) : (st.goalBehaviours ?? []);
       const changes = o.remove === true || (o.id !== undefined && list.some((b) => b.id === String(o.id).toUpperCase()));
       const reason = changes && st.frozen ? text(o.reason, 'reason (removing or rewording a behaviour after freeze changes the bar)', 300) : null;
+      const openWhy = openReason(o.open);
+      if (o.remove !== true && typeof o.text === 'string') { const refusal = unboundedRefusal([{ what: `${unit ?? 'the goal'} behaviour`, text: o.text, open: openWhy }]); if (refusal) throw new Error(refusal); }
       id = behave(st, u, { id: o.id, text: o.text, remove: o.remove === true });
+      if (o.remove !== true) keepOpen(st, u, id, openWhy);
       if (u) {
         delete u.feasibility;
         const fm = validateUnitSurfaceBar(u, o);
@@ -1082,7 +1183,13 @@ const commands = {
         log(u, 'early', `early review ${u.early.length} by ${by}: ${verdict} ${effectiveScore}${gap ? `: ${clip(gap, 120)}` : ''} (not a round)`);
         return;
       }
-      if (o.specialist !== undefined) { // a required second critic: recorded on this round, the unit stays judging
+      // One critic on a small delta (lib/rules.mjs oneCritic): its verdict closes the round, and no other is taken.
+      const solo = late ? null : oneCritic(u);
+      if (solo) {
+        const who = o.specialist === undefined ? 'general' : String(o.specialist);
+        if (who !== solo.critic) throw new Error(`verdict refused: one critic judges round ${u.rounds.length + 1} (a ${solo.lines}-line delta): ${solo.critic === 'general' ? 'the general critic, without --specialist' : `${solo.critic}, with the general checks (--specialist ${solo.critic})`}`);
+      }
+      if (o.specialist !== undefined && !solo) { // a required second critic: recorded on this round, the unit stays judging
         const name = String(o.specialist);
         if (!(u.specialists ?? []).includes(name)) throw new Error(`no specialist ${name} on unit ${unit} (run.mjs add-specialist ${s.id} ${u.id} ${name} --reason …)`);
         // The visual gate (references/prism.md): a FAIL report blocks every pass; the prism specialist needs a PASS one.
@@ -1099,7 +1206,7 @@ const commands = {
       }
       if (late) throw new Error('unreachable');
       // Every required specialist marks the build before a general pass closes the round.
-      const unmarked = (u.specialists ?? []).filter((n) => !u.specialistMarks?.[n]);
+      const unmarked = solo ? [] : (u.specialists ?? []).filter((n) => !u.specialistMarks?.[n]);
       if (verdict === 'pass' && unmarked.length) throw new Error(`pass refused: specialist ${unmarked.join(', ')} has not passed this build`);
       // A general pass on a build a specialist failed (#126): recorded as given, the round closes as failed by that specialist.
       const byS = verdict === 'pass' ? specialistFailure(u.specialistMarks) : null;
@@ -1123,8 +1230,8 @@ const commands = {
       const reviewedHead = typeof o.head === 'string' ? o.head.toLowerCase() : (u.detect?.round === round && u.detect.head) ? u.detect.head : (u.builtHead ?? null);
       // Kept on a fail too: the next critic reviews the delta since this head (sub-skills/review.md, Delta review).
       if (reviewedHead) extra.reviewedHead = reviewedHead;
-      u.rounds.push({ n: round, verdict: closing.verdict, score: effectiveScore, gap: closing.gap, cause: closing.cause, evidence, at: now(), ...extra, ...(byS ? { severity: byS.severity, general: 'pass', failedBy: byS.failedBy } : {}), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}) });
-      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt; delete u.builtHead;
+      u.rounds.push({ n: round, verdict: closing.verdict, score: effectiveScore, gap: closing.gap, cause: closing.cause, evidence, at: now(), ...extra, ...(byS ? { severity: byS.severity, general: 'pass', failedBy: byS.failedBy } : {}), ...(marks.length ? { behaviours: marks } : {}), ...(u.report ? { report: u.report } : {}), ...(critic ? { critic } : {}), ...(u.builtBy ? { builtBy: u.builtBy, ...(u.builtWhy ? { builtWhy: u.builtWhy } : {}) } : {}), ...judgedBy, ...(u.specialistMarks ? { specialists: u.specialistMarks } : {}), ...(solo ? { oneCritic: solo.critic, deltaLines: solo.lines } : {}) });
+      u.report = null; delete u.specialistMarks; delete u.builtBy; delete u.builtWhy; delete u.judgingAt; delete u.builtHead; delete u.delta;
       if (byS) log(u, 'verdict', `round ${round} failed by specialist ${byS.failedBy.join(', ')}; the general critic passed it (score ${score(o.score) ?? 'none'})`);
       u.status = passes ? 'pass' : 'open';
     }, { unit });
@@ -1546,12 +1653,26 @@ const commands = {
     const claimed = CLAIMED; CLAIMED = null;
     return report(load(run), { ...(claimed ?? {}), id: me.id });
   },
-  next([run], o = {}) {
+  async next([run], o = {}) {
+    // --all: the actions for every open run of this folder that this window leads (the perf plan, cause H: runs
+    // under one lead waited on each other); each run as next <run> would print it.
+    if (o.all !== undefined) {
+      if (o.all !== true) throw new Error('--all takes no value');
+      if (run !== undefined) throw new Error('next --all takes no run');
+      const me = identity(BY.harness, { flag: o.lead }).id;
+      const ids = existsSync(runsDir()) ? readdirSync(runsDir()).filter((d) => isSafeId(d) && exists(d)) : [];
+      const mine = ids.filter((id) => { try { const x = load(id); return !x.closed && x.lead?.id === me; } catch { return false; } });
+      const runs = [];
+      for (const id of mine) runs.push({ run: id, ...(await commands.next([id], { ...o, all: undefined })) });
+      return { lead: me, runs, ...(runs.length ? {} : { note: 'this window leads no open run here' }) };
+    }
     let stopped; let s = load(run);
     const expired = !s.closed && spent(s, Date.now());
     // Expired: applyStops changes the loaded state in memory only; it is never saved.
     if (expired) stopped = applyStops(s);
     else {
+      // A stop to record rewrites the pages: load their modules first (main() skips them for next).
+      if (!s.closed && applyStops(structuredClone(s)).size > 0) await loadPages();
       // Recording a stop is a lead step (lib/lead.mjs); reading what to do next is not. Whether it records
       // one is decided on the locked state, with the lead check, in the same write as the stop.
       s = change(run, 'run.stop', (st) => { stopped = applyStops(st); }, { leadWhen: { o, when: (st) => applyStops(structuredClone(st)).size > 0 } });
@@ -1575,15 +1696,78 @@ const commands = {
     const launch = (u) => (caps && ['build', 'judge', 'fold-in'].includes(u.action) ? { ...u, launch: { ...(caps.minutes ? { minutes: caps.minutes } : {}), ...(caps.cost ? { cost: `${caps.cost.amount} ${caps.cost.currency}` } : {}) } } : u);
     // A unit at work: its last beat, worked out here in minutes and local time (never a bare UTC time to convert).
     const beat = (u) => { const x = unitOf(s, u.id); return ['building', 'judging'].includes(x.status) ? { ...u, lastBeat: agoText(x.heartbeatAt ?? s.createdAt, Date.now()) } : u; };
-    const units = plan.units.map((u) => (stopped.has(u.id) ? { ...stopped.get(u.id), ...(expired ? { recorded: false } : {}) } : beat(launch(early(how(sync(suggest(u))))))));
+    // One critic on a small delta (lib/rules.mjs oneCritic): next names it, so the lead launches only that one.
+    const solo = (u) => { if (u.action !== 'judge') return u; const x = oneCritic(unitOf(s, u.id)); return x ? { ...u, critics: 1, critic: x.critic, deltaLines: x.lines } : u; };
+    const units = plan.units.map((u) => (stopped.has(u.id) ? { ...stopped.get(u.id), ...(expired ? { recorded: false } : {}) } : beat(launch(early(how(sync(solo(suggest(u)))))))));
     const paused = pauseNote(s); // a paused run starts nothing: its build and judge steps wait (lib/pause.mjs)
     const outcome = { stopped: 'stopped', 'done-with-gaps': 'partial', done: 'done' }[plan.decision];
     const led = s.closed ? null : leadInfo(s, Date.now(), { alive: leadAlive });
+    // The lead's context budget, from its transcript's usage numbers only (lib/leadctx.mjs).
+    const budget = s.closed ? null : leadBudget(s.notes);
     return {
       decision: paused ? 'paused' : plan.decision, ...(paused ? { paused } : {}), units,
       ...(led ? { lead: { tool: led.tool, lastActive: led.lastActive, ...(led.gone ? { gone: led.goneText } : {}) } } : {}),
+      ...(budget && budget.level !== 'ok' ? { context: budget } : {}),
       ...(expired ? { spent: { text: 'the time budget is spent: next recorded nothing', step: outcome ? `run.mjs close ${s.id} --outcome ${outcome} records the stops above` : 'a critic started inside the time budget may still return its verdict; then close records the stops' } } : {}),
     };
+  },
+  // The lead's full suite on a unit's head (lib/suites.mjs): the command after -- runs under this machine's one suite
+  // lock (never two full suites at once: the load flakes) and is recorded; or --result records a run made elsewhere.
+  // Critics of that head then cite it and run no full suite (lib/briefs.mjs).
+  suite([run, unit], o) {
+    unitOf(load(run), unit);
+    if (typeof o.head !== 'string' || !SHA.test(o.head)) throw new Error('--head takes the commit the suite runs on (7-64 hex characters)');
+    if (o.fail !== undefined && o.fail !== true) throw new Error('--fail takes no value');
+    const given = (o.result ?? []).map((r) => text(r === true ? undefined : r, 'result', 300));
+    if (given.length && SUITE_ARGV.length) throw new Error('--result or a command after --, not both');
+    if (!given.length && !SUITE_ARGV.length) throw new Error('usage: run.mjs suite <run> <unit> --head <sha> -- <test command …> | --result "<pass line>" [--fail]');
+    let ok = o.fail === undefined; let results = given; let code = null; let seconds = null;
+    if (!given.length) {
+      if (o.fail !== undefined) throw new Error('--fail goes with --result: a command\'s exit code says whether it passed');
+      const release = holdLock(join(registryHome(), 'suite.lock'), { run, unit, head: o.head }, { onWait: (h) => console.error(`waiting: a full suite is running on this machine (run ${h.run ?? '?'}, unit ${h.unit ?? '?'}, since ${h.at})`) });
+      let r; try { r = runSuite(SUITE_ARGV, { cwd: process.cwd() }); } finally { release(); }
+      ({ code, seconds } = r); ok = code === 0;
+      results = summaryLines(r.output).map((l) => text(l, 'result', 300));
+      if (!results.length) results = [`exit code ${code}`];
+      if (!ok) process.stderr.write(`${r.output.split(/\r?\n/).slice(-40).join('\n')}\n`);
+    }
+    let rec;
+    change(run, 'evidence', (s) => {
+      const u = unitOf(s, unit);
+      rec = recordSuite(u, { head: o.head, ok, results, at: now(), code, seconds });
+      log(u, 'suite', `full suite ${ok ? 'passed' : 'FAILED'} on ${rec.head.slice(0, 12)}: ${results.at(-1)}`);
+    }, { unit });
+    return { run, unit, suite: rec };
+  },
+  // Mechanical checks of the unit's diff (lib/precheck.mjs, rules from "precheck" in .coordinator/coordinator.json),
+  // recorded on the unit for that head: built refuses a head whose precheck has a hit.
+  precheck([run, unit], o) {
+    unitOf(load(run), unit);
+    const res = runPrecheck(o.base, o.head);
+    change(run, 'unit.detect', (s) => {
+      const u = unitOf(s, unit);
+      u.precheck = { base: res.base, head: res.head, hits: res.hits, at: now() };
+      log(u, 'precheck', res.hits.length ? `${res.hits.length} hit(s): ${res.hits.map((h) => `${h.rule} ${h.file}`).join(', ')}` : 'clean');
+    }, { unit });
+    if (res.hits.length) process.exitCode = 1;
+    return { run, unit, clean: !res.hits.length, base: res.base, head: res.head, hits: res.hits };
+  },
+  // Every unit's changelog line (built --changelog), for the release PR to write in one place.
+  changelog([run]) {
+    const s = load(run);
+    const lines = s.units.filter((u) => u.changelog).map((u) => `- ${u.changelog}`);
+    process.stdout.write(lines.length ? `${lines.join('\n')}\n` : `no changelog lines recorded (run.mjs built ${s.id} <unit> --changelog "<line>")\n`);
+    return null;
+  },
+  // A follow-up, triaged as it arrives (lib/followups.mjs): batch (one unit that builds last), P1-P3 or drop.
+  followup([run], o) {
+    const triage = typeof o.triage === 'string' ? o.triage.replace(/^p/, 'P') : o.triage;
+    let out;
+    const s = change(run, 'note', (st) => {
+      const unit = o.unit === undefined ? null : unitOf(st, o.unit).id;
+      out = addFollowup(st, { text: text(o.text, 'text', 500), triage, reason: text(o.reason, 'reason', 300), unit, at: now() });
+    }, { unit: o.unit ?? null });
+    return { run: s.id, triage, ...(out.unit ? { batchUnit: out.unit, items: s.units.find((u) => u.id === out.unit)?.bar } : {}), ...(out.file ? { step: out.file } : {}) };
   },
   brief([run, unit], o) {
     const files = o.quote ?? []; const labels = o.source ?? [];
@@ -1919,29 +2103,47 @@ function startDashboard(port, o) {
 }
 
 // --harness works on every command: it names the tool that runs this one (lib/harness.mjs).
-helpAndExit(import.meta.url);
-const [cmd, ...argv] = process.argv.slice(2);
-const rest = []; let harnessFlag;
-for (let i = 0; i < argv.length; i++) {
-  const m = /^--harness(?:=([\s\S]*))?$/.exec(argv[i]);
-  if (!m) { rest.push(argv[i]); continue; }
-  harnessFlag = m[1] ?? argv[++i] ?? '';
-}
+// The CLI as a function: run.mjs runs it with its own arguments; the tests call it in process (test/inproc.mjs),
+// which is why the module keeps no state between calls but LEAD, CLAIMED and BY, reset here.
 let BY = null;
-try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
-if (!commands[cmd]) { console.error('usage: run.mjs init|lead|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|waiting|stats|where|bench … (see the header of run.mjs)'); process.exit(2); }
-if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
-try {
-  const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
-  // One lead per run (lib/lead.mjs): a lead step from another window is refused before it changes anything; a
-  // claim it needs is written with its change (change()). init checks and claims itself; next only when it would
-  // record a stop; pull checks and never writes a claim; note only in its lead form (note --asking). Closed runs
-  // have no lead.
-  if (isLeadStep(cmd, opt) && !['init', 'next'].includes(cmd)) {
-    const run = pos[0];
-    if (typeof run === 'string' && isSafeId(run) && exists(run) && !load(run).closed) leadCheck(run, opt);
+export async function main(args = process.argv.slice(2)) {
+  helpAndExit(import.meta.url, args);
+  const [cmd, ...argv] = args;
+  LEAD = null; CLAIMED = null; BY = null; SUITE_ARGV = [];
+  const rest = []; let harnessFlag;
+  for (let i = 0; i < argv.length; i++) {
+    const m = /^--harness(?:=([\s\S]*))?$/.exec(argv[i]);
+    if (!m) { rest.push(argv[i]); continue; }
+    harnessFlag = m[1] ?? argv[++i] ?? '';
   }
-  const out = await commands[cmd](pos, opt);
-  const claimed = (o) => (CLAIMED && o && typeof o === 'object' && !Array.isArray(o) ? { ...o, claim: CLAIMED } : o);
-  if (out !== null) console.log(JSON.stringify(claimed(out.id === undefined || ['models', 'next', 'lead', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.asking ? { asking: out.asking } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}) }), null, 2));
-} catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
+  try { BY = stamp(harnessOf(harnessFlag)); } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }
+  if (!commands[cmd]) { console.error('usage: run.mjs init|lead|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|waiting|stats|where|bench|suite|precheck|changelog|followup … (see the header of run.mjs)'); process.exit(2); }
+  if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
+  try {
+    // suite runs the command after --, as given (its own options are never read as run.mjs options).
+    const cut = cmd === 'suite' ? rest.indexOf('--') : -1;
+    if (cut >= 0) { SUITE_ARGV = rest.slice(cut + 1); rest.length = cut; }
+    const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
+    await Promise.all([NO_PAGES.has(cmd) ? null : loadPages(), EXTRA_COMMANDS.has(cmd) ? loadExtras() : null]);
+    // One lead per run (lib/lead.mjs): a lead step from another window is refused before it changes anything; a
+    // claim it needs is written with its change (change()). init checks and claims itself; next only when it would
+    // record a stop; pull checks and never writes a claim; note only in its lead form (note --asking). Closed runs
+    // have no lead.
+    if (isLeadStep(cmd, opt) && !['init', 'next'].includes(cmd)) {
+      const run = pos[0];
+      if (typeof run === 'string' && isSafeId(run) && exists(run) && !load(run).closed) {
+        leadCheck(run, opt);
+        // Over the lead's context budget, lead steps stop until a compaction or a handover note (lib/leadctx.mjs).
+        const budget = leadBudget(load(run).notes);
+        if (budget?.level === 'over') throw new Error(budget.text);
+      }
+    }
+    const out = await commands[cmd](pos, opt);
+    const claimed = (o) => (CLAIMED && o && typeof o === 'object' && !Array.isArray(o) ? { ...o, claim: CLAIMED } : o);
+    if (out !== null) console.log(JSON.stringify(claimed(out.id === undefined || ['models', 'next', 'lead', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.asking ? { asking: out.asking } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}), ...(out.checks ? { checks: out.checks } : {}) }), null, 2));
+  } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
+}
+
+// Run as a script (node run.mjs …), not when imported.
+const isMain = () => { try { return realpathSync(process.argv[1]) === realpathSync(RUN_MJS); } catch { return false; } };
+if (process.argv[1] && isMain()) await main();

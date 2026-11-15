@@ -7,13 +7,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { behave, TEXT_MAX } from '../lib/behaviours.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'coordinator-behaviours-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 function cli(...args) {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+  const r = runSync(args, { env: { ...process.env, COORDINATOR_DIR: dir } });
   let out = null; try { out = JSON.parse(r.stdout || 'null'); } catch { out = r.stdout; }
   return { code: r.status, out, err: r.stderr };
 }

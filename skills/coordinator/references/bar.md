@@ -33,6 +33,10 @@ Record them with `S/run.mjs add <run> <unit> --behaviour "…"` (repeat the flag
 - **Can it be met at all?** Before `freeze`, check each behaviour can be met at all. "Exactly once" or "never" across parties that share no state while a dependency is down (two servers, one store, the store down) cannot be met: they have nowhere to agree. Rewrite such a claim per party and state the duplicate: "notified once per server; while the store is up, once across servers". Why: a critic can be right while the bar is wrong, and then each fix only moves the hole (one run spent five rounds and a third of its budget on such a bar). When `helpers` is configured, `freeze` and `start` check each behaviour via Jev `noul` (`lib/statechart.mjs`) and block `< 0.30` (`--skip-feasibility` overrides). Stateful units attach an accessible statechart (`--statechart <path|json>`, or generated from behaviours and `feature-map.json`) to unit pages and briefs, and `verdict --reins-packet <path>` fails undeclared `reins_state` transitions with state evidence.
 - **Guard tests get their own unit.** A guard or invariant test (a lint rule, a "no message claims X" test) goes in a unit of its own, apart from the product fix it protects, so a guard that keeps failing cannot stop a fix that passed. When a no-progress stop finds one behaviour failing in each of the last rounds while the rest pass, its reason names that behaviour: narrow it or move it out.
 
+### Unbounded words are refused
+
+`add --behaviour`, `behave` and `freeze` refuse a behaviour with never, any, all, cannot, only, always or every, unless the line names its cases ("for these three: A, B and C", "(admin, owner, viewer)", "1) … 2) …", or a list it points to: "listed in", "the following") or the lead passes `--open "<why it can be met as written>"`, which is kept on the behaviour and logged as a bar note. When the same behaviour fails in a unit's two latest failing rounds, `next` asks the person (Change the bar, Simplify the design, Accept as is, One more round) after the second, not the third.
+
 ## Severity: what fails a round
 
 Every finding the critic reports carries a severity:

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { readRun } from '../lib/events.mjs';
 
 // Two machines (clones a and b) share a bare repo; each has its own state folder.
@@ -25,7 +26,7 @@ const mainSha = git(origin, 'rev-parse', 'main').trim();
 const stateDir = (m) => join(root, `${m === A ? 'a' : 'b'}-state`);
 const configure = (m, c) => { mkdirSync(stateDir(m), { recursive: true }); writeFileSync(join(stateDir(m), 'coordinator.json'), JSON.stringify(c)); };
 const json = (s) => { try { return JSON.parse(s); } catch { return s; } };
-const cli = (m, ...a) => { const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { cwd: m, env: { ...process.env, COORDINATOR_DIR: stateDir(m) }, encoding: 'utf8' }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
+const cli = (m, ...a) => { const r = runSync(a, { cwd: m, env: { ...process.env, COORDINATOR_DIR: stateDir(m) } }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
 const runDir = (m, r) => join(stateDir(m), 'runs', r);
 const show = (ref, path) => git(origin, 'show', `${ref}:${path}`);
 configure(A, { visibility: 'private' }); configure(B, { visibility: 'private' });
@@ -268,7 +269,7 @@ test('a note or answer from the branch with fields run.mjs never writes is not r
 test('push blanks the lead\'s window process; pull and the next push agree with it', () => {
   const env = { ...process.env, COORDINATOR_DIR: stateDir(A), CLAUDE_CODE_SESSION_ID: 'sync-window', CLAUDE_PID: String(process.pid) };
   delete env.COORDINATOR_LEAD;
-  const lead = (...a) => { const x = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { cwd: A, env, encoding: 'utf8' }); return { code: x.status, out: json(x.stdout), err: x.stderr }; };
+  const lead = (...a) => { const x = runSync(a, { cwd: A, env }); return { code: x.status, out: json(x.stdout), err: x.stderr }; };
   const r = lead('init', 'rp', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--harness', 'claude-code');
   assert.equal(r.code, 0, r.err);
   assert.equal(readRun(runDir(A, 'rp')).state.lead.pid, process.pid, 'kept on this PC');

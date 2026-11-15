@@ -4,6 +4,10 @@
 // escaped. Anchors open in a new tab and send no referrer, so the answer
 // page's token never leaves it.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { gitCommonDir, writeAtomic } from './store.mjs';
 
 const ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ENTITIES[c]);
@@ -83,12 +87,22 @@ export function repoFromText(text) {
   return best && REPO.test(best[0]) ? best[0] : null;
 }
 
-// Reads the project's own git config (no network). Cached per folder.
+// Reads the project's own git config (no network). Cached per folder, and with cacheFile also on disk: git is
+// asked again only when the repo's config file changed (every run.mjs change shows the repo; a git process is ~20 ms).
 const cache = new Map();
-export function inferRepo(cwd) {
+export function inferRepo(cwd, { cacheFile = null } = {}) {
   if (!cache.has(cwd)) {
-    let repo = null;
-    try { repo = repoFromRemote(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })); } catch { /* not a repo */ }
+    let key = null;
+    const common = cacheFile ? gitCommonDir(cwd) : undefined;
+    if (common) { try { const st = statSync(join(common, 'config')); key = createHash('sha256').update(`${resolve(cwd)}|${st.mtimeMs}|${st.size}`).digest('hex').slice(0, 16); } catch { /* no config */ } }
+    let repo;
+    if (key) { try { const c = JSON.parse(readFileSync(cacheFile, 'utf8')); if (c.key === key && (c.repo === null || REPO.test(c.repo))) repo = c.repo; } catch { /* none yet */ } }
+    if (repo === undefined) {
+      repo = null;
+      try { repo = repoFromRemote(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })); } catch { /* not a repo */ }
+      if (key) { try { writeAtomic(cacheFile, `${JSON.stringify({ key, repo })}
+`); } catch { /* a read-only folder: ask git next time */ } }
+    }
     cache.set(cwd, repo);
   }
   return cache.get(cwd);

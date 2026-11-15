@@ -7,6 +7,8 @@
 //   lessons.mjs list [--tag T] [--top 8] [--scope …]      promote: true once seen 3+ times
 //   lessons.mjs use <id> | drop <id> [--scope …]
 //   lessons.mjs prune [--keep 60] [--scope …]
+//   lessons.mjs mark <id> --check "<the script check that enforces it>" | --advisory [--scope …]
+//                   a lesson that names a rule becomes a check (run.mjs init prints the checks in force) or is marked advisory
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, text } from './lib/args.mjs';
@@ -16,7 +18,7 @@ import { tokens } from './lib/rules.mjs';
 import { findSecret } from './lib/secrets.mjs';
 import { baseDir, readJson, safeId, update } from './lib/store.mjs';
 
-const FLAGS = { add: ['tag', 'text', 'from', 'source', 'scope'], list: ['tag', 'top', 'scope'], use: ['scope'], drop: ['scope'], prune: ['keep', 'scope'] };
+const FLAGS = { add: ['tag', 'text', 'from', 'source', 'scope'], list: ['tag', 'top', 'scope'], use: ['scope'], drop: ['scope'], prune: ['keep', 'scope'], mark: ['check', 'advisory', 'scope'] };
 const norm = (s) => tokens(s).join(' ');
 const idOf = (s) => createHash('sha256').update(norm(s)).digest('hex').slice(0, 10);
 
@@ -76,12 +78,25 @@ function main(cmd, pos, opt) {
     }
     case 'list':
       return readJson(file, []).filter((l) => !opt.tag || l.tag === opt.tag || l.tag === 'general').sort(byRank)
-        .slice(0, num(opt.top, 8, 1, 200)).map(({ id, tag, text: t, seen, used, from, sources }) => ({ id, tag, seen, used, promote: seen >= 3, text: t, from: from ?? [], ...(sources?.length ? { sources } : {}) }));
+        .slice(0, num(opt.top, 8, 1, 200)).map(({ id, tag, text: t, seen, used, from, sources, check, advisory }) => ({ id, tag, seen, used, promote: seen >= 3, text: t, from: from ?? [], ...(sources?.length ? { sources } : {}), ...(check ? { check } : {}), ...(advisory ? { advisory: true } : {}) }));
     case 'use': touch(safeId(pos[0], 'lesson id'), 'used'); return { id: pos[0], used: true };
     case 'drop': {
       const id = safeId(pos[0], 'lesson id');
       update(file, [], (all) => { if (!all.some((x) => x.id === id)) throw new Error(`no lesson ${id}`); return all.filter((x) => x.id !== id); });
       return { id, dropped: true };
+    }
+    case 'mark': {
+      const id = safeId(pos[0], 'lesson id');
+      if ((opt.check === undefined) === (opt.advisory === undefined)) throw new Error('mark <id> --check "<check>" or --advisory, one of them');
+      if (opt.advisory !== undefined && opt.advisory !== true) throw new Error('--advisory takes no value');
+      const check = opt.check === undefined ? null : text(opt.check, 'check', 200);
+      update(file, [], (all) => {
+        const l = all.find((x) => x.id === id);
+        if (!l) throw new Error(`no lesson ${id}`);
+        if (check) { l.check = check; delete l.advisory; } else { l.advisory = true; delete l.check; }
+        l.lastAt = now;
+      });
+      return { id, ...(check ? { check } : { advisory: true }) };
     }
     case 'prune': {
       const keep = num(opt.keep, 60, 1, 1000);
@@ -89,7 +104,7 @@ function main(cmd, pos, opt) {
       update(file, [], (all) => { const kept = [...all].sort(byRank).slice(0, keep); removed = all.length - kept.length; return kept; });
       return { keep, removed };
     }
-    default: throw new Error('usage: lessons.mjs add|list|use|drop|prune … (see the header of lessons.mjs)');
+    default: throw new Error('usage: lessons.mjs add|list|use|drop|prune|mark … (see the header of lessons.mjs)');
   }
 }
 

@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { runSync } from '../../skills/coordinator/scripts/test/inproc.mjs';
 import dns from 'node:dns';
 import net from 'node:net';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -26,7 +27,7 @@ const CLEAN = {};
 function project() {
   const root = mkdtempSync(join(tmpdir(), 'coord-demo-src-'));
   const cli = (...a) => {
-    const r = spawnSync(process.execPath, [RUN_MJS, ...a], { cwd: root, env: { ...process.env, COORDINATOR_DIR: join(root, '.coordinator') }, encoding: 'utf8' });
+    const r = runSync(a, { cwd: root, env: { ...process.env, COORDINATOR_DIR: join(root, '.coordinator') } });
     if (r.status !== 0) throw new Error(`run.mjs ${a.join(' ')}: ${r.stderr}`);
   };
   cli('init', 'r1', '--goal', 'Totals match', '--bar', 'tests pass', '--fence', 'web only', '--repo', 'acme/web');
