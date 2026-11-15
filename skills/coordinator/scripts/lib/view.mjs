@@ -46,6 +46,16 @@ function nextStep(run, plan) {
 }
 
 // linked: the runs this one continues or was continued in (lib/chain.mjs linkedRuns); without them a chain still shows, its other runs as "not here".
+// The evidence that goes with a round's gap. A round the general critic passed and a specialist failed (#126)
+// carries the specialist's gap but the general critic's evidence; its evidence is the specialist's own (#147),
+// each one named when several failed it, as the gap names each one's gap (lib/rules.mjs specialistFailure).
+export function gapEvidence(r) {
+  if (!r) return null;
+  if (!r.failedBy?.length) return r.evidence ?? null;
+  const by = r.failedBy.map((n) => [n, r.specialists?.[n]?.evidence]).filter(([, e]) => e);
+  return by.length ? (r.failedBy.length === 1 ? by[0][1] : by.map(([n, e]) => `${n}: ${e}`).join('; ')) : null;
+}
+
 // project: the project's name for each question's label (lib/questions.mjs questionLabel); the hosted service passes the repo's name.
 export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null, project = null, alive = null, timeZone } = {}) {
   const end = run.closed ? Date.parse(run.closed.at) : nowMs;
@@ -113,7 +123,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         gap: u.status === 'pass' ? null : (last?.gap ?? null), cause: u.status === 'pass' ? null : (last?.cause ?? null),
         // A round the general critic passed and a specialist failed (#126): who failed it, and the general verdict and score.
         failedBy: u.status !== 'pass' && last?.failedBy ? { specialists: last.failedBy, general: last.general ?? null, score: typeof last.score === 'number' ? last.score : null } : null,
-        evidence: last?.evidence ?? null,
+        evidence: gapEvidence(last), // with its gap: a specialist's own when it failed the round (#147)
         next: label(d),
         personNotes: personNotes.filter((n) => n.unit === u.id),
         // The lead's decisions, follow-ups and info about this unit (note --unit, #45).

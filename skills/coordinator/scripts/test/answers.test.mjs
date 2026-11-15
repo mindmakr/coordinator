@@ -100,7 +100,7 @@ test('questions and person notes are global or per unit', () => {
   const notes = state('a3').notes.filter((n) => n.kind === 'person');
   assert.deepEqual(notes.map((n) => n.unit), ['u2', null]);
   const html = readFileSync(join(dir, 'runs', 'a3', 'hud.html'), 'utf8');
-  assert.match(html, /<section data-k="unit-u2" data-h="[^"]+" class="card" id="unit-u2">.*<b>From you:<\/b> Use the staging data/s);
+  assert.match(html, /<tr id="unit-u2" data-a="row-u2">(?:(?!<\/tr>).)*<b>From you:<\/b> Use the staging data/s);
   assert.match(html, /<b>q1<\/b> Merge u1 now\? <span class="cause">· u1<\/span>/);
   assert.match(html, /This copy is read-only\. Answer in the chat, or ask the lead for the answer page \(<code>run\.mjs serve a3<\/code>\)/);
   assert.doesNotMatch(html, /<form|<script/, 'the file takes no answers and runs nothing');

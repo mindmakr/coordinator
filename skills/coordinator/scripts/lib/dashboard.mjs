@@ -15,7 +15,7 @@ import { basename, join } from 'node:path';
 import { linkedRuns } from './chain.mjs';
 import { loadRun } from './events.mjs';
 import { harnessName, origin, versionWarning } from './harness.mjs';
-import { hud, originLine, questionItem, statusChip } from './hud.mjs';
+import { hud, originLine, questionItem, runTabs, statusChip } from './hud.mjs';
 import { linkify, repoFromText } from './links.mjs';
 import { mapsPage } from './mapspage.mjs';
 import { ageText } from './age.mjs';
@@ -238,7 +238,8 @@ function projectCtx(live, key, id, home) {
     unitHref: (u) => `${base}/unit/${encodeURIComponent(u)}?${t}`,
     artHref: () => null, // stored files of other projects stay on disk: the page says "file kept locally"
     runHref: (other) => `/p/${key}/run/${encodeURIComponent(other)}?${t}`,
-    pages: [{ path: base, label: id, href: `${base}?${t}` }, { path: `${base}/maps`, label: 'Maps', href: `${base}/maps?${t}` }, { path: `${base}/report`, label: 'Report', href: `${base}/report?${t}` }, { path: `${base}/retro`, label: 'Retro', href: `${base}/retro?${t}` }, home],
+    // The run's tabs; the way back to the run list is the breadcrumb's This PC.
+    pages: [...runTabs({ base, href: (p) => `${base}${p}?${t}` }), { ...home, tab: false }], pc: { label: 'This PC', href: home.href },
   };
 }
 

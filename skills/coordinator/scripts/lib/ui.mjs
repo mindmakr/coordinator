@@ -7,13 +7,15 @@
 //
 //   heading(title, sub?, { inlineHtml?, actionsHtml? })
 //                                     <div class="head">: h1, inline HTML (a status chip), a muted line, and actions pushed to the right
-//   kpis([{ k, v, s?, bar? }])        <div class="kpis">: label, value, small line, optional bar (0-100)
+//   kpis([{ k, v, s?, bar?, vHtml? }]) <div class="kpis">: label, value, small line, optional bar (0-100);
+//                                     vHtml (trusted) in place of v, such as tries()
 //   cols(mainHtml, sideHtml)          <div class="cols">: main and side columns; the side stacks under main when narrow
 //   panel({ id, title, count?, metaHtml?, bodyHtml, open?, scroll?, flush?, tone? })
 //                                     details.panel: summary (chevron, h2, count, controls) and its body;
 //                                     `id` is data-d, so the live page keeps it open or closed per page
-//   table({ cols: [{ label, num? }], rows: [[cell] | { cls, cells }], min?, max?, empty? })
-//                                     table.t with a sticky header, in its own scrolling box
+//   table({ cols: [{ label, num? }], rows: [[cell] | { cells, key?, cls?, id? }], min?, max?, empty? })
+//                                     table.t with a sticky header, in its own scrolling box; an object row
+//                                     carries its data-a (the live page's key), class and id
 //   toneChip(word, tone?)             span.chip: ask, ok, retry, bad or done; the word is always shown
 //   typeTag(kind, file?)              span.tag: IMG, LOG, CSV, TXT, PDF, URL or TEST
 //   tries([state])                    try marks: pass ✓, fail ✕, work …, queued (its number), open (empty)
@@ -49,7 +51,7 @@ export function bar(value, { label, tone = '' } = {}) {
 }
 
 export function kpis(items) {
-  return `<div class="kpis">${items.map((i) => `<div class="kpi"><span class="k">${text(i.k)}</span><span class="v">${text(i.v)}</span>`
+  return `<div class="kpis">${items.map((i) => `<div class="kpi"><span class="k">${text(i.k)}</span><span class="v">${i.vHtml ?? text(i.v)}</span>`
     + `${i.bar === undefined ? '' : bar(i.bar)}${i.s ? `<span class="s">${text(i.s)}</span>` : ''}</div>`).join('')}</div>`;
 }
 
@@ -65,16 +67,17 @@ export function panel({ id, title, count, metaHtml = '', bodyHtml = '', open = t
     + `<summary><span class="chev" aria-hidden="true">›</span><h2>${text(title)}</h2>${n}${metaHtml ? `<span class="meta">${metaHtml}</span>` : ''}</summary>${body}</details>`;
 }
 
-// A row is its cells, or { cls, cells } when the page's own CSS filters rows by class.
+// A row is its cells, or { cells, key?, cls?, id? }: its data-a (the live page's key), its class (a page's own CSS
+// filters rows by class) and its id.
 const cellsOf = (r) => (Array.isArray(r) ? r : r.cells);
-const rowCls = (r) => (!Array.isArray(r) && r.cls ? ` class="${text(r.cls)}"` : '');
+const rowAttrs = (r) => (Array.isArray(r) ? '' : `${r.id ? ` id="${text(r.id)}"` : ''}${r.cls ? ` class="${text(r.cls)}"` : ''}${r.key ? ` data-a="${text(r.key)}"` : ''}`);
 export function table({ cols: heads, rows, min, max, empty = 'None' }) {
   if (!rows.length) return `<p class="empty">${text(empty)}</p>`;
   const num = (i) => (heads[i]?.num ? ' class="num"' : '');
   const w = length(min); const h = length(max);
   return `<div class="scroll tbox"${h ? ` style="max-height:${h}"` : ''}><table class="t"${w ? ` style="min-width:${w}"` : ''}>`
     + `<thead><tr>${heads.map((c, i) => `<th scope="col"${num(i)}>${text(c.label)}</th>`).join('')}</tr></thead>`
-    + `<tbody>${rows.map((r) => `<tr${rowCls(r)}>${cellsOf(r).map((c, i) => `<td${num(i)}>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    + `<tbody>${rows.map((r) => `<tr${rowAttrs(r)}>${cellsOf(r).map((c, i) => `<td${num(i)}>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 // A status in words, coloured by tone: the colour never says it alone. No word, no chip.

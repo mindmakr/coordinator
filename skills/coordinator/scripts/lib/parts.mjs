@@ -13,7 +13,7 @@ import { eventEvidence, itemBody } from './evview.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
 import { ageText } from './age.mjs';
-import { rememberToggle, restoreOpen } from './ui.mjs';
+import { rememberToggle, restoreOpen, typeTag } from './ui.mjs';
 
 export { esc };
 export { bar, cols, heading, kpis, mdActions, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from './ui.mjs';
@@ -111,8 +111,13 @@ export function blocksLine(u, ctx) {
 }
 
 // The tab row: links between pages (ctx.pages); the current one is marked. It scrolls inside itself when narrow.
-const tabs = (ctx, path) => (ctx.pages?.length
-  ? `<nav class="tabs" aria-label="Pages">${ctx.pages.map((p) => `<a href="${esc(p.href)}"${p.path === path ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')}</nav>` : '');
+// A page is current at its path, or under its prefix (the Units tab on every unit page); one with tab: false
+// is a tab only on its own page (the coordinator's page, reached from the breadcrumb on the run's pages).
+const here = (p, path) => p.path === path || (!!p.prefix && String(path ?? '').startsWith(p.prefix));
+const tabs = (ctx, path) => {
+  const list = (ctx.pages ?? []).filter((p) => p.tab !== false || here(p, path));
+  return list.length ? `<nav class="tabs" aria-label="Pages">${list.map((p) => `<a href="${esc(p.href)}"${here(p, path) ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')}</nav>` : '';
+};
 // The breadcrumb: [{ label, href? }], the last one is where you are; flagHtml (a toneChip) follows it.
 const crumbs = (list, flagHtml = '') => `<nav class="crumbs" aria-label="Breadcrumb">${markSvg(18)}`
   + list.map((c, i) => (i === list.length - 1 ? `<span class="here" aria-current="location">${esc(c.label)}</span>`
@@ -188,7 +193,7 @@ function prismSummary(p) {
 }
 
 function evidenceItem(e, repo, ctx, key) {
-  const head = `${badge('evidence', e.kind)}${e.behaviour ? ` <b>${esc(e.behaviour)}</b>` : ''} ${esc(e.label ?? '')}`;
+  const head = `${typeTag(e.kind, e.file ?? e.url)} ${badge('evidence', e.kind)}${e.behaviour ? ` <b>${esc(e.behaviour)}</b>` : ''} ${esc(e.label ?? '')}`;
   let body = '';
   if (e.text !== undefined) {
     const pre = `<pre>${linkify(e.text, repo)}</pre>`;

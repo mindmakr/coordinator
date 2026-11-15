@@ -439,6 +439,53 @@ ul.rows .grow { flex: 1 1 200px; min-width: 0; }
   .wrap { padding: 16px; }
   .head h1 { font-size: 19px; }
 }
+/* page: run / unit */
+#app > [data-k] + [data-k], #app > [data-k] + .cols, #app > .cols + [data-k] { margin-top: var(--gap); }
+#app > [data-k="head"] .head { margin-top: 4px; }
+.runmeta { margin: 4px 0 0; }
+.rows > * { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 9px 0; border-bottom: 1px solid var(--line2); min-width: 0; overflow-wrap: anywhere; }
+.rows > *:first-child { padding-top: 0; } .rows > *:last-child { border-bottom: 0; padding-bottom: 0; }
+dl.kv { margin: 0; display: grid; grid-template-columns: minmax(64px, max-content) minmax(0, 1fr); gap: 8px 12px; font-size: 13px; }
+dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+dl.kv .next-step { font-weight: 600; }
+.panel .body > :first-child { margin-top: 0; }
+.panel .goal, .panel .status { margin: 0; padding: 0; border: 0; background: none; }
+.panel .legend { margin: 0 0 10px; }
+.panel .qs { list-style: none; margin: 0; padding: 0; }
+.panel .qs .q:first-child { margin-top: 0; }
+.answered-wait { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line2); opacity: .9; }
+.answered-wait h3.sub { margin: 0; }
+.t .ucell { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 200px; }
+.t .uid { font-weight: 600; }
+.t p { margin: 4px 0 0; } .t .say { font-size: 12px; }
+.t .gapcell { min-width: 200px; max-width: 360px; font-size: 12px; overflow-wrap: anywhere; }
+.gapcell p, .lastgap p { margin: 0 0 4px; }
+.lastgap .gap { font-size: 14px; }
+.gev { overflow-wrap: anywhere; }
+tr.fin td { opacity: .78; }
+:root:has(#show-finished:not(:checked)) tr.fin, :root:has(#show-finished:not(:checked)) .lane.fin { display: none; }
+.lanes { min-width: 600px; }
+.lanes .ends { display: flex; justify-content: space-between; gap: 12px; padding: 0 0 4px 72px; font-size: 12px; color: var(--muted); }
+.lane { display: flex; align-items: center; min-height: 34px; border-top: 1px solid var(--line2); }
+.lane > a { flex: 0 0 72px; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 6px; }
+.lane .track { position: relative; flex: 1 1 auto; height: 26px; }
+.lane .seg { position: absolute; top: 3px; bottom: 3px; min-width: 6px; display: flex; align-items: center; padding: 0 4px; border-radius: 4px; font-size: 11px; font-weight: 700; overflow: hidden; white-space: nowrap; text-decoration: none; border: 1.5px solid transparent; }
+.seg.p { background: var(--text); color: var(--bg); }
+.seg.f { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+.seg.j { background: var(--ok-bg); color: var(--ok); border-style: dashed; border-color: var(--ok); }
+.seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.budget-rows { display: grid; gap: 10px; font-size: 13px; }
+.brow .row { margin: 0; } .brow ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+.panel .timeline { margin-top: 0; }
+.unitbar { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+.unitbar a { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; text-decoration: none; }
+.unitbar a .mono { font-weight: 600; }
+.unitbar a[aria-current="page"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.head .meta { margin-left: auto; }
+.round-list { margin-top: 10px; }
+.udetail + .udetail { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line2); }
+.udetail h3.sub { margin: 0; display: flex; align-items: center; gap: 6px; }
+:root:has(#show-finished:not(:checked)) .udetail.fin { display: none; }
 /* page: report / retro */
 .head .acts { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .btn { box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-decoration: none; }

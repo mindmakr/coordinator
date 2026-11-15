@@ -234,7 +234,7 @@ test('run.mjs map writes the map beside the run, links it from the dashboard, an
   assert.equal(out.build, 1); assert.equal(out.partial, false); assert.equal(out.stats.modules, map.modules.length);
   for (const f of ['map/events.jsonl', 'map/map.json', 'map/map.md', 'map.html']) assert.ok(existsSync(join(state, 'runs', 'm1', f)), f);
   assert.match(readFileSync(join(state, 'runs', 'm1', 'map', 'map.md'), 'utf8'), /# Project map: project/);
-  assert.match(readFileSync(join(state, 'runs', 'm1', 'hud.html'), 'utf8'), /<a class="open" href="map.html">Project map →<\/a>/);
+  assert.match(readFileSync(join(state, 'runs', 'm1', 'hud.html'), 'utf8'), /<a href="map\.html">Project map<\/a><\/nav>/, 'the Project map tab');
   const t = cli('touches', 'm1', 'src/services/ewa.service.ts');
   assert.equal(t.code, 0, t.err);
   assert.match(t.out, /^What src\/services\/ewa.service.ts touches \(project map\):/);
@@ -309,7 +309,7 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
     const html = await page.text();
     assert.match(html, /<svg class="graph"/);
     assert.match(html, /href="\/\?t=/, 'back link keeps the token');
-    assert.match(await (await fetch(url)).text(), /href="\/map\?t=[^"]+">Project map →/);
+    assert.match(await (await fetch(url)).text(), /<a href="\/map\?t=[^"]+">Project map<\/a>/);
     assert.equal((await fetch(`${u.origin}/map`)).status, 403, 'no token, no map');
     const other = await fetch(`${u.origin}/run/m2/map${u.search}`);
     assert.equal(other.status, 200, 'another run\'s map at /run/<id>/map');
@@ -323,7 +323,7 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
       const broken = await (await fetch(`${u.origin}/run/m2/map${u.search}`)).text();
       assert.match(broken, /Project map · not readable/); assert.match(broken, /is not JSON[\s\S]*--fresh/);
       const nav = /<nav class="tabs"[\s\S]*?<\/nav>/.exec(broken)[0];
-      assert.match(nav, /href="\/run\/m2\?t=[^"]+">m2<\/a>/, 'the nav names m2, the run whose map this is');
+      assert.match(nav, /href="\/run\/m2\?t=[^"]+">Overview<\/a>/, 'the run tabs lead to m2, the run whose map this is');
       assert.match(nav, /href="\/run\/m2\/maps\?t=[^"]+">Maps<\/a>/);
       assert.match(nav, /href="\/run\/m2\/map\?t=[^"]+" aria-current="page">Project map<\/a>/);
       assert.ok(!/>m1</.test(nav), 'not the served run');

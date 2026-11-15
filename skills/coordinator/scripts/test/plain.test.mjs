@@ -40,7 +40,7 @@ test('the situation is the lead\'s latest note, or counted from the state', () =
 
 test('needs you lists open questions with the recommendation, and is calm when there are none', () => {
   let r = render(state());
-  assert.match(r.html, /<div class="needs calm">Nothing needs you\.<\/div>/);
+  assert.match(r.html, /<h2>Needs you<\/h2><span class="count">0<\/span><\/summary><div class="body"><p class="empty">Nothing needs you\.<\/p><\/div>/);
   assert.match(r.txt, /^needs you {2}nothing$/m);
   const notes = [
     { kind: 'question', text: 'Merge u1 now?', recommend: 'yes, the review says READY', at: at(31) },
@@ -49,7 +49,7 @@ test('needs you lists open questions with the recommendation, and is calm when t
   ];
   r = render(state({ notes }));
   assert.deepEqual(r.v.needsYou.map((q) => q.id), ['q1']);
-  assert.match(r.html, /<div class="needs"><b>Needs you<\/b><ul><li class="q" id="q1" data-a="q-q1"><p class="qlabel" title="Which run and task this question comes from">g \(r1\)<\/p><p class="qtext"><b>q1<\/b> Merge u1 now\?<\/p><p class="rec">Recommended: yes, the review says READY<\/p>/);
+  assert.match(r.html, /<details class="panel ask" data-d="needs"[^>]*><summary>[\s\S]*?<h2>Needs you<\/h2><span class="count">1<\/span><\/summary><div class="body"><ul class="qs"><li class="q" id="q1" data-a="q-q1"><p class="qlabel" title="Which run and task this question comes from">g \(r1\)<\/p><p class="qtext"><b>q1<\/b> Merge u1 now\?<\/p><p class="rec">Recommended: yes, the review says READY<\/p>/);
   assert.match(r.txt, /^needs you {2}g \(r1\)\n {11}q1: Merge u1 now\? → recommended: yes, the review says READY$/m);
   assert.match(r.txt, /open {4}1 questions/);
   assert.match(r.html, /<b>q2<\/b> Use UTC\?<p class="ans"><b>Answered:<\/b> UTC it is /, 'a decided question shows its answer, not as open');
@@ -62,7 +62,7 @@ test('time left is rough: none before a try finishes, then median tries on the l
   // tries took 30 (u1), 20 and 20 (u2): median 20. Chain u3 → u4 is 2 tries, plus integration: 3.
   const r = render(state());
   assert.equal(r.v.timeLeft, 'About 1 h (rough: 3 more tries at a median 20 min each); the time budget has 3 h 15 min left.');
-  assert.match(r.html, /<b>Time left<\/b>About 1 h \(rough/);
+  assert.match(r.html, /<span class="cause">Time left<\/span><span>About 1 h \(rough/);
   assert.match(render(state(), 300).v.timeLeft, /the time budget is spent/);
   assert.equal(render(state({ closed: { outcome: 'done', at: at(50) } })).v.timeLeft, 'None: the run is closed.');
 });
@@ -74,10 +74,10 @@ test('each unit says what it is for, how it went and what happens next', () => {
   assert.equal(say.u2, 'u2 works. Failed twice in a row: cycle dates; next another try.');
   assert.equal(say.u3, 'u3 works. Building, try 1; next a critic checks it when the builder finishes.');
   assert.equal(say.u4, 'u4 works. Waiting for u3; starts when it passes.');
-  assert.ok(html.indexOf('<p class="say">u2 works.') < html.indexOf('Tries used: 2 of 4'), 'the sentence comes before the scores');
-  assert.match(html, /<details class="raw" data-d="u-u2-raw" data-a="d-u-u2-raw"><summary>Gap and evidence<\/summary><dl><dt>Last gap<\/dt><dd>still off by one/);
+  assert.ok(html.indexOf('data-a="say-u2">u2 works.') < html.indexOf('try 3 of 4 next'), 'the sentence comes before the tries');
+  assert.match(html, /<div class="gapcell" data-a="gap-u2"><p class="gap">still off by one/);
   assert.match(html, /<a href="https:\/\/github.com\/o\/r\/issues\/1" target="_blank" rel="noopener noreferrer">o\/r#1<\/a>/, 'a short label for a GitHub link');
-  assert.match(html, /u1 · #1 Security gaps/);
+  assert.match(html, />u1<\/a> <b>#1 Security gaps<\/b>/, 'the id and the title');
 });
 
 test('attention: two failed tries in a row, or a silent agent, earn a badge', () => {
