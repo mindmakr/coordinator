@@ -118,7 +118,7 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
       ['Tries per unit', b.rounds, b.usedRounds, b.suggested ?? '–'],
       ['Builds started', '–', b.builds, '–'],
       ...(b.resets ? [['Resets', '–', b.resets, '–']] : []),
-      ['Units', b.units, b.usedUnits, '–'],
+      ['Units', b.units ?? '–', b.usedUnits, '–'],
       ['Time, minutes', b.minutes, '–', '–'],
     ].map(([item, ...rest]) => [item, ...rest.map(String)]),
     min: 420,

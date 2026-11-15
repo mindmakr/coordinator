@@ -286,6 +286,7 @@ test('retro budget: the Units row shows the cap as the budget and the count as u
   const m = retroModel(s);
   assert.equal(m.budget.units, 6); assert.equal(m.budget.usedUnits, 2);
   assert.match(retroPage(m, view(), Date.now(), null, false), /<td[^>]*>Units<\/td>\s*<td[^>]*>6<\/td>\s*<td[^>]*>2<\/td>/);
+  assert.match(retroPage(retroModel({ ...s, budget: { maxRounds: 4, maxMinutes: 60 } }), view(), Date.now(), null, false), /<td[^>]*>Units<\/td>\s*<td[^>]*>–<\/td>\s*<td[^>]*>2<\/td>/); // no maxUnits: a dash, not "undefined"
 });
 
 test('retro page: shared shell, KPI row and the panels, links to units, Download always and Copy only live', () => {
