@@ -6,6 +6,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { basename, join, posix } from 'node:path';
 import { inferRepo } from '../links.mjs';
+import { findFeatureMap } from '../featuremap.mjs';
 import { ENV_TEMPLATE, gitHead, JS, listFiles, OTHER } from './files.mjs';
 import { analyse } from './js.mjs';
 import { langOf, looseIndex, resolveLoose, scanOther } from './other.mjs';
@@ -217,11 +218,24 @@ export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
 
   const langs = {};
   for (const m of modules) langs[m.lang] = (langs[m.lang] ?? 0) + 1;
+  const fm = findFeatureMap(root);
+  if (fm.found) {
+    for (const a of fm.actions) surfaces.push({ id: `reins-action:${a}`, kind: 'reins-action', name: a, source: fm.path });
+    for (const p of fm.panels) surfaces.push({ id: `reins-panel:${p}`, kind: 'reins-panel', name: p, source: fm.path });
+    for (const s of fm.states) surfaces.push({ id: `reins-state:${s}`, kind: 'reins-state', name: s, source: fm.path });
+    for (const r of fm.routes) {
+      const rid = `route:${r.method ? `${r.method} ` : ''}${r.path}`;
+      if (!surfaces.some((x) => x.id === rid)) {
+        surfaces.push({ id: rid, kind: 'route', ...(r.file ? { file: r.file } : {}), source: fm.path });
+      }
+    }
+  }
   const head = gitHead(root);
   const meta = {
     root: basename(root), repo: inferRepo(root), commit: head.commit, pushed: head.pushed, files: files.length, scanned: info.size, partial, ms,
     langs, unresolved, messages: { keys: keys.size, unused, unknownLookups: missing, catalogs: dirs },
     external: [...external].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 15).map(([name, n]) => `${name} ${n}`),
+    ...(fm.found ? { featureMap: { path: fm.path, actions: fm.actions.length, panels: fm.panels.length, states: fm.states.length } } : {}),
   };
   const once = [...new Map(surfaces.map((s) => [s.id, s])).values()]; // a route registered twice is one surface
   return { meta, modules: modules.sort(byId), helpers: helpers.sort(byId), settings: settingList.sort(byId), surfaces: once.sort(byId), reuse: reuse.sort(byId) };
