@@ -49,12 +49,15 @@ for (const kind of ['memory', 'postgres']) {
       assert.equal(await db.seenDelivery('d1'), true);
 
       const s = { idHash: 'h1', userId: 1, login: 'reader', tokenEnc: 'enc', refreshEnc: null, tokenExpiresAt: Date.now() + 1000, refreshExpiresAt: null, expiresAt: Date.now() + 60_000 };
-      await db.putSession(s);
-      assert.equal((await db.session('h1')).login, 'reader');
-      await db.putSession({ ...s, idHash: 'old', expiresAt: Date.now() - 3_600_000 });
-      assert.equal(await db.session('old'), null, 'an expired session is gone');
+      await db.putSession(s, Date.now());
+      assert.equal((await db.session('h1', Date.now())).login, 'reader');
+      await db.putSession({ ...s, idHash: 'old', expiresAt: Date.now() - 3_600_000 }, Date.now());
+      assert.equal(await db.session('old', Date.now()), null, 'an expired session is gone');
+      // Expiry is by the time the caller (the app clock) gives, not the wall clock.
+      assert.equal((await db.session('h1', s.expiresAt - 1)).login, 'reader');
+      assert.equal(await db.session('h1', s.expiresAt), null, 'ended at its expiry by the given time');
       await db.dropSession('h1');
-      assert.equal(await db.session('h1'), null);
+      assert.equal(await db.session('h1', Date.now()), null);
 
       // The trail's tables.
       await db.upsertRepo({ installationId: 7, id: 70, fullName: 'acme/web', private: true });

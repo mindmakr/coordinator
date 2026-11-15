@@ -13,6 +13,12 @@ const SCOPED = ['repos', 'removeRepo', 'setRepoSync', 'runs', 'runSummaries', 'f
 // c12 writes: comment commands, claimed once each.
 SCOPED.push('claimCommand', 'finishCommand', 'releaseCommand');
 
+// The app clock's time for a session read or write: both adapters take it from the caller, never the wall clock.
+export function atMs(at) {
+  if (!Number.isFinite(at)) throw new Error('db: the time (ms) is required');
+  return at;
+}
+
 export function guard(db) {
   const out = { ...db };
   for (const name of SCOPED) {
