@@ -38,7 +38,7 @@ import {
   setupHelpers,
 } from './lib/helpers.mjs';
 import { complete, listModels } from './lib/helpercall.mjs';
-import { readSettings, settingsFile, settingsTracked, TRACKED_FIX, trackedRefusal } from './lib/settings.mjs';
+import { activeHelpers, readSettings, settingsFile, settingsTracked, TRACKED_FIX } from './lib/settings.mjs';
 import { baseDir, readJson, safeId, update, withLock, writeAtomic } from './lib/store.mjs';
 
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -56,12 +56,9 @@ const readText = (f, what) => {
 const str = (v, name) => { if (typeof v !== 'string' || !v.trim()) throw new Error(`missing --${name}`); return v; };
 
 function config() {
-  const base = baseDir('project');
-  const { settings, error } = readSettings(base);
-  if (error) throw new Error(`${settingsFile(base)}: ${error}`);
-  // The helper endpoint is sent the key named in keyEnv, so a committed settings file may not turn helpers on.
-  if (settings.helpers !== undefined && settings.helpers !== false && settingsTracked(base)) return { on: false, tracked: true, why: trackedRefusal('helpers') };
-  return helperConfig(settings);
+  const cfg = activeHelpers(baseDir('project'));
+  if (cfg.error) throw new Error(cfg.error);
+  return cfg;
 }
 function needOn() {
   const cfg = config();
