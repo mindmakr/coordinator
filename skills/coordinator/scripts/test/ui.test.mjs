@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { bar, cols, heading, kpis, page, panel, rememberToggle, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
+import { bar, cols, heading, kpis, page, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
 import { privacy } from '../lib/quality/privacy.mjs';
 import { sourceFile } from '../lib/quality/source.mjs';
 
@@ -221,4 +221,10 @@ test('restoreOpen: toggles and panels open or closed as the reader left them; un
   assert.deepEqual(nodes.map((n) => n.open), [true, false, true, false]);
   assert.deepEqual(map, { tl: false, 'ev-1': true, junk: 'yes' }, 'the same map, kept for the next toggles');
   for (const bad of [null, [], 'x', 3]) assert.deepEqual(restoreOpen([d('a', true)], bad), {}, `stored ${JSON.stringify(bad)}: nothing restored`);
+});
+
+test('rows: one li per item, the caller\'s HTML kept; none says the empty text, escaped', () => {
+  assert.equal(rows(['<b>a</b>', 'b']), '<ul class="rows"><li><b>a</b></li><li>b</li></ul>');
+  assert.equal(rows([]), '<p class="empty">None</p>');
+  assert.equal(rows([], { empty: 'No <run>' }), '<p class="empty">No &lt;run&gt;</p>');
 });

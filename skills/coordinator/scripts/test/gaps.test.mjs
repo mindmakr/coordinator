@@ -189,7 +189,8 @@ test('the page: a Gaps section with its count in the header and the nav; escaped
   const m = selfModel({ runs: [a, b] });
   const html = selfPage(m, Date.now(), { ...staticCtx('', 0), runHref: (id) => `runs/${id}/hud.html` });
   assert.match(html, /<a href="#self-gaps">2 open gaps across 1 run<\/a>/);
-  assert.match(html, /href="#self-gaps">Gaps · 2</);
+  assert.match(html, /<h2>Gaps<\/h2><span class="count">2<\/span>/);
+  assert.match(html, /<span class="k">Open gaps<\/span><span class="v">2<\/span>/);
   assert.match(html, /data-k="self-gaps"/);
   assert.doesNotMatch(html, /<script>alert|<img src=x|<b>c<\/b>/);
   assert.doesNotMatch(html, /href="javascript:/);

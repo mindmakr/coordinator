@@ -429,6 +429,10 @@ table.t { width: 100%; border: 0; border-radius: 0; background: none; border-col
 .pip.q { color: var(--retry); background: var(--retry-bg); border-style: dashed; border-color: var(--retry); }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 .bar.ok > span { background: var(--ok); } .bar.bad > span { background: var(--bad); } .bar.ask > span { background: var(--ask); }
+ul.rows { list-style: none; margin: 0; padding: 0; }
+ul.rows > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 9px 0; border-bottom: 1px solid var(--line2); overflow-wrap: anywhere; min-width: 0; }
+ul.rows > li:first-child { padding-top: 0; } ul.rows > li:last-child { border-bottom: 0; padding-bottom: 0; }
+ul.rows .grow { flex: 1 1 200px; min-width: 0; }
 @media (max-width: 640px) {
   .top { padding: 10px 16px; }
   .tabs { padding: 0 16px; }
@@ -460,6 +464,22 @@ a.evtag { text-decoration: none; }
 .pmap-page .t code { font: 12px var(--mono); overflow-wrap: anywhere; }
 .pmap-page .side .t th, .pmap-page .side .t td { padding-left: 6px; padding-right: 6px; }
 .pmap-page .t .meta { overflow-wrap: anywhere; } /* a long declared path breaks, so the side panel's tables fit without a sideways scroll */
+/* page: this-pc / coordinator (lib/dashboard.mjs pcPage, lib/selfpage.mjs) */
+.wrap > main > .kpis, .wrap > main > .cols, .wrap > main > [data-k="kpis"] { margin-top: var(--gap); }
+.panel .body > section > .needs:first-child { margin-top: 0; }
+.panel .body > section > .card + .card { margin-top: var(--gap); }
+.panel .t .muted { font-size: 12px; }
+.panel .t .origin, .panel .t .origin-warn { margin: 2px 0 0; font-size: 12px; }
+.panel .t .bar { max-width: 140px; margin-top: 4px; }
+ul.rows .line { display: block; }
+ul.rows ul { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+ul.rows > li > .muted:last-child { font-size: 12px; }
+.figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.figs > div { display: flex; flex-direction: column; min-width: 0; }
+.figs .k { font-size: 12px; color: var(--muted); } .figs .v { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.caps li .bar { flex: 1 1 100%; margin: 0; }
+section.self > h3.sub:first-child, .panel .body > section > p.meta:first-child { margin-top: 0; }
+section.self .run-rows { grid-template-columns: 1fr; }
 /* Export PDF (the browser's print): light theme, everything open, live-only controls hidden, nothing cut across pages where it fits. */
 @media print {
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

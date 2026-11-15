@@ -19,6 +19,7 @@
 //   bar(pct, { label?, tone? })       div.bar: a meter with its percent as its label
 //   restoreOpen(nodes, saved)         the live page's memory of toggles and panels (live.client.js runs it)
 //   rememberToggle(map, d, armed)     records a toggle only after the reader clicked its summary
+//   rows([html], { empty? })          ul.rows: one short line per item, its parts wrapping; none says so
 import { esc } from './links.mjs';
 
 const text = esc;
@@ -103,4 +104,10 @@ const TRY = { pass: ['p', '✓', 'passed'], fail: ['f', '✕', 'failed'], work: 
 export function tries(states) {
   const marks = states.map((s, i) => { const [c, g, w] = TRY[s] ?? TRY.open; return { c, g: g ?? String(i + 1), w: `try ${i + 1} ${w}` }; });
   return `<span class="tries" role="img" aria-label="${text(marks.map((m) => m.w).join(', '))}">${marks.map((m) => `<span class="pip ${m.c}" aria-hidden="true">${m.g}</span>`).join('')}</span>`;
+}
+
+// Short lines, one per item (the canvas's .rows). Each item is HTML its caller built; none says `empty`.
+export function rows(items, { empty = 'None' } = {}) {
+  if (!items.length) return `<p class="empty">${text(empty)}</p>`;
+  return `<ul class="rows">${items.map((i) => `<li>${i}</li>`).join('')}</ul>`;
 }
