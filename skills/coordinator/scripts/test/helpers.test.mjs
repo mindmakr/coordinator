@@ -7,7 +7,22 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { complete } from '../lib/helpercall.mjs';
-import { buildRequest, checkHelpers, endpointProblem, helperConfig, hostKind, missingModels, readAnswer, setupHelpers } from '../lib/helpers.mjs';
+import {
+  askChoice,
+  askNoul,
+  askScore,
+  buildRequest,
+  checkAtomicProposition,
+  checkHelpers,
+  classifyProbability,
+  DEFAULT_JEV_THRESHOLDS,
+  endpointProblem,
+  helperConfig,
+  hostKind,
+  missingModels,
+  readAnswer,
+  setupHelpers,
+} from '../lib/helpers.mjs';
 import { launchCostProblem, overLaunch } from '../lib/cost.mjs';
 import { checkSettings } from '../lib/settings.mjs';
 import { buildBrief } from '../lib/briefs.mjs';
@@ -226,4 +241,192 @@ test('helper.mjs: helpers in a settings file committed to git are off, and setup
     assert.match(setup.err, /committed to git/);
     assert.equal(cli('helper.mjs', ['setup', 'off'], env).code, 0, 'turning helpers off is still allowed');
   } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('jev system one: checkAtomicProposition & classifyProbability enforce [0.20, 0.85] uncertainty band', () => {
+  assert.equal(DEFAULT_JEV_THRESHOLDS.passAbove, 0.85);
+  assert.equal(DEFAULT_JEV_THRESHOLDS.failBelow, 0.20);
+  assert.equal(classifyProbability(0.86).verdict, 'pass');
+  assert.equal(classifyProbability(0.86).escalate, false);
+  assert.equal(classifyProbability(0.19).verdict, 'fail');
+  assert.equal(classifyProbability(0.19).escalate, false);
+  for (const p of [0.20, 0.50, 0.85, null, Number.NaN]) {
+    const r = classifyProbability(p);
+    assert.equal(r.verdict, 'uncertain');
+    assert.equal(r.escalate, true);
+  }
+  assert.equal(checkAtomicProposition('The file exports buildRequest.'), 'The file exports buildRequest.');
+  assert.throws(() => checkAtomicProposition(''), /non-empty/);
+  assert.throws(() => checkAtomicProposition('Does A work? Does B work?'), /one atomic proposition/);
+  assert.throws(() => checkAtomicProposition('- item one\n- item two'), /one atomic proposition/);
+});
+
+test('jev system one: setup jev, custom thresholds, choice, score, and batched noul via local server', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'coordinator-jev-cli-'));
+  const seenRequests = [];
+  const srv = createServer((req, res) => {
+    let raw = '';
+    req.on('data', (d) => { raw += d; });
+    req.on('end', () => {
+      const body = JSON.parse(raw);
+      seenRequests.push(body);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      const schemaName = body.response_format?.json_schema?.name;
+      if (schemaName === 'jev_noul_batch') {
+        res.end(JSON.stringify({
+          model: body.model,
+          usage: { prompt_tokens: 40, completion_tokens: 24 },
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                results: [
+                  { id: 'P1', probability: 0.94, rationale: 'direct match' },
+                  { id: 'P2', probability: 0.55, rationale: 'ambiguous' },
+                  { id: 'P3', probability: 0.08, rationale: 'contradicted' },
+                ],
+              }),
+            },
+          }],
+        }));
+      } else if (schemaName === 'jev_choice') {
+        res.end(JSON.stringify({
+          model: body.model,
+          usage: { prompt_tokens: 22, completion_tokens: 12 },
+          choices: [{ message: { content: JSON.stringify({ answer: 'docs-only', probability: 0.92, rationale: 'only md edited' }) } }],
+        }));
+      } else if (schemaName === 'jev_score') {
+        res.end(JSON.stringify({
+          model: body.model,
+          usage: { prompt_tokens: 25, completion_tokens: 14 },
+          choices: [{ message: { content: JSON.stringify({ score: 8, probability: 0.91, rationale: 'clean tests' }) } }],
+        }));
+      } else {
+        res.end(JSON.stringify({ model: body.model, choices: [{ message: { content: '{}' } }] }));
+      }
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  const env = { COORDINATOR_DIR: base, JEV_API_KEY: 'test-jev-key' };
+  try {
+    const hSetup = setupHelpers('jev', { thresholds: { passAbove: 0.9, failBelow: 0.1 } });
+    assert.equal(hSetup.provider, 'jev');
+    const cfgSetup = helperConfig({ helpers: hSetup });
+    assert.equal(cfgSetup.models.noul, 'typesafe/jev-noul');
+    assert.equal(cfgSetup.models.choice, 'typesafe/jev-choice');
+    assert.equal(cfgSetup.models.score, 'typesafe/jev-score');
+    assert.deepEqual(cfgSetup.thresholds, { passAbove: 0.9, failBelow: 0.1 });
+
+    const s = cli('helper.mjs', [
+      'setup', 'jev',
+      '--endpoint', `http://127.0.0.1:${port}/v1`,
+      '--pass-above', '0.85',
+      '--fail-below', '0.20',
+    ], env);
+    assert.equal(s.code, 0, s.err);
+    assert.deepEqual(s.out.thresholds, { passAbove: 0.85, failBelow: 0.20 });
+
+    const batch = await cliAsync('helper.mjs', [
+      'noul',
+      '--proposition', 'Tests pass',
+      '--proposition', 'Copy matches Figma',
+      '--proposition', 'Secret leaked in stdout',
+      '--context', 'Diff summary',
+    ], env);
+    assert.equal(batch.code, 0, batch.err);
+    assert.equal(seenRequests.length, 1, 'multiple propositions batch into one Jev request');
+    assert.equal(batch.out.results.length, 3);
+    assert.equal(batch.out.results[0].verdict, 'pass');
+    assert.equal(batch.out.results[0].escalate, false);
+    assert.equal(batch.out.results[1].verdict, 'uncertain');
+    assert.equal(batch.out.results[1].escalate, true);
+    assert.equal(batch.out.results[2].verdict, 'fail');
+    assert.equal(batch.out.results[2].escalate, false);
+    assert.equal(batch.out.escalate, true);
+    assert.equal(batch.out.verdict, 'uncertain');
+
+    const ch = await cliAsync('helper.mjs', [
+      'choice', '--question', 'Task class?', '--choice', 'docs-only', '--choice', 'auth',
+    ], env);
+    assert.equal(ch.code, 0, ch.err);
+    assert.equal(ch.out.answer, 'docs-only');
+    assert.equal(ch.out.verdict, 'pass');
+    assert.equal(ch.out.escalate, false);
+
+    const sc = await cliAsync('helper.mjs', [
+      'score', '--criterion', 'Verification strength', '--min', '0', '--max', '10',
+    ], env);
+    assert.equal(sc.code, 0, sc.err);
+    assert.equal(sc.out.score, 8);
+    assert.equal(sc.out.normalizedScore, 0.8);
+    assert.equal(sc.out.verdict, 'pass');
+
+    // Also test direct askNoul / askChoice / askScore helpers with failing network
+    const badCfg = helperConfig({
+      helpers: { provider: 'jev', endpoint: 'http://127.0.0.1:1/v1', keyEnv: 'JEV_API_KEY' },
+    });
+    const offline = await askNoul(badCfg, { proposition: 'Bridge started' }, { completeFn: async () => { throw new Error('connect ECONNREFUSED'); } });
+    assert.equal(offline.escalate, true);
+    assert.equal(offline.fallback, true);
+    assert.equal(offline.verdict, 'uncertain');
+    assert.match(offline.why, /ECONNREFUSED/);
+
+    const chRes = await askChoice(cfgSetup, { question: 'Class?', choices: ['a', 'b'] }, {
+      completeFn: async () => ({ model: 'typesafe/jev-choice', choices: [{ message: { content: JSON.stringify({ answer: 'a', probability: 0.6 }) } }] }),
+    });
+    assert.equal(chRes.escalate, true);
+    assert.equal(chRes.verdict, 'uncertain');
+
+    const scRes = await askScore(cfgSetup, { criterion: 'Quality', min: 0, max: 10 }, {
+      completeFn: async () => ({ model: 'typesafe/jev-score', choices: [{ message: { content: JSON.stringify({ score: 9, probability: 0.95 }) } }] }),
+    });
+    assert.equal(scRes.escalate, false);
+    assert.equal(scRes.verdict, 'pass');
+  } finally {
+    srv.close();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('jev system one: offline fallback logs helper.call telemetry without crashing run', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'coordinator-jev-offline-'));
+  const env = { COORDINATOR_DIR: base, JEV_API_KEY: 'test-jev-key' };
+  try {
+    assert.equal(cli('run.mjs', ['init', 'r1', '--goal', 'g', '--bar', 'b', '--fence', 'f'], env).code, 0);
+    assert.equal(cli('run.mjs', ['add', 'r1', 'u1', '--bar', 'b'], env).code, 0);
+
+    // 1) Helpers disabled -> clean fallback + helper.call event logged
+    const offRes = await cliAsync('helper.mjs', ['noul', '--proposition', 'Tests ran cleanly', '--run', 'r1', '--unit', 'u1'], env);
+    assert.equal(offRes.code, 0, offRes.err);
+    assert.equal(offRes.out.escalate, true);
+    assert.equal(offRes.out.fallback, true);
+    assert.equal(offRes.out.verdict, 'uncertain');
+
+    // 2) Helpers enabled to a closed ephemeral loopback port -> clean fallback + helper.call event logged
+    const deadSrv = createServer();
+    await new Promise((r) => deadSrv.listen(0, '127.0.0.1', r));
+    const deadPort = deadSrv.address().port;
+    await new Promise((r) => deadSrv.close(r));
+    const setupRes = cli('helper.mjs', ['setup', 'jev', '--endpoint', `http://127.0.0.1:${deadPort}/v1`], env);
+    assert.equal(setupRes.code, 0, setupRes.err);
+    const downRes = await cliAsync('helper.mjs', ['noul', '--proposition', 'Tests ran cleanly', '--run', 'r1', '--unit', 'u1'], env);
+    assert.equal(downRes.code, 0, downRes.err);
+    assert.equal(downRes.out.escalate, true);
+    assert.equal(downRes.out.fallback, true);
+    assert.equal(downRes.out.verdict, 'uncertain');
+
+    const lines = readFileSync(join(base, 'runs', 'r1', 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const helperEvents = lines.filter((e) => e.kind === 'helper.call');
+    assert.equal(helperEvents.length, 2);
+    assert.equal(helperEvents[0].unit, 'u1');
+    const state = JSON.parse(readFileSync(join(base, 'runs', 'r1', 'state.json'), 'utf8'));
+    assert.equal(state.helperCalls.length, 2);
+    assert.equal(state.helperCalls[1].model, 'typesafe/jev-noul');
+    assert.equal(state.helperCalls[1].fallback, true);
+    assert.equal(state.helperCalls[1].escalate, true);
+    assert.equal(state.helperCalls[1].verdict, 'uncertain');
+    assert.equal(typeof state.helperCalls[1].latencyMs, 'number');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
