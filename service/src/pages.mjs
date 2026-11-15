@@ -226,13 +226,13 @@ export function retroView(user, repo, row, nowMs = Date.now(), nonce = null, run
 // replayed shows why, as the local dashboard does; one that broke later keeps the last good map.
 // "Touched by this run" from the run's state (touchedBy): only the map's snapshot is kept here, not its log.
 export function projectMapView(user, repo, row, nonce = null) {
-  const ctx = { ...ctxFor(repo.fullName, row.runId, row, null, nonce), touched: touchedBy(runState(row)?.units ?? []) };
+  const ctx = ctxFor(repo.fullName, row.runId, row, null, nonce);
   if (!row.map) {
     const body = `<a class="back" href="${esc(ctx.home)}">← ${esc(row.runId)} dashboard</a><header class="run"><h1>Project map · not readable</h1></header>`
       + `<div class="needs"><p><b>The map's log could not be read.</b></p><p>${esc(row.mapError ?? '')}</p></div>`;
     return withBar(page({ title: `Map · ${row.runId}`, body, ctx, path: `${ctx.base}/map` }), user, repo.fullName);
   }
-  const html = projectMapPage(row.map, ctx, row.runId);
+  const html = projectMapPage(row.map, { ...ctx, touched: touchedBy(runState(row)?.units ?? []) }, row.runId);
   const note = row.mapError ? `<p class="meta">The latest map log was refused, showing the last good copy: ${esc(row.mapError)}</p>` : '';
   return withBar(html.replace('<main id="app">', () => `<main id="app">${note}`), user, repo.fullName);
 }

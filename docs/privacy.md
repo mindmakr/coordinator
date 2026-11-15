@@ -37,6 +37,8 @@ Coordinator runs on your machine. The hosted service at [app.coordinator.mindmak
 | Rate counters (below) | To keep one client or tenant from crowding out the rest | In memory, for their window. A restart resets them |
 | GitHub's published webhook address ranges (from `GET /meta`, public) | To tell GitHub's deliveries from others' | In memory, refreshed daily |
 
+The hosted and local pages keep two kinds of key in your browser's storage: `coordinator.theme` and `coordinator:<run>:open:<path>`. They hold the theme you picked and which panels are open, no personal data, and they stay in the browser after you sign out.
+
 **Uninstalling the App** deletes everything about that installation at once: runs, repos, links, trackers, merges and checks, handled comment commands, the alerts made for its repos (sent or waiting for a digest), everyone's follows of its repos, and its audit rows. Two things stay: one audit row, `installation.deleted`, with who removed it (for 90 days), and the installation's id in `uninstalled` (above). What is yours rather than the installation's stays as above: your session, alert settings, email and push subscriptions, and audit rows about you that name no installation (sign-in and sign-out, refused access, email confirmed or unsubscribed). Your repo keeps its state branch.
 
 **Removing one repo** from the installation deletes its runs, links, follows and the alerts made for it.

@@ -274,19 +274,27 @@ test('extend <run>: a hand-edited question text or header never approves, and th
   probe((q) => { q.header = 'urgent'; }, /q1 was last written by state\.edited, not by question/, 'header, no amount');
 });
 
-// f5 round 2 (finding 2): "Give it ‮600‬ more minutes?" displayed as "006".
+// f5 round 2 (finding 2): "Give it \u202e600\u202c more minutes?" displayed as "006".
 test('ask: text-direction overrides and zero-width characters are stripped from the question, header and options', () => {
-  const hidden = '‪‫‬‭‮⁦⁧⁨⁩​‌‍‎‏﻿';
-  assert.equal(argText(`Give it ‮600‬ more minutes?${hidden}`, 'question'), 'Give it 600 more minutes?');
-  assert.equal(argText(`6​0‍0`, 'x'), '600');
+  const hidden = '\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u200b\u200c\u200d\u200e\u200f\ufeff';
+  assert.equal(argText(`Give it \u202e600\u202c more minutes?${hidden}`, 'question'), 'Give it 600 more minutes?');
+  assert.equal(argText(`6\u200b0\u200d0`, 'x'), '600');
   assert.throws(() => argText(hidden, 'header'), /missing --header/);
   run('init', 'bd', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
   run('add', 'bd', 'm1', '--bar', 'b'); run('freeze', 'bd');
-  const a = run('ask', 'bd', '--question', 'Give it ‮600‬ more minutes?', '--header', 't​ime', '--option', 'Y‮es', '--option', 'No|close ⁦it⁩', '--approves', 'Yes', '--grant-minutes', '600');
+  const a = run('ask', 'bd', '--question', 'Give it \u202e600\u202c more minutes?', '--header', 't\u200bime', '--option', 'Y\u202ees', '--option', 'No|close \u2066it\u2069', '--approves', 'Yes', '--grant-minutes', '600');
   assert.equal(a.code, 0, a.err);
   const q = state('bd').notes.find((x) => x.kind === 'question');
   assert.equal(q.text, 'Give it 600 more minutes?'); assert.equal(q.header, 'time');
   assert.deepEqual(q.options, [{ label: 'Yes', description: '600 more minutes' }, { label: 'No', description: 'close it' }]);
+});
+
+test('ask: a soft hyphen and a word joiner are stripped from the question', () => {
+  run('init', 'sh', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'sh', 'm1', '--bar', 'b'); run('freeze', 'sh');
+  const a = run('ask', 'sh', '--question', 'More' + '\u00ad' + ' time' + '\u2060' + '?', '--header', 'h', '--option', 'Yes', '--option', 'No');
+  assert.equal(a.code, 0, a.err);
+  assert.equal(state('sh').notes.find((x) => x.kind === 'question').text, 'More time?');
 });
 
 test('grantQuestion: every field of a stored question, the one check ask and extend share', () => {
