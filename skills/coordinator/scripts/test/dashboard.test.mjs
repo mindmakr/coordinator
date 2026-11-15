@@ -139,23 +139,32 @@ test('theme: a project CSS maps onto the HUD tokens; unsafe values are dropped',
     @plugin "daisyui/theme" { name: dark; --color-error: oklch(80% 0.1 20); }
     @theme { --border: 1px; --color-base-300: #ddd; --spacing: 0.25rem; }`);
   assert.equal(t.light.bg, 'hsl(0 0% 100%)');
-  assert.equal(t.light.run, 'oklch(0.5 0.1 260)', 'var() resolved');
+  assert.equal(t.light.accent, 'oklch(0.5 0.1 260)', 'var() resolved');
   assert.equal(t.light.line, '#ddd', '--border: 1px is not a colour');
   assert.equal(t.light.radius, '0.75rem');
   assert.equal(t.light.font, 'Inter, system-ui', 'runtime font variables dropped');
-  assert.equal(t.light.gap, 'calc(0.25rem * 3)');
+  assert.equal(t.light.gap, 'calc(0.25rem * 4)');
   assert.match(t.light.muted, /^color-mix/, 'the unsafe value is ignored, muted is derived');
-  assert.equal(t.dark.bg, '#0a0a0a'); assert.equal(t.dark.fail, 'oklch(80% 0.1 20)');
+  assert.match(t.light['accent-bg'], /^color-mix\(in oklab, oklch\(0\.5 0\.1 260\) 10%/, 'shades the project does not name come from its colours');
+  assert.equal(t.light.heat4, t.light.accent);
+  assert.equal(t.light.ok, LIGHT.ok, 'no success colour: the built-in one');
+  assert.equal(t.dark.bg, '#0a0a0a'); assert.equal(t.dark.bad, 'oklch(80% 0.1 20)');
+  assert.match(t.dark['bad-bd'], /^color-mix\(in oklab, oklch\(80% 0\.1 20\) 40%/);
   const out = css(t);
   assert.doesNotMatch(out, /url\(|evil|<|@import/);
   assert.match(out, /:root:has\(#theme-dark:checked\)/);
   const payday = 'D:/projects/mindmakr/payday-web-nextjs/frontend/src/app/globals.css';
   if (existsSync(payday)) {
     const p = fromCss(readFileSync(payday, 'utf8'));
-    assert.equal(p.light.card, 'oklch(1 0 0)'); assert.equal(p.light.run, 'oklch(0.1758 0.0643 257.72)');
-    assert.equal(p.dark.card, 'oklch(0.1758 0.0643 257.72)'); assert.equal(p.light.radius, '0.75rem');
+    assert.equal(p.light.surface, 'oklch(1 0 0)'); assert.equal(p.light.accent, 'oklch(0.1758 0.0643 257.72)');
+    assert.equal(p.dark.surface, 'oklch(0.1758 0.0643 257.72)'); assert.equal(p.light.radius, '0.75rem');
   }
-  assert.deepEqual(fromCss('').light.bg, LIGHT.bg); assert.equal(DARK.scheme, 'dark');
+  assert.deepEqual(fromCss('').light, LIGHT, 'nothing named: the built-in light theme'); assert.equal(DARK.scheme, 'dark');
+  // Light and dark define the same tokens, and every page's CSS gets each one.
+  assert.deepEqual(Object.keys(DARK).sort(), Object.keys(LIGHT).sort());
+  for (const k of ['bg', 'surface', 'surface2', 'line', 'line2', 'text', 'text2', 'muted', 'accent', 'accent-bg', 'on-accent', 'ask', 'ask-bg', 'ask-bd', 'ok', 'ok-bg', 'ok-bd', 'retry', 'retry-bg', 'retry-bd', 'bad', 'bad-bg', 'bad-bd', 'heat0', 'heat4', 'shadow']) {
+    assert.ok(LIGHT[k] && DARK[k], k); assert.ok(css().includes(`--${k}:${LIGHT[k]}`) && css().includes(`--${k}:${DARK[k]}`), k);
+  }
 });
 
 test('timelines: a unit holds only its own events in order; filters, ranges and sort', () => {
@@ -250,7 +259,9 @@ test('serve: live updates over SSE on change, artifacts and pages need the token
   const page = (await get(`/?t=${t}`)).body;
   assert.match(page, /<script nonce="[^"]+">const matches = function matches/);
   assert.match(page, /<img class="thumb" src="\/artifacts\/u1\/E1-shot2\.png\?t=/);
-  assert.match(page, /Coordinator<\/b><span>by <a href="https:\/\/github.com\/mindmakr" target="_blank"/);
+  assert.match(page, /<header class="top"><nav class="crumbs" aria-label="Breadcrumb"><svg class="mark"[^>]*>[\s\S]*?<\/svg><span class="here" aria-current="location">s1<\/span><\/nav>/, 'the breadcrumb, with the mark');
+  assert.match(page, /<footer>Coordinator [\d.]+ · by <a href="https:\/\/github.com\/mindmakr" target="_blank"/);
+  assert.match(page, /<script nonce="[^"]+">\/\/ The theme switch's memory[\s\S]*?coordinator\.theme[\s\S]*?<\/script>\n<\/head>/, 'the theme applies from <head>, before the first paint');
   const frames = [];
   const stream = await new Promise((ok) => httpGet(`${origin}/events?t=${t}&p=/`, (res) => { res.setEncoding('utf8'); res.on('data', (d) => frames.push(d)); ok(res); }));
   assert.equal(stream.headers['content-type'], 'text/event-stream; charset=utf-8');

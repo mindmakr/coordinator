@@ -5,8 +5,9 @@
 // against a small fake DOM.
 //
 // hooks: busy(form) → true to leave a form being filled alone; skipped() when
-// one was; added(node) for each node inserted. `open` (a reader's toggle) and
-// `hidden` (the timeline filter) belong to the page and are never removed.
+// one was; added(node) for each node inserted. `open` (a reader's toggle or
+// panel) belongs to the page and is never set or removed; `hidden` (the timeline
+// filter) is never removed.
 export function morph(target, source, hooks) {
   const KEEP = { open: 1, hidden: 1 };
   const keyOf = (c) => (c.nodeType === 1 ? c.getAttribute('data-a') || c.getAttribute('data-k') : null);
@@ -16,7 +17,7 @@ export function morph(target, source, hooks) {
     if (a.tagName === 'FORM' && hooks.busy(a)) { hooks.skipped(); return; }
     const h = a.getAttribute('data-h');
     if (h && h === b.getAttribute('data-h')) return; // the server says nothing in it changed
-    for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+    for (const { name, value } of [...b.attributes]) if (name !== 'open' && a.getAttribute(name) !== value) a.setAttribute(name, value);
     for (const { name } of [...a.attributes]) if (!b.hasAttribute(name) && !KEEP[name]) a.removeAttribute(name);
     kids(a, b);
   }

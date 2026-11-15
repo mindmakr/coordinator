@@ -306,7 +306,7 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
     try {
       const broken = await (await fetch(`${u.origin}/run/m2/map${u.search}`)).text();
       assert.match(broken, /Project map · not readable/); assert.match(broken, /is not JSON[\s\S]*--fresh/);
-      const nav = /<nav class="pages"[\s\S]*?<\/nav>/.exec(broken)[0];
+      const nav = /<nav class="tabs"[\s\S]*?<\/nav>/.exec(broken)[0];
       assert.match(nav, /href="\/run\/m2\?t=[^"]+">m2<\/a>/, 'the nav names m2, the run whose map this is');
       assert.match(nav, /href="\/run\/m2\/maps\?t=[^"]+">Maps<\/a>/);
       assert.match(nav, /href="\/run\/m2\/map\?t=[^"]+" aria-current="page">Project map<\/a>/);

@@ -1,6 +1,7 @@
-// Pieces shared by the dashboard (hud.mjs) and a unit's page (unitpage.mjs):
-// the page shell, the brand, keyed blocks the live page patches in place,
-// behaviours, evidence and timeline rows. All state text is escaped or linkified.
+// Pieces shared by every page: the page shell (page(): breadcrumb, tabs, theme switch),
+// the mark, keyed blocks the live page patches in place, behaviours, evidence and
+// timeline rows, and the components in lib/ui.mjs (re-exported here: heading, kpis,
+// cols, panel, table, toneChip, typeTag, tries, bar). All state text is escaped or linkified.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { anchor, esc, linkify } from './links.mjs';
@@ -12,13 +13,17 @@ import { eventEvidence, itemBody } from './evview.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
 import { ageText } from './age.mjs';
+import { rememberToggle, restoreOpen } from './ui.mjs';
 
 export { esc };
+export { bar, cols, heading, kpis, panel, rememberToggle, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from './ui.mjs';
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
+// The theme switch's memory, in <head> so the stored theme applies before the first paint.
+const THEME_CLIENT = readFileSync(new URL('./theme.client.js', import.meta.url), 'utf8');
 // The live page's script: updates, then the map panels (lib/maptips.mjs), walking a map (lib/mapnav.mjs) and the evidence viewer (lib/evview.mjs).
 const CLIENT = ['./live.client.js', './maptips.client.js', './mapnav.client.js', './evview.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
-const SERVED = [matches, morph, findMatches, highlight, unhighlight, ageText];
+const SERVED = [matches, morph, findMatches, highlight, unhighlight, ageText, restoreOpen, rememberToggle];
 
 export const cls = (s) => String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '');
 export const when = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
@@ -45,10 +50,9 @@ export const toggle = (key, summary, body, cls2 = 'raw') => `<details class="${c
 const MARK = '<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 10 4.5 4.5M10 10l5.5-5.5M10 10v6"/></g><g fill="currentColor"><circle cx="10" cy="10" r="2.8"/><circle cx="4.5" cy="4.5" r="2"/><circle cx="15.5" cy="4.5" r="2"/><circle cx="10" cy="16.5" r="2"/></g>';
 const markSvg = (size) => `<svg class="mark" width="${size}" height="${size}" viewBox="0 0 20 20" aria-hidden="true">${MARK}</svg>`;
 const FAVICON = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" style="color:#6b6b66">${MARK}</svg>`)}`;
-export const brand = () => `<div class="brand">${markSvg(20)}<b>Coordinator</b><span>by ${anchor('https://github.com/mindmakr', 'mindmakr')}</span></div>`;
 const footer = () => `<footer>Coordinator ${VERSION} · by ${anchor('https://github.com/mindmakr', 'mindmakr')} · ${anchor('https://github.com/mindmakr/coordinator', 'github.com/mindmakr/coordinator')}</footer>`;
 
-// System, light or dark. Works without a script (CSS :has); the live page also remembers it.
+// System, light or dark. Works without a script (CSS :has); the live page also remembers it (theme.client.js).
 const THEME_TOGGLE = '<fieldset class="themes"><legend class="sr">Colour theme</legend>'
   + ['system', 'light', 'dark'].map((t) => `<input type="radio" name="theme" id="theme-${t}" value="${t}"${t === 'system' ? ' checked' : ''}><label for="theme-${t}">${t[0].toUpperCase()}${t.slice(1)}</label>`).join('')
   + '</fieldset>';
@@ -94,9 +98,14 @@ export function blocksLine(u, ctx) {
   return ids.length ? `<p class="cause blocks" data-a="blocks-${esc(u.id)}"><b>Blocks:</b> ${ids.map((id) => unitLink(id, ctx)).join(', ')}</p>` : '';
 }
 
-// The header's links between pages (ctx.pages, live only); the current one is marked.
-const nav = (ctx, path) => (ctx.pages?.length
-  ? `<nav class="pages" aria-label="Pages">${ctx.pages.map((p) => `<a href="${esc(p.href)}"${p.path === path ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')}</nav>` : '');
+// The tab row: links between pages (ctx.pages); the current one is marked. It scrolls inside itself when narrow.
+const tabs = (ctx, path) => (ctx.pages?.length
+  ? `<nav class="tabs" aria-label="Pages">${ctx.pages.map((p) => `<a href="${esc(p.href)}"${p.path === path ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')}</nav>` : '');
+// The breadcrumb: [{ label, href? }], the last one is where you are; flagHtml (a toneChip) follows it.
+const crumbs = (list, flagHtml = '') => `<nav class="crumbs" aria-label="Breadcrumb">${markSvg(18)}`
+  + list.map((c, i) => (i === list.length - 1 ? `<span class="here" aria-current="location">${esc(c.label)}</span>`
+    : `${c.href ? `<a href="${esc(c.href)}">${esc(c.label)}</a>` : `<span>${esc(c.label)}</span>`}<span class="sep" aria-hidden="true">/</span>`)).join('')
+  + `${flagHtml}</nav>`;
 
 // A CSS string from any text: everything but letters, digits and spaces as a hex escape, so nothing can end the string or the rule.
 export const cssText = (t) => `"${String(t ?? '').replace(/[^A-Za-z0-9 ]/g, (c) => `\\${c.codePointAt(0).toString(16)} `)}"`;
@@ -108,14 +117,16 @@ const printTool = (live) => (live ? '<button type="button" class="print-btn" dat
 const printHead = () => '<div class="print-head" aria-hidden="true"><span data-printed></span></div>';
 const pageRules = (title) => `@page{size:auto;margin:14mm 12mm 16mm;@top-left{content:${cssText(title)};font:9px system-ui,sans-serif;color:#62625c}@bottom-right{content:"Page " counter(page) " of " counter(pages);font:9px system-ui,sans-serif;color:#62625c}@bottom-left{content:"Coordinator by mindmakr";font:9px system-ui,sans-serif;color:#62625c}}`;
 
-export function page({ title, body, ctx, path, closed = false }) {
+// crumbs: the breadcrumb, [{ label, href? }] (default: the title); flag: HTML after it, such as a toneChip.
+export function page({ title, body, ctx, path, closed = false, crumbs: trail = [{ label: title }], flag = '' }) {
   const live = ctx.live;
   const status = closed ? `<span id="live" class="live" role="status" data-state="finished">Finished${live ? '' : ' · snapshot'}</span>`
     : live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span><button id="live-retry" class="retry" type="button" hidden>Retry</button>'
       : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
     csp: csp(live && { nonce: esc(live.nonce) }, !!ctx.artifacts), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }) + pageRules(title),
-    top: `${printHead()}<div class="top">${brand()}${nav(ctx, path)}<div class="tools">${status}${printTool(live)}${THEME_TOGGLE}</div></div>`,
+    top: `${printHead()}<header class="top">${crumbs(trail, flag)}<div class="tools">${status}${printTool(live)}${THEME_TOGGLE}</div></header>${tabs(ctx, path)}`,
+    head: live ? `<script nonce="${esc(live.nonce)}">${THEME_CLIENT}</script>` : '',
     body, footer: footer(),
     attrs: live ? ` data-run="${esc(ctx.store ?? ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
     script: live ? `<script nonce="${esc(live.nonce)}">${SERVED.map((f) => `const ${f.name} = ${f.toString()};`).join('\n')}\n${CLIENT}</script>` : '',

@@ -61,6 +61,17 @@ test('rows inserted above the reader (the timeline, newest first) are added; the
   assert.equal(old[1].hasAttribute('hidden'), true, 'with a filter active, a hidden row stays hidden until the filter runs again');
 });
 
+test('a live update never reopens a panel the reader closed (the server renders it open)', () => {
+  const panel = (n) => h('details', { class: 'panel', 'data-d': 'units', 'data-a': 'panel-units', open: '' }, h('summary', {}, `Units ${n}`));
+  const app = frag(panel(1));
+  const live = app.childNodes[0];
+  live.removeAttribute('open'); // the reader closed it
+  morph(app, frag(panel(2)), hooks());
+  assert.equal(app.childNodes[0], live, 'the same node');
+  assert.equal(live.hasAttribute('open'), false, 'still closed');
+  assert.equal(live.text, 'Units 2', 'its content updated');
+});
+
 test('a tall card that grows keeps its content nodes and the reader\'s open toggle', () => {
   const card = (n, say) => h('section', { 'data-k': 'unit-u1', 'data-h': `c${n}` },
     h('p', { class: 'say' }, say),
