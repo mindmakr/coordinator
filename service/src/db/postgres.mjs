@@ -2,6 +2,7 @@
 // run in order at start, once each, under an advisory lock.
 import { readdirSync, readFileSync } from 'node:fs';
 import pg from 'pg';
+import { atMs } from './index.mjs';
 
 const SQL = new URL('../../sql/', import.meta.url);
 const ms = (d) => (d ? new Date(d).getTime() : null);
@@ -193,13 +194,14 @@ export async function postgresDb(url, { max = 10, schema = null } = {}) {
     async finishCommand(installationId, commentId, status) { await q('UPDATE comment_commands SET status = $3 WHERE installation_id = $1 AND comment_id = $2', [installationId, commentId, status]); },
     async releaseCommand(installationId, commentId) { await q('DELETE FROM comment_commands WHERE installation_id = $1 AND comment_id = $2', [installationId, commentId]); },
 
-    async putSession(s) {
+    // at: the app clock's time in ms; a session ends by the clock that dated it (session.mjs), not the database's now().
+    async putSession(s, at) {
       await q(`INSERT INTO sessions (id_hash, user_id, login, token_enc, refresh_enc, token_expires_at, refresh_expires_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [s.idHash, s.userId, s.login, s.tokenEnc, s.refreshEnc, ts(s.tokenExpiresAt), ts(s.refreshExpiresAt), ts(s.expiresAt)]);
-      await q('DELETE FROM sessions WHERE expires_at < now()');
+      await q('DELETE FROM sessions WHERE expires_at < $1', [ts(atMs(at))]);
     },
-    async session(idHash) {
-      const r = (await q('SELECT * FROM sessions WHERE id_hash = $1 AND expires_at > now()', [idHash])).rows[0];
+    async session(idHash, at) {
+      const r = (await q('SELECT * FROM sessions WHERE id_hash = $1 AND expires_at > $2', [idHash, ts(atMs(at))])).rows[0];
       return r ? { idHash: r.id_hash, userId: Number(r.user_id), login: r.login, tokenEnc: r.token_enc, refreshEnc: r.refresh_enc, tokenExpiresAt: ms(r.token_expires_at), refreshExpiresAt: ms(r.refresh_expires_at), expiresAt: ms(r.expires_at) } : null;
     },
     async updateSessionTokens(idHash, t) {
