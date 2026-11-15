@@ -255,6 +255,12 @@ test('report page: the shared shell, KPI row and panels for every section it had
   const live = reportPage(view(), Date.now(), liveCtx({ ...staticCtx('', 0), token: 't' }, 'r'), { report: { text: 'x', at: 'a' } });
   assert.match(live, /data-copy>Copy Markdown<\/button>/);
   assert.match(live, /<a href="[^"]*u1[^"]*">u1<\/a>/); // the unit links
+  // The breadcrumb is the run pages' own: This PC, the project, the run, then Report.
+  assert.match(reportPage(view(), Date.now(), { ...staticCtx('', 0), pc: { label: 'This PC', href: '/pc' }, project: 'proj' }, {}),
+    /<nav class="crumbs"[^>]*>[\s\S]*?<a href="\/pc">This PC<\/a><span class="sep"[^>]*>\/<\/span><span>proj<\/span><span class="sep"[^>]*>\/<\/span><a href="hud\.html">r<\/a><span class="sep"[^>]*>\/<\/span><span class="here" aria-current="location">Report<\/span>/);
+  // A PR linked again on a later try counts once.
+  const twice = view({ units: [{ id: 'u1', status: 'pass', links: [{ kind: 'pr', url: 'https://github.com/o/r/pull/7' }, { kind: 'pr', url: 'https://github.com/o/r/pull/7' }, { kind: 'merge', url: 'https://github.com/o/r/commit/abc1234' }] }] });
+  assert.match(reportPage(twice, Date.now(), null, {}), /<span class="k">Pull requests<\/span><span class="v">1<\/span><span class="s">1 merged<\/span>/);
   const bare = reportPage(view({ units: [] }), Date.now(), null, {});
   assert.match(bare, /Not written yet/); assert.match(bare, /No units\./); assert.match(bare, /download="report-r\.md"/); // no notes and no draft: both buttons export the not-written state
 });
@@ -301,6 +307,7 @@ test('retro page: shared shell, KPI row and the panels, links to units, Download
   assert.match(html, /Use the clock/); assert.match(html, /dates differ/); assert.match(html, /round budget/);
   assert.match(html, /<a class="mono" href="[^"]*u2[^"]*">u2<\/a>/);
   assert.match(html, /download="retro-r\.md"/); assert.doesNotMatch(html, /data-copy/);
+  assert.match(retroPage(m, view(), Date.now(), { ...staticCtx('', 0), pc: { label: 'This PC', href: '/pc' } }, false), /<a href="\/pc">This PC<\/a>[\s\S]*?<a href="hud\.html">r<\/a>[\s\S]*?<span class="here" aria-current="location">Retro<\/span>/, 'the run pages\' breadcrumb');
   assert.match(retroPage(m, view(), Date.now(), liveCtx({ ...staticCtx('', 0), token: 't' }, 'r'), true), /data-copy>Copy Markdown[\s\S]*Retro pending/);
   const md = retroMarkdown(m);
   assert.match(md, /^# Retro · r\n\n## Budget\n- Tries per unit: 3 of 4/);

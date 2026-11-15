@@ -205,6 +205,7 @@ test('the map page: shared shell, KPIs, panels Imports, Surfaces, Reuse candidat
   const snap = load(join(dir, 'log1'));
   const html = mapPage(snap, staticCtx(dir, 0), 'r1');
   assert.match(html, /<span class="here" aria-current="location">Project map<\/span>/);
+  assert.match(mapPage(snap, { ...staticCtx(dir, 0), pc: { label: 'This PC', href: '/pc' }, project: 'proj' }, 'r1'), /<a href="\/pc">This PC<\/a><span class="sep"[^>]*>\/<\/span><span>proj<\/span><span class="sep"[^>]*>\/<\/span><a href="hud.html">r1<\/a>/, 'This PC and the project, as on the run page');
   assert.match(html, /<div class="head"><h1>Project map · [^<]+<\/h1><span class="muted">build \d+/);
   for (const k of ['Files', 'Modules', 'Surfaces', 'Settings', 'Reuse candidates']) assert.match(html, new RegExp(`<div class="kpi"><span class="k">${k}</span><span class="v">\\d+</span>`), k);
   const titles = [...html.matchAll(/<details class="panel"[^>]*><summary>[\s\S]*?<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);

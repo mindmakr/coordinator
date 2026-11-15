@@ -4,7 +4,7 @@
 // quality and compliance signals (run.mjs quality). Stored text is rendered
 // escaped (lib/report/md.mjs). The shared shell and components (lib/ui.mjs); with Copy
 // Markdown (live page) and Download (also in the snapshot and the hosted page, no script).
-import { liveCtx, staticCtx, unitLinks } from '../hud.mjs';
+import { liveCtx, runCrumbs, staticCtx, unitLinks } from '../hud.mjs';
 import { blk, cols, esc, heading, kpis, mdActions, page, panel, stamp, table, toggle, toneChip } from '../parts.mjs';
 import { bySeverity } from '../quality/index.mjs';
 import { draftMarkdown } from './draft.mjs';
@@ -142,6 +142,8 @@ export function reportPage(v, nowMs = Date.now(), ctx = null, data = {}) {
   ctx ??= staticCtx('', 0);
   if (ctx.token) ctx = liveCtx(ctx, v.id);
   const links = v.units.flatMap((u) => u.links ?? []);
+  // A PR linked again on a later try counts once.
+  const distinct = (kind) => new Set(links.filter((l) => l.kind === kind).map((l) => l.url)).size;
   const passed = v.units.filter((u) => u.status === 'pass').length; const stopped = v.units.filter((u) => u.status === 'stopped').length;
   const n = notes(v, data.report, v.id); const dv = devops(data.draft, v.id);
   const md = reportMarkdown(v, data);
@@ -151,7 +153,7 @@ export function reportPage(v, nowMs = Date.now(), ctx = null, data = {}) {
   });
   const strip = kpis([
     { k: 'Units', v: `${passed} of ${v.units.length}`, s: stopped ? `${stopped} stopped` : 'passed' },
-    { k: 'Pull requests', v: links.filter((l) => l.kind === 'pr').length, s: `${links.filter((l) => l.kind === 'merge').length} merged` },
+    { k: 'Pull requests', v: distinct('pr'), s: `${distinct('merge')} merged` },
     { k: 'Files changed', v: data.draft ? data.draft.files.length : '–', s: data.draft ? `${data.draft.migrations.length} migrations · ${data.draft.env.length} variables` : 'not read from git' },
     signalsKpi(data.quality),
   ]);
@@ -161,5 +163,5 @@ export function reportPage(v, nowMs = Date.now(), ctx = null, data = {}) {
     + files
     + blk('devops', panel({ id: 'devops', title: 'For devops, from git', count: dv.count, metaHtml: dv.meta, bodyHtml: dv.body, open: false }));
   const body = `<div class="stack">${[blk('head', head), blk('kpis', strip), cols(main, qualityPanels(data.quality, v.id))].join('\n')}</div>`;
-  return page({ title: `Report · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/report`, closed: !v.open, crumbs: [{ label: v.id, href: ctx.home }, { label: 'Report' }] });
+  return page({ title: `Report · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/report`, closed: !v.open, crumbs: runCrumbs(v, ctx, 'Report') });
 }

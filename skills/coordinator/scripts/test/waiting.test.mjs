@@ -146,6 +146,8 @@ test('B2, B3: run.mjs waiting and the PC front page show the same list, oldest f
   const page0 = pcPage(pc0, Date.now(), { live: { token: 't', nonce: 'n' } }, []);
   assert.match(page0, /<section data-k="pc-needs"[^>]*><div class="needs calm">Nothing needs you on this PC\.<\/div>/);
   assert.match(page0, /<section data-k="pc-loose"[^>]*><p class="empty">Nothing waits on you\.<\/p>/);
+  // Long lists scroll inside their panel (the canvas's heights), so the page stays short.
+  for (const [id, h] of [['pc-runs', 380], ['pc-blocked', 240], ['pc-loose', 300], ['pc-concluded', 260]]) assert.match(page0, new RegExp(`data-d="${id}"[^>]*>[\\s\\S]*?<div class="body scroll[^"]*" style="max-height:${h}px">`), id);
 
   ok(cli('alpha', ['init', 'ra', '--goal', 'goal a', '--bar', 'b', '--fence', 'f', '--alias', 'alpha work']));
   ok(cli('alpha', ['add', 'ra', 'u1', '--bar', 'b', '--title', 'Mobile card']));

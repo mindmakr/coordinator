@@ -6,6 +6,7 @@
 import { anchor, esc } from '../links.mjs';
 import { blk, cols, heading, kpis, page, panel, table, toneChip } from '../parts.mjs';
 import { count } from '../self.mjs';
+import { runCrumbs } from '../hud.mjs';
 import { TEST } from './js.mjs';
 
 const MAX_NODES = 60;
@@ -202,5 +203,5 @@ export function mapPage(snap, ctx, run) {
   const side = panel({ id: 'settings', title: 'Settings', count: snap.settings.length, bodyHtml: settings })
     + panel({ id: 'helpers', title: 'Shared helpers', count: snap.helpers.length, open: false, bodyHtml: helpers });
   const body = [styles(gr, areaIds), blk('map-head', head), `<div class="pmap-page">${cols(main, side)}</div>`].join('\n');
-  return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map`, crumbs: [{ label: run, href: ctx.home }, { label: 'Project map' }], flag: b.partial ? toneChip('Partial', 'bad') : '' });
+  return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map`, crumbs: runCrumbs({ id: run }, ctx, 'Project map'), flag: b.partial ? toneChip('Partial', 'bad') : '' });
 }
