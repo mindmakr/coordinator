@@ -39,7 +39,7 @@ const empty = (t) => `<p class="empty">${esc(t)}</p>`;
 const legend = (items) => `<p class="map-legend">${items.map(([c, l]) => `<span><i class="sw ${c}" aria-hidden="true"></i>${esc(l)}</span>`).join('')}</p>`;
 
 // Goal at the centre; units on the first ring (labelled boxes), their behaviours on the second, evidence outside.
-const PW = 140; const PH = 42; const PG = 12; const TAG_W = 34;
+const PW = 140; const PH = 42; const PG = 12; const TAG_W = 34; const TAG_H = 16; const TAG_GAP = 3;
 // The smallest ring on which neighbouring unit boxes clear each other (side by side or one above the other).
 export function ringRadius(n, base) {
   let r = base;
@@ -67,6 +67,33 @@ export function mindSvg(v, ctx) {
     const spread = (k, m, mid, width) => (m < 2 ? mid : mid - width / 2 + (k * width) / (m - 1));
     const labels = g.nodes.filter((n) => n.kind === 'behaviour').length <= 48;
     const edges = []; const nodes = []; const pts = [];
+    // Boxes already taken (centre x, y, width, height): behaviour dots and their labels first, then each evidence tag as it is placed.
+    const taken = [];
+    const free = (x, y, w, h) => taken.every((o) => Math.abs(o.x - x) >= (o.w + w) / 2 + TAG_GAP || Math.abs(o.y - y) >= (o.h + h) / 2 + TAG_GAP);
+    units.forEach((u, i) => {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / units.length; const ks = kids(u.id);
+      taken.push({ x: at(R1, a)[0], y: at(R1, a)[1], w: PW, h: PH });
+      ks.forEach((k, j) => {
+        if (k.kind !== 'behaviour') return; // evidence kept on the unit itself is placed below, around these
+        const ka = spread(j, ks.length, a, sector); const [kx, ky] = at(R2, ka);
+        taken.push({ x: kx, y: ky, w: 18, h: 18 });
+        if (labels) {
+          const w = 7 * String(k.label).length + 4; const lx = cx + (R2 + 16) * Math.cos(ka); const side = Math.cos(ka) < -0.2 ? -1 : Math.cos(ka) > 0.2 ? 1 : 0;
+          taken.push({ x: lx + (side * w) / 2, y: cy + (R2 + 16) * Math.sin(ka), w, h: 14 });
+        }
+      });
+    });
+    // The first spot, from the parent's own angle outward, where a tag clears every box taken; rings step out and sideways by one tag.
+    const place = (e, ea, r0) => {
+      const w = e.kind === 'more' ? 20 : TAG_W; const h = e.kind === 'more' ? 20 : TAG_H; let spot = at(r0, ea);
+      for (let k = 0; k < 40; k++) {
+        const r = r0 + k * (h + TAG_GAP); const d = (w + TAG_GAP) / r;
+        const hit = [0, 1, -1, 2, -2].map((m) => ea + m * d).find((t) => { const [x, y] = at(r, t); return free(x, y, w, h); });
+        if (hit !== undefined) { spot = at(r, hit); break; }
+      }
+      taken.push({ x: spot[0], y: spot[1], w, h });
+      return spot;
+    };
     const line = (x1, y1, x2, y2, i) => edges.push(`<line class="edge ${near([i], 'e')}" x1="${r1(x1)}" y1="${r1(y1)}" x2="${r1(x2)}" y2="${r1(y2)}"/>`);
     const leaf = (n, x, y, a) => {
       pts.push([x, y, n.kind === 'behaviour' && labels ? 34 : n.kind === 'evidence' ? TAG_W / 2 + 2 : 12]);
@@ -91,12 +118,12 @@ export function mindSvg(v, ctx) {
       line(cx, cy, x, y, ui);
       const ks = kids(u.id);
       ks.forEach((k, j) => {
-        const ka = spread(j, ks.length, a, sector); const [kx, ky] = at(R2, ka);
+        const ka = spread(j, ks.length, a, sector); const [kx, ky] = k.kind === 'behaviour' ? at(R2, ka) : place(k, ka, R2);
         line(x, y, kx, ky, ui);
         leaf(k, kx, ky, ka);
         const es = kids(k.id);
         es.forEach((e, m) => {
-          const ea = spread(m, es.length, ka, (sector / Math.max(1, ks.length)) * 0.8); const [ex, ey] = at(R3, ea);
+          const ea = spread(m, es.length, ka, (sector / Math.max(1, ks.length)) * 0.8); const [ex, ey] = place(e, ea, R3);
           line(kx, ky, ex, ey, ui);
           leaf(e, ex, ey, ea);
         });

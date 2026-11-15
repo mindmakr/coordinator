@@ -90,7 +90,9 @@ export function fileUrl(snap, file, line = null) {
 }
 const treeUrl = (snap, dir) => (ghBase(snap) ? `${ghBase(snap)}/tree/${ref(snap)}/${dir === '.' ? '' : dir.split('/').map(encodeURIComponent).join('/')}` : null);
 const fileLink = (snap, file, line = null, label = null) => { const u = fileUrl(snap, file, line); const text = label ?? `${file}${line ? `:${line}` : ''}`; return u ? anchor(u, text) : `<code>${esc(text)}</code>`; };
-const refLink = (snap, r) => { const i = r.lastIndexOf(':'); return fileLink(snap, r.slice(0, i), Number(r.slice(i + 1)) || null); };
+// The side panel is narrow: a file is its name and line, the full path in the hover text and in the link's address.
+const shortLink = (snap, file, line = null) => `<span title="${esc(file)}">${fileLink(snap, file, line, `${file.split('/').pop()}${line ? `:${line}` : ''}`)}</span>`;
+const shortRef = (snap, r) => { const i = r.lastIndexOf(':'); return shortLink(snap, r.slice(0, i), Number(r.slice(i + 1)) || null); };
 const few = (items, n = 4) => items.slice(0, n).join('<br>') + (items.length > n ? `<br><span class="meta">+${items.length - n} more</span>` : '');
 const clipLabel = (s, n = 26) => (s.length > n ? `…${s.slice(-(n - 1))}` : s);
 
@@ -189,9 +191,9 @@ export function mapPage(snap, ctx, run) {
     + blk('map-screens', `<h3 class="sub">Screens</h3>${rows(screens, (s) => [`<code>${esc(s.path)}</code>`, fileLink(snap, s.file), (s.calls ?? []).map((c) => `<code>${esc(c.split(' ').slice(0, 2).join(' ').replace(/^route:/, ''))}</code>`).join('<br>') || '<span class="meta">no calls found</span>'], ['Screen', 'File', 'Routes it calls'], (s) => rowArea(s.file))}`)
     + blk('map-messages', `<p class="meta">${b.messages?.keys ?? 0} message keys in ${(b.messages?.catalogs ?? []).length} catalog folders (${esc((b.messages?.catalogs ?? []).join('; '))}); ${b.messages?.unused ?? 0} not found in code${b.messages?.unknownLookups ? `; ${b.messages.unknownLookups} lookups match no key` : ''}${msgs.some((m) => m.missing) ? `; ${msgs.filter((m) => m.missing).length} keys miss a locale` : ''}${b.messages?.from ? ` (counted in ${esc(b.messages.from)})` : ''}. Keys built at runtime are not counted.</p>`);
   const settings = blk('map-settings', rows([...snap.settings].sort((x, y) => y.writes.length - x.writes.length || y.reads.length - x.reads.length), (s) => [`<code>${esc(s.id)}</code>`,
-    s.reads.slice(0, 4).map((r) => refLink(snap, r)).join('<br>') + (s.reads.length > 4 ? `<br><span class="meta">+${s.reads.length - 4}</span>` : ''),
-    s.writes.slice(0, 4).map((r) => refLink(snap, r)).join('<br>') + (s.writes.length > 4 ? `<br><span class="meta">+${s.writes.length - 4}</span>` : '') + (s.declared ? `<br><span class="meta">declared in ${esc(s.declared.join(', '))}</span>` : '')], ['Key', 'Read at', 'Written at'], () => '', 480));
-  const helpers = blk('map-helpers', rows([...snap.helpers].sort((x, y) => y.usedBy.length - x.usedBy.length), (h) => [`<code>${esc(h.name)}</code>`, fileLink(snap, h.file, h.line), `${h.usedBy.length}`], ['Helper', 'Defined in', 'Used by'], (h) => rowArea(h.file), 420));
+    s.reads.slice(0, 4).map((r) => shortRef(snap, r)).join('<br>') + (s.reads.length > 4 ? `<br><span class="meta">+${s.reads.length - 4}</span>` : ''),
+    s.writes.slice(0, 4).map((r) => shortRef(snap, r)).join('<br>') + (s.writes.length > 4 ? `<br><span class="meta">+${s.writes.length - 4}</span>` : '') + (s.declared ? `<br><span class="meta">declared in ${esc(s.declared.join(', '))}</span>` : '')], ['Key', 'Read at', 'Written at']));
+  const helpers = blk('map-helpers', rows([...snap.helpers].sort((x, y) => y.usedBy.length - x.usedBy.length), (h) => [`<code>${esc(h.name)}</code>`, shortLink(snap, h.file, h.line), `${h.usedBy.length}`], ['Helper', 'Defined in', 'Used by'], (h) => rowArea(h.file)));
   const reuse = blk('map-reuse', rows(snap.reuse, (r) => [`${r.lines}`, r.fns.map((f) => { const [file, rest] = f.split('#'); const [name, line] = rest.split(':'); return `${fileLink(snap, file, Number(line), `${file}#${name}`)}`; }).join('<br>')], ['Lines', 'Where']));
   const main = panel({ id: 'imports', title: 'Imports', count: snap.modules.length, metaHtml: commit ? `commit ${commit}` : '', bodyHtml: imports })
     + panel({ id: 'surfaces', title: 'Surfaces', count: routes.length + screens.length, bodyHtml: surfaces })

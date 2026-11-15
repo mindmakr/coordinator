@@ -330,3 +330,13 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
     } finally { writeFileSync(log, good); }
   } finally { child.kill(); }
 });
+
+test('the map page: the Settings and Shared helpers tables fit the side panel, with no minimum width forcing a sideways scroll', () => {
+  const snap = load(join(dir, 'log1'));
+  const html = mapPage(snap, staticCtx(dir, 0), 'r1');
+  const block = (k) => html.slice(html.indexOf(`data-k="${k}"`), html.indexOf('</section>', html.indexOf(`data-k="${k}"`)));
+  for (const k of ['map-settings', 'map-helpers']) {
+    assert.ok(block(k).includes('<table class="t"'), `${k} has a table`);
+    assert.ok(!/min-width/.test(block(k)), `${k} has no min-width`);
+  }
+});

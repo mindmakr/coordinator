@@ -260,3 +260,14 @@ test('maps page: Export saves the mind map and flow as styled SVG and activity a
   assert.equal(svgFile('<p>no map</p>'), null);
   assert.match(mapsPage(viewOf([]), T0, staticCtx('', 0)), /<h2>Export<\/h2>[\s\S]*<p class="empty">None<\/p>/, 'nothing to export, nothing offered');
 });
+
+test('maps page: the Behaviours count, the heading and the table rows agree, the goal\'s own behaviours included', () => {
+  const v = viewOf([unit('u1', { behaviours: [{ id: 'B1', text: 'loads', status: 'pass' }, { id: 'B2', text: 'saves', status: 'fail' }] })],
+    { goalCheck: { behaviours: [{ id: 'G1', text: 'one', status: 'unchecked' }, { id: 'G2', text: 'two', status: 'unchecked' }], evidence: [], met: false } });
+  const html = mapsPage(v, T0);
+  const open = html.indexOf('data-d="behaviours"'); const panelHtml = html.slice(open, html.indexOf('</details>', open));
+  const rows = (panelHtml.slice(panelHtml.indexOf('<tbody>')).match(/<tr/g) ?? []).length;
+  assert.equal(rows, 4);
+  assert.match(panelHtml, /<h2>Behaviours<\/h2><span class="count">4<\/span>/, 'the panel count');
+  assert.ok(html.includes('4 behaviours'), 'the heading');
+});

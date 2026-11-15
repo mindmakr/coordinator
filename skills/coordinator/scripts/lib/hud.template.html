@@ -457,7 +457,9 @@ a.evtag { text-decoration: none; }
 }
 .pmap-page .panel .mapbox { max-height: 70vh; border: 0; }
 .pmap-page .sub { margin: 12px 0 6px; font-size: 13px; font-weight: 700; }
-.pmap-page .t code { font: 12px var(--mono); overflow-wrap: break-word; }
+.pmap-page .t code { font: 12px var(--mono); overflow-wrap: anywhere; }
+.pmap-page .side .t th, .pmap-page .side .t td { padding-left: 6px; padding-right: 6px; }
+.pmap-page .t .meta { overflow-wrap: anywhere; } /* a long declared path breaks, so the side panel's tables fit without a sideways scroll */
 /* Export PDF (the browser's print): light theme, everything open, live-only controls hidden, nothing cut across pages where it fits. */
 @media print {
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

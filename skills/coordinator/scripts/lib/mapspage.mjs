@@ -86,7 +86,7 @@ export function mapsPage(v, nowMs = Date.now(), ctx = null) {
   ctx ??= staticCtx('', 0);
   if (ctx.token) ctx = liveCtx(ctx, v.id);
   const drawn = new Map(MAPS.map((m) => [m.id, m.render(v, ctx, nowMs)]));
-  const nB = v.units.reduce((n, u) => n + u.behaviours.length, 0);
+  const nB = v.units.reduce((n, u) => n + u.behaviours.length, 0) + v.goalCheck.behaviours.length; // the goal's own behaviours are rows of the table too
   const nE = v.units.reduce((n, u) => n + (u.evidenceItems ?? []).length, 0);
   const crit = criticalPath(v.units, nowMs).path;
   const meta = { flow: crit.length ? `${toneChip('Critical path')}<span class="mono">${esc(crit.join(' → '))}</span>` : '' };
@@ -95,7 +95,7 @@ export function mapsPage(v, nowMs = Date.now(), ctx = null) {
     bodyHtml: blk(`map-${m.id}`, drawn.get(m.id), 'section', ` class="maps" id="map-${m.id}" aria-label="${esc(m.title)}"`) })).join('');
   const f = safeName(v.id);
   const files = [download('Mind map SVG', `${f}-mind-map.svg`, 'image/svg+xml', svgFile(drawn.get('mind'))), download('Flow SVG', `${f}-flow.svg`, 'image/svg+xml', svgFile(drawn.get('flow'))),
-    download('Activity CSV', `${f}-activity.csv`, 'text/csv', v.units.length ? heatCsv(v, nowMs) : null), download('Behaviours CSV', `${f}-behaviours.csv`, 'text/csv', nB + v.goalCheck.behaviours.length ? behavioursCsv(v) : null)].join('');
+    download('Activity CSV', `${f}-activity.csv`, 'text/csv', v.units.length ? heatCsv(v, nowMs) : null), download('Behaviours CSV', `${f}-behaviours.csv`, 'text/csv', nB ? behavioursCsv(v) : null)].join('');
   const side = [
     panel({ id: 'legend', title: 'Legend', bodyHtml: legend() }),
     // The walkable maps' selection (lib/mapnav.client.js fills it); selecting needs the live script.

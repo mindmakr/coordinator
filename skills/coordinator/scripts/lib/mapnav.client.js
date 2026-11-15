@@ -82,6 +82,7 @@
   function panel(svg, el) {
     const box = document.querySelector('[data-nav-panel]'); if (!box) return; // one for the page: the Selected panel
     box.textContent = ''; box.hidden = false;
+    const side = box.closest('details'); if (side) side.open = true; // a selection made while the Selected panel is closed still shows
     const crumbs = h('nav', { class: 'crumbs', 'aria-label': 'Path to the selected node' }); const ol = h('ol');
     sel.path.forEach((k, i) => {
       const n = nodeEl(svg, k); const li = h('li'); if (i === sel.path.length - 1) li.setAttribute('aria-current', 'location');
