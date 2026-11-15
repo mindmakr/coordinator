@@ -86,3 +86,17 @@ test('the projects page lists only repos the person can read', async () => {
     assert.match(none, /No projects yet/);
   } finally { await t.close(); }
 });
+
+test('a session lasts sessionDays by the app clock, wherever the wall clock is', async () => {
+  // The app clock a month behind the wall clock, as in every test world here dated 2026-11-06.
+  let clock = Date.now() - 30 * 86_400_000;
+  const t = await world({ now: () => clock });
+  try {
+    const reader = await signIn(t, 'reader');
+    assert.equal((await t.get('/r/acme/web', reader)).status, 200, 'signed in now, by the app clock');
+    clock += t.cfg.sessionDays * 86_400_000 - 60_000;
+    assert.equal((await t.get('/r/acme/web', reader)).status, 200, 'a minute before it ends');
+    clock += 120_000;
+    assert.equal((await t.get('/r/acme/web', reader)).status, 302, 'ended after sessionDays, by the app clock');
+  } finally { await t.close(); }
+});

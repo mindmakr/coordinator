@@ -56,7 +56,7 @@ export function sessions({ db, gh, config, log, now = Date.now }) {
   async function current(cookies) {
     const id = cookies[name];
     if (!id || !/^[A-Za-z0-9_-]{43}$/.test(id)) return null;
-    const s = await db.session(hash(id));
+    const s = await db.session(hash(id), now());
     if (!s) return null;
     return { idHash: s.idHash, userId: s.userId, login: s.login, csrf: createHmac('sha256', csrfKey).update(s.idHash).digest('base64url'), token: () => token(s) };
   }
@@ -89,7 +89,7 @@ export function sessions({ db, gh, config, log, now = Date.now }) {
       return sealed;
     } catch (e) {
       // Another instance of the service may have refreshed first: then the stored tokens are newer than ours and still good.
-      const latest = await db.session(s.idHash).catch(() => null);
+      const latest = await db.session(s.idHash, now()).catch(() => null);
       if (latest && latest.tokenEnc !== s.tokenEnc && latest.tokenExpiresAt > now() + 60_000) return tokensOf(latest);
       log?.warn('token refresh failed; signing out', { login: s.login, error: e });
       await db.dropSession(s.idHash);
@@ -127,7 +127,7 @@ export function sessions({ db, gh, config, log, now = Date.now }) {
         idHash: hash(id), userId: Number(user.id), login: String(user.login),
         tokenEnc: box.seal(t.token), refreshEnc: box.seal(t.refresh), tokenExpiresAt: t.expiresAt, refreshExpiresAt: t.refreshExpiresAt,
         expiresAt: now() + days,
-      });
+      }, now());
       await db.audit('sign-in', { login: String(user.login) });
       let next = '/';
       try { next = safeNext(Buffer.from(nextB64 ?? '', 'base64url').toString('utf8')); } catch { /* default */ }
