@@ -599,7 +599,7 @@ function approvingAnswer(q, written) {
 }
 
 // More minutes for the run's time budget (`extend <run> --minutes`), on the person's approving answer to a
-// question on the run: as many as their words name, at most. next reads the budget afresh, so units past it go on.
+// question on the run: as many as their words grant (lib/approval.mjs namedMinutes), at most. next reads the budget afresh, so units past it go on.
 function extendTime(run, o) {
   if (o.rounds !== undefined) throw new Error('--rounds goes with a unit (extend <run> <unit>); more time for the run is --minutes');
   if (o.answer === undefined || o.answer === true) throw new Error('extend refused: more time needs --answer qN, a question on the run (no --unit) asked with --approves and answered by the person with that option');
@@ -610,7 +610,8 @@ function extendTime(run, o) {
     if (!q) throw new Error(`--answer: no question ${o.answer}`);
     if (q.unit) throw new Error(`--answer: ${q.id} is about ${q.unit}; a question approving more time for the run names no unit`);
     const { words, source } = approvingAnswer(q, writtenBy(run, s, 'extend'));
-    const named = namedMinutes(words);
+    const { minutes: named, why: unread } = namedMinutes(words);
+    if (unread) throw new Error(`extend refused: ${q.id}'s approved words grant no single amount: ${unread}; ask again with one amount in the option, e.g. --option "Yes|60 more minutes"`);
     if (!named) throw new Error(`extend refused: ${q.id}'s approved words name no minutes or hours; ask with the time in the option, e.g. --option "Yes|60 more minutes"`);
     const minutes = asked ?? named;
     if (minutes > named) throw new Error(`extend refused: --minutes ${minutes}, but the approval names ${named}`);
@@ -1080,10 +1081,10 @@ const commands = {
       }
       // One round unless their own words name more.
       const named = namedRounds(words);
-      if (rounds > (named ?? 1)) throw new Error(`extend refused: --rounds ${rounds}, but the approval ${named ? `names ${named}` : 'names no number, so it is for one round'}`);
+      if (rounds > (named ?? 1)) throw new Error(`extend refused: --rounds ${rounds}, but the approval ${named ? `names ${named}` : 'names no single number, so it is for one round'}`);
       u.extraRounds = (u.extraRounds ?? 0) + rounds;
       if (u.status === 'stopped') { u.status = 'open'; u.stopReason = null; }
-      const scope = named ? `their words name ${named}` : 'their words name no number: one round';
+      const scope = named ? `their words name ${named}` : 'their words name no single number: one round';
       s.notes.push({ kind: 'decision', text: `${u.id}: ${rounds} more round${rounds === 1 ? '' : 's'} (now ${roundCap(u, s)}; ${scope}), approved by the person (${source}): ${reason}`, at: now(), ...(o.answer !== undefined ? { answers: String(o.answer) } : {}) });
       log(u, 'extend', `+${rounds} round${rounds === 1 ? '' : 's'}: ${reason}`);
     }, { unit });

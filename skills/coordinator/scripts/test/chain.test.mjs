@@ -211,9 +211,9 @@ test('extend: one approval, one use; only after the last verdict; on the named u
   // A note is used once too, and with no number it is one round.
   stop('m2');
   run('note', 'x', '--kind', 'person', '--unit', 'm2', '--text', 'Approved', '--confirm');
-  assert.match(run('extend', 'x', 'm2', '--rounds', '2', '--reason', 'r').err, /names no number, so it is for one round/);
+  assert.match(run('extend', 'x', 'm2', '--rounds', '2', '--reason', 'r').err, /names no single number, so it is for one round/);
   assert.equal(run('extend', 'x', 'm2', '--reason', 'r').code, 0);
-  assert.match(state('x').notes.at(-1).text, /their words name no number: one round/);
+  assert.match(state('x').notes.at(-1).text, /their words name no single number: one round/);
   stop('m2');
   assert.match(run('extend', 'x', 'm2', '--reason', 'r').err, /no approval from the person since m2's last verdict/);
 });
@@ -304,17 +304,56 @@ test('extend --minutes: more time for the run only on the person\'s approving an
   assert.match(run('extend', 't', '--minutes', '10', '--reason', 'r', '--answer', 'q2').err, /q2 is already decided/);
 });
 
+// Round-1 critic, f4: "Yes|30 more minutes (the run is 45 minutes over)" made extend add 45.
+test('extend --minutes: a number given for context is not the time approved; different amounts are refused', () => {
+  run('init', 'cx', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'cx', 'm1', '--bar', 'b'); run('freeze', 'cx');
+  run('ask', 'cx', '--question', 'More time?', '--header', 'time', '--option', 'Yes|30 more minutes (the run is 45 minutes over)', '--option', 'No|close it', '--approves', 'Yes');
+  run('answer', 'cx', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes');
+  assert.match(run('extend', 'cx', '--minutes', '45', '--reason', 'r', '--answer', 'q1').err, /--minutes 45, but the approval names 30/);
+  assert.equal(run('extend', 'cx', '--reason', 'over by 45', '--answer', 'q1').code, 0);
+  let s = state('cx');
+  assert.equal(s.budget.maxMinutes, 90, '60 + 30, not 60 + 45'); assert.equal(s.budget.addedMinutes, 30);
+  assert.match(s.notes.at(-1).text, /^run time budget: 30 more minutes \(now 90, was 60; \d+ used; their words name 30\), approved by the person/);
+  // Their words name two different granted amounts: nothing is added.
+  run('ask', 'cx', '--question', 'More time?', '--header', 'time', '--option', 'Yes|30 more minutes', '--option', 'No|close it', '--approves', 'Yes');
+  run('answer', 'cx', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, another hour');
+  assert.match(run('extend', 'cx', '--reason', 'r', '--answer', 'q2').err, /extend refused: q2's approved words grant no single amount: they name different amounts \(30, 60 minutes\)/);
+  // A time it cannot read for sure: nothing is added, never a part of it.
+  run('ask', 'cx', '--question', 'More time?', '--header', 'time', '--option', 'Yes|a couple more hours', '--option', 'No|close it', '--approves', 'Yes');
+  run('answer', 'cx', 'q3', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes');
+  assert.match(run('extend', 'cx', '--reason', 'r', '--answer', 'q3').err, /grant no single amount: they name a time that cannot be read for sure \("couple more hours"\)/);
+  s = state('cx');
+  assert.equal(s.budget.maxMinutes, 90, 'no refusal recorded anything');
+});
+
 test('the minutes an approval names', () => {
-  assert.equal(namedMinutes('Yes|60 more minutes'), 60);
-  assert.equal(namedMinutes('give it 45 more mins'), 45);
-  assert.equal(namedMinutes('Yes, take the hour'), null, '"the hour" names no amount');
-  assert.equal(namedMinutes('an hour'), 60);
-  assert.equal(namedMinutes('two more hours'), 120);
-  assert.equal(namedMinutes('1.5 hours'), 90);
-  assert.equal(namedMinutes('half an hour'), 30, 'not an hour');
-  assert.equal(namedMinutes('approved, PR 1234 and 2 more rounds'), null, 'no time unit');
-  assert.equal(namedMinutes('30 minutes, or an hour at most'), 60, 'the largest named');
-  assert.equal(namedMinutes(''), null);
+  const m = (t) => namedMinutes(t).minutes;
+  assert.equal(m('Yes|60 more minutes'), 60);
+  assert.equal(m('give it 45 more mins'), 45);
+  assert.deepEqual(namedMinutes('Yes, take the hour'), { minutes: null, why: null }, '"the hour" names no amount');
+  assert.equal(m('an hour'), 60);
+  assert.equal(m('two more hours'), 120);
+  assert.equal(m('1.5 hours'), 90);
+  assert.equal(m('half an hour'), 30, 'not an hour');
+  assert.deepEqual(namedMinutes('approved, PR 1234 and 2 more rounds'), { minutes: null, why: null }, 'no time unit');
+  assert.deepEqual(namedMinutes(''), { minutes: null, why: null });
+  // A number given for context never wins (round-1 critic, f4): the amount tied to more, another, extra or add does.
+  assert.equal(m('Yes|30 more minutes (the run is 45 minutes over)'), 30);
+  assert.equal(m('Yes|add 30 minutes; it used 240 minutes'), 30);
+  assert.equal(m('Yes|60 more minutes for a 120 minute budget'), 60);
+  assert.equal(m('extend it by 20 minutes, the run is 50 minutes over'), 20);
+  assert.equal(m('Yes|a 60-minute extension (budget 120 minutes)'), 60);
+  // Amounts that count but differ grant nothing.
+  assert.deepEqual(namedMinutes('30 minutes, or an hour at most'), { minutes: null, why: 'they name different amounts (30, 60 minutes)' });
+  assert.deepEqual(namedMinutes('30 more minutes; another 15 minutes'), { minutes: null, why: 'they name different amounts (15, 30 minutes)' });
+  assert.equal(m('60 more minutes, that is another hour'), 60, 'the same amount twice');
+  // Read exactly, or refused: never fewer or more minutes than were said (round-1 critic, f4).
+  for (const [t, n] of [['an hour and a half', 90], ['one and a half hours', 90], ['two hours and a half', 150], ['1h', 60], ['90m', 90], ['1h30', 90], ['1h 30m', 90], ['1 hour 30 minutes', 90], ['another hour', 60], ['an extra hour', 60], ['an extra half hour', 30], ['60-minute extension', 60], ['an hour more', 60], ['thirty more minutes', 30], ['twenty-five minutes', 25]]) assert.equal(m(t), n, t);
+  for (const t of ['1h 30', '1 hour 30', 'an hour and 2 more rounds', 'a couple of hours', 'a few more minutes', 'a hundred minutes', '1.33 hours', '0 minutes', 'half the time again']) {
+    const r = namedMinutes(t);
+    assert.equal(r.minutes, null, t); assert.ok(r.why, t);
+  }
 });
 
 test('the rounds an approval names', () => {
@@ -325,6 +364,10 @@ test('the rounds an approval names', () => {
   assert.equal(namedRounds('approved once PR 1234 lands'), null, 'nor is a PR number');
   assert.equal(namedRounds('5 more rounds'), null, 'only 1-4');
   assert.equal(namedRounds('fix #2 and 1 more'), 1);
+  // A count given for context never wins (round-1 critic, f4): the one tied to "more" does; counts that still differ name none.
+  assert.equal(namedRounds('two more rounds; it used 3 rounds'), 2);
+  assert.equal(namedRounds('2 rounds or 3 rounds'), null, 'different counts: one round');
+  assert.equal(namedRounds('one more, then two more'), null);
   for (const t of ['approved once PR 1234 lands', 'approved after the demo', 'approved when CI is green', 'approved until Friday']) assert.equal(noteApproves(t), false, t);
   assert.equal(namedRounds('Approved'), null);
 });
