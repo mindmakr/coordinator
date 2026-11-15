@@ -57,6 +57,16 @@ test('table: table.t with a sticky header row, inside its own scrolling box; cel
   assert.match(tpl, /\.t th \{[^}]*position: sticky; top: 0;/, 'the header row sticks');
 });
 
+test('table: a row given as an object carries its live key, class and id, escaped', () => {
+  const html = table({ cols: [{ label: 'Unit' }], rows: [{ cells: ['u1'], key: 'row-u1', cls: 'fin', id: 'unit-u1' }, ['u2']] });
+  assert.ok(html.includes('<tbody><tr id="unit-u1" class="fin" data-a="row-u1"><td>u1</td></tr><tr><td>u2</td></tr></tbody>'));
+  clean(table({ cols: [{ label: 'A' }], rows: [{ cells: [BAD], key: BAD, cls: BAD, id: BAD }] }));
+});
+
+test('kpis: a value given as trusted html, such as try marks', () => {
+  assert.match(kpis([{ k: 'Tries', vHtml: tries(['fail', 'work']), s: 'try 2 of 4' }]), /<span class="v"><span class="tries" role="img" aria-label="try 1 failed, try 2 in progress">/);
+});
+
 test('toneChip: the status word is always shown; tone is colour on top of it', () => {
   for (const tone of ['ask', 'ok', 'retry', 'bad', 'done']) assert.equal(toneChip('Waiting on you', tone), `<span class="chip ${tone}">Waiting on you</span>`);
   assert.equal(toneChip('Queued'), '<span class="chip">Queued</span>');

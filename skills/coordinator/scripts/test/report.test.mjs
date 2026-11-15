@@ -95,8 +95,8 @@ test('CLI: report and retro pages in the snapshot, notes stored and escaped, the
   run('freeze', 'r1');
   const hud = () => readFileSync(join(runDir('r1'), 'hud.html'), 'utf8');
   const report = () => readFileSync(join(runDir('r1'), 'report.html'), 'utf8');
-  assert.match(hud(), /href="report\.html">Report →/);
-  assert.match(hud(), /href="retro\.html">Retro →/);
+  assert.match(hud(), /<a href="report\.html">Report<\/a>/);
+  assert.match(hud(), /<a href="retro\.html">Retro<\/a>/);
   assert.match(report(), /Not written yet/);
   assert.match(report(), /run\.mjs report r1 --file notes\.md/);
   assert.match(report(), /Not measured yet/);

@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { anchor, linkify, shortRef, webUrl } from './links.mjs';
 import { answerText, OTHER } from './questions.mjs';
-import { badge, behaviourList, blk, blocksLine, chip, cls, dot, esc, grows, linkWaits, stateChip, unitDot, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
+import { badge, behaviourList, blk, blocksLine, chip, cls, cols, dot, esc, grows, heading, kpis, linkWaits, panel, stateChip, table, toneChip, tries, unitDot, unitLink, eventRow, evidenceList, hash, keyed, page, stamp, timelineTools, toggle } from './parts.mjs';
 import { clip } from './plain.mjs';
 import { viewer, viewerEntries } from './evview.mjs';
 import { readStored, storedPath } from './evidence.mjs';
@@ -60,7 +60,9 @@ const EMBED_MAX = 150 * 1024;
 export function staticCtx(runDir, depth = 0, theme = null) {
   const up = '../'.repeat(depth);
   return {
-    live: null, theme, run: null, artifacts: !!runDir, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`, pages: [],
+    live: null, theme, run: null, artifacts: !!runDir, home: `${up}hud.html`, maps: `${up}maps.html`, report: `${up}report.html`, retro: `${up}retro.html`,
+    // The run's tabs, as files beside hud.html (the Project map only when one is built).
+    pages: runTabs({ base: '', href: (p) => `${up}${{ '': 'hud', '/maps': 'maps', '/report': 'report', '/retro': 'retro' }[p]}.html`, map: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null }),
     runHref: (id) => `${up}../${encodeURIComponent(id)}/hud.html`,
     mapHref: runDir && existsSync(join(runDir, 'map.html')) ? `${up}map.html` : null,
     unitHref: (id) => `${up}units/${encodeURIComponent(id)}.html`,
@@ -91,8 +93,24 @@ export function liveCtx({ token, nonce }, run, theme = null, other = null) {
     runHref: (id) => (id === run ? `/?${t}` : `/run/${encodeURIComponent(id)}?${t}`),
     // The header's page links; a new page adds itself here and to lib/serve.mjs PAGE.
     // On another run's pages they name and link that run, not the served one.
-    pages: [{ path: base || '/', label: other ?? run ?? 'Run', href: base ? `${base}?${t}` : `/?${t}` }, { path: `${base}/maps`, label: 'Maps', href: `${base}/maps?${t}` }, { path: `${base}/report`, label: 'Report', href: `${base}/report?${t}` }, { path: `${base}/retro`, label: 'Retro', href: `${base}/retro?${t}` }, { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}` }],
+    // The coordinator's page is a tab only on itself; the run's pages reach it from the breadcrumb (This PC).
+    pages: [...runTabs({ base, href: (p) => `${base}${p}${p || base ? '' : '/'}?${t}`, map: `${base}/map?${t}` }), { path: '/coordinator', label: 'Coordinator', href: `/coordinator?${t}`, tab: false }],
+    pc: { label: 'This PC', href: `/coordinator?${t}#self-pc` },
   };
+}
+
+// The run's tab row (Overview, Units, Maps, Report, Retro, Project map): href(p) is where the page at
+// sub-path p ('' for the run itself) lives; map is the project map's href, or null when there is none.
+// Units is current on every unit page and leads to the Units table.
+export function runTabs({ base = '', href, map = null }) {
+  return [
+    { path: base || '/', label: 'Overview', href: href('') },
+    { path: `${base}/unit`, prefix: `${base}/unit/`, label: 'Units', href: `${href('')}#unit-list` },
+    { path: `${base}/maps`, label: 'Maps', href: href('/maps') },
+    { path: `${base}/report`, label: 'Report', href: href('/report') },
+    { path: `${base}/retro`, label: 'Retro', href: href('/retro') },
+    ...(map ? [{ path: `${base}/map`, label: 'Project map', href: map }] : []),
+  ];
 }
 
 // tone: 'hot' when a limit is blocking work, 'calm' when a full bar is simply done.
@@ -195,39 +213,144 @@ export function chainRow(u, ctx) {
   return `<p class="cause chain" data-a="chain-${esc(u.id)}">${parts.join(' · ')}${c.after.length ? ` · finally ${chip(c.final.outcome ?? 'unknown', c.final.outcome ?? '')}` : ''}</p>`;
 }
 
-function unitCard(u, ctx, form, repo) {
-  const raw = [u.gap && `<dt>Last gap</dt><dd>${linkify(u.gap, repo)}${u.cause ? ` <span class="cause">cause: ${esc(u.cause)}</span>` : ''}</dd>`, u.evidence && `<dt>Evidence</dt><dd>${linkify(u.evidence, repo)}</dd>`].filter(Boolean).join('');
-  const passing = u.behaviours.filter((b) => b.status === 'pass').length;
+// One mark per try (lib/ui.mjs tries): passed or failed rounds, the try a builder or critic is on, the
+// next try when it is queued, then the tries still unused up to the unit's cap.
+export function tryStates(u) {
+  const working = !u.finished && ['building', 'judging'].includes(u.status);
+  const s = u.roundList.map((r) => (r.verdict === 'pass' ? 'pass' : 'fail'));
+  if (working) s.push('work');
+  else if (!u.finished && ['queued', 'retrying'].includes(u.dot) && s.length < u.maxRounds) s.push('queued');
+  while (s.length < u.maxRounds) s.push('open');
+  return s;
+}
+// "try 3 of 4 in progress", "try 2 of 4 next", "2 of 4 tries used".
+export function tryText(u) {
+  if (!u.finished && ['building', 'judging'].includes(u.status)) return `try ${u.rounds + 1} of ${u.maxRounds} in progress`;
+  if (!u.finished && ['queued', 'retrying'].includes(u.dot) && u.rounds < u.maxRounds) return `try ${u.rounds + 1} of ${u.maxRounds} next`;
+  return `${u.rounds} of ${u.maxRounds} ${u.maxRounds === 1 ? 'try' : 'tries'} used`;
+}
+// Scores per try as a trend: "7 → 4 → 5"; a try without a score is "–".
+export const scoreTrend = (u) => u.scores.map((s) => (typeof s.score === 'number' ? s.score : '–')).join(' → ');
+
+// The last gap and the evidence that goes with it (lib/view.mjs gapEvidence: a specialist's own when it
+// failed the round, #147), with who gave it. Empty once the unit passed.
+export function lastGapHtml(u, repo, short = true) {
+  if (!u.gap) return '';
+  const last = u.roundList.at(-1);
+  const by = u.failedBy ? toneChip(`specialist ${u.failedBy.specialists.join(', ')}`, 'bad') : '';
+  const cut = (t) => (short ? clip(t, 220) : t);
+  return `${by ? `<p class="by">${by}${last ? ` <span class="cause">try ${esc(last.n)}</span>` : ''}</p>` : ''}<p class="gap">${linkify(cut(u.gap), repo)}</p>`
+    + (u.cause ? `<p class="cause">cause: ${esc(u.cause)}</p>` : '')
+    + (u.evidence ? `<p class="cause gev"><b>Evidence${u.failedBy ? ` (${esc(u.failedBy.specialists.join(', '))})` : ''}:</b> ${linkify(cut(u.evidence), repo)}</p>` : '');
+}
+
+// One row of the Units table: the unit (linked) with its sentence, what it blocks and its links; its state;
+// its try marks; its scores; its last gap; its next step.
+function unitRow(u, ctx, repo) {
   const waits = u.dependsOn.map((x) => x.id);
-  const html = `<h3><span>${unitDot(u)} ${esc(u.title ? `${u.id} · ${u.title}` : u.id)}</span><span>${stateChip(u, ctx)}</span></h3>`
-    + unitLinks(u, repo)
-    + `<p class="say" data-a="say-${esc(u.id)}">${linkWaits(u.sentence, waits, ctx)}</p>`
-    + blocksLine(u, ctx)
-    + triesRow(u)
-    + chainRow(u, ctx)
-    + (u.who ? `<p class="cause" data-a="who-${esc(u.id)}">${esc(u.who)}</p>` : '')
-    + scoreChart(u.roundList)
-    + (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo, [], null, `u-${u.id}`)) : '')
-    + (u.evidenceItems.length ? toggle(`u-${u.id}-ev`, `Evidence · ${u.evidenceItems.length}`, evidenceList(u.evidenceItems, repo, ctx, `u-${u.id}-ev`)) : '')
-    + (raw ? toggle(`u-${u.id}-raw`, 'Gap and evidence', `<dl>${raw}</dl>`) : '')
-    + `<div class="unit-next" data-a="next-${esc(u.id)}"><b>Next:</b> ${linkWaits(u.next, waits, ctx)}</div>`
-    + u.personNotes.slice(-2).map((n) => `<p class="from" data-a="from-${esc(u.id)}-${esc(n.at)}"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('')
-    + (form ? toggle(`u-${u.id}-note`, 'Add a note on this unit', noteForm(form, u.id)) : '')
-    + `<div class="row" data-a="open-${esc(u.id)}"><a class="open" href="${esc(ctx.unitHref(u.id))}">Open ${esc(u.id)} →</a></div>`;
-  return blk(`unit-${u.id}`, html, 'section', ` class="card${u.finished ? ' fin' : ''}" id="unit-${esc(u.id)}"`);
+  const passing = u.behaviours.filter((b) => b.status === 'pass').length;
+  const name = `<a class="mono uid" href="${esc(ctx.unitHref(u.id))}">${esc(u.id)}</a>${u.title ? ` <b>${esc(u.title)}</b>` : ''}`;
+  const unit = `<div class="ucell">${unitDot(u)} ${name}</div><p class="say cause" data-a="say-${esc(u.id)}">${linkWaits(u.sentence, waits, ctx)}</p>`
+    + blocksLine(u, ctx) + unitLinks(u, repo) + chainRow(u, ctx) + (u.who ? `<p class="cause" data-a="who-${esc(u.id)}">${esc(u.who)}</p>` : '')
+    + u.personNotes.slice(-2).map((n) => `<p class="from" data-a="from-${esc(u.id)}-${esc(n.at)}"><b>From you:</b> ${linkify(n.text, repo)}</p>`).join('');
+  const state = `${stateChip(u, ctx)}${u.behaviours.length ? `<p class="cause">behaviours ${passing}/${u.behaviours.length}</p>` : ''}`;
+  const tried = `${tries(tryStates(u))}<p class="cause">${esc(tryText(u))}</p>`;
+  return {
+    id: `unit-${u.id}`, key: `row-${u.id}`, cls: u.finished ? 'fin' : '',
+    cells: [{ html: unit }, { html: state }, { html: tried }, { html: `<span class="mono">${esc(scoreTrend(u) || '–')}</span>` },
+      { html: `<div class="gapcell" data-a="gap-${esc(u.id)}">${lastGapHtml(u, repo) || '<span class="cause">–</span>'}</div>` },
+      { html: `<div data-a="next-${esc(u.id)}">${linkWaits(u.next, waits, ctx)}</div>` }],
+  };
+}
+
+const LEGEND = `<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <span class="key">${dot('needs-you')} <b>Needs you</b> = only you can unblock it;</span> <span class="key">${dot('blocked')} <b>Waiting for A</b> = blocked on another unit (A);</span> <span class="key">${dot('queued')} <b>Up next</b> = ready, not started;</span> <span class="key">${dot('working')} working;</span> <span class="key">${dot('retrying')} <b>Retrying</b> = the lead is on it;</span> <span class="key">${dot('stale')} <b>Quiet</b> = the lead is checking on a silent agent;</span> <span class="key">${dot('passed')} passed;</span> <span class="key">${dot('stopped')} stopped.</span> Try marks: ✓ passed, ✕ failed, … in progress.</p>`;
+
+function unitsPanel(v, ctx, repo) {
+  const list = [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)];
+  const cols = ['Unit', 'State', 'Tries', 'Scores', 'Last gap', 'Next'].map((label) => ({ label }));
+  return panel({ id: 'units', title: 'Units', count: v.units.length, bodyHtml: (v.units.length ? LEGEND : '') + table({ cols, rows: list.map((u) => unitRow(u, ctx, repo)), min: 860, max: 560, empty: 'No units yet.' }) });
+}
+
+// Each unit's behaviours, evidence and note box, as the toggles the unit cards had; the unit page has them in full.
+function detailsPanel(v, ctx, form, repo) {
+  const one = (u) => {
+    const passing = u.behaviours.filter((b) => b.status === 'pass').length;
+    const parts = (u.behaviours.length ? toggle(`u-${u.id}-beh`, `Behaviours · ${passing}/${u.behaviours.length} pass`, behaviourList(u.behaviours, repo, [], null, `u-${u.id}`)) : '')
+      + (u.evidenceItems.length ? toggle(`u-${u.id}-ev`, `Evidence · ${u.evidenceItems.length}`, evidenceList(u.evidenceItems, repo, ctx, `u-${u.id}-ev`)) : '')
+      + (form ? toggle(`u-${u.id}-note`, 'Add a note on this unit', noteForm(form, u.id)) : '');
+    return parts ? `<div class="udetail${u.finished ? ' fin' : ''}" data-a="ud-${esc(u.id)}"><h3 class="sub">${unitDot(u)} ${unitLink(u.id, ctx)}${u.title ? ` ${esc(u.title)}` : ''}</h3>${parts}</div>` : '';
+  };
+  const html = v.units.map(one).join('');
+  return html ? panel({ id: 'unit-details', title: 'Behaviours and evidence', count: v.units.reduce((n, u) => n + u.evidenceItems.length, 0), open: false, bodyHtml: html }) : '';
 }
 
 // ctx.readOnlyHint (plain text): where a read-only copy tells people to answer instead.
-function needsYou(v, form, ctx = {}) {
+function needsPanel(v, form, ctx = {}) {
   const hint = form || !(v.needsYou.length + v.answered.length) ? ''
     : ctx.readOnlyHint ? `<p class="hint">${esc(ctx.readOnlyHint)}</p>`
       : `<p class="hint">This copy is read-only. Answer in the chat, or ask the lead for the answer page (<code>run.mjs serve ${esc(v.id)}</code>).</p>`;
-  const open = v.needsYou.length ? `<div class="needs"><b>Needs you</b><ul>${v.needsYou.map((q) => questionItem(q, form, v.repo)).join('')}</ul>${hint}</div>`
-    : `<div class="needs calm">Nothing needs you.${hint}</div>`;
+  const open = v.needsYou.length ? `<ul class="qs">${v.needsYou.map((q) => questionItem(q, form, v.repo)).join('')}</ul>${hint}`
+    : `<p class="empty">Nothing needs you.</p>${v.answered.length ? '' : hint}`;
   const answered = v.answered.length
-    ? `<div class="needs calm"><b>Answered, waiting for the lead</b> <span class="cause">you can change these until the lead uses them</span><ul>${v.answered.map((q) => questionItem(q, form, v.repo)).join('')}</ul></div>` : '';
-  return open + answered;
+    ? `<div class="answered-wait"><h3 class="sub">Answered, waiting for the lead</h3><p class="cause">Can be changed until the lead uses them.</p><ul class="qs">${v.answered.map((q) => questionItem(q, form, v.repo)).join('')}</ul>${v.needsYou.length ? '' : hint}</div>` : '';
+  return panel({ id: 'needs', title: 'Needs you', count: v.needsYou.length, tone: v.needsYou.length ? 'ask' : '', bodyHtml: open + answered });
 }
+
+// Units the lead is handling (Retrying, Quiet), the next step, the time left and who leads.
+function leadPanel(v, ctx) {
+  const busy = v.units.filter((u) => ['retrying', 'stale'].includes(u.dot));
+  const rows = busy.map((u) => `<div data-a="lead-${esc(u.id)}">${toneChip(u.badge?.label ?? u.dot, u.dot === 'stale' ? 'bad' : 'retry')}${unitLink(u.id, ctx)}<span>${esc(u.badge?.title ?? '')}</span></div>`).join('')
+    + `<div data-a="lead-next"><span class="cause">Next step</span><span>${esc(v.next)}</span></div>`
+    + `<div data-a="lead-left"><span class="cause">Time left</span><span>${esc(v.timeLeft)}</span></div>`
+    + (v.lead ? `<div data-a="lead-who"><span class="cause">Lead</span><span>${esc(v.lead.tool)}, since ${esc(v.lead.since ?? '–')}, last active ${esc(v.lead.lastActive ?? 'at an unknown time')}${v.lead.goneText ? ` · ${esc(v.lead.goneText)}` : ''}</span></div>` : '');
+  return panel({ id: 'lead', title: 'Lead', count: busy.length || null, bodyHtml: `<div class="rows">${rows}</div>` });
+}
+
+// The run's units as lanes over its time: one bar per try, from its start to its verdict (or now, for the
+// try in progress), coloured and labelled by outcome, each linked to the unit's page.
+export function lanes(v, nowMs, ctx) {
+  const t0 = Date.parse(v.started); const t1 = v.closedAt ? Date.parse(v.closedAt) : nowMs;
+  if (!(t1 > t0) || !v.units.length) return '<p class="empty">Nothing yet.</p>';
+  const x = (t) => Math.min(100, Math.max(0, ((t - t0) / (t1 - t0)) * 100));
+  const lane = (u) => {
+    const segs = []; let from = null; let n = 0;
+    for (const e of [...u.timeline].sort((a, b) => a.at.localeCompare(b.at))) {
+      if (e.label === 'start') from ??= Date.parse(e.at);
+      else if (/^verdict /.test(e.label)) { n++; const to = Date.parse(e.at); segs.push({ n, from: from ?? to, to, c: e.badge === 'pass' ? 'p' : 'f' }); from = null; }
+    }
+    if (from !== null && ['building', 'judging'].includes(u.status)) segs.push({ n: n + 1, from, to: t1, c: 'j' });
+    const word = { p: 'passed', f: 'failed', j: 'in progress' };
+    const bars = segs.map((s) => `<a class="seg ${s.c}" href="${esc(ctx.unitHref(u.id))}" style="left:${x(s.from).toFixed(2)}%;width:${Math.max(0.6, x(s.to) - x(s.from)).toFixed(2)}%" title="${esc(`${u.id} try ${s.n}: ${word[s.c]}`)}" aria-label="${esc(`${u.id} try ${s.n}: ${word[s.c]}`)}">T${s.n}</a>`).join('');
+    return `<div class="lane${u.finished ? ' fin' : ''}" data-a="lane-${esc(u.id)}"><a class="mono" href="${esc(ctx.unitHref(u.id))}">${esc(u.id)}</a><div class="track">${bars}</div></div>`;
+  };
+  return `<div class="scroll"><div class="lanes"><div class="ends"><span>${stamp(v.started, 'abs')}</span><span>${v.closedAt ? stamp(v.closedAt, 'abs') : 'now'}</span></div>${v.units.map(lane).join('')}</div></div>`;
+}
+
+// The run's numbers: units done, tries used with the critics' verdicts, time, ETA and the goal's behaviours.
+function runKpis(v) {
+  const st = v.status;
+  const used = v.units.reduce((n, u) => n + u.rounds, 0); const cap = v.units.reduce((n, u) => n + u.maxRounds, 0);
+  const verdicts = v.units.reduce((n, u) => n + u.roundList.reduce((m, r) => m + 1 + Object.keys(r.specialists ?? {}).length, 0), 0);
+  const time = v.budget.find((b) => b.name === 'time');
+  const g = v.goalCheck; const passing = g.behaviours.filter((b) => b.status === 'pass').length;
+  return kpis([
+    // No unit done yet but work under way (#71): no empty 0% bar; the work is in words below.
+    { k: 'Units', v: `${st.done} of ${st.total}`, ...(st.done || !st.work?.length ? { bar: st.pct } : {}), s: [st.stopped ? `${st.stopped} stopped` : '', st.work?.length ? `${st.work.length} in work` : ''].filter(Boolean).join(' · ') },
+    { k: 'Tries', v: `${used} of ${cap}`, s: `${verdicts} ${verdicts === 1 ? 'verdict' : 'verdicts'}` },
+    ...(time ? [{ k: 'Time', v: `${time.used} of ${time.max} min`, s: time.note ?? '' }] : []),
+    { k: 'ETA', v: st.eta.short },
+    { k: 'Goal', v: g.behaviours.length ? `${passing} of ${g.behaviours.length}` : g.met ? 'met' : 'not yet', s: g.behaviours.length ? 'behaviours passing' : '' },
+  ]);
+}
+
+const STATUS_TONE = { running: 'ok', waiting: 'ask', paused: 'retry', finishing: 'done' };
+const OUTCOME_TONE = { done: 'ok', partial: 'ask', stopped: 'bad' };
+// The breadcrumb: This PC (when the page knows where it is), the project, the run, and below it a unit.
+export function runCrumbs(v, ctx, unit = null) {
+  const project = v.project ?? ctx.project ?? null;
+  return [...(ctx.pc ? [ctx.pc] : []), ...(project ? [{ label: project }] : []), unit ? { label: v.id, href: ctx.home } : { label: v.id }, ...(unit ? [{ label: unit }] : [])];
+}
+export const runFlag = (st) => (st ? toneChip(st.word, st.concluded ? OUTCOME_TONE[st.outcome] : STATUS_TONE[st.kind]) : '');
 
 export function goalBlock(v, ctx) {
   const g = v.goalCheck;
@@ -238,19 +361,24 @@ export function goalBlock(v, ctx) {
     + evidenceList(g.evidence.filter((e) => !e.behaviour), v.repo, ctx, 'goal-ev') + '</section>';
 }
 
-function list(title, items, repo) {
-  const body = items.length ? grows(`<ul>${keyed(items, (t) => `l-${title}-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None.</p>';
-  return `<section class="card" data-a="list-${esc(title)}"><h3>${esc(title)} <span class="chip">${items.length}</span></h3>${body}</section>`;
+function listBody(title, items, repo) {
+  return items.length ? grows(`<ul>${keyed(items, (t) => `l-${title}-${hash(t)}`).map(([t, k]) => `<li data-a="${k}">${linkify(t, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None.</p>';
 }
+const listPanel = (id, title, items, repo, open = false) => panel({ id, title, count: items.length, open, scroll: 360, bodyHtml: `<div data-a="list-${esc(title)}">${listBody(title, items, repo)}</div>` });
 
 // Open questions only, counted; answered ones in a dimmed, collapsed group with the answer first.
-function questionsCard(v, repo) {
+function questionsPanel(v, repo) {
   const open = v.questions.length ? grows(`<ul>${keyed(v.questions, (q) => `l-Questions-${hash(`${q.label}|${q.text}`)}`).map(([q, k]) => `<li data-a="${k}">${qLabel(q)}${linkify(q.text, repo)}</li>`).join('')}</ul>`) : '<p class="empty">None open.</p>';
   const done = v.answeredQuestions.map((q) => `<li data-a="aq-${esc(q.id)}">${qLabel(q)}<b>${esc(q.id)}</b> ${esc(q.title)}`
     + `<p class="ans"><b>Answered:</b> ${linkify(q.answer, repo)} <span class="cause">— by ${q.by === 'person' ? 'you' : esc(q.by)}${q.at ? `, ${stamp(q.at)}` : ''}</span></p>`
     + `${q.decision ? `<p class="cause">Decision: ${linkify(q.decision, repo)}</p>` : ''}</li>`).join('');
-  return `<section class="card" data-a="list-Questions"><h3>Questions <span class="chip" title="open questions">${v.questions.length}</span></h3>${open}`
-    + (done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, grows(`<ul class="answered">${done}</ul>`)) : '') + '</section>';
+  return panel({ id: 'questions', title: 'Questions', count: v.questions.length, open: v.questions.length > 0, scroll: 420,
+    bodyHtml: `<div data-a="list-Questions">${open}${done ? toggle('answered-questions', `Answered · ${v.answeredQuestions.length}`, grows(`<ul class="answered">${done}</ul>`)) : ''}</div>` });
+}
+
+function budgetPanel(v) {
+  const rows = v.budget.map((b) => `<div class="brow" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row"><span>${esc(b.name)}</span><b class="mono">${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${b.note ? `<p class="meta">${esc(b.note)}</p>` : ''}${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('');
+  return panel({ id: 'budget', title: 'Budget', open: false, bodyHtml: `<div class="budget-rows">${rows}${escapeCard(v.escapes)}${modelCard(v.models, v.modelsUnrecorded)}${costCard(v.cost)}</div>` });
 }
 
 // The timeline's list; its block is a .list-anchor container (issue #23).
@@ -266,51 +394,60 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const live = ctx.form ?? ctx.live; // ctx.form: a hosted copy's forms (no live script)
   const form = live && v.open && !ctx.readOnly ? live : null; // a closed run, or another run's page, takes no answers
   const r = v.repo;
+  const st = v.status;
+  const g = v.goalCheck;
+  const fin = new Set(v.units.filter((u) => u.finished).map((u) => u.id));
+  const meta = `<p class="meta runmeta">${esc(v.tag)} · ${st ? `${esc(st.word)} · ` : ''}phase ${esc(v.phase)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</p>`;
+  const main = [
+    blk('needs', needsPanel(v, form, ctx)),
+    blk('units', unitsPanel(v, ctx, r), 'div', ' id="unit-list"'),
+    blk('unit-details', detailsPanel(v, ctx, form, r)),
+    blk('lanes', panel({ id: 'lanes', title: 'Timeline', bodyHtml: lanes(v, nowMs, ctx) })),
+    blk('activity', panel({ id: 'activity', title: 'Activity', count: Math.min(v.timeline.length, TIMELINE_MAX),
+      bodyHtml: `${ctx.live ? timelineTools(v.units.map((u) => u.id)) : ''}<div class="list-anchor">${timelineOl(timelineList(v.timeline, r, fin, ctx))}</div>` }), 'div', ' id="timeline"'),
+  ];
+  const side = [
+    blk('lead', leadPanel(v, ctx)),
+    blk('goal', panel({ id: 'goal', title: 'Goal', count: g.behaviours.length ? `${g.behaviours.filter((b) => b.status === 'pass').length} / ${g.behaviours.length}` : null, scroll: 520, bodyHtml: goalBlock(v, ctx) })),
+    blk('decisions', listPanel('decisions', 'Decisions', v.decisions, r)),
+    blk('questions', questionsPanel(v, r)),
+    blk('follow-ups', listPanel('follow-ups', 'Follow-ups', v.followUps, r)),
+    blk('person-notes', listPanel('person-notes', 'Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)),
+    blk('budget', budgetPanel(v)),
+    v.integration.length ? blk('integration', panel({ id: 'integration', title: 'Integration', count: v.integration.length, bodyHtml: `<p>${v.integration.map((x) => chip(x, x)).join(' → ')}</p>` })) : '',
+    blk('gbf', panel({ id: 'gbf', title: 'Goal, bar and fence', open: false, bodyHtml: `<dl class="kv"><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>` })),
+    form ? blk('note', panel({ id: 'note', title: 'Note to lead', open: false, bodyHtml: noteForm(form) })) : '',
+  ];
   const body = [
-    blk('head', `<header class="run"><h1>${esc(v.id)}</h1>${v.status ? statusChip(v.status) : chip(v.phase, cls(v.phase.replace(/^closed: /, '')))}<span class="meta">${esc(v.tag)} · ${v.status ? `phase ${esc(v.phase)} · ` : ''}started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</span>${ctx.maps && !ctx.pages?.length ? `<a class="open" href="${esc(ctx.maps)}">Maps →</a>` : ''}${ctx.mapHref ? `<a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}${ctx.report && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.report)}">Report →</a>` : ''}${ctx.retro && !ctx.pages?.length ? `<a class="open" style="margin-left:14px" href="${esc(ctx.retro)}">Retro →</a>` : ''}</header>`),
-    v.status ? blk('status', statusBlock(v.status, ctx)) : '',
+    blk('head', heading(v.id, clip(v.goal, 140)) + meta),
+    st ? blk('status', statusBlock(st, ctx)) : '',
     v.origin ? blk('origin', originLine(v.origin)) : '',
     blk('situation', `<div class="situation"><p>${linkify(v.situation.text, r)}</p><p class="meta">Situation · ${v.situation.computed ? 'counted from the state' : `the lead, ${stamp(v.situation.at)}`}</p></div>`),
     v.retroPending ? blk('retro-pending', pendingBanner(v, !v.open, ctx.project)) : '',
-    blk('goal', goalBlock(v, ctx)),
-    blk('needs', needsYou(v, form, ctx)),
-    form ? blk('note', noteForm(form)) : '',
-    blk('eta', `<div class="eta"><b>Time left</b>${esc(v.timeLeft)}</div><div class="next"><b>Next</b>${esc(v.next)}</div>`),
-    blk('gbf', toggle('gbf', 'Goal, bar and fence', `<dl><dt>Goal</dt><dd>${linkify(v.goal, r)}</dd><dt>Bar</dt><dd>${linkify(v.bar, r)}</dd><dt>Fence</dt><dd>${linkify(v.fence, r)}</dd></dl>`, '')),
-    '<h2 data-a="h-Budget">Budget</h2>',
-    blk('budget', v.budget.map((b) => `<div class="card" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row" style="margin:0"><span>${esc(b.name)}</span><b>${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${b.note ? `<p class="meta">${esc(b.note)}</p>` : ''}${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('') + escapeCard(v.escapes) + modelCard(v.models, v.modelsUnrecorded) + costCard(v.cost), 'div', ' class="budget"'),
-    '<h2 data-a="h-Units">Units</h2>',
-    `<p class="legend"><label class="fchip"><input type="checkbox" id="show-finished" checked><span>Show finished</span></label> <span class="key">${dot('needs-you')} <b>Needs you</b> = only you can unblock it;</span> <span class="key">${dot('blocked')} <b>Waiting for A</b> = blocked on another unit (A);</span> <span class="key">${dot('queued')} <b>Up next</b> = ready, not started;</span> <span class="key">${dot('working')} working;</span> <span class="key">${dot('retrying')} <b>Retrying</b> = the lead is on it;</span> <span class="key">${dot('stale')} <b>Quiet</b> = the lead is checking on a silent agent;</span> <span class="key">${dot('passed')} passed;</span> <span class="key">${dot('stopped')} stopped.</span> Score dots: red = failed try, green = passed try.</p>`,
-    blk('units', v.units.length ? [...v.units.filter((u) => !u.finished), ...v.units.filter((u) => u.finished)].map((u) => unitCard(u, ctx, form, r)).join('') : '<p class="empty">No units yet.</p>', 'div', ' class="grid"'),
-    blk('integration', v.integration.length ? `<h2>Integration</h2><p>${v.integration.map((x) => chip(x, x)).join(' → ')}</p>` : ''),
-    '<h2 data-a="h-Decisions">Decisions, questions and follow-ups</h2>',
-    blk('lists', [list('Decisions', v.decisions, r), questionsCard(v, r), list('Follow-ups', v.followUps, r),
-      list('Notes from you', v.personNotes.map((n) => `${n.unit ? `${n.unit}: ` : ''}${n.text}`), r)].join(''), 'div', ' class="lists"'),
-    '<h2 id="timeline" data-a="h-timeline">Timeline</h2>',
-    ctx.live ? timelineTools(v.units.map((u) => u.id)) : '',
-    blk('timeline', timelineOl(timelineList(v.timeline, r, new Set(v.units.filter((u) => u.finished).map((u) => u.id)), ctx)), 'div', ' class="list-anchor"'),
+    st ? blk('kpis', runKpis(v)) : '',
+    cols(main.join('\n'), side.join('\n')),
     blk('evv', viewer(viewerEntries(v), ctx, r)),
   ].join('\n');
-  return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open });
+  return page({ title: v.id, body, ctx, path: ctx.base || '/', closed: !v.open, crumbs: runCrumbs(v, ctx), flag: runFlag(st) });
 }
 
 
 // Builder models: rounds and pass rate each, so a cheaper builder that fails more shows up.
 function modelCard(m, none = 0) {
   if (!m?.length && !none) return '';
-  return `<div class="card" data-a="budget-models" title="Rounds built on each model, and how many the critic passed"><div class="row" style="margin:0"><span>builder models</span><b>${esc(modelLine(m ?? [], none))}</b></div></div>`;
+  return `<div class="brow" data-a="budget-models" title="Rounds built on each model, and how many the critic passed"><div class="row" style="margin:0"><span>builder models</span><b>${esc(modelLine(m ?? [], none))}</b></div></div>`;
 }
 
 // Cost: tokens, minutes and money per run, unit and model, as the lead recorded them (lib/cost.mjs).
 function costCard(c) {
   if (!c) return '';
   const items = [...c.byUnit.map((u) => `<li>${esc(u.id)}: ${esc(u.line)}</li>`), ...c.byModel.map((m) => `<li>model ${esc(m.model)}: ${esc(m.line)}</li>`)].join('');
-  return `<div class="card" data-a="budget-cost" title="Tokens, minutes and cost each launch reported, as the lead recorded them"><div class="row" style="margin:0"><span>cost</span><b>${esc(c.run)}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
+  return `<div class="brow" data-a="budget-cost" title="Tokens, minutes and cost each launch reported, as the lead recorded them"><div class="row" style="margin:0"><span>cost</span><b>${esc(c.run)}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
 }
 
 // Escapes: defects found after a unit passed, from note --kind escape. Shown once there is a pass.
 function escapeCard(e) {
   if (!e || (!e.passed && !e.escapes)) return '';
   const items = e.list.map((x) => `<li>${esc(x.unit)}${x.round ? ` (passed in try ${x.round})` : ''}: ${esc(clip(x.text, 160))}</li>`).join('');
-  return `<div class="card" data-a="budget-escapes" title="Defects found after a unit passed: in a later review, in verify, on test or by a person"><div class="row" style="margin:0"><span>escapes</span><b>${esc(escapeLine(e))}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
+  return `<div class="brow" data-a="budget-escapes" title="Defects found after a unit passed: in a later review, in verify, on test or by a person"><div class="row" style="margin:0"><span>escapes</span><b>${esc(escapeLine(e))}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
 }

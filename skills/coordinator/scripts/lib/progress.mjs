@@ -1,7 +1,7 @@
 // Is the run finished, and how near is it? One status word, progress, an ETA and the
 // status line, computed here only: `show`, `list`, `status-line`, the HUD and the
 // coordinator page all read runStatus, so they never disagree. Pure over the state.
-import { decide } from './rules.mjs';
+import { decide, roundCap } from './rules.mjs';
 import { questions } from './questions.mjs';
 import { gapsModel } from './gaps.mjs';
 import { clip, duration, estimate } from './plain.mjs';
@@ -88,6 +88,7 @@ export function runStatus(run, plan = null, { nowMs = Date.now(), runs = null, t
   const stopped = run.units.filter((u) => u.status === 'stopped').length;
   const done = passed + stopped;
   const pct = total ? Math.round((done / total) * 100) : 0;
+  const work = unitWork(run);
   const current = run.units.filter((u) => ['building', 'judging'].includes(u.status))
     .map((u) => ({ id: u.id, phase: u.status === 'building' ? 'building' : 'checking', round: u.rounds.length + 1, lastBeat: agoText(u.heartbeatAt ?? run.createdAt, nowMs, timeZone) }));
   const open = run.closed ? [] : questions(run).filter((q) => q.open);
@@ -111,11 +112,29 @@ export function runStatus(run, plan = null, { nowMs = Date.now(), runs = null, t
   const st = {
     run: run.id, kind, word, outcome, concluded: !!run.closed, closedAt: run.closed?.at ?? null,
     reason: run.closed ? closeReason(run, passed, stopped, total) : null,
-    done, total, passed, stopped, pct, current, doing, eta: t, needsYou, delivered, followUps,
-    progress: `${done} of ${total} ${total === 1 ? 'unit' : 'units'} done (${pct}%)${stopped ? `, ${stopped} stopped` : ''}`,
+    done, total, passed, stopped, pct, current, work, doing, eta: t, needsYou, delivered, followUps,
+    // No unit done yet but work under way (#71): the work, not a bare 0% that reads as a stale page.
+    progress: `${done} of ${total} ${total === 1 ? 'unit' : 'units'} done${done || !work.length ? ` (${pct}%)` : ''}${stopped ? `, ${stopped} stopped` : ''}${work.length ? ` · ${workText(work)}` : ''}`,
   };
   return { ...st, line: statusLine(st) };
 }
+
+// The work inside units not finished yet (#71): the try in progress (one more than the judged rounds while
+// a builder or critic is on it), the critic verdicts given (the general critic's and each specialist's mark)
+// and the scores so far. Units not started are left out.
+export function unitWork(run) {
+  return run.units.filter((u) => !['pass', 'stopped'].includes(u.status) && (u.rounds.length || ['building', 'judging'].includes(u.status)))
+    .map((u) => ({
+      id: u.id, try: u.rounds.length + (['building', 'judging'].includes(u.status) ? 1 : 0), of: roundCap(u, run),
+      verdicts: u.rounds.reduce((n, r) => n + 1 + Object.keys(r.specialists ?? {}).length, 0),
+      scores: u.rounds.map((r) => r.score).filter((x) => typeof x === 'number'),
+    }));
+}
+const WORK_SHOWN = 2;
+const workText = (work) => work.slice(0, WORK_SHOWN).map((w) => `${w.id} on try ${w.try} of ${w.of}`
+  + `${w.verdicts ? `, ${w.verdicts} critic ${w.verdicts === 1 ? 'verdict' : 'verdicts'}` : ''}`
+  + `${w.scores.length ? `, last ${w.scores.length === 1 ? 'score' : 'scores'} ${w.scores.slice(-2).join(' → ')}` : ''}`).join('; ')
+  + (work.length > WORK_SHOWN ? `; ${work.length - WORK_SHOWN} more in work` : '');
 
 const deliveredText = (list) => (list.length ? `${list.slice(0, DELIVERED_SHOWN).join('; ')}${list.length > DELIVERED_SHOWN ? `; and ${list.length - DELIVERED_SHOWN} more` : ''}` : 'nothing');
 

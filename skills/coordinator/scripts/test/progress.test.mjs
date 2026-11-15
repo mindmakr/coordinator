@@ -75,7 +75,7 @@ test('the status word: running, waiting on you, finishing, concluded with its re
 test('progress: decided units out of total, a percentage, and the round in progress', () => {
   const s = st(state());
   assert.deepEqual([s.done, s.total, s.pct, s.stopped], [2, 4, 50, 0]);
-  assert.equal(s.progress, '2 of 4 units done (50%)');
+  assert.equal(s.progress, '2 of 4 units done (50%) · u3 on try 2 of 4, 1 critic verdict, last score 4');
   // The last beat's age is worked out here, in minutes and local time, never left as a UTC timestamp.
   assert.deepEqual(s.current, [{ id: 'u3', phase: 'building', round: 2, lastBeat: '1 min ago (18:44 local, UTC)' }]);
   assert.equal(s.doing, 'building u3 round 2, last beat 1 min ago (18:44 local, UTC)');
@@ -88,7 +88,27 @@ test('progress: decided units out of total, a percentage, and the round in progr
   assert.equal(st(none).progress, '0 of 0 units done (0%)');
   const one = state(); one.units = [unit('only', { status: 'judging', rounds: [] })];
   assert.match(st(one).doing, /^checking only round 1, last beat \d+ (min|h)[^()]* ago \(\d\d:\d\d local, UTC\)$/);
-  assert.equal(st(one).progress, '0 of 1 unit done (0%)');
+  assert.equal(st(one).progress, '0 of 1 unit done · only on try 1 of 4');
+});
+
+// #71: run payday-b4-early-close, 4 units, u1 three builds in with six critic verdicts (scores 6 then 5,
+// each round also marked by a specialist, try 3 being judged): the progress line read "0 of 4 units done (0%)".
+test('progress shows the work inside units, never 0% while a unit is several tries in (#71)', () => {
+  const marked = (n, score, min) => ({ ...fail(n, min), score, specialists: { security: { verdict: 'pass', score: 8 }, ux: { verdict: 'pass', score: 8 } } });
+  const s = state({ id: 'payday-b4-early-close' });
+  s.units = [unit('u1', { status: 'judging', heartbeatAt: at(44), rounds: [marked(1, 6, 20), marked(2, 5, 40)] }), unit('u2', { after: 'u1' }), unit('u3'), unit('u4')];
+  const r = st(s);
+  assert.equal(r.progress, '0 of 4 units done · u1 on try 3 of 4, 6 critic verdicts, last scores 6 → 5');
+  assert.doesNotMatch(r.line, /0%/);
+  assert.deepEqual(r.work, [{ id: 'u1', try: 3, of: 4, verdicts: 6, scores: [6, 5] }]);
+  // The HUD shows the same line, and the units bar does not read as an empty 0%.
+  const page = hud(view(s, decide(s, NOW), NOW, { timeZone: 'UTC' }), NOW, staticCtx('', 0));
+  assert.match(page, /0 of 4 units done · u1 on try 3 of 4, 6 critic verdicts, last scores 6 → 5/);
+  assert.doesNotMatch(page, /units done \(0%\)/);
+  // Nothing started yet: still 0%, plainly.
+  const idle = state(); idle.units = [unit('a'), unit('b')];
+  assert.equal(st(idle).progress, '0 of 2 units done (0%)');
+  assert.deepEqual(st(idle).work, []);
 });
 
 test('the ETA in plain words: time left and a local ready time, or no estimate yet', () => {
@@ -112,9 +132,9 @@ test('the ETA in plain words: time left and a local ready time, or no estimate y
 });
 
 test('status-line and the closing line say it one way', () => {
-  assert.equal(st(state()).line, 'payday-x · Running: 2 of 4 units done (50%), building u3 round 2, last beat 1 min ago (18:44 local, UTC), about 1 h left (~19:45). Nothing needs you.');
+  assert.equal(st(state()).line, 'payday-x · Running: 2 of 4 units done (50%) · u3 on try 2 of 4, 1 critic verdict, last score 4, building u3 round 2, last beat 1 min ago (18:44 local, UTC), about 1 h left (~19:45). Nothing needs you.');
   const q = st(state({ notes: [{ kind: 'question', text: 'Which zone?', unit: 'u4', at: at(10) }] }));
-  assert.equal(q.line, 'payday-x · Waiting on you: 2 of 4 units done (50%), building u3 round 2, last beat 1 min ago (18:44 local, UTC), about 1 h left (~19:45). Needs you: q1.');
+  assert.equal(q.line, 'payday-x · Waiting on you: 2 of 4 units done (50%) · u3 on try 2 of 4, 1 critic verdict, last score 4, building u3 round 2, last beat 1 min ago (18:44 local, UTC), about 1 h left (~19:45). Needs you: q1.');
   const closed = state({ closed: { outcome: 'partial', at: at(90) }, notes: [{ kind: 'follow-up', text: 'u4 dates in the export', unit: 'u4', at: at(80) }] });
   const c = st(closed);
   assert.match(c.line, /^payday-x concluded: partial\. Delivered: u1 Totals; u2 Dates\. Follow-ups: \d+ in Gaps\. Ready for the next run\.$/);
@@ -176,7 +196,7 @@ test('the CLI: list, status-line (one run and all), show and self print the same
   ok('add', 'r2', 'd1', '--bar', 'page exists'); ok('freeze', 'r2'); ok('next', 'r2');
   ok('note', 'r2', '--kind', 'decision', '--text', 'skip');
   const one = ok('status-line', 'r1').trim();
-  assert.match(one, /^r1 · Running: 0 of 2 units done \(0%\), building api round 1, last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\), no estimate yet\. Nothing needs you\.$/);
+  assert.match(one, /^r1 · Running: 0 of 2 units done · api on try 1 of 4, building api round 1, last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\), no estimate yet\. Nothing needs you\.$/);
   const list = JSON.parse(ok('list'));
   const r1 = list.find((r) => r.run === 'r1');
   assert.equal(r1.line, one);
@@ -188,7 +208,7 @@ test('the CLI: list, status-line (one run and all), show and self print the same
   assert.equal(all.length, 2);
   const show = ok('show', 'r1');
   assert.match(show, /^r1 \[code\] · Running/);
-  assert.match(show, /^progress {3}0 of 2 units done \(0%\) · building api round 1, last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\)$/m);
+  assert.match(show, /^progress {3}0 of 2 units done · api on try 1 of 4 · building api round 1, last beat under a minute ago \((?:[A-Z][a-z]{2} )?\d\d:\d\d local, UTC[+-]?[\d:]*\)$/m);
   assert.match(show, /^eta {8}no estimate yet$/m);
   assert.ok(ok('self').includes(one));
   const json = JSON.parse(ok('status-line', 'r1', '--json'));

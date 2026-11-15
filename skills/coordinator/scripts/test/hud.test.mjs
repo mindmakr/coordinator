@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { hud, scoreChart } from '../lib/hud.mjs';
+import { unitPage } from '../lib/unitpage.mjs';
 import { decide } from '../lib/rules.mjs';
 import { text, view } from '../lib/view.mjs';
 
@@ -64,7 +65,8 @@ test('hud.html escapes every piece of state text and loads nothing', () => {
   assert.doesNotMatch(html, /<link rel="stylesheet"|@import/i, 'no stylesheets from anywhere');
   assert.match(html, /default-src 'none'/);
   assert.doesNotMatch(html, /http-equiv="refresh"/, 'a snapshot: no reload that would close what the reader opened');
-  assert.match(html, /<svg class="spark"[^>]*>.*<polyline points="/s);
+  assert.match(html, /<span class="mono">3 → 5\.5<\/span>/, 'the scores per try, as a trend on the run page');
+  assert.match(unitPage(view(s, decide(s, T0), T0), 'api', T0), /<svg class="spark"[^>]*>.*<polyline points="/s, 'and as a chart on the unit page');
   assert.deepEqual([...new Set(html.match(/\{\{\w+\}\}/g))], ['{{units}}'], 'every placeholder filled; only the goal\'s text remains');
 });
 
@@ -106,11 +108,11 @@ test('a unit waiting on another says so in words, links it, and the other says w
   assert.equal(api.dot, 'retrying'); assert.equal(api.badge.label, 'Retrying'); assert.equal(api.badge.title, 'The lead is on it: failed twice in a row');
   assert.deepEqual(api.dependents.map((x) => [x.id, x.dot]), [['ui', 'blocked']]);
   const html = hud(v, T0, staticCtx('', 0));
-  const card = html.slice(html.indexOf('id="unit-ui"'), html.indexOf('</section>', html.indexOf('id="unit-ui"')));
+  const card = html.slice(html.indexOf('id="unit-ui"'), html.indexOf('</tr>', html.indexOf('id="unit-ui"')));
   assert.match(card, /<span class="chip s-blocked"[^>]*>Waiting for <a class="ulink" href="units\/api\.html">api<\/a><\/span>/);
   assert.match(card, /aria-label="waiting for api"/);
   assert.match(card, /Waiting for <a class="ulink" href="units\/api\.html">api<\/a>; starts when it passes\./);
-  assert.match(card, /<b>Next:<\/b> wait: after <a class="ulink" href="units\/api\.html">api<\/a>/);
+  assert.match(card, /<div data-a="next-ui">wait: after <a class="ulink" href="units\/api\.html">api<\/a>/);
   assert.doesNotMatch(card, /chip s-open/, 'the bare "open" chip is replaced by the state in words');
   assert.match(html, /<p class="cause blocks" data-a="blocks-api"><b>Blocks:<\/b> <a class="ulink" href="units\/ui\.html">ui<\/a><\/p>/);
   assert.match(html, /<b>Needs you<\/b> = only you can unblock it;.*<b>Waiting for A<\/b> = blocked on another unit.*<b>Up next<\/b> = ready, not started/s);
@@ -206,4 +208,26 @@ test('a try a specialist failed names the specialist in its dot label', () => {
 test('a lone try a specialist failed names the specialist too', () => {
   assert.match(scoreChart([{ n: 1, verdict: 'fail', score: 9, failedBy: ['security'], cause: 'leak', general: 'pass' }]), /Failed try 1 by specialist security \(9\/10\) — leak/);
   assert.match(scoreChart([{ n: 1, verdict: 'fail', score: 6, gap: 'g' }]), /Failed try 1 \(6\/10\) — g/);
+});
+
+// #147: a round the general critic passed and specialist money failed (#126) has the specialist's gap and the
+// general critic's evidence ("review clean"). Last gap must show money's own evidence (pay.ts:40) with money's gap.
+test('Last gap of a round a specialist failed shows that specialist\'s evidence, not the general critic\'s (#147)', async () => {
+  const { unitPage } = await import('../lib/unitpage.mjs');
+  const s = state();
+  s.units[0].rounds = [{ n: 1, verdict: 'fail', general: 'pass', score: 9, failedBy: ['money'], gap: 'refund rounds half a cent away', cause: 'refund rounding', severity: 'high', evidence: 'review clean', at: at(10),
+    specialists: { money: { verdict: 'fail', gap: 'refund rounds half a cent away', evidence: 'pay.ts:40', severity: 'high' }, screen: { verdict: 'pass', evidence: 'screens ok' } } }];
+  const v = view(s, decide(s, T0), T0);
+  assert.equal(v.units[0].evidence, 'pay.ts:40');
+  const gapCell = (html) => { const i = html.indexOf('data-a="gap-api"'); assert.ok(i > 0, 'a Last gap for api'); return html.slice(i, html.indexOf('</td>', i)); };
+  const run = gapCell(hud(v, T0));
+  assert.match(run, /refund rounds half a cent away/); assert.match(run, /money/); assert.match(run, /pay\.ts:40/);
+  assert.doesNotMatch(run, /review clean/);
+  const page = unitPage(v, 'api', T0);
+  const last = page.slice(page.indexOf('data-d="last-gap" data-a'), page.indexOf('</details>', page.indexOf('data-d="last-gap" data-a')));
+  assert.match(last, /refund rounds half a cent away/); assert.match(last, /money/); assert.match(last, /pay\.ts:40/);
+  assert.doesNotMatch(last, /review clean/);
+  // Two specialists failed: each one's evidence, named, as the gap names each one's gap.
+  s.units[0].rounds[0] = { ...s.units[0].rounds[0], failedBy: ['money', 'screen'], gap: 'money: g1; screen: g2', specialists: { money: { verdict: 'fail', evidence: 'pay.ts:40' }, screen: { verdict: 'fail', evidence: 'shot.png' } } };
+  assert.equal(view(s, decide(s, T0), T0).units[0].evidence, 'money: pay.ts:40; screen: shot.png');
 });
