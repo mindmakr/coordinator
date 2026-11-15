@@ -63,8 +63,9 @@ export function score(value) {
 }
 
 // Removes control characters, text-direction overrides and zero-width characters (so what is shown is what
-// is stored and checked: "‮600‬" never displays as "006"), and masks anything that looks like a secret.
-const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g;
+// is stored and checked: "\u202e600\u202c" never displays as "006"), and masks anything that looks like a secret.
+// Also drops ZWJ and ZWNJ (U+200D, U+200C) from text arguments: they are default-ignorable.
+const HIDDEN = /[\p{Default_Ignorable_Code_Point}\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c]/gu;
 export function text(value, name, max = 2000) {
   const v = typeof value === 'string' ? value.replace(HIDDEN, '').trim() : '';
   if (!v) throw new Error(`missing --${name}`);

@@ -153,8 +153,9 @@ export function memoryDb() {
     // at: the app clock's time in ms; a session ends by the clock that dated it (session.mjs), not the wall clock.
     async putSession(s, at) { atMs(at); sessions.set(s.idHash, clone(s)); },
     async session(idHash, at) {
+      const now = atMs(at);
       const s = sessions.get(idHash);
-      if (s && s.expiresAt <= atMs(at)) { sessions.delete(idHash); return null; }
+      if (s && s.expiresAt <= now) { sessions.delete(idHash); return null; }
       return clone(s) ?? null;
     },
     async updateSessionTokens(idHash, t) { const s = sessions.get(idHash); if (s) Object.assign(s, clone(t)); },

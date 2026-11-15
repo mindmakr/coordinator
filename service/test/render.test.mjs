@@ -27,7 +27,7 @@ test('every page escapes run text, runs only the theme and panel scripts by a no
       assert.ok(sc.tagged, `${p}: each script carries the nonce the header and the page's CSP name`);
       assert.doesNotMatch(r.headers.get('content-security-policy'), /connect-src|unsafe-inline'[^;]*script/, `${p}: the scripts connect nowhere`);
       assert.equal(html.includes('<img src=x'), false, `${p}: no raw markup from the run`);
-      assert.match(r.headers.get('content-security-policy'), /default-src 'none'.*form-action 'self'.*frame-ancestors 'none'/);
+      assert.equal(r.headers.get('content-security-policy'), `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${sc.nonce}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, p);
       assert.equal(r.headers.get('cache-control'), 'no-store');
       assert.equal(r.headers.get('x-frame-options'), 'DENY');
     }

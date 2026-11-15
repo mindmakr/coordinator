@@ -17,7 +17,7 @@ async function world(over = {}) {
   return t;
 }
 
-const PATHS = ['/r/acme/secret', '/r/acme/secret/run/s1', '/r/acme/secret/run/s1/unit/u1', '/r/acme/secret/coordinator'];
+const PATHS = ['/r/acme/secret', '/r/acme/secret/run/s1', '/r/acme/secret/run/s1/unit/u1', '/r/acme/secret/coordinator', '/r/acme/secret/run/s1/report', '/r/acme/secret/run/s1/retro', '/r/acme/secret/run/s1/maps'];
 
 test('a reader sees the runs of a repo they can read; an outsider gets 404 everywhere, same as a repo that does not exist', async () => {
   const t = await world();
