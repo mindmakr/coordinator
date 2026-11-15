@@ -302,7 +302,7 @@ test('retro page: shared shell, KPI row and the panels, links to units, Download
   const html = retroPage(m, view(), Date.now(), null, false);
   assert.match(html, /<div class="head"><h1>Retro<\/h1>/);
   assert.match(html, /<div class="kpis">/);
-  assert.deepEqual(ids(html), ['budget', 'notes', 'lessons', 'gaps', 'stopped', 'checklist', 'upstream', 'escapes']);
+  assert.deepEqual(ids(html), ['budget', 'notes', 'lessons', 'gaps', 'stopped', 'spend', 'checklist', 'upstream', 'staffing', 'escapes']);
   for (const [id, closed] of [['gaps', true], ['stopped', true], ['escapes', true], ['budget', false], ['lessons', false]]) assert.equal(new RegExp(`data-d="${id}"[^>]*\\sopen`).test(html), !closed, id);
   assert.match(html, /Use the clock/); assert.match(html, /dates differ/); assert.match(html, /round budget/);
   assert.match(html, /<a class="mono" href="[^"]*u2[^"]*">u2<\/a>/);
@@ -312,4 +312,38 @@ test('retro page: shared shell, KPI row and the panels, links to units, Download
   const md = retroMarkdown(m);
   assert.match(md, /^# Retro · r\n\n## Budget\n- Tries per unit: 3 of 4/);
   assert.match(md, /## Repeated gaps\n- dates differ \(u1; 2 rounds\)/); assert.match(md, /## Stopped units\n- u2: round budget/);
+});
+
+// Run hud-followups f2 (B3): the canvas's Spend and Staffing panels, and budget rows the run records.
+test('retro: Spend per agent kind and per unit from launch figures, Staffing from critic setups, time and review minutes used', () => {
+  const T = (min) => new Date(Date.parse('2026-01-01T00:00:00Z') + min * 60_000).toISOString();
+  const s = { id: 'r', tag: 'code', createdAt: T(0), closed: { outcome: 'done', at: T(120) }, budget: { maxRounds: 4, maxMinutes: 240, maxUnits: 6 }, notes: [{ kind: 'escape', unit: 'u1', text: 'missed', at: T(130) }],
+    units: [
+      { id: 'u1', status: 'pass', log: [{ kind: 'start', at: T(0) }, { kind: 'built', at: T(30) }, { kind: 'start', at: T(50) }, { kind: 'built', at: T(70) }],
+        rounds: [{ n: 1, verdict: 'fail', gap: 'g', critic: 'general, opus, full depth', at: T(40), builtBy: 'opus' }, { n: 2, verdict: 'pass', critic: 'general, sonnet, delta review', at: T(90), builtBy: 'sonnet', specialists: { security: { verdict: 'pass', critic: 'security, opus' } } }],
+        costs: [{ step: 'start', role: 'builder', tokensIn: 600_000, minutes: 50, at: T(0) }, { step: 'verdict', role: 'critic', tokensIn: 300_000, minutes: 30, at: T(40) }, { step: 'verdict', role: 'critic:security', tokensIn: 100_000, at: T(90), cost: { amount: 1.25, currency: 'USD' } }] },
+      { id: 'u2', status: 'stopped', stopReason: 'budget', rounds: [] },
+    ] };
+  const m = retroModel(s);
+  assert.deepEqual(m.spend.byKind.map((g) => [g.label, g.tokensIn, g.share]), [['Builders', 600_000, 60], ['General critics', 300_000, 30], ['Specialist critics', 100_000, 10]]);
+  assert.deepEqual(m.staffing.critics.map((g) => [g.critic, g.setup, g.rounds, g.passed, g.escapes]), [['general', 'general, opus, full depth', 1, 0, 0], ['general', 'general, sonnet, delta review', 1, 1, 1], ['security', 'security, opus', 1, 1, null]]);
+  assert.equal(m.budget.usedMinutes, 120); assert.equal(m.budget.reviewMedian, 10, 'reviews took 10 and 20 minutes: the median is the lower middle');
+  const html = retroPage(m, view(), Date.now(), null, false);
+  const panelOf = (id) => { const i = html.indexOf(`data-d="${id}"`); assert.ok(i > 0, id); return html.slice(i, html.indexOf('</details>', i)); };
+  const spend = panelOf('spend');
+  assert.match(spend, /<span class="meta">1000k in tokens · 80 min · 1\.25 USD<\/span>/);
+  assert.match(spend, /<tr data-a="spend-builder"><td>Builders<\/td><td class="num">600k<\/td><td class="num">–<\/td><td class="num">50<\/td><td class="num">–<\/td><td class="num">60%<\/td><\/tr>/);
+  assert.match(spend, /<tr data-a="spend-specialist"><td>Specialist critics<\/td><td class="num">100k<\/td><td class="num">–<\/td><td class="num">–<\/td><td class="num">1\.25 USD<\/td><td class="num">10%<\/td><\/tr>/);
+  assert.match(spend, /<tr data-a="spend-u-u1"><td><a class="mono" href="[^"]*u1[^"]*">u1<\/a><\/td><td class="num">1000k<\/td>/);
+  assert.doesNotMatch(spend, /spend-u-u2/, 'a unit with no recorded launch is not listed as zero');
+  const staffing = panelOf('staffing');
+  assert.match(staffing, /<td>General<\/td><td>general, sonnet, delta review<\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">1<\/td>/);
+  assert.match(staffing, /<td>Specialist security<\/td><td>security, opus<\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">–<\/td>/);
+  assert.match(staffing, /Builder models: opus 0\/1 passed · sonnet 1\/1 passed/);
+  assert.match(html, /<td>Time, minutes<\/td><td class="num">240<\/td><td class="num">120<\/td>/);
+  assert.match(html, /<td>Review minutes per try<\/td><td class="num">–<\/td><td class="num">10<\/td>/);
+  assert.match(html, /<td>Tokens in<\/td><td class="num">–<\/td><td class="num">1000k<\/td>/);
+  // Nothing recorded: the panels say so, nothing is guessed.
+  const bare = retroPage(retroModel({ id: 'r', tag: 'code', budget: { maxRounds: 4, maxMinutes: 60 }, notes: [], units: [{ id: 'u1', status: 'open', rounds: [] }] }), view(), Date.now(), null, false);
+  assert.match(bare, /Not recorded: the lead passes --tokens-in, --minutes or --cost/); assert.match(bare, /No round judged yet\./);
 });

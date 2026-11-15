@@ -307,9 +307,12 @@ function leadPanel(v, ctx) {
 }
 
 // The run's units as lanes over its time: one bar per try, from its start to its verdict (or now, for the
-// try in progress), coloured and labelled by outcome, each linked to the unit's page.
+// try in progress), coloured and labelled by outcome, each linked to the unit's page. An open run's axis runs on
+// to its ETA (lib/progress.mjs), with Now and ETA marked; pauses by hand are hatched.
 export function lanes(v, nowMs, ctx) {
-  const t0 = Date.parse(v.started); const t1 = v.closedAt ? Date.parse(v.closedAt) : nowMs;
+  const t0 = Date.parse(v.started); const now = v.closedAt ? Date.parse(v.closedAt) : nowMs;
+  const ready = v.open && v.status?.eta?.readyAt ? Date.parse(v.status.eta.readyAt) : null;
+  const t1 = Math.max(now, ready ?? 0);
   if (!(t1 > t0) || !v.units.length) return '<p class="empty">Nothing yet.</p>';
   const x = (t) => Math.min(100, Math.max(0, ((t - t0) / (t1 - t0)) * 100));
   const lane = (u) => {
@@ -318,12 +321,20 @@ export function lanes(v, nowMs, ctx) {
       if (e.label === 'start') from ??= Date.parse(e.at);
       else if (/^verdict /.test(e.label)) { n++; const to = Date.parse(e.at); segs.push({ n, from: from ?? to, to, c: e.badge === 'pass' ? 'p' : 'f' }); from = null; }
     }
-    if (from !== null && ['building', 'judging'].includes(u.status)) segs.push({ n: n + 1, from, to: t1, c: 'j' });
+    if (from !== null && ['building', 'judging'].includes(u.status)) segs.push({ n: n + 1, from, to: now, c: 'j' });
     const word = { p: 'passed', f: 'failed', j: 'in progress' };
     const bars = segs.map((s) => `<a class="seg ${s.c}" href="${esc(ctx.unitHref(u.id))}" style="left:${x(s.from).toFixed(2)}%;width:${Math.max(0.6, x(s.to) - x(s.from)).toFixed(2)}%" title="${esc(`${u.id} try ${s.n}: ${word[s.c]}`)}" aria-label="${esc(`${u.id} try ${s.n}: ${word[s.c]}`)}">T${s.n}</a>`).join('');
     return `<div class="lane${u.finished ? ' fin' : ''}" data-a="lane-${esc(u.id)}"><a class="mono" href="${esc(ctx.unitHref(u.id))}">${esc(u.id)}</a><div class="track">${bars}</div></div>`;
   };
-  return `<div class="scroll"><div class="lanes"><div class="ends"><span>${stamp(v.started, 'abs')}</span><span>${v.closedAt ? stamp(v.closedAt, 'abs') : 'now'}</span></div>${v.units.map(lane).join('')}</div></div>`;
+  const pct = (t) => x(t).toFixed(2);
+  const held = (v.pauses ?? []).map((p) => [Date.parse(p.from), p.to ? Date.parse(p.to) : now]).filter(([a, b]) => b > a)
+    .map(([a, b]) => `<span class="held" style="left:${pct(a)}%;width:${(x(b) - x(a)).toFixed(2)}%"></span>`).join('');
+  const marks = `${held}${v.open ? `<span class="mark now" style="left:${pct(now)}%"></span>` : ''}${ready ? `<span class="mark eta" style="left:${pct(ready)}%"></span>` : ''}`;
+  // Now under its line; the ETA is the axis's end, named in the end label above.
+  const axis = v.open ? `<div class="axis"><span class="now" style="left:${pct(now)}%">Now</span></div>` : '';
+  const end = v.closedAt ? stamp(v.closedAt, 'abs') : ready ? `ETA ${stamp(v.status.eta.readyAt, 'abs')}` : 'now';
+  return `<div class="scroll"><div class="lanes"><div class="ends"><span>${stamp(v.started, 'abs')}</span><span>${end}</span></div>`
+    + `<div class="lane-rows">${marks ? `<div class="marks" aria-hidden="true">${marks}</div>` : ''}${v.units.map(lane).join('')}</div>${axis}</div></div>`;
 }
 
 // The run's numbers: units done, tries used with the critics' verdicts, time, ETA and the goal's behaviours.
@@ -338,7 +349,8 @@ function runKpis(v) {
     { k: 'Units', v: `${st.done} of ${st.total}`, ...(st.done || !st.work?.length ? { bar: st.pct } : {}), s: [st.stopped ? `${st.stopped} stopped` : '', st.work?.length ? `${st.work.length} in work` : ''].filter(Boolean).join(' · ') },
     { k: 'Tries', v: `${used} of ${cap}`, s: `${verdicts} ${verdicts === 1 ? 'verdict' : 'verdicts'}` },
     ...(time ? [{ k: 'Time', v: `${time.used} of ${time.max} min`, s: time.note ?? '' }] : []),
-    { k: 'ETA', v: st.eta.short },
+    // The ready time when there is one; below it the ETA in the words `show` prints.
+    { k: 'ETA', ...(st.eta.readyAt ? { vHtml: stamp(st.eta.readyAt, 'abs'), s: st.eta.text } : { v: st.eta.short }) },
     { k: 'Goal', v: g.behaviours.length ? `${passing} of ${g.behaviours.length}` : g.met ? 'met' : 'not yet', s: g.behaviours.length ? 'behaviours passing' : '' },
   ]);
 }
@@ -379,8 +391,12 @@ function questionsPanel(v, repo) {
 
 function budgetPanel(v) {
   const rows = v.budget.map((b) => `<div class="brow" data-a="budget-${esc(b.name)}" title="${esc(BUDGET_HELP[b.name] ?? '')}"><div class="row"><span>${esc(b.name)}</span><b class="mono">${b.used}/${b.max}${b.unit ? ` ${esc(b.unit)}` : ''}</b></div>${b.note ? `<p class="meta">${esc(b.note)}</p>` : ''}${bar(b.used, b.max, b.name !== 'units' && pct(b.used, b.max) >= 90 ? 'hot' : '', BUDGET_HELP[b.name])}</div>`).join('');
-  return panel({ id: 'budget', title: 'Budget', open: false, bodyHtml: `<div class="budget-rows">${rows}${escapeCard(v.escapes)}${modelCard(v.models, v.modelsUnrecorded)}${costCard(v.cost)}</div>` });
+  return panel({ id: 'budget', title: 'Budget', open: false, bodyHtml: `<div class="budget-rows">${rows}${escapeCard(v.escapes)}${modelCard(v.models, v.modelsUnrecorded)}${criticCard(v.critics)}${costCard(v.cost)}</div>` });
 }
+
+// A long activity list scrolls inside its own box, below the search and filters, so the page stays short.
+const ACTIVITY_MAX = 360;
+export const activityBox = (list, max = ACTIVITY_MAX) => `<div class="scroll activity-box" style="max-height:${max}px"><div class="list-anchor">${list}</div></div>`;
 
 // The timeline's list; its block is a .list-anchor container (issue #23).
 export const timelineOl = (rows) => `<ol class="timeline" data-tl-list data-ev-list>${rows}</ol>`;
@@ -403,9 +419,9 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
     blk('needs', needsPanel(v, form, ctx)),
     blk('units', unitsPanel(v, ctx, r), 'div', ' id="unit-list"'),
     blk('unit-details', detailsPanel(v, ctx, form, r)),
-    blk('lanes', panel({ id: 'lanes', title: 'Timeline', bodyHtml: lanes(v, nowMs, ctx) })),
+    blk('lanes', panel({ id: 'lanes', title: 'Timeline', metaHtml: v.pauses?.length ? '<span class="held-key" aria-hidden="true"></span>paused' : '', bodyHtml: lanes(v, nowMs, ctx) })),
     blk('activity', panel({ id: 'activity', title: 'Activity', count: Math.min(v.timeline.length, TIMELINE_MAX),
-      bodyHtml: `${ctx.live ? timelineTools(v.units.map((u) => u.id)) : ''}<div class="list-anchor">${timelineOl(timelineList(v.timeline, r, fin, ctx))}</div>` }), 'div', ' id="timeline"'),
+      bodyHtml: `${ctx.live ? timelineTools(v.units.map((u) => u.id)) : ''}${activityBox(timelineOl(timelineList(v.timeline, r, fin, ctx)))}` }), 'div', ' id="timeline"'),
   ];
   const side = [
     blk('lead', leadPanel(v, ctx)),
@@ -442,8 +458,17 @@ function modelCard(m, none = 0) {
 // Cost: tokens, minutes and money per run, unit and model, as the lead recorded them (lib/cost.mjs).
 function costCard(c) {
   if (!c) return '';
-  const items = [...c.byUnit.map((u) => `<li>${esc(u.id)}: ${esc(u.line)}</li>`), ...c.byModel.map((m) => `<li>model ${esc(m.model)}: ${esc(m.line)}</li>`)].join('');
+  const share = (g) => (g.share === null ? '' : ` · ${g.share}% of ${g.shareOf === 'tokensIn' ? 'tokens in' : 'minutes'}`);
+  const items = [...c.byUnit.map((u) => `<li>${esc(u.id)}: ${esc(u.line)}</li>`), ...(c.byKind ?? []).map((g) => `<li data-a="cost-${esc(g.kind)}">${esc(g.label)}: ${esc(g.line)}${esc(share(g))}</li>`), ...c.byModel.map((m) => `<li>model ${esc(m.model)}: ${esc(m.line)}</li>`)].join('');
   return `<div class="brow" data-a="budget-cost" title="Tokens, minutes and cost each launch reported, as the lead recorded them"><div class="row" style="margin:0"><span>cost</span><b>${esc(c.run)}</b></div>${items ? `<ul>${items}</ul>` : ''}</div>`;
+}
+
+// Critic setups (verdict --critic): rounds each judged and passed, as `show` prints the escapes per setup.
+const criticWho = (g) => (g.critic === 'general' ? 'general critic' : `specialist ${g.critic}`);
+function criticCard(list) {
+  if (!list?.length) return '';
+  const items = list.map((g) => `<li data-a="critic-${esc(hash(`${g.critic}|${g.setup}`))}">${esc(criticWho(g))}, ${esc(g.setup)}: ${g.passed} of ${g.rounds} passed${g.escapes === null ? '' : ` · ${g.escapes} escape${g.escapes === 1 ? '' : 's'}`}</li>`).join('');
+  return `<div class="brow" data-a="budget-critics" title="Each critic setup the lead recorded with verdict --critic, and the rounds it judged"><div class="row" style="margin:0"><span>critic setups</span><b>${list.length}</b></div><ul>${items}</ul></div>`;
 }
 
 // Escapes: defects found after a unit passed, from note --kind escape. Shown once there is a pass.

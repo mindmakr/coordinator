@@ -39,6 +39,40 @@ function noteEvents(run, keep) {
   ];
 }
 
+// Each try's start and end stamps, from the unit's log (start, built, reset) and its rounds (the verdict
+// ends a try): { n, start, built, end, minutes, build, review, open }. Minutes are wall-clock time while an
+// agent worked on the try: start to the verdict, less the gap after a reset (a crashed build) until the next
+// start. build is the last start to the last built, review the last built to the verdict. A try whose start
+// fell out of the log has null minutes. The try in progress (building or judging) runs to nowMs, open: true.
+export function tryTimes(u, nowMs) {
+  const log = (u.log ?? []).filter((e) => e && typeof e.at === 'string' && ['start', 'built', 'reset'].includes(e.kind));
+  const mins = (a, b) => (a && b ? Math.max(0, Date.parse(b) - Date.parse(a)) / 60_000 : null);
+  const one = (n, lo, end, open) => {
+    let from = null; let start = null; let last = null; let built = null; let worked = 0;
+    for (const e of log.filter((x) => x.at > lo && (!end || x.at <= end))) {
+      if (e.kind === 'start') { start ??= e.at; if (!from) { from = e.at; last = e.at; } }
+      else if (e.kind === 'built') built = e.at;
+      else if (from) { worked += mins(from, e.at); from = null; built = null; } // reset: the build ended with no verdict
+    }
+    const to = end ?? new Date(nowMs).toISOString();
+    if (from) worked += mins(from, to);
+    const ok = start !== null && (from !== null || worked > 0);
+    return { n, start, built, end, open, minutes: ok ? worked : null, build: built && last ? mins(last, built) : null, review: built ? mins(built, to) : null };
+  };
+  const out = []; let lo = '';
+  for (const [i, r] of (u.rounds ?? []).entries()) { if (typeof r.at !== 'string') continue; out.push(one(r.n ?? i + 1, lo, r.at, false)); lo = r.at; }
+  if (['building', 'judging'].includes(u.status)) { const t = one((u.rounds?.length ?? 0) + 1, lo, null, true); if (t.start) out.push(t); }
+  return out;
+}
+
+// A unit's working time over its tries: total, build and review minutes of the stamped tries, how many
+// tries had no start stamp, and whether one is still running. minutes is null when no try was stamped.
+export function workTime(tries) {
+  const known = tries.filter((t) => t.minutes !== null);
+  const sum = (k) => known.reduce((n, t) => n + (t[k] ?? 0), 0);
+  return { minutes: known.length ? sum('minutes') : null, build: sum('build'), review: sum('review'), unstamped: tries.length - known.length, open: tries.some((t) => t.open) };
+}
+
 // Every event of one unit, oldest first.
 export function unitTimeline(run, id) {
   const u = run.units.find((x) => x.id === id);

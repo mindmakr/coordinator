@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { pendingSyncs, syncStep, unitPaths } from '../lib/overlap.mjs';
+import { overlapsOf, pendingSyncs, syncStep, unitPaths } from '../lib/overlap.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'coordinator-overlap-'));
@@ -70,4 +70,10 @@ test('next names the step once an overlapping unit merged; sync clears it; detec
   assert.equal(run('sync', 'p', 'u3', '--text', 'merged main at abc123').code, 0);
   assert.equal(run('next', 'p').out.units[1].sync, undefined);
   assert.equal(state('p').units[1].log.at(-1).kind, 'sync');
+});
+
+test('overlapsOf: the other units sharing a planned or diffed path, none for a unit with no files', () => {
+  const run = { units: [{ id: 'a', touches: ['./lib/x.mjs', 'lib/y.mjs'] }, { id: 'b', detect: { paths: ['lib\\x.mjs'] } }, { id: 'c', touches: ['lib/z.mjs'] }, { id: 'd' }] };
+  assert.deepEqual(overlapsOf(run, run.units[0]), [{ id: 'b', paths: ['lib/x.mjs'] }]);
+  assert.deepEqual(overlapsOf(run, run.units[3]), []);
 });

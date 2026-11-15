@@ -33,6 +33,13 @@ export function pendingSyncs(run) {
   return out;
 }
 
+// The other units whose files (planned or in their last checked diff) share a path with this one: [{ id, paths }].
+export function overlapsOf(run, u) {
+  const mine = unitPaths(u);
+  if (!mine.size) return [];
+  return run.units.filter((x) => x.id !== u.id).map((x) => ({ id: x.id, paths: [...unitPaths(x)].filter((p) => mine.has(p)).sort() })).filter((x) => x.paths.length);
+}
+
 const shown = (paths) => (paths.length > MAX_SHOWN ? `${paths.slice(0, MAX_SHOWN).join(', ')} and ${paths.length - MAX_SHOWN} more` : paths.join(', '));
 
 // "u3 overlaps u1 in content/en.json: merge the target into u3 before review, then run.mjs sync <run> u3"
