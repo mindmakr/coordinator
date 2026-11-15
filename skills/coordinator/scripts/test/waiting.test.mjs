@@ -147,7 +147,7 @@ test('B2, B3: run.mjs waiting and the PC front page show the same list, oldest f
   assert.match(page0, /<section data-k="pc-needs"[^>]*><div class="needs calm">Nothing needs you on this PC\.<\/div>/);
   assert.match(page0, /<section data-k="pc-loose"[^>]*><p class="empty">Nothing waits on you\.<\/p>/);
   // Long lists scroll inside their panel (the canvas's heights), so the page stays short.
-  for (const [id, h] of [['pc-runs', 380], ['pc-blocked', 240], ['pc-loose', 300], ['pc-concluded', 260]]) assert.match(page0, new RegExp(`data-d="${id}"[^>]*>[\\s\\S]*?<div class="body scroll[^"]*" style="max-height:${h}px">`), id);
+  for (const [id, h] of [['pc-blocked', 240], ['pc-loose', 300], ['pc-concluded', 260]]) assert.match(page0, new RegExp(`data-d="${id}"[^>]*>[\\s\\S]*?<div class="body scroll[^"]*" style="max-height:${h}px">`), id);
 
   ok(cli('alpha', ['init', 'ra', '--goal', 'goal a', '--bar', 'b', '--fence', 'f', '--alias', 'alpha work']));
   ok(cli('alpha', ['add', 'ra', 'u1', '--bar', 'b', '--title', 'Mobile card']));
@@ -174,6 +174,10 @@ test('B2, B3: run.mjs waiting and the PC front page show the same list, oldest f
   const pc = pcModel(entries, { nowMs });
   const ctx = { answerForm: { token: 'tok' }, pcHref: (k, r, sub = '') => `/p/${k}/run/${r}${sub}?t=tok` };
   const page = pcPage(pc, nowMs, { live: { token: 'tok', nonce: 'n' }, ...ctx }, same);
+  // Runs scroll once: the table's own box (its header sticks to it), not the panel body around it.
+  const runsPanel = page.slice(page.indexOf('data-d="pc-runs"'), page.indexOf('data-d="pc-blocked"'));
+  assert.match(runsPanel, /<div class="body flush">/, 'the Runs panel body does not scroll');
+  assert.match(runsPanel, /<div class="scroll tbox" style="max-height:380px">/, 'the table box is the one scroller');
   const top = page.indexOf('id="pc-needs"');
   assert.ok(top > 0 && top < page.indexOf('id="self-pc"'), 'Questions sit above the runs');
   assert.equal(page.split('Ship beta?').length - 1, 1, 'the open question shows once, with its answer form');
