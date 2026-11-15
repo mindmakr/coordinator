@@ -8,15 +8,31 @@ import { naming } from './naming.mjs';
 import { privacy } from './privacy.mjs';
 import { redundancy } from './redundancy.mjs';
 import { security } from './security.mjs';
+import { scoreWorkaroundComments, slop, WORKAROUND_THRESHOLD } from './slop.mjs';
 import { readSources } from './source.mjs';
 import { DEEP, FILE_LONG, FN_LONG, structure } from './structure.mjs';
 
-export const DISCLAIMER = 'Signals for a person to review, found by patterns: not a compliance certification, an audit or legal advice. Each one names the file and line to check; some will be false positives.';
-export const THRESHOLDS = { duplicateWindow: WINDOW, longFile: FILE_LONG, longFunction: FN_LONG, deepNesting: DEEP };
+export { WORKAROUND_THRESHOLD };
 
-function measure(files, focus, map) {
+export const DISCLAIMER = 'Signals for a person to review, found by patterns: not a compliance certification, an audit or legal advice. Each one names the file and line to check; some will be false positives.';
+export const THRESHOLDS = { duplicateWindow: WINDOW, longFile: FILE_LONG, longFunction: FN_LONG, deepNesting: DEEP, workaroundScore: WORKAROUND_THRESHOLD };
+
+function scopeSignals(signals, focus) {
+  if (!signals?.length) return [];
+  if (!focus) return signals;
+  return signals
+    .map((s) => {
+      const ev = (s.evidence ?? []).filter((e) => focus.has(e.file));
+      return ev.length ? { ...s, count: ev.length, evidence: ev } : null;
+    })
+    .filter(Boolean);
+}
+
+function measure(files, focus, map, extraSignals = []) {
   const sec = security(files, { focus });
   const priv = privacy(files, { focus });
+  const slopSignals = slop(files, { focus });
+  const extra = scopeSignals(extraSignals, focus);
   const scoped = focus ? files.filter((f) => focus.has(f.path)) : files;
   const langs = {};
   for (const f of scoped) langs[f.lang] = (langs[f.lang] ?? 0) + 1;
@@ -24,18 +40,32 @@ function measure(files, focus, map) {
     files: scoped.length, lines: scoped.reduce((n, f) => n + f.lines.length, 0), languages: langs,
     duplication: duplication(files, { focus }), structure: structure(files, { focus }), naming: naming(files, { focus }),
     redundancy: redundancy(map, { focus }),
-    signals: [...sec, ...priv.signals], privacy: priv.found,
+    signals: [...sec, ...priv.signals, ...slopSignals, ...extra], privacy: priv.found,
   };
 }
 
 // root: the project; changed: relative paths the run changed (or null); map: the run's map snapshot (or null).
-export function quality({ root, changed = null, map = null, now = new Date() }) {
+export function quality({ root, changed = null, map = null, now = new Date(), extraSignals = [] }) {
   const { files, skipped } = readSources(root);
   const focus = changed ? new Set(changed.filter((p) => files.some((f) => f.path === p))) : null;
   return {
     v: 1, at: now.toISOString(), root, disclaimer: DISCLAIMER, thresholds: THRESHOLDS, skipped,
-    project: measure(files, null, map),
-    ...(focus ? { changed: { listed: changed.length, ...measure(files, focus, map) } } : {}),
+    project: measure(files, null, map, extraSignals),
+    ...(focus ? { changed: { listed: changed.length, ...measure(files, focus, map, extraSignals) } } : {}),
+  };
+}
+
+// Async quality check that adds Jev `noul` workaround-comment scoring (> 0.75) when helpers are active.
+export async function qualityAsync({ root, changed = null, map = null, now = new Date(), helpersCfg = null, askNoulFn } = {}) {
+  const { files, skipped } = readSources(root);
+  const focus = changed ? new Set(changed.filter((p) => files.some((f) => f.path === p))) : null;
+  const extraSignals = helpersCfg?.on || askNoulFn
+    ? await scoreWorkaroundComments(files, helpersCfg, { ...(askNoulFn ? { askNoulFn } : {}) })
+    : [];
+  return {
+    v: 1, at: now.toISOString(), root, disclaimer: DISCLAIMER, thresholds: THRESHOLDS, skipped,
+    project: measure(files, null, map, extraSignals),
+    ...(focus ? { changed: { listed: changed.length, ...measure(files, focus, map, extraSignals) } } : {}),
   };
 }
 

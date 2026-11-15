@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { allowed, detect } from '../lib/gaming.mjs';
+import { fileURLToPath } from 'node:url';
+import { allowed, detect, installWorktreeHook } from '../lib/gaming.mjs';
+
+const DETECT = fileURLToPath(new URL('../detect.mjs', import.meta.url));
 
 const diff = (path, lines, deleted = false) => [
   `diff --git a/${path} b/${path}`,
@@ -97,4 +104,140 @@ test('files outside the fence are flagged; inside are not', () => {
   assert.deepEqual(rules(d, { fence: ['src', 'backend/'] }), ['outside-fence']);
   assert.deepEqual(rules(diff('src/x.ts', ['+y']), { fence: ['src'] }), []);
   assert.deepEqual(rules(diff('srcx/x.ts', ['+y']), { fence: ['src'] }), ['outside-fence']);
+});
+
+test('B1: slop detection catches raw useEffect, timer workarounds, cross-boundary imports, and full-file rewrites', () => {
+  assert.deepEqual(
+    rules(diff('src/components/Panel.tsx', ['+useEffect(() => { load(); }, []);', '+setTimeout(() => retry(), 50);', '+import { db } from "../../backend/db.js";']), { slop: true }),
+    ['raw-use-effect', 'timer-workaround', 'cross-boundary-import'],
+  );
+  // Dedicated hook modules, intra-feature imports, and req.setTimeout are not flagged.
+  assert.deepEqual(
+    rules(diff('src/hooks/useAuth.ts', ['+useEffect(() => { sync(); }, []);', '+import { api } from "../api.js";']), { slop: true }),
+    [],
+  );
+  assert.deepEqual(rules(diff('src/server/req.ts', ['+req.setTimeout(5000);']), { slop: true }), []);
+
+  const bigRewrite = [
+    'diff --git a/src/rewrite.ts b/src/rewrite.ts',
+    '--- a/src/rewrite.ts',
+    '+++ b/src/rewrite.ts',
+    '@@ -1,30 +1,30 @@',
+    ...Array.from({ length: 26 }, (_, i) => `-const old${i} = ${i};`),
+    ...Array.from({ length: 26 }, (_, i) => `+const next${i} = ${i};`),
+  ].join('\n');
+  assert.deepEqual(rules(bigRewrite, { slop: true }), ['full-file-rewrite']);
+});
+
+test('B2: detect() blocks unauthorized edits to existing test suites while allowing new test files or authorized edits', () => {
+  const modExisting = diff('tests/widget.test.js', ['+expect(1).toBe(1);']);
+  const newTest = [
+    'diff --git a/tests/new_widget.test.js b/tests/new_widget.test.js',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/tests/new_widget.test.js',
+    '@@ -0,0 +1 @@',
+    '+expect(1).toBe(1);',
+  ].join('\n');
+
+  assert.deepEqual(rules(modExisting, { brief: 'Implement widget formatting in src/widget.ts' }), ['unauthorized-test-edit']);
+  assert.deepEqual(rules(newTest, { brief: 'Implement widget formatting in src/widget.ts' }), []);
+  assert.deepEqual(rules(modExisting, { brief: 'Fix regression and update existing tests in tests/widget.test.js' }), []);
+});
+
+test('B1 + B2 CLI: detect.mjs --hook exits 2 with remediation on stderr; --brief containment rejects traversal and symlinks', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'coord-gaming-cli-'));
+  const outsideDir = mkdtempSync(join(tmpdir(), 'coord-outside-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    const coordDir = join(dir, '.coordinator');
+    mkdirSync(coordDir, { recursive: true });
+    const briefFile = join(dir, 'brief.md');
+    writeFileSync(briefFile, 'Implement payment retries cleanly in src/pay.ts.');
+    const badDiff = join(dir, 'bad.diff');
+    writeFileSync(badDiff, [
+      diff('src/frontend/Pay.tsx', ['+setTimeout(() => submit(), 100);', '+import { secretDb } from "../../backend/db.js";']),
+      diff('tests/pay.test.js', ['+assert.equal(1, 1);']),
+    ].join('\n'));
+
+    const r = spawnSync(
+      process.execPath,
+      [DETECT, '--hook', '--diff-file', badDiff, '--brief', briefFile, '--fence', 'src,tests'],
+      { cwd: dir, env: { ...process.env, COORDINATOR_DIR: coordDir }, encoding: 'utf8' },
+    );
+    assert.equal(r.status, 2);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.clean, false);
+    assert.deepEqual(out.hits.map((h) => h.rule), ['timer-workaround', 'cross-boundary-import', 'unauthorized-test-edit']);
+    assert.match(r.stderr, /BLOCKED \(exit code 2\)/);
+    assert.match(r.stderr, /timer-workaround/);
+    assert.match(r.stderr, /unauthorized-test-edit/);
+
+    const cleanDiff = join(dir, 'clean.diff');
+    writeFileSync(cleanDiff, diff('src/pay.ts', ['-return 1;', '+return 2;']));
+    const okRun = spawnSync(
+      process.execPath,
+      [DETECT, '--hook', '--diff-file', cleanDiff, '--brief', briefFile, '--fence', 'src'],
+      { cwd: dir, env: { ...process.env, COORDINATOR_DIR: coordDir }, encoding: 'utf8' },
+    );
+    assert.equal(okRun.status, 0);
+
+    // Path traversal outside allowed roots must be rejected with exit code 2.
+    const outsideBrief = join(outsideDir, 'leak.md');
+    writeFileSync(outsideBrief, 'allow-test-edit');
+    const escRun = spawnSync(
+      process.execPath,
+      [DETECT, '--hook', '--diff-file', cleanDiff, '--brief', outsideBrief],
+      { cwd: dir, env: { ...process.env, COORDINATOR_DIR: coordDir }, encoding: 'utf8' },
+    );
+    assert.equal(escRun.status, 2);
+    assert.match(escRun.stderr, /escapes allowed project root/);
+
+    // Symlink brief rejection when symlink creation is permitted on the host OS.
+    const linkBrief = join(dir, 'link.md');
+    let symlinkCreated = false;
+    try { symlinkSync(briefFile, linkBrief); symlinkCreated = true; } catch { /* unprivileged Windows */ }
+    if (symlinkCreated) {
+      const symRun = spawnSync(
+        process.execPath,
+        [DETECT, '--hook', '--diff-file', cleanDiff, '--brief', linkBrief],
+        { cwd: dir, env: { ...process.env, COORDINATOR_DIR: coordDir }, encoding: 'utf8' },
+      );
+      assert.equal(symRun.status, 2);
+      assert.match(symRun.stderr, /regular file, not a symlink/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test('installWorktreeHook merges .claude/settings.local.json idempotently and excludes it in git', () => {
+  const wt = mkdtempSync(join(tmpdir(), 'coord-hook-wt-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: wt });
+    mkdirSync(join(wt, '.claude'), { recursive: true });
+    writeFileSync(join(wt, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }, null, 2));
+
+    const first = installWorktreeHook(wt, { detectScriptPath: DETECT });
+    assert.equal(first.ok, true);
+    assert.equal(first.added, true);
+    assert.ok(existsSync(first.settingsPath));
+    const saved = JSON.parse(readFileSync(first.settingsPath, 'utf8'));
+    assert.deepEqual(saved.permissions, { allow: ['Bash(npm test)'] });
+    assert.equal(saved.hooks.Stop.length, 1);
+    assert.match(saved.hooks.Stop[0].hooks[0].command, /detect\.mjs.*--hook/);
+
+    const second = installWorktreeHook(wt, { detectScriptPath: DETECT });
+    assert.equal(second.added, false);
+    const savedAgain = JSON.parse(readFileSync(first.settingsPath, 'utf8'));
+    assert.equal(savedAgain.hooks.Stop.length, 1);
+
+    const exclude = readFileSync(join(wt, '.git', 'info', 'exclude'), 'utf8');
+    assert.match(exclude, /\.claude\/settings\.local\.json/);
+
+    assert.throws(() => installWorktreeHook(resolve(homedir())), /home directory/);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
 });

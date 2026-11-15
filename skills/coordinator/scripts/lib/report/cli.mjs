@@ -9,7 +9,7 @@ import { readJson, writeAtomic, writeJson } from '../store.mjs';
 import { maskLine } from '../quality/secretline.mjs';
 import { maskSecrets } from '../secrets.mjs';
 import { loadRuns, loadSelf } from '../selfdata.mjs';
-import { quality, qualityText } from '../quality/index.mjs';
+import { quality, qualityAsync, qualityText } from '../quality/index.mjs';
 import { loadMap } from '../quality/redundancy.mjs';
 import { retroModel, retroPage } from '../retro.mjs';
 import { changedPaths, draft, draftMarkdown, gitRunner, unitDiffs } from './draft.mjs';
@@ -79,6 +79,16 @@ export function reportFor(run, dir, { draft: wantDraft = false, quality: wantQua
     draft: existsSync(f.draftMd) ? f.draftMd : null, quality: existsSync(f.quality) ? f.quality : null, page: join(dir, 'report.html'),
     ...(run.report ? {} : { next: `run.mjs report ${run.id} --draft, write the notes (references/sub-skills/release-notes.md), then run.mjs report ${run.id} --file notes.md` }),
   };
+}
+
+// Async variant used by `run.mjs quality` so Jev `noul` scores multi-line workaround comments (> 0.75) when configured.
+export async function reportForAsync(run, dir, { draft: wantDraft = false, quality: wantQuality = false, root = process.cwd(), helpersCfg = null, askNoulFn } = {}) {
+  if (!wantQuality) return reportFor(run, dir, { draft: wantDraft, quality: false, root });
+  const git = gitRunner(root);
+  const changed = run ? changedPaths(unitDiffs(run, git)) : null;
+  const q = await qualityAsync({ root, changed: changed?.length ? changed : null, map: dir ? loadMap(dir) : null, helpersCfg, ...(askNoulFn ? { askNoulFn } : {}) });
+  if (dir) writeJson(files(dir).quality, q);
+  return { quality: q, text: qualityText(q) };
 }
 
 function lessonsOf(src = null) {

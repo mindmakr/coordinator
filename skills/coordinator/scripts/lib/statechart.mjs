@@ -546,16 +546,12 @@ export function resolveAllowedRoots({ project, base, runDirPath = null, cwd = pr
     .filter((r) => r !== absTmp && parse(r).root !== r && !isContainedPath(r, home));
 }
 
-// Reads and parses bounded JSON from inline string or a single-link regular file inside `allowedRoots`.
-export function readBoundedJsonFile(raw, { flag, allowInline = false, maxBytes = DEFAULT_JSON_MAX_BYTES, baseDir, allowedRoots } = {}) {
+// Reads a bounded UTF-8 text file from a single-link regular file inside `allowedRoots`.
+export function readBoundedFile(raw, { flag, maxBytes = DEFAULT_JSON_MAX_BYTES, baseDir, allowedRoots } = {}) {
   if (typeof raw !== 'string' || !raw.trim() || raw.includes('\0')) {
-    throw new Error(`${flag} requires a non-empty file path${allowInline ? ' or JSON object' : ''}`);
+    throw new Error(`${flag} requires a non-empty file path`);
   }
   const trimmed = raw.trim();
-  if (allowInline && trimmed.startsWith('{')) {
-    if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) throw new Error(`${flag} JSON exceeds ${Math.ceil(maxBytes / 1024)} KB`);
-    try { return JSON.parse(trimmed); } catch (e) { throw new Error(`${flag} invalid JSON: ${e.message}`); }
-  }
   const anchor = baseDir ?? allowedRoots?.[0];
   if (!anchor || !allowedRoots?.length) throw new Error(`${flag}: no allowed root available`);
   const abs = resolve(anchor, trimmed);
@@ -580,10 +576,24 @@ export function readBoundedJsonFile(raw, { flag, allowInline = false, maxBytes =
     if (fst.size > maxBytes) throw new Error(`${flag}: file exceeds ${Math.ceil(maxBytes / 1024)} KB`);
     const content = readFileSync(fd, 'utf8');
     if (Buffer.byteLength(content, 'utf8') > maxBytes) throw new Error(`${flag}: file exceeds ${Math.ceil(maxBytes / 1024)} KB`);
-    try { return JSON.parse(content); } catch (e) { throw new Error(`${flag}: invalid JSON in ${raw}: ${e.message}`); }
+    return content;
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+// Reads and parses bounded JSON from inline string or a single-link regular file inside `allowedRoots`.
+export function readBoundedJsonFile(raw, { flag, allowInline = false, maxBytes = DEFAULT_JSON_MAX_BYTES, baseDir, allowedRoots } = {}) {
+  if (typeof raw !== 'string' || !raw.trim() || raw.includes('\0')) {
+    throw new Error(`${flag} requires a non-empty file path${allowInline ? ' or JSON object' : ''}`);
+  }
+  const trimmed = raw.trim();
+  if (allowInline && trimmed.startsWith('{')) {
+    if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) throw new Error(`${flag} JSON exceeds ${Math.ceil(maxBytes / 1024)} KB`);
+    try { return JSON.parse(trimmed); } catch (e) { throw new Error(`${flag} invalid JSON: ${e.message}`); }
+  }
+  const content = readBoundedFile(trimmed, { flag, maxBytes, baseDir, allowedRoots });
+  try { return JSON.parse(content); } catch (e) { throw new Error(`${flag}: invalid JSON in ${raw}: ${e.message}`); }
 }
 
 export const behaviourSignature = (u) => JSON.stringify((u?.behaviours ?? []).map((b) => `${b.id}:${b.text}`));

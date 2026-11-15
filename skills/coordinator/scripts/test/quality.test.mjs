@@ -1,19 +1,24 @@
 // Quality and compliance signals: each detector on fixture files, with true
 // positives it must find and true negatives it must leave alone.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { duplication } from '../lib/quality/duplication.mjs';
-import { quality, qualityText } from '../lib/quality/index.mjs';
+import { quality, qualityAsync, qualityText } from '../lib/quality/index.mjs';
 import { naming, styleOf } from '../lib/quality/naming.mjs';
 import { isPersonal, privacy } from '../lib/quality/privacy.mjs';
 import { redundancy } from '../lib/quality/redundancy.mjs';
 import { security } from '../lib/quality/security.mjs';
+import { extractMultilineComments, scoreWorkaroundComments, slop } from '../lib/quality/slop.mjs';
 import { sourceFile } from '../lib/quality/source.mjs';
 import { structure } from '../lib/quality/structure.mjs';
+
+const RUN_MJS = fileURLToPath(new URL('../run.mjs', import.meta.url));
 
 const src = (path, text) => sourceFile(path, text);
 const lines = (sig) => sig.evidence.map((e) => `${e.file}:${e.line}`);
@@ -202,4 +207,129 @@ test('round 3: a credential on a line over 400 characters is found, and that lin
   assert.deepEqual(lines(pick(s, 'sql')), ['src/long.ts:1']);
   assert.doesNotMatch(JSON.stringify(s), /synthLong/);
   assert.equal(pick(s, 'sql').evidence[0].text, '[line withheld: it holds a credential]');
+});
+
+test('slop detectors flag raw useEffect, timer workarounds, and cross-boundary imports in source files', () => {
+  const ui = src('src/frontend/Panel.tsx', [
+    'import { queryDb } from "../../backend/db.js";',
+    'export function Panel() {',
+    '  useEffect(() => { setTimeout(() => queryDb(), 50); }, []);',
+    '}',
+  ].join('\n'));
+  const hook = src('src/hooks/usePanel.ts', 'export function usePanel() { useEffect(() => {}, []); }\n');
+  const s = slop([ui, hook]);
+  assert.deepEqual(lines(pick(s, 'raw-use-effect')), ['src/frontend/Panel.tsx:3']);
+  assert.deepEqual(lines(pick(s, 'timer-workaround')), ['src/frontend/Panel.tsx:3']);
+  assert.deepEqual(lines(pick(s, 'cross-boundary-import')), ['src/frontend/Panel.tsx:1']);
+});
+
+test('B3: scoreWorkaroundComments and run.mjs quality flag multi-line workaround comments with Jev noul score > 0.75 at exact file and line', async () => {
+  const comments = extractMultilineComments([
+    src('src/sync.js', [
+      'const x = 1;',
+      '',
+      '/* Temporary workaround hack:',
+      ' * Wait 250ms before reloading so the stale cache race hides itself.',
+      ' */',
+      'export function refresh() { return x; }',
+      '',
+      '// Formats an ISO date in UTC',
+      '// for CSV download headers.',
+      'export const fmt = (d) => d.toISOString();',
+      '',
+      '// Borderline boundary comment line 1',
+      '// exactly at 0.75 must not trigger.',
+      'export const ok = true;',
+    ].join('\n')),
+  ]);
+  assert.equal(comments.length, 3);
+  assert.deepEqual(comments.map((c) => c.line), [3, 8, 12]);
+
+  const sigs = await scoreWorkaroundComments(
+    [src('src/sync.js', [
+      'const x = 1;',
+      '',
+      '/* Temporary workaround hack:',
+      ' * Wait 250ms before reloading so the stale cache race hides itself.',
+      ' */',
+      'export function refresh() { return x; }',
+      '',
+      '// Formats an ISO date in UTC',
+      '// for CSV download headers.',
+      'export const fmt = (d) => d.toISOString();',
+      '',
+      '// Borderline boundary comment line 1',
+      '// exactly at 0.75 must not trigger.',
+      'export const ok = true;',
+    ].join('\n'))],
+    { on: true, models: { noul: 'typesafe/jev-noul' } },
+    {
+      askNoulFn: async (_cfg, input) => {
+        if (input.context.includes('Temporary workaround hack')) return { probability: 0.91 };
+        if (input.context.includes('exactly at 0.75')) return { probability: 0.75 };
+        return { probability: 0.12 };
+      },
+    },
+  );
+  assert.equal(sigs.length, 1);
+  assert.equal(sigs[0].id, 'workaround-comment');
+  assert.deepEqual(lines(sigs[0]), ['src/sync.js:3']);
+
+  // End-to-end check via local HTTP Jev noul server and `run.mjs quality`.
+  const repo = mkdtempSync(join(tmpdir(), 'coord-quality-noul-'));
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const parsed = JSON.parse(body || '{}');
+      const prompt = JSON.stringify(parsed.messages ?? []);
+      const prob = prompt.includes('bypass proper state reconciliation') ? 0.89 : 0.15;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ probability: prob, rationale: 'noul check' }) } }] }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    const port = server.address().port;
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    const coordDir = join(repo, '.coordinator');
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    mkdirSync(coordDir, { recursive: true });
+    writeFileSync(join(repo, 'src', 'patch.js'), [
+      'export const a = 1;',
+      '',
+      '// Hacky workaround: leave stale listener attached to',
+      '// bypass proper state reconciliation until refactor.',
+      'export const b = 2;',
+    ].join('\n'));
+    writeFileSync(join(coordDir, 'coordinator.json'), JSON.stringify({
+      helpers: { provider: 'custom', endpoint: `http://127.0.0.1:${port}/v1`, models: { noul: 'jev-noul' } },
+    }));
+    execFileSync('git', ['add', 'src/patch.js'], { cwd: repo });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'], { cwd: repo });
+
+    const r = await new Promise((resolveRun) => {
+      execFile(
+        process.execPath,
+        [RUN_MJS, 'quality', '--project', '--json'],
+        { cwd: repo, env: { ...process.env, COORDINATOR_DIR: coordDir }, encoding: 'utf8' },
+        (err, stdout, stderr) => resolveRun({ status: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout, stderr }),
+      );
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    const wc = pick(out.project.signals, 'workaround-comment');
+    assert.ok(wc, 'expected workaround-comment signal from run.mjs quality');
+    assert.deepEqual(lines(wc), ['src/patch.js:3']);
+
+    const qa = await qualityAsync({
+      root: repo,
+      changed: ['src/patch.js'],
+      helpersCfg: { on: true, endpoint: `http://127.0.0.1:${port}/v1`, local: true, host: `127.0.0.1:${port}`, models: { noul: 'jev-noul' } },
+    });
+    assert.deepEqual(lines(pick(qa.changed.signals, 'workaround-comment')), ['src/patch.js:3']);
+  } finally {
+    server.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

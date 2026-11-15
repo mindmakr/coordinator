@@ -65,6 +65,8 @@ Leave other keys to their own questions (model routing: `models`). Write `.coord
 | `asking` | `dialog` (the default when absent) or `dashboard`; a run's own intake answer wins | the lead (`commands/run.md`, Asking); `run.mjs ask` prints the mode in force |
 | `helpers` | absent (off) or `{ provider, endpoint, keyEnv, models: { decide, summarize, look }, minConfidence }`; `keyEnv` names an environment variable, never a key | `helper.mjs` (`helpers.md`) |
 
+To enable the exit-code-2 worktree pre-gate hook in a builder worktree (catching unapproved slop, `setTimeout` workarounds, cross-boundary imports, and unauthorized existing-test edits on `Stop`), run `node <skill-dir>/scripts/detect.mjs --install-hook <worktree-dir>`.
+
 Then run `node <skill-dir>/scripts/doctor.mjs` and show its lines. Fix what the answers cover; list the rest as the person's to-do, each with its fix line.
 
 ## Updating it

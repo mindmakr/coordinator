@@ -2,13 +2,16 @@
 // Flags a diff that games the bar: focused, skipped, deleted or renamed-away
 // tests, removed, weakened or trivialized assertions, tests excluded in runner
 // config, rewritten snapshots, suppressed checks, ignored failures, files
-// outside the fence, and changes to the visual contract in .prism/ (brief, dials,
-// tokens, anchors: allowed only on the look-dev unit, with --allow visual-contract).
-// Exit 0 = clean, 1 = hits (a FAIL), 2 = usage.
+// outside the fence, unauthorized edits to existing test suites, hunk-level
+// slop (raw useEffect, setTimeout workarounds, cross-boundary imports,
+// full-file rewrites), and changes to the visual contract in .prism/ (brief,
+// dials, tokens, anchors: allowed only on the look-dev unit, with --allow
+// visual-contract). Exit 0 = clean, 1 = hits (a FAIL), 2 = usage or --hook block.
 //
-//   detect.mjs --base <ref> [--head <ref>] [--run <run> [--unit <unit>]] [--fence a,b] [--allow rule[:path],…]
+//   detect.mjs --base <ref> [--head <ref>] [--run <run> [--unit <unit>]] [--fence a,b] [--brief file] [--slop] [--hook] [--allow rule[:path],…]
 // --allow may be given more than once (--allow a:x --allow b:y), or as one comma list.
 //   detect.mjs --diff-file <file> [same options]
+//   detect.mjs --install-hook [<dir>]   installs a Stop hook in <dir>/.claude/settings.local.json
 // --run adds the fence paths recorded on the run (run.mjs init --paths).
 // --unit records the result on that unit; on a run with --paths, a PASS verdict needs it clean.
 // On a pass waiting for its fold-in check, --base <reviewed head> --head <fold head> checks the fold (run.mjs foldin needs it clean).
@@ -16,9 +19,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { helpAndExit, parse } from './lib/args.mjs';
-import { allowed, detect, parseDiff } from './lib/gaming.mjs';
+import { allowed, detect, formatHookRemediation, installWorktreeHook, parseDiff, readBriefFile } from './lib/gaming.mjs';
 import { EVENTS, loadRun, updateRun } from './lib/events.mjs';
-import { baseDir, safeId } from './lib/store.mjs';
+import { baseDir, projectDir, safeId } from './lib/store.mjs';
+import { resolveAllowedRoots } from './lib/statechart.mjs';
 import { harnessOf, stamp } from './lib/harness.mjs';
 
 // A comma list, or several of them (a repeated --allow).
@@ -34,14 +38,39 @@ function commit(ref, name) {
 
 helpAndExit(import.meta.url);
 try {
-  const { opt } = parse(process.argv.slice(2), ['base', 'head', 'run', 'unit', 'fence', 'allow', 'diff-file'], ['allow']);
+  const { opt } = parse(
+    process.argv.slice(2),
+    ['base', 'head', 'run', 'unit', 'fence', 'allow', 'diff-file', 'brief', 'hook', 'slop', 'install-hook'],
+    ['allow'],
+  );
+  if (opt['install-hook'] !== undefined) {
+    if (opt['install-hook'] !== true && (typeof opt['install-hook'] !== 'string' || !opt['install-hook'].trim())) {
+      throw new Error('--install-hook takes a worktree folder path or no value (cwd)');
+    }
+    const target = opt['install-hook'] === true ? process.cwd() : opt['install-hook'];
+    console.log(JSON.stringify(installWorktreeHook(target), null, 2));
+    process.exit(0);
+  }
+  const hook = opt.hook === true;
+  if (opt.hook !== undefined && !hook) throw new Error('--hook takes no value');
+  const slop = hook || opt.slop === true;
+  if (opt.slop !== undefined && opt.slop !== true) throw new Error('--slop takes no value');
+  if (opt.brief !== undefined && (typeof opt.brief !== 'string' || !opt.brief.trim())) throw new Error('--brief needs a file path');
   if (opt.unit && !opt.run) throw new Error('--unit needs --run');
   const dir = opt.run ? join(baseDir('project'), 'runs', safeId(opt.run, 'run')) : null;
   if (dir && !existsSync(join(dir, 'state.json')) && !existsSync(join(dir, EVENTS))) throw new Error(`no run: ${opt.run}`);
-  const fence = list(opt.fence).concat(dir ? loadRun(dir).paths ?? [] : []);
+  const runState = dir ? loadRun(dir) : null;
+  const fence = list(opt.fence).concat(runState?.paths ?? []);
+  const unitObj = opt.unit && runState ? (runState.units ?? []).find((x) => x.id === safeId(opt.unit, 'unit')) ?? null : null;
+  const briefText = opt.brief !== undefined
+    ? readBriefFile(opt.brief, { baseDir: process.cwd(), allowedRoots: resolveAllowedRoots({ project: projectDir(), base: baseDir('project'), runDirPath: dir }) })
+    : null;
   let diff; let base = null; let head = null;
   if (opt['diff-file']) diff = readFileSync(opt['diff-file'], 'utf8');
-  else {
+  else if (hook && !opt.base) {
+    head = commit(opt.head ?? 'HEAD', 'head');
+    diff = git(['-c', 'core.quotePath=false', 'diff', '--no-color', '--unified=0', '-M', head]);
+  } else {
     if (!opt.base) throw new Error('need --base <ref> or --diff-file <file>');
     if (opt.unit && !opt.head) throw new Error('--unit needs an explicit --head (the PR head the critic will judge)');
     base = commit(opt.base, 'base');
@@ -51,7 +80,14 @@ try {
   const changed = parseDiff(diff);
   const files = changed.length;
   const allow = list(opt.allow);
-  const hits = detect(diff, { fence }).filter((h) => !allowed(h, allow));
+  const detectOpts = {
+    fence,
+    brief: briefText,
+    unit: unitObj,
+    enforceTestScope: Boolean(hook || briefText !== null || unitObj !== null),
+    slop,
+  };
+  const hits = detect(diff, detectOpts).filter((h) => !allowed(h, allow));
   let result = { allow, hits };
   if (opt.unit) {
     // An empty diff proves nothing: it would let a PASS through unchecked.
@@ -70,11 +106,12 @@ try {
       // A rerun without --allow on the same round, base and head (the critic's) keeps the lead's allowances (#45).
       const same = u.detect && u.detect.round === round && u.detect.base === base && u.detect.head === head && !!u.detect.fold === fold;
       const kept = opt.allow === undefined && same ? (u.detect.allow ?? []) : allow;
-      const left = kept === allow ? hits : detect(diff, { fence }).filter((h) => !allowed(h, kept));
+      const left = kept === allow ? hits : detect(diff, { ...detectOpts, unit: u }).filter((h) => !allowed(h, kept));
       result = { allow: kept, hits: left };
       u.detect = { round, clean: left.length === 0, base, head, files, paths, allow: kept, hits: left.length, at: new Date().toISOString(), ...(fold ? { fold: true } : {}) };
     });
   }
   console.log(JSON.stringify({ clean: result.hits.length === 0, base, head, files, fence, allowed: result.allow, hits: result.hits }, null, 2));
-  process.exit(result.hits.length ? 1 : 0);
+  if (result.hits.length && hook) console.error(formatHookRemediation(result.hits));
+  process.exit(result.hits.length ? (hook ? 2 : 1) : 0);
 } catch (e) { console.error(`error: ${e.message}`); process.exit(2); }

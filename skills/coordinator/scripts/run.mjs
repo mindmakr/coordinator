@@ -234,7 +234,7 @@ import { load as loadTheme, themeFile } from './lib/theme.mjs';
 import { log } from './lib/timeline.mjs';
 import { unitPage } from './lib/unitpage.mjs';
 import { mapsPage } from './lib/mapspage.mjs';
-import { reportFor, reportPages, storeReport } from './lib/report/cli.mjs';
+import { reportFor, reportForAsync, reportPages, storeReport } from './lib/report/cli.mjs';
 import { BENCH_FLAGS, BENCH_REPEAT, benchCommand, benchHelp } from './lib/ceb/cli.mjs';
 import { hasRetro, retroCommand } from './lib/retro.mjs';
 import { ASKING, answer, answerText, ask, askingMode, events, find, fromForm, personNote, projectName, questions, useAnswer } from './lib/questions.mjs';
@@ -1611,9 +1611,10 @@ const commands = {
     if (o.draft !== undefined) { commands.hud([run]); process.stdout.write(out.markdown); return null; }
     return out;
   },
-  quality([run], o) {
+  async quality([run], o) {
     if ((o.project === true) === (run !== undefined)) throw new Error('usage: run.mjs quality <run> | --project [--json]');
-    const out = reportFor(run === undefined ? null : load(run), run === undefined ? null : runDir(run), { quality: true, root: projectDir() });
+    const helpersCfg = activeHelpers(baseDir('project'));
+    const out = await reportForAsync(run === undefined ? null : load(run), run === undefined ? null : runDir(run), { quality: true, root: projectDir(), helpersCfg });
     if (run !== undefined) commands.hud([run]);
     if (o.json === true) return out.quality;
     process.stdout.write(out.text);
