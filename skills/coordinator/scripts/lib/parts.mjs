@@ -16,7 +16,7 @@ import { ageText } from './age.mjs';
 import { rememberToggle, restoreOpen } from './ui.mjs';
 
 export { esc };
-export { bar, cols, heading, kpis, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from './ui.mjs';
+export { bar, cols, heading, kpis, mdActions, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from './ui.mjs';
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
 // The theme switch's memory, in <head> so the stored theme applies before the first paint.
 const THEME_CLIENT = readFileSync(new URL('./theme.client.js', import.meta.url), 'utf8');

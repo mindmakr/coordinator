@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { bar, cols, heading, kpis, page, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
+import { bar, cols, heading, kpis, mdActions, page, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
 import { privacy } from '../lib/quality/privacy.mjs';
 import { sourceFile } from '../lib/quality/source.mjs';
 
@@ -15,6 +15,20 @@ test('heading: h1 and a muted line, escaped', () => {
   assert.equal(heading('r1', 'Goal text'), '<div class="head"><h1>r1</h1><span class="muted">Goal text</span></div>');
   assert.equal(heading('r1'), '<div class="head"><h1>r1</h1></div>');
   clean(heading(BAD, BAD));
+  assert.equal(heading('Report', '', { inlineHtml: '<i>x</i>', actionsHtml: '<b>y</b>' }), '<div class="head"><h1>Report</h1><i>x</i><span class="acts"><b>y</b></span></div>');
+});
+
+test('mdActions: Download carries the text in a data: link and works without script; Copy only on the live page; no text, no buttons', () => {
+  const md = '# Retro\n- a & b <script>';
+  const off = mdActions(md, 'retro r1.md');
+  assert.match(off, /^<a class="btn sm" download="retro_r1\.md" href="data:text\/markdown;charset=utf-8,%23%20Retro%0A/);
+  assert.doesNotMatch(off, /<button|<script/);
+  const live = mdActions(md, 'x.md', { copy: true });
+  assert.match(live, /^<button type="button" class="btn sm" data-copy>Copy Markdown<\/button><a /);
+  assert.equal(decodeURIComponent(/href="data:[^,]*,([^"]*)"/.exec(live)[1]), md);
+  assert.equal(mdActions('  ', 'x.md'), '');
+  assert.equal(mdActions(undefined, 'x.md', { copy: true }), '');
+  clean(mdActions(BAD, BAD, { copy: true }));
 });
 
 test('kpis: label, value, small line and an optional bar per tile', () => {
