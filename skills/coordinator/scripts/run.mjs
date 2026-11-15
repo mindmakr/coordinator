@@ -188,14 +188,14 @@
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, lstatSync, rmSync, statSync, truncateSync } from 'node:fs';
 import { execFile, spawn as spawnProcess } from 'node:child_process';
 import { get as httpGet } from 'node:http';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, extname, join, resolve } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
 import { findFeatureMap, validateBehavioursAgainstFeatureMap } from './lib/featuremap.mjs';
 import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { prismRefusal } from './lib/prismreport.mjs';
 import { adopt, table } from './lib/adopt.mjs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { briefPrompt, buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
 import { allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
@@ -270,12 +270,17 @@ const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
 
 function featureMapRoot() {
-  return process.env.COORDINATOR_DIR
-    ? (basename(baseDir('project')) === '.coordinator' ? dirname(baseDir('project')) : process.cwd())
-    : projectDir();
+  const cwd = resolve(process.cwd());
+  const tmp = resolve(tmpdir());
+  if (process.env.COORDINATOR_DIR && (cwd === tmp || cwd.startsWith(`${tmp}\\`) || cwd.startsWith(`${tmp}/`))) return cwd;
+  return projectDir();
 }
 function validateUnitSurfaceBar(u, o = {}) {
-  const fm = findFeatureMap(featureMapRoot(), typeof o['feature-map'] === 'string' ? o['feature-map'] : null);
+  if (o['new-surface'] !== undefined && o['new-surface'] !== true) throw new Error('--new-surface takes no value');
+  if (o['feature-map'] !== undefined && (typeof o['feature-map'] !== 'string' || !o['feature-map'].trim())) {
+    throw new Error('--feature-map requires a non-empty path');
+  }
+  const fm = findFeatureMap(featureMapRoot(), o['feature-map'] ?? null);
   if (!fm.found) return fm;
   const res = validateBehavioursAgainstFeatureMap(u.behaviours ?? [], fm, {
     allowNew: o['new-surface'] === true,
@@ -284,6 +289,7 @@ function validateUnitSurfaceBar(u, o = {}) {
   });
   if (!res.ok) throw new Error(res.errors.map((e) => e.message).join('; '));
   if (res.matched.length) u.surfaceContract = res.matched;
+  else delete u.surfaceContract;
   return fm;
 }
 
@@ -841,7 +847,7 @@ const commands = {
       const changes = o.remove === true || (o.id !== undefined && list.some((b) => b.id === String(o.id).toUpperCase()));
       const reason = changes && st.frozen ? text(o.reason, 'reason (removing or rewording a behaviour after freeze changes the bar)', 300) : null;
       id = behave(st, u, { id: o.id, text: o.text, remove: o.remove === true });
-      if (u && o.remove !== true) validateUnitSurfaceBar(u, o);
+      if (u) validateUnitSurfaceBar(u, o);
       const what = o.remove ? `removed ${id}` : `${id}: ${optText(o.text, 300)}`;
       if (u) log(u, 'behaviour', reason ? `${what} (${reason})` : what);
       if (reason) st.notes.push({ kind: 'bar', text: `${u ? u.id : 'goal'} ${what}: ${reason}`, at: now() });

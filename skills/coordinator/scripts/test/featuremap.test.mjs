@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -131,15 +131,32 @@ describe('feature-map.json bar validation & map merge (#158)', () => {
     const frozenState = JSON.parse(readFileSync(join(dir, '.coordinator', 'runs', 'fm-ok', 'state.json'), 'utf8'));
     assert.equal(frozenState.frozen, true);
 
+    // Removing the surface-citing behaviour clears stale surfaceContract
+    cli(dir, ['behave', 'fm-ok', 'u2', '--id', 'B1', '--remove', '--reason', 'dropping test surface behaviour']);
+    const afterRemove = JSON.parse(readFileSync(join(dir, '.coordinator', 'runs', 'fm-ok', 'state.json'), 'utf8'));
+    assert.equal(afterRemove.units.find((u) => u.id === 'u2').surfaceContract, undefined);
+
     const map = buildMap(dir, { maxSeconds: 10 });
     assert.equal(map.meta.featureMap.path, 'feature-map.json');
     assert.ok(map.surfaces.some((s) => s.kind === 'reins-action' && s.name === 'applyCoupon'));
     assert.ok(map.surfaces.some((s) => s.kind === 'reins-panel' && s.name === 'checkout-summary'));
     assert.ok(map.surfaces.some((s) => s.kind === 'reins-state' && s.name === 'submitted'));
-    assert.ok(map.surfaces.some((s) => s.kind === 'route' && s.id === 'route:/invoices'));
+    const invRoute = map.surfaces.find((s) => s.kind === 'route' && s.path === '/invoices');
+    assert.ok(invRoute);
+    assert.equal(invRoute.method, 'GET');
+    assert.equal(invRoute.file, 'feature-map.json');
+    assert.ok(Array.isArray(invRoute.services));
+
+    // End-to-end `run.mjs map` renders mapPage HTML without crashing on feature-map routes
+    cli(dir, ['map', 'fm-ok', '--root', dir]);
+    const mapHtmlPath = join(dir, '.coordinator', 'runs', 'fm-ok', 'map.html');
+    assert.equal(existsSync(mapHtmlPath), true);
+    assert.match(readFileSync(mapHtmlPath, 'utf8'), /\/invoices/);
+    const touched = cli(dir, ['touches', 'fm-ok', 'src/app.js', '--json']);
+    assert.equal(touched.file, 'src/app.js');
   });
 
-  it('rejects path traversal and symlink escapes for feature-map paths', () => {
+  it('rejects path traversal, invalid CLI flags, ReDoS inputs, and sanitizes route fields', () => {
     const dir = makeProject();
     const outsideDir = mkdtempSync(join(tmpdir(), 'coord-fm-outside-'));
     temps.push(outsideDir);
@@ -148,6 +165,10 @@ describe('feature-map.json bar validation & map merge (#158)', () => {
     assert.throws(
       () => findFeatureMap(dir, '../outside/secret.json'),
       /must stay inside project root/i,
+    );
+    assert.throws(
+      () => findFeatureMap(dir, ''),
+      /non-empty string/i,
     );
 
     const linkPath = join(dir, 'escaped-map.json');
@@ -161,6 +182,34 @@ describe('feature-map.json bar validation & map merge (#158)', () => {
     if (symlinkCreated) {
       assert.throws(() => findFeatureMap(dir, 'escaped-map.json'), /symlink escapes project root/i);
     }
+
+    // Ignores hyphenated test-id= and stays linear on repeated unclosed <ReinsPanel fragments
+    const attrRefs = extractBarSurfaceRefs('<ReinsPanel test-id="alpha" id="invoice-panel">');
+    assert.deepEqual(attrRefs.map((r) => `${r.kind}:${r.id}`), ['panel:invoice-panel']);
+
+    const t0 = performance.now();
+    const redosRefs = extractBarSurfaceRefs('<ReinsPanel '.repeat(1500));
+    const elapsedMs = performance.now() - t0;
+    assert.deepEqual(redosRefs, []);
+    assert.ok(elapsedMs < 150, `expected linear regex scan (<150ms), got ${elapsedMs.toFixed(1)}ms`);
+
+    // Sanitizes malformed route method/file types and rejects bare/invalid CLI flags
+    writeFileSync(
+      join(dir, 'malformed-routes.json'),
+      JSON.stringify({
+        panels: ['invoice-panel'],
+        routes: [{ path: '/orders', method: 123, file: ['bad'] }, { path: '/ok', method: 'post', file: 'src/app.js' }],
+      }),
+    );
+    const badFm = findFeatureMap(dir, 'malformed-routes.json');
+    assert.deepEqual(badFm.routes, [
+      { path: '/orders', method: 'GET' },
+      { path: '/ok', method: 'POST', file: 'src/app.js' },
+    ]);
+
+    cli(dir, ['init', 'fm-flags', '--goal', 'validate CLI flag handling cleanly', '--bar', 'every panel renders totals with zero errors', '--fence', 'checkout flow only']);
+    assert.match(cliFails(dir, ['add', 'fm-flags', 'u1', '--bar', 'use invoice-panel', '--feature-map']), /requires a non-empty path/i);
+    assert.match(cliFails(dir, ['add', 'fm-flags', 'u1', '--bar', 'use invoice-panel', '--new-surface', 'yes']), /--new-surface takes no value/i);
 
     const refs = extractBarSurfaceRefs('Check <ReinsPanel id="invoice-panel"> and reins exec applyCoupon');
     assert.deepEqual(

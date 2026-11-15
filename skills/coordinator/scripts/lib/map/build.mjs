@@ -224,9 +224,11 @@ export function buildMap(root, { maxSeconds = 60, now = Date.now } = {}) {
     for (const p of fm.panels) surfaces.push({ id: `reins-panel:${p}`, kind: 'reins-panel', name: p, source: fm.path });
     for (const s of fm.states) surfaces.push({ id: `reins-state:${s}`, kind: 'reins-state', name: s, source: fm.path });
     for (const r of fm.routes) {
-      const rid = `route:${r.method ? `${r.method} ` : ''}${r.path}`;
-      if (!surfaces.some((x) => x.id === rid)) {
-        surfaces.push({ id: rid, kind: 'route', ...(r.file ? { file: r.file } : {}), source: fm.path });
+      const method = typeof r.method === 'string' && r.method ? r.method : 'GET';
+      const file = typeof r.file === 'string' && r.file ? r.file : fm.path;
+      const rid = `route:${method} ${r.path} ${file}`;
+      if (!surfaces.some((x) => x.kind === 'route' && x.path === r.path && (x.method ?? 'GET') === method)) {
+        surfaces.push({ id: rid, kind: 'route', method, path: r.path, file, services: [], source: fm.path });
       }
     }
   }

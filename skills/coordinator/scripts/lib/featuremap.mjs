@@ -45,6 +45,9 @@ function assertRealContainment(root, absTarget) {
  */
 export function findFeatureMap(root, explicitPath = null) {
   const empty = { found: false, path: null, actions: [], panels: [], states: [], routes: [], raw: null };
+  if (explicitPath !== null && (typeof explicitPath !== 'string' || !explicitPath.trim())) {
+    throw new Error('feature-map path must be a non-empty string');
+  }
   if (!root) return empty;
   const candidates = explicitPath ? [explicitPath] : DEFAULT_PATHS;
   for (const cand of candidates) {
@@ -92,7 +95,15 @@ export function findFeatureMap(root, explicitPath = null) {
     const states = sortedUnique(Array.isArray(raw.states) ? raw.states : []);
     const routes = Array.isArray(raw.routes)
       ? raw.routes
-          .map((r) => (typeof r === 'string' ? { path: r } : isObj(r) && typeof r.path === 'string' ? r : null))
+          .map((r) => {
+            if (typeof r === 'string' && r.trim()) return { path: r.trim(), method: 'GET' };
+            if (!isObj(r) || typeof r.path !== 'string' || !r.path.trim()) return null;
+            return {
+              path: r.path.trim(),
+              method: typeof r.method === 'string' && r.method.trim() ? r.method.trim().toUpperCase() : 'GET',
+              ...(typeof r.file === 'string' && r.file.trim() ? { file: r.file.trim() } : {}),
+            };
+          })
           .filter(Boolean)
       : [];
 
@@ -120,7 +131,7 @@ export function extractBarSurfaceRefs(text) {
   const markedNew = NEW_MARKER.test(text);
   const found = new Map();
   const patterns = [
-    ['panel', new RegExp(`<ReinsPanel\\b[^>]*?\\bid\\s*=\\s*(?:"(${ID_PART})"|'(${ID_PART})'|(${ID_PART}))`, 'gi')],
+    ['panel', new RegExp(`<ReinsPanel\\b[^<>]*?(?<![\\w-])id\\s*=\\s*(?:"(${ID_PART})"|'(${ID_PART})'|(${ID_PART}))`, 'gi')],
     ['panel', new RegExp(`<ReinsPanel>\\s*(?:"(${ID_PART})"|'(${ID_PART})'|\`(${ID_PART})\`|(${ID_PART}))`, 'gi')],
     ['panel', new RegExp(`\\bpanel\\s*(?:[:=]\\s*(?:"(${ID_PART})"|'(${ID_PART})'|\`(${ID_PART})\`|(${ID_PART}))|(?:"(${ID_PART})"|'(${ID_PART})'|\`(${ID_PART})\`))`, 'gi')],
     ['action', new RegExp(`\\baction\\s*(?:[:=]\\s*(?:"(${ID_PART})"|'(${ID_PART})'|\`(${ID_PART})\`|(${ID_PART}))|(?:"(${ID_PART})"|'(${ID_PART})'|\`(${ID_PART})\`))`, 'gi')],
