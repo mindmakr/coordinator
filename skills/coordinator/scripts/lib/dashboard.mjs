@@ -8,23 +8,26 @@
 //                                               lib/waiting.mjs), then every registered run, grouped by project
 //   POST /answer (key, run, q, choice, other)   an answer to an open question of a registered run
 //   GET /p/<key>/run/<run>[/unit/<u>|/maps|/report|/retro]   one run's pages, read-only
+//   GET /p/<key>/coordinator                    that project's coordinator page (lib/selfpage.mjs), read-only
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { loadRunsIn } from './selfdata.mjs';
 import { basename, join } from 'node:path';
 import { linkedRuns } from './chain.mjs';
 import { loadRun } from './events.mjs';
 import { harnessName, origin, versionWarning } from './harness.mjs';
-import { hud, originLine, progressBar, questionItem, runTabs, statusChip } from './hud.mjs';
-import { repoFromText } from './links.mjs';
+import { hud, originLine, questionItem, runTabs, statusChip } from './hud.mjs';
+import { linkify, repoFromText } from './links.mjs';
 import { mapsPage } from './mapspage.mjs';
 import { ageText } from './age.mjs';
-import { blk, chip, esc, page, stamp, when } from './parts.mjs';
+import { bar, blk, chip, cols, esc, heading, kpis, linkUnits, page, panel, rows, stamp, table, toneChip, when } from './parts.mjs';
 import { runStatus } from './progress.mjs';
 import { needsAnchor } from './pcanswer.mjs';
 import { doctorFile } from './doctorrecord.mjs';
 import { projectName, questions } from './questions.mjs';
 import { byProject, findEntry, registryFile, registryHome } from './registry.mjs';
 import { reportPages } from './report/cli.mjs';
+import { selfModel } from './self.mjs';
+import { selfPage } from './selfpage.mjs';
 import { decide } from './rules.mjs';
 import { isSafeId } from './store.mjs';
 import { unitPage } from './unitpage.mjs';
@@ -32,16 +35,21 @@ import { VERSION } from './version.mjs';
 import { view } from './view.mjs';
 
 const ID = '[A-Za-z0-9][A-Za-z0-9._-]{0,63}';
-export const PROJECT_PAGE = new RegExp(`^/p/([0-9a-f]{12})/run/(${ID})(/unit/${ID}|/maps|/report|/retro)?$`);
+export const PROJECT_PAGE = new RegExp(`^/p/([0-9a-f]{12})/(?:run/(${ID})(/unit/${ID}|/maps|/report|/retro)?|(coordinator))$`);
 const runDirOf = (e, id = e.run) => join(e.stateDir, 'runs', id);
 const count = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-// One registered run, read now: its status (lib/progress.mjs) and origin (lib/harness.mjs), or why it could not be read.
+// The units of an open run that wait on another unit (--after) that has not passed.
+const blockedIn = (s) => (s.closed ? [] : s.units.filter((u) => u.after && !['pass', 'stopped'].includes(u.status))
+  .map((u) => ({ id: u.id, title: u.title ?? null, after: u.after, afterStatus: s.units.find((x) => x.id === u.after)?.status ?? null }))
+  .filter((b) => b.afterStatus !== 'pass'));
+
+// One registered run, read now: its status (lib/progress.mjs), origin (lib/harness.mjs) and blocked units, or why it could not be read.
 function readEntry(e, nowMs) {
   try {
     const s = loadRun(runDirOf(e));
     const open = s.closed ? [] : questions(s, { project: projectName(e.stateDir) }).filter((q) => q.open);
-    return { ...e, title: e.title ?? s.goal, alias: s.alias ?? e.alias, startedAt: s.createdAt ?? null, status: runStatus(s, s.closed ? null : decide(s, nowMs), { nowMs }), origin: origin(s), questions: open, repo: s.repo ?? null };
+    return { ...e, title: e.title ?? s.goal, alias: s.alias ?? e.alias, startedAt: s.createdAt ?? null, status: runStatus(s, s.closed ? null : decide(s, nowMs), { nowMs }), origin: origin(s), questions: open, blocked: blockedIn(s), repo: s.repo ?? null };
   } catch (err) { return { ...e, error: `unreadable: ${err.message}` }; }
 }
 
@@ -57,45 +65,49 @@ export function pcModel(entries, { nowMs = Date.now(), here = null, read = true 
 // When a run started, when it ended or should end, and its age (start to now). Start and end show
 // as clock times; the live page keeps the age current (lib/live.client.js, class "abs" and "age").
 const valid = (iso) => typeof iso === 'string' && !Number.isNaN(Date.parse(iso));
-function timesLine(r, st, nowMs) {
-  if (!valid(r.startedAt)) return '';
+function times(r, st, nowMs) {
+  if (!valid(r.startedAt)) return { start: '', end: '' };
   const from = Date.parse(r.startedAt);
   const age = `<time datetime="${esc(r.startedAt)}" class="age" title="${esc(when(r.startedAt))}">${esc(ageText(nowMs - from))}</time>`;
   let end;
   if (st ? st.concluded : r.closed) end = valid(st?.closedAt) ? `ended ${stamp(st.closedAt, 'abs')} (took ${esc(ageText(Date.parse(st.closedAt) - from))})` : 'ended, time not recorded';
   else if (valid(st?.eta?.readyAt)) end = `ending about ${stamp(st.eta.readyAt, 'abs')}`;
   else end = `ending: ${esc(st?.eta?.short ?? 'no estimate yet')}`;
-  return `<p class="cause times">started ${stamp(r.startedAt, 'abs')} · ${end} · age ${age}</p>`;
+  return { start: `${stamp(r.startedAt, 'abs')}<div class="muted">age ${age}</div>`, end };
 }
 
-function runItem(r, ctx, nowMs = Date.now()) {
-  const href = ctx.pcHref ? ctx.pcHref(r.key, r.run) : null;
-  const name = href ? `<a href="${esc(href)}">${esc(r.run)}</a>` : esc(r.run);
-  const alias = r.alias ? ` <span class="cause">“${esc(r.alias)}”</span>` : '';
-  if (r.error) return `<li class="card run-row" data-a="pc-${esc(r.key)}-${esc(r.run)}"><h3><span>${name}${alias}</span></h3><p class="cause">${esc(r.error)}</p></li>`;
+const isOver = (r) => (r.status ? r.status.concluded : !!r.closed);
+const activeFirst = (r) => (isOver(r) ? 1 : 0);
+const pcLink = (ctx, key, run, sub = '') => (ctx.pcHref ? ctx.pcHref(key, run, sub) : null);
+const link = (href, label, cls = '') => (href ? `<a${cls ? ` class="${cls}"` : ''} href="${esc(href)}">${esc(label)}</a>` : esc(label));
+// A registered project's coordinator page on a served page (/p/<key>/coordinator); a file on disk has none.
+export const coordinatorHref = (ctx, key) => (ctx.live && key ? `/p/${key}/coordinator?t=${encodeURIComponent(ctx.live.token)}` : null);
+
+// Every run of the register, flat, each with its project's name and whether it is the project shown.
+const flat = (pc) => pc.groups.flatMap((g) => g.runs.map((r) => ({ r, name: g.name, here: g.key === pc.here })));
+
+// One run as a table row: status, run, project and the tool it ran in, progress, what it does, its end, start and last write.
+function runRow({ r, name, here }, ctx, nowMs) {
+  const runCell = `${link(pcLink(ctx, r.key, r.run), r.run, 'mono')}${r.alias ? ` <span class="muted">“${esc(r.alias)}”</span>` : ''}${r.title ? `<div class="muted">${linkify(r.title, r.repo)}</div>` : ''}`;
+  const project = `${esc(name)}${here ? ' <span class="muted">this project</span>' : ''}${r.origin ? originLine({ ...r.origin, alias: null }) : ''}`;
+  const updated = { html: stamp(r.lastSeen) };
+  if (r.error) return [{ html: toneChip('unreadable', 'bad') }, { html: runCell }, { html: project }, '', r.error, '', '', updated];
   const st = r.status;
-  if (!st) {
-    return `<li class="card run-row${r.closed ? ' fin' : ''}" data-a="pc-${esc(r.key)}-${esc(r.run)}"><h3><span>${name}${alias}</span>${chip(r.closed ? `closed: ${r.closed}` : 'open', r.closed ?? 'running')}</h3>`
-      + `${r.title ? `<p class="cause">${esc(r.title)}</p>` : ''}${originLine({ ...r.origin, alias: null })}<p class="cause">last written ${stamp(r.lastSeen)}</p></li>`;
-  }
-  const body = st.concluded ? `<p class="say">${esc(String(st.reason).replace(/\.*$/, ''))}.</p>`
-    : `<p class="say"><b>${esc(st.progress)}</b> · ${esc(st.doing)}</p>${progressBar(st, true)}<p class="cause">${esc(st.eta.text)}</p>`;
-  return `<li class="card run-row${st.concluded ? ' fin' : ''}" data-a="pc-${esc(r.key)}-${esc(r.run)}"><h3><span>${name}${alias}</span>${statusChip(st)}</h3>`
-    + `${timesLine(r, st, nowMs)}${r.title ? `<p class="cause">${esc(r.title)}</p>` : ''}${body}${originLine({ ...r.origin, alias: null })}<p class="cause">last written ${stamp(r.lastSeen)}</p></li>`;
+  if (!st) return [{ html: chip(r.closed ? `closed: ${r.closed}` : 'open', r.closed ?? 'running') }, { html: runCell }, { html: project }, '', '', '', '', updated];
+  const t = times(r, st, nowMs);
+  const progress = `${esc(st.progress)}${bar(st.pct, { label: st.progress, tone: st.concluded ? '' : 'ok' })}`;
+  return [{ html: statusChip(st) }, { html: runCell }, { html: project }, { html: progress }, { html: st.concluded ? linkify(String(st.reason).replace(/\.*$/, ''), r.repo) : linkUnits(st.doing, st.current, (id) => pcLink(ctx, r.key, r.run, `/unit/${encodeURIComponent(id)}`)) }, { html: t.end }, { html: t.start }, updated];
 }
+const RUN_COLS = ['Status', 'Run', 'Project', 'Progress', 'Current', 'ETA', 'Started', 'Updated'].map((label) => ({ label }));
+const runsTable = (list, ctx, nowMs, empty) => table({ cols: RUN_COLS, rows: list.map((x) => runRow(x, ctx, nowMs)), min: 980, max: 420, empty });
 
-const activeFirst = (r) => (r.status ? (r.status.concluded ? 1 : 0) : (r.closed ? 1 : 0));
-
-// The "This PC" section: every registered run on this machine, grouped by project, this project first.
+// The "This PC" runs: every registered run on this machine, active first, this project's first among equals.
 export function pcSection(m, ctx) {
   const pc = m.pc;
   if (!pc) return '<p class="empty">The register of runs on this PC was not read.</p>';
-  if (!pc.groups.length) return '<p class="empty">No run registered on this PC yet. Every run.mjs write adds its run.</p>';
-  const groups = [...pc.groups].sort((a, b) => (b.key === pc.here) - (a.key === pc.here));
-  const active = (g) => g.runs.filter((r) => (r.status ? !r.status.concluded : !r.closed)).length;
-  return `<p class="meta">${count(pc.runs, 'run')} in ${count(pc.groups.length, 'project')} on this PC, from every tool that ran the coordinator. This dashboard is skill ${esc(pc.version)}.</p>`
-    + groups.map((g) => `<section class="card" data-a="pcg-${esc(g.key)}"><h3><span>${esc(g.name)}${g.key === pc.here ? ' <span class="cause">this project</span>' : ''}</span><span class="cause">${active(g)} active · ${g.runs.length} in all</span></h3>`
-      + `<p class="cause" style="overflow-wrap:anywhere">${esc(g.project)}</p><ul class="plain run-rows">${[...g.runs].sort((a, b) => activeFirst(a) - activeFirst(b)).map((r) => runItem(r, ctx, pc.now)).join('')}</ul></section>`).join('');
+  if (!pc.groups.length) return '<p class="empty">No run registered on this PC yet.</p>';
+  const list = flat(pc).sort((a, b) => activeFirst(a.r) - activeFirst(b.r) || b.here - a.here);
+  return `<p class="meta">${count(pc.runs, 'run')} in ${count(pc.groups.length, 'project')} · skill ${esc(pc.version)}</p>${runsTable(list, ctx, pc.now)}`;
 }
 
 // Needs you: every open question of every registered run, by project and run, each labelled with its
@@ -106,8 +118,7 @@ export function needsSection(pc, ctx = {}) {
   if (!groups.length) return '<div class="needs calm">Nothing needs you on this PC.</div>';
   const runBlock = (r) => {
     const form = ctx.answerForm ? { ...ctx.answerForm, fields: [['key', r.key], ['run', r.run]] } : null;
-    const href = ctx.pcHref ? ctx.pcHref(r.key, r.run) : null;
-    const name = href ? `<a href="${esc(href)}">${esc(r.run)}</a>` : esc(r.run);
+    const name = link(pcLink(ctx, r.key, r.run), r.run);
     const anchor = needsAnchor(r.key, r.run);
     return `<div class="needs" id="${esc(anchor)}" data-a="${esc(anchor)}"><b>${name}</b>${r.alias ? ` <span class="cause">“${esc(r.alias)}”</span>` : ''}`
       + `<ul>${r.questions.map((q) => questionItem(q, form, r.repo, `${r.key}-${r.run}-`)).join('')}</ul></div>`;
@@ -116,41 +127,104 @@ export function needsSection(pc, ctx = {}) {
     + `<span class="cause">${count(g.asking.reduce((n, r) => n + r.questions.length, 0), 'open question')}</span></h3>${g.asking.map(runBlock).join('')}</section>`).join('');
 }
 
-// Waiting on you (design one-boss 5.5): the open questions first, with their answer forms (needsSection),
-// then the rest of what waits on the person (lib/waiting.mjs; its questions are those same forms, so they
-// are not listed twice). Each item says how long it has waited; the live page keeps that current.
-export function waitingSection(pc, waiting, ctx = {}) {
-  const asking = pc.groups.some((g) => g.runs.some((r) => r.questions?.length));
-  const rest = (waiting ?? []).filter((x) => x.kind !== 'question');
-  if (!asking && !rest.length) return '<div class="needs calm">Nothing waits on you.</div>';
+// What waits on the person besides the open questions (lib/waiting.mjs; the questions have their forms in Questions).
+const looseOf = (waiting) => (waiting ?? []).filter((x) => x.kind !== 'question');
+const since = (x, nowMs) => (x.since ? `<time datetime="${esc(x.since)}" class="age" title="${esc(when(x.since))}">${esc(ageText(nowMs - Date.parse(x.since)))}</time> ago` : 'since unknown');
+
+// Loose ends, oldest first: each says where, what, how long it has waited (the live page keeps that current) and the fix.
+export function looseEnds(pc, waiting, ctx = {}) {
+  const nowMs = pc.now ?? Date.now();
   const href = (x) => {
     if (!x.link) return null;
     if (x.link.startsWith('/#')) return x.link.slice(1);
-    const sub = x.link.slice(`/p/${x.key}/run/${encodeURIComponent(x.run)}`.length);
-    return ctx.pcHref ? ctx.pcHref(x.key, x.run, sub) : null;
+    return pcLink(ctx, x.key, x.run, x.link.slice(`/p/${x.key}/run/${encodeURIComponent(x.run)}`.length));
   };
+  const repoOf = (x) => flat(pc).find(({ r }) => r.key === x.key && r.run === x.run)?.r.repo ?? null;
   const item = (x) => {
-    const where = x.run ? `${esc(x.project)} · ${x.name ? `${esc(x.name)} ` : ''}(${esc(x.run)})` : 'this PC';
-    const h = href(x);
-    const since = x.since ? `<time datetime="${esc(x.since)}" class="age" title="${esc(when(x.since))}">${esc(ageText((pc.now ?? Date.now()) - Date.parse(x.since)))}</time> ago` : 'since unknown';
-    const list = x.items?.length > 1 ? `<ul>${x.items.map((g) => `<li><span class="cause">${esc(g.id)}</span> ${esc(g.text)}</li>`).join('')}</ul>` : '';
-    return `<li class="card" data-a="wait-${esc(x.kind)}-${esc(x.key ?? 'pc')}-${esc(x.run ?? 'plugin')}"><h3><span>${h ? `<a href="${esc(h)}">${where}</a>` : where}</span>${chip(x.what, x.kind === 'plugin' ? 'not-yet' : 'needs-you')}</h3>`
-      + `<p class="say">${esc(x.text)}</p>${list}<p class="cause">waiting ${since}${x.fix ? ` · <code>${esc(x.fix)}</code>` : ''}</p></li>`;
+    const where = x.run ? `${x.project} · ${x.name ? `${x.name} ` : ''}(${x.run})` : 'this PC';
+    const list = x.items?.length > 1 ? `<ul>${x.items.map((g) => `<li><span class="cause">${esc(g.id)}</span> ${linkify(g.text, repoOf(x))}</li>`).join('')}</ul>` : '';
+    return `${toneChip(x.what, x.kind === 'plugin' ? '' : 'ask')}<span class="grow">${link(href(x), where)}<span class="line">${linkify(x.text, repoOf(x))}</span>${list}`
+      + `<span class="muted">waiting ${since(x, nowMs)}${x.fix ? ` · <code>${esc(x.fix)}</code>` : ''}</span></span>`;
   };
-  const questionsPart = asking ? `<h3 id="pc-needs" data-a="h-pc-needs">Questions for you</h3>${needsSection(pc, ctx)}` : '';
-  const restPart = rest.length ? `<h3 id="pc-loose" data-a="h-pc-loose">Loose ends · ${count(rest.length, 'item')}, oldest first</h3><ul class="plain run-rows">${rest.map(item).join('')}</ul>` : '';
-  return questionsPart + restPart;
+  return rows(looseOf(waiting).map(item), { empty: 'Nothing waits on you.' });
 }
+
+// Units that wait on another unit of their run that has not passed.
+function blockedRows(pc, ctx) {
+  const list = flat(pc).filter(({ r }) => !isOver(r)).flatMap(({ r, name }) => (r.blocked ?? []).map((b) => ({ r, name, b })));
+  return rows(list.map(({ r, name, b }) => `${toneChip(b.afterStatus === 'stopped' ? `${b.after} stopped` : `after ${b.after}`, b.afterStatus === 'stopped' ? 'bad' : '')}`
+    + `<span class="grow">${link(pcLink(ctx, r.key, r.run), r.run, 'mono')} / ${link(pcLink(ctx, r.key, r.run, `/unit/${encodeURIComponent(b.id)}`), b.id, 'mono')}${b.title ? ` <span class="muted">${linkify(b.title, r.repo)}</span>` : ''}</span>`
+    + `<span class="muted">${esc(name)}</span>`), { empty: 'No blocked unit.' });
+}
+
+// Concluded runs, latest first: outcome, run, project and when it ended.
+function concludedRows(list, ctx, nowMs) {
+  const end = ({ r }) => (r.status?.closedAt ?? r.lastSeen ?? '');
+  return rows([...list].sort((a, b) => String(end(b)).localeCompare(String(end(a)))).map((x) => {
+    const { r, name } = x;
+    const t = times(r, r.status, nowMs);
+    return `${r.status ? statusChip(r.status) : chip(`closed: ${r.closed}`, r.closed)}<span class="grow">${link(pcLink(ctx, r.key, r.run), r.run, 'mono')}`
+      + `${r.alias ? ` <span class="muted">“${esc(r.alias)}”</span>` : ''} <span class="muted">${esc(name)}</span>${r.status?.reason ? `<span class="line muted">${linkify(String(r.status.reason).replace(/\.*$/, ''), r.repo)}</span>` : ''}</span>`
+      + `<span class="muted">${t.end || (r.lastSeen ? `last written ${stamp(r.lastSeen)}` : '')}</span>`;
+  }), { empty: 'No concluded run.' });
+}
+
+// The project whose coordinator page the tab opens: the one shown, else the one written to last.
+function coordinatorKey(pc) {
+  if (pc.here) return pc.here;
+  const last = flat(pc).sort((a, b) => String(b.r.lastSeen ?? '').localeCompare(String(a.r.lastSeen ?? '')))[0];
+  return last?.r.key ?? pc.groups[0]?.key ?? null;
+}
+
+// The coordinator in figures, and each project's coordinator page.
+function coordinatorSummary(pc, active, tools, ctx) {
+  const fig = (k, v) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+  const figs = `<div class="figs">${fig('Runs', pc.runs)}${fig('Projects', pc.groups.length)}${fig('Active', active)}${fig('Skill', pc.version)}</div>`;
+  const projects = rows(pc.groups.map((g) => `<span class="grow">${link(coordinatorHref(ctx, g.key), g.name)}</span>`
+    + `<span class="muted">${count(g.runs.length, 'run')} · ${g.runs.filter((r) => !isOver(r)).length} active</span>`), { empty: 'No project.' });
+  return `${figs}${tools.length ? `<p class="meta">Tools: ${esc(tools.join(', '))}</p>` : ''}${projects}`;
+}
+
+const sameDay = (iso, nowMs) => valid(iso) && new Date(iso).toDateString() === new Date(nowMs).toDateString();
+const oldest = (list, nowMs) => { const t = list.map((x) => Date.parse(x.since)).filter(Number.isFinite); return t.length ? `oldest ${ageText(nowMs - Math.min(...t))}` : ''; };
 
 // The global dashboard's home page. waiting: lib/waiting.mjs waitingList, read now.
 export function pcPage(pc, nowMs, ctx, waiting = []) {
   const tools = [...new Set(pc.groups.flatMap((g) => g.runs.map((r) => r.origin?.harness).filter(Boolean)))].map(harnessName);
+  const all = flat(pc);
+  const active = all.filter(({ r }) => !isOver(r)).sort((a, b) => b.here - a.here);
+  const over = all.filter(({ r }) => isOver(r));
+  const asked = all.reduce((n, { r }) => n + (r.questions?.length ?? 0), 0);
+  const askingRuns = active.filter(({ r }) => r.questions?.length || r.status?.kind === 'waiting').length;
+  const today = over.filter(({ r }) => sameDay(r.status?.closedAt, nowMs));
+  const loose = looseOf(waiting);
+  const blocked = active.reduce((n, { r }) => n + (r.blocked?.length ?? 0), 0);
+  const key = coordinatorKey(pc);
+  const home = ctx.pages?.find((p) => p.path === '/') ?? { path: '/', label: 'This PC', href: ctx.home ?? '/' };
+  const coord = coordinatorHref(ctx, key);
+  const pages = [home, ...(coord ? [{ path: `/p/${key}/coordinator`, label: 'Coordinator', href: coord }] : [])];
+  const sub = `${count(pc.runs, 'run')} · ${count(pc.groups.length, 'project')} · skill ${pc.version}${tools.length ? ` · ${tools.join(', ')}` : ''}`;
+  const main = [
+    panel({ id: 'pc-questions', title: 'Questions', count: asked, tone: asked ? 'ask' : '', bodyHtml: blk('pc-needs', needsSection(pc, ctx), 'section', ' id="pc-needs"') }),
+    panel({ id: 'pc-runs', title: 'Runs', count: active.length, flush: active.length > 0, bodyHtml: blk('pc-runs', runsTable(active, ctx, nowMs, 'No active run.'), 'section', ' id="self-pc"') }),
+    panel({ id: 'pc-blocked', title: 'Blocked units', count: blocked, bodyHtml: blk('pc-blocked', blockedRows(pc, ctx), 'section', ' id="pc-blocked"') }),
+  ].join('');
+  const side = [
+    panel({ id: 'pc-loose', title: 'Loose ends', count: loose.length, bodyHtml: blk('pc-loose', looseEnds(pc, waiting, ctx), 'section', ' id="pc-loose"') }),
+    panel({ id: 'pc-coordinator', title: 'Coordinator', metaHtml: coord ? `<a href="${esc(coord)}">Open</a>` : '', bodyHtml: blk('pc-coordinator', coordinatorSummary(pc, active.length, tools, ctx)) }),
+    panel({ id: 'pc-concluded', title: 'Concluded', count: over.length, open: false, bodyHtml: blk('pc-concluded', concludedRows(over, ctx, nowMs), 'section', ' id="pc-concluded"') }),
+  ].join('');
   const body = [
-    blk('head', `<header class="run"><h1>Coordinator · this PC</h1><span class="meta">${count(pc.runs, 'run')} in ${count(pc.groups.length, 'project')}${tools.length ? ` · from ${esc(tools.join(', '))}` : ''} · updated ${stamp(new Date(nowMs).toISOString())}</span></header>`),
-    `<h2 id="pc-waiting" data-a="h-pc-waiting">Waiting on you</h2>${blk('pc-waiting', waitingSection(pc, waiting, ctx), 'section', ' aria-labelledby="pc-waiting"')}`,
-    `<h2 id="self-pc" data-a="h-pc">Runs on this PC</h2>${blk('self-pc', pcSection({ pc }, ctx), 'section', ' class="self" aria-labelledby="self-pc"')}`,
+    blk('head', heading('This PC', sub)),
+    blk('kpis', kpis([
+      { k: 'Active', v: active.length, s: `${askingRuns} waiting on you` },
+      { k: 'Questions', v: asked, s: oldest(waiting.filter((x) => x.kind === 'question'), nowMs) },
+      { k: 'Finished today', v: today.length, s: today.length ? today.map(({ r }) => r.run).join(', ') : '' },
+      { k: 'Loose ends', v: loose.length, s: oldest(loose, nowMs) },
+    ])),
+    cols(main, side),
   ].join('\n');
-  return page({ title: 'This PC', body, ctx, path: '/' });
+  return page({ title: 'This PC', body, ctx: { ...ctx, pages }, path: '/' });
 }
 
 // A served ctx for one run of a registered project, under /p/<key>/run/<id>: read-only, no forms, no stored files.
@@ -175,11 +249,32 @@ export function sourceOf(stateDir) {
   return { runs: () => loadRunsIn(stateDir), lessons: () => ({ global: read(join(registryHome(), 'lessons.json')), project: read(join(stateDir, 'lessons.json')) }) };
 }
 
+// A registered project's coordinator page, read-only: its runs, lessons, COORDINATOR.md and last gaps check,
+// read from its own folders as the snapshot reads them (lib/selfdata.mjs); the PC's runs from the register alone.
+function projectCoordinator(key, live, entries, home, nowMs) {
+  const e = entries.find((x) => x.key === key);
+  if (!e || !existsSync(e.stateDir)) return null;
+  const read = (f) => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
+  let gapsCheck = null; try { gapsCheck = JSON.parse(read(join(e.stateDir, 'gaps-check.json'))); } catch { /* none yet */ }
+  const src = sourceOf(e.stateDir);
+  const m = { ...selfModel({ runs: src.runs(), lessons: src.lessons(), context: read(join(e.project, 'COORDINATOR.md')), gapsCheck, nowMs }), pc: pcModel(entries, { here: e.stateDir, nowMs, read: false }) };
+  const t = `t=${encodeURIComponent(live.token)}`;
+  const path = `/p/${key}/coordinator`;
+  const runHref = (id) => `/p/${key}/run/${encodeURIComponent(id)}?${t}`;
+  const ctx = {
+    live, theme: null, run: null, store: null, base: path, home: home.href, embed: null, readOnly: true, path, project: basename(e.project),
+    runHref, artHref: () => null, pcHref: (k, id, sub = '') => `/p/${k}/run/${encodeURIComponent(id)}${sub}?${t}`,
+    pages: [home, { path, label: home.path === '/' ? 'Coordinator' : `Coordinator · ${basename(e.project)}`, href: `${path}?${t}` }],
+  };
+  return selfPage(m, nowMs, ctx);
+}
+
 // The page at one /p/… path, or null. entries: the register, read now; home: the nav entry back to the run list.
 export function projectPage(path, live, entries, home, nowMs = Date.now()) {
   const m = PROJECT_PAGE.exec(path);
   if (!m) return null;
-  const [, key, id, rest = '/'] = m;
+  const [, key, id, rest = '/', coordinator] = m;
+  if (coordinator) return projectCoordinator(key, live, entries, home, nowMs);
   const e = findEntry(entries, key, id);
   if (!e || !isSafeId(id) || !existsSync(runDirOf(e))) return null;
   const s = loadRun(runDirOf(e));

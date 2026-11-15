@@ -1256,7 +1256,7 @@ const commands = {
         ctx.calls = readCalls(runDir(id));
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
-        if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx, id) }) : null;
+        if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx) }) : null;
         if (rest === '/maps') return mapsPage(v, Date.now(), ctx);
         if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDir(id), ctx, rest.slice(1))[0][1];
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);

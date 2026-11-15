@@ -48,12 +48,13 @@ export function navGraph(keys, edges) {
   };
 }
 
-// The live toolbar above a walkable map: search, focus, and the selection panel the script fills.
+// The live toolbar above a walkable map: search and focus.
 export const navTools = (map, label) => `<div class="nav-tools" data-nav-tools="${esc(map)}">`
   + `<label class="nav-find">Find a ${esc(label)} <input type="search" data-nav-find autocomplete="off" placeholder="id or title"></label>`
   + '<label class="nav-focus"><input type="checkbox" data-nav-focus> Focus: hide what is not selected</label>'
-  + '<span class="cause" data-nav-count aria-live="polite"></span>'
-  + `<div class="nav-panel" data-nav-panel role="region" aria-label="Selected on this map" aria-live="polite" hidden></div></div>`;
+  + '<span class="cause" data-nav-count aria-live="polite"></span></div>';
+// The one selection panel of the page (the maps page's Selected panel); mapnav.client.js fills it.
+export const navPanel = () => '<div class="nav-panel" data-nav-panel role="region" aria-label="Selected on this map" aria-live="polite" hidden></div>';
 
 // How to use it, said once under each walkable map.
 export const navHelp = (live) => `<p class="map-legend nav-help"><span class="cause">${live

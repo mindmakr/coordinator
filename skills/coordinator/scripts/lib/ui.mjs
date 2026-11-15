@@ -5,22 +5,26 @@
 // Text arguments are escaped. Arguments named *html (and a cell given as { html })
 // are HTML the caller built from these helpers or other escaping code.
 //
-//   heading(title, sub?)              <div class="head">: h1 and a muted line
+//   heading(title, sub?, { inlineHtml?, actionsHtml? })
+//                                     <div class="head">: h1, inline HTML (a status chip), a muted line, and actions pushed to the right
 //   kpis([{ k, v, s?, bar?, vHtml? }]) <div class="kpis">: label, value, small line, optional bar (0-100);
 //                                     vHtml (trusted) in place of v, such as tries()
 //   cols(mainHtml, sideHtml)          <div class="cols">: main and side columns; the side stacks under main when narrow
 //   panel({ id, title, count?, metaHtml?, bodyHtml, open?, scroll?, flush?, tone? })
 //                                     details.panel: summary (chevron, h2, count, controls) and its body;
 //                                     `id` is data-d, so the live page keeps it open or closed per page
-//   table({ cols: [{ label, num? }], rows: [[cell]], min?, max?, empty? })
-//                                     table.t with a sticky header, in its own scrolling box; a row may be
-//                                     { cells: [cell], key?, cls?, id? }: its data-a (the live page's key), class and id
+//   table({ cols: [{ label, num? }], rows: [[cell] | { cells, key?, cls?, id? }], min?, max?, empty? })
+//                                     table.t with a sticky header, in its own scrolling box; an object row
+//                                     carries its data-a (the live page's key), class and id
 //   toneChip(word, tone?)             span.chip: ask, ok, retry, bad or done; the word is always shown
 //   typeTag(kind, file?)              span.tag: IMG, LOG, CSV, TXT, PDF, URL or TEST
 //   tries([state])                    try marks: pass ✓, fail ✕, work …, queued (its number), open (empty)
 //   bar(pct, { label?, tone? })       div.bar: a meter with its percent as its label
+//   mdActions(markdown, file, { copy? })  Copy Markdown and Download for a page: Download is a link that works without
+//                                     script; Copy (only with `copy`, the live page) reads the same text from that link
 //   restoreOpen(nodes, saved)         the live page's memory of toggles and panels (live.client.js runs it)
 //   rememberToggle(map, d, armed)     records a toggle only after the reader clicked its summary
+//   rows([html], { empty? })          ul.rows: one short line per item, its parts wrapping; none says so
 import { esc } from './links.mjs';
 
 const text = esc;
@@ -29,7 +33,16 @@ const cell = (c) => (c && typeof c === 'object' && 'html' in c ? String(c.html) 
 const length = (v) => (typeof v === 'number' && v > 0 ? `${v}px` : typeof v === 'string' && /^\d+(\.\d+)?(px|rem|em|vh|%)$/.test(v) ? v : '');
 const pct = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.round(Math.min(100, Math.max(0, n))) : 0; };
 
-export const heading = (title, sub = '') => `<div class="head"><h1>${text(title)}</h1>${sub ? `<span class="muted">${text(sub)}</span>` : ''}</div>`;
+export const heading = (title, sub = '', { inlineHtml = '', actionsHtml = '' } = {}) => `<div class="head"><h1>${text(title)}</h1>${inlineHtml}${sub ? `<span class="muted">${text(sub)}</span>` : ''}${actionsHtml ? `<span class="acts">${actionsHtml}</span>` : ''}</div>`;
+
+// Copy Markdown and Download for a page's Markdown. The text rides in the Download link's data: URL, the one copy of it;
+// the live page's Copy button (data-copy, live.client.js) reads it from there. No text, no buttons.
+export function mdActions(markdown, file, { copy = false } = {}) {
+  if (typeof markdown !== 'string' || !markdown.trim()) return '';
+  const name = String(file ?? 'report.md').replace(/[^A-Za-z0-9._-]/g, '_');
+  return `${copy ? '<button type="button" class="btn sm" data-copy>Copy Markdown</button>' : ''}`
+    + `<a class="btn sm" download="${text(name)}" href="data:text/markdown;charset=utf-8,${text(encodeURIComponent(markdown))}">Download</a>`;
+}
 
 export function bar(value, { label, tone = '' } = {}) {
   const p = pct(value);
@@ -54,6 +67,9 @@ export function panel({ id, title, count, metaHtml = '', bodyHtml = '', open = t
     + `<summary><span class="chev" aria-hidden="true">›</span><h2>${text(title)}</h2>${n}${metaHtml ? `<span class="meta">${metaHtml}</span>` : ''}</summary>${body}</details>`;
 }
 
+// A row is its cells, or { cells, key?, cls?, id? }: its data-a (the live page's key), its class (a page's own CSS
+// filters rows by class) and its id.
+const cellsOf = (r) => (Array.isArray(r) ? r : r.cells);
 const rowAttrs = (r) => (Array.isArray(r) ? '' : `${r.id ? ` id="${text(r.id)}"` : ''}${r.cls ? ` class="${text(r.cls)}"` : ''}${r.key ? ` data-a="${text(r.key)}"` : ''}`);
 export function table({ cols: heads, rows, min, max, empty = 'None' }) {
   if (!rows.length) return `<p class="empty">${text(empty)}</p>`;
@@ -61,7 +77,7 @@ export function table({ cols: heads, rows, min, max, empty = 'None' }) {
   const w = length(min); const h = length(max);
   return `<div class="scroll tbox"${h ? ` style="max-height:${h}"` : ''}><table class="t"${w ? ` style="min-width:${w}"` : ''}>`
     + `<thead><tr>${heads.map((c, i) => `<th scope="col"${num(i)}>${text(c.label)}</th>`).join('')}</tr></thead>`
-    + `<tbody>${rows.map((r) => `<tr${rowAttrs(r)}>${(Array.isArray(r) ? r : r.cells).map((c, i) => `<td${num(i)}>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    + `<tbody>${rows.map((r) => `<tr${rowAttrs(r)}>${cellsOf(r).map((c, i) => `<td${num(i)}>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 // A status in words, coloured by tone: the colour never says it alone. No word, no chip.
@@ -103,4 +119,10 @@ const TRY = { pass: ['p', '✓', 'passed'], fail: ['f', '✕', 'failed'], work: 
 export function tries(states) {
   const marks = states.map((s, i) => { const [c, g, w] = TRY[s] ?? TRY.open; return { c, g: g ?? String(i + 1), w: `try ${i + 1} ${w}` }; });
   return `<span class="tries" role="img" aria-label="${text(marks.map((m) => m.w).join(', '))}">${marks.map((m) => `<span class="pip ${m.c}" aria-hidden="true">${m.g}</span>`).join('')}</span>`;
+}
+
+// Short lines, one per item (the canvas's .rows). Each item is HTML its caller built; none says `empty`.
+export function rows(items, { empty = 'None' } = {}) {
+  if (!items.length) return `<p class="empty">${text(empty)}</p>`;
+  return `<ul class="rows">${items.map((i) => `<li>${i}</li>`).join('')}</ul>`;
 }

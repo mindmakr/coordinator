@@ -106,3 +106,20 @@ test('goal relevance: with no unit on goal, the Off goal heading sits below Unit
   const boxY = Number(/<rect class="nd [^"]*off" x="[^"]+" y="([^"]+)"/.exec(svg)[1]);
   assert.ok(boxY > y('Off goal'), 'the off-goal box sits under its heading');
 });
+
+test('mind map: evidence tags on a crowded unit never overlap each other, a behaviour dot or a +n node', () => {
+  const ev = (n, b) => Array.from({ length: n }, (_, i) => ({ id: `E${b}${i}`, kind: ['screenshot', 'log', 'test', 'link', 'file', 'report'][i % 6], behaviour: b, file: `u1/f${b}${i}.png`, label: `shot ${b}${i}` }));
+  const crowded = unit('u1', { behaviours: ['B1', 'B2', 'B3', 'B4'].map((id) => ({ id, text: id, status: 'pass' })), evidenceItems: [...ev(6, 'B1'), ...ev(5, 'B2'), ...ev(7, 'B3'), ...ev(4, 'B4')] });
+  const v = viewOf([crowded, unit('u2', { behaviours: [{ id: 'B1', text: 'x', status: 'pass' }], evidenceItems: ev(6, 'B1') }),
+    unit('u3', { behaviours: [{ id: 'B1', text: 'x', status: 'pass' }], evidenceItems: [...ev(6, 'B1'), ...ev(9, 'none')] })]); // u3: evidence on the unit itself too
+  const svg = mindSvg(v, staticCtx('', 0));
+  const num = (s, k) => Number(new RegExp(`${k}="([^"]+)"`).exec(s)[1]);
+  const boxes = [...svg.matchAll(/<rect class="nd ev tagbox"[^>]*\/>/g)].map(([s]) => ({ x: num(s, 'x'), y: num(s, 'y'), w: num(s, 'width'), h: num(s, 'height') }));
+  const dots = [...svg.matchAll(/<circle class="nd (?:ev|st-\w+)" cx="([^"]+)" cy="([^"]+)" r="9"\/>/g)].map(([, x, y]) => ({ x: x - 9, y: y - 9, w: 18, h: 18 }));
+  assert.ok(boxes.length >= 12, `many tags drawn (${boxes.length})`);
+  const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) assert.ok(!hit(boxes[i], boxes[j]), `tags ${i} and ${j} do not intersect`);
+    for (const d of dots) assert.ok(!hit(boxes[i], d), `tag ${i} is not under a dot`);
+  }
+});

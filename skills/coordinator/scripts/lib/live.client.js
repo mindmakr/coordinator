@@ -176,6 +176,17 @@
 
   // Export PDF: the browser's print, with every toggle open for the paper and closed again after.
   document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-print]')) print(); });
+  // Copy Markdown: the text is the Download link's data: URL beside the button (ui.mjs mdActions).
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-copy]');
+    const a = b && b.parentNode.querySelector('a[download]');
+    if (!a) return;
+    let md = '';
+    try { md = decodeURIComponent(a.getAttribute('href').split(',').slice(1).join(',')); } catch { return; }
+    const done = () => { const w = b.textContent; b.textContent = 'Copied'; setTimeout(() => { b.textContent = w; }, 1500); };
+    const old = () => { const t = document.createElement('textarea'); t.value = md; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); done(); } catch { /* the Download link still works */ } t.remove(); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(md).then(done, old); else old();
+  });
   addEventListener('beforeprint', () => {
     document.querySelectorAll('details:not([open])').forEach((d) => { d.dataset.po = '1'; d.open = true; });
     const at = document.querySelector('[data-printed]'); if (at) at.textContent = `Exported ${full.format(Date.now())}`;

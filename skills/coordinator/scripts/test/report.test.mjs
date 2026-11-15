@@ -9,7 +9,9 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { copyNote, draft, draftMarkdown, gitRunner } from '../lib/report/draft.mjs';
 import { markdown } from '../lib/report/md.mjs';
-import { retroModel, retroPending } from '../lib/retro.mjs';
+import { liveCtx, staticCtx } from '../lib/hud.mjs';
+import { reportMarkdown, reportPage } from '../lib/report/page.mjs';
+import { repeatedGaps, retroMarkdown, retroModel, retroPage, retroPending } from '../lib/retro.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const root = mkdtempSync(join(tmpdir(), 'coord-report-'));
@@ -232,4 +234,75 @@ test('the closed rule shows beside stored notes too; a code word with a value is
   const r = cli('report', 'r5', '--file', notes);
   assert.notEqual(r.status, 0);
   assert.ok(!(r.stdout + r.stderr).includes('55720123'));
+});
+
+const view = (over = {}) => ({ id: 'r', repo: 'o/r', phase: 'closed: done', open: false, units: [{ id: 'u1', title: 'Payouts settle once', status: 'pass', links: [{ kind: 'pr', url: 'https://github.com/o/r/pull/7' }, { kind: 'merge', url: 'https://github.com/o/r/commit/abc1234' }] }, { id: 'u2', title: 'Copy', status: 'stopped', links: [] }], ...over });
+const ids = (html) => [...html.matchAll(/data-d="([^"]+)" data-a="panel-/g)].map((x) => x[1]);
+const draftData = (over = {}) => ({ at: '2026-11-15T10:00:00Z', changes: [], diffs: [], files: [], migrations: [], scripts: [], env: [], jobs: [], copy: [], ...over });
+
+test('report page: the shared shell, KPI row and panels for every section it had; Copy only on the live page, Download always', () => {
+  const d = draftData({ diffs: [{ unit: 'u2', ok: false, why: 'no recorded diff' }], files: ['src/a.js'], migrations: [{ path: 'drizzle/1.sql', unit: 'u1' }] });
+  const html = reportPage(view(), Date.now(), null, { report: { text: '## r\n### Fixed\n- x (#7)', at: '2026-11-15T10:00:00Z', source: 'n.md' }, draft: d, quality: null });
+  assert.match(html, /<div class="head"><h1>Report<\/h1>/);
+  assert.match(html, /<div class="kpis">/);
+  assert.deepEqual(ids(html), ['changes', 'notes', 'files', 'devops', 'quality']);
+  assert.match(html, /<details class="panel" data-d="devops" data-a="panel-devops">/); // starts closed
+  assert.match(html, /<h4 class="md">Fixed<\/h4>/);
+  assert.match(html, /<span class="lbl">Migrations added <span class="chip">1<\/span>/); assert.match(html, /<span class="lbl">Scripts added <span class="chip">0<\/span>/); // per-section counts
+  assert.match(html, /drizzle\/1\.sql/); assert.match(html, /Not read from git: u2/); assert.match(html, /Not measured yet/);
+  assert.match(html, /<a class="btn sm" download="report-r\.md"/);
+  assert.doesNotMatch(html, /data-copy|<script/);
+  const live = reportPage(view(), Date.now(), liveCtx({ ...staticCtx('', 0), token: 't' }, 'r'), { report: { text: 'x', at: 'a' } });
+  assert.match(live, /data-copy>Copy Markdown<\/button>/);
+  assert.match(live, /<a href="[^"]*u1[^"]*">u1<\/a>/); // the unit links
+  const bare = reportPage(view({ units: [] }), Date.now(), null, {});
+  assert.match(bare, /Not written yet/); assert.match(bare, /No units\./); assert.match(bare, /download="report-r\.md"/); // no notes and no draft: both buttons export the not-written state
+});
+
+test('report markdown: the stored notes, else the draft from git', () => {
+  assert.equal(reportMarkdown(view(), { report: { text: 'stored' }, draft: {} }), 'stored');
+  assert.match(reportMarkdown(view(), { draft: draftData() }), /^## r · 2026-11-15/);
+  assert.match(reportMarkdown(view(), {}), /^# Report · r\n\nNot written yet\./);
+});
+
+test('retro: repeated gaps group a gap raised in two or more rounds by cause, then wording; the checklist reads the run', () => {
+  const rd = (gap, cause) => ({ verdict: 'fail', gap, cause });
+  const s = { id: 'r', tag: 'code', budget: { maxRounds: 4, maxMinutes: 60, maxUnits: 6 }, notes: [{ kind: 'retro', text: 'u2 stopped: needs the person. Tokens by role measured', at: 'a' }],
+    units: [{ id: 'u1', status: 'pass', rounds: [rd('lock stays held', 'lock release'), rd('other words', 'lock release'), { verdict: 'pass' }] }, { id: 'u2', status: 'stopped', stopReason: 'budget', rounds: [rd('a one-off', 'x')] }, { id: 'u3', status: 'pass', rounds: [rd('lock still held', 'Lock  Release'), {}] }] };
+  assert.deepEqual(repeatedGaps(s), [{ gap: 'lock stays held', cause: 'lock release', units: ['u1', 'u3'], rounds: 3 }]);
+  const m = retroModel(s);
+  assert.deepEqual(m.checklist.map((c) => [c.label, c.done]), [['Retro notes', true], ['Repeated gaps', false], ['Stopped units', true], ['Run closed', false]]);
+  const withLesson = retroModel(s, { lessons: [{ id: 'L1', tag: 'code', text: 't', from: ['r'], seen: 1 }] });
+  assert.equal(withLesson.checklist[1].done, true);
+  // A stopped unit without a recorded reason leaves the item open; with none stopped the item is dropped, and nothing guesses at spend.
+  const noReason = retroModel({ ...s, units: [{ id: 'u2', status: 'stopped', rounds: [] }] });
+  assert.equal(noReason.checklist.find((c) => c.label === 'Stopped units').done, false);
+  assert.equal(retroModel({ ...s, units: [{ id: 'u1', status: 'pass', rounds: [] }] }).checklist.some((c) => c.label === 'Stopped units'), false);
+  assert.equal(m.checklist.some((c) => /spend/i.test(c.label)), false);
+});
+
+test('retro budget: the Units row shows the cap as the budget and the count as used', () => {
+  const s = { id: 'r', tag: 'code', budget: { maxRounds: 4, maxMinutes: 60, maxUnits: 6 }, notes: [], units: [{ id: 'u1', status: 'pass', rounds: [] }, { id: 'u2', status: 'pass', rounds: [] }] };
+  const m = retroModel(s);
+  assert.equal(m.budget.units, 6); assert.equal(m.budget.usedUnits, 2);
+  assert.match(retroPage(m, view(), Date.now(), null, false), /<td[^>]*>Units<\/td>\s*<td[^>]*>6<\/td>\s*<td[^>]*>2<\/td>/);
+  assert.match(retroPage(retroModel({ ...s, budget: { maxRounds: 4, maxMinutes: 60 } }), view(), Date.now(), null, false), /<td[^>]*>Units<\/td>\s*<td[^>]*>–<\/td>\s*<td[^>]*>2<\/td>/); // no maxUnits: a dash, not "undefined"
+});
+
+test('retro page: shared shell, KPI row and the panels, links to units, Download always and Copy only live', () => {
+  const s = { id: 'r', tag: 'code', budget: { maxRounds: 4, maxMinutes: 60, maxUnits: 6 }, notes: [{ kind: 'retro', text: 'Repeated gap: dates', at: 'a' }, { kind: 'retro', text: 'upstream: fix #3', at: 'b' }, { kind: 'escape', unit: 'u1', round: 2, text: 'missed', at: 'c' }],
+    units: [{ id: 'u1', status: 'pass', rounds: [{ verdict: 'fail', gap: 'dates differ', cause: 'clock' }, { verdict: 'fail', gap: 'dates differ', cause: 'clock' }, {}] }, { id: 'u2', status: 'stopped', stopReason: 'round budget', rounds: [] }] };
+  const m = retroModel(s, { lessons: [{ id: 'L1', tag: 'code', text: 'Use the clock', from: ['r'], seen: 2, scope: 'project' }] });
+  const html = retroPage(m, view(), Date.now(), null, false);
+  assert.match(html, /<div class="head"><h1>Retro<\/h1>/);
+  assert.match(html, /<div class="kpis">/);
+  assert.deepEqual(ids(html), ['budget', 'notes', 'lessons', 'gaps', 'stopped', 'checklist', 'upstream', 'escapes']);
+  for (const [id, closed] of [['gaps', true], ['stopped', true], ['escapes', true], ['budget', false], ['lessons', false]]) assert.equal(new RegExp(`data-d="${id}"[^>]*\\sopen`).test(html), !closed, id);
+  assert.match(html, /Use the clock/); assert.match(html, /dates differ/); assert.match(html, /round budget/);
+  assert.match(html, /<a class="mono" href="[^"]*u2[^"]*">u2<\/a>/);
+  assert.match(html, /download="retro-r\.md"/); assert.doesNotMatch(html, /data-copy/);
+  assert.match(retroPage(m, view(), Date.now(), liveCtx({ ...staticCtx('', 0), token: 't' }, 'r'), true), /data-copy>Copy Markdown[\s\S]*Retro pending/);
+  const md = retroMarkdown(m);
+  assert.match(md, /^# Retro · r\n\n## Budget\n- Tries per unit: 3 of 4/);
+  assert.match(md, /## Repeated gaps\n- dates differ \(u1; 2 rounds\)/); assert.match(md, /## Stopped units\n- u2: round budget/);
 });

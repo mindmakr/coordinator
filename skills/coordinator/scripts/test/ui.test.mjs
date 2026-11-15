@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { bar, cols, heading, kpis, page, panel, rememberToggle, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
+import { bar, cols, heading, kpis, mdActions, page, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
 import { privacy } from '../lib/quality/privacy.mjs';
 import { sourceFile } from '../lib/quality/source.mjs';
 
@@ -15,6 +15,20 @@ test('heading: h1 and a muted line, escaped', () => {
   assert.equal(heading('r1', 'Goal text'), '<div class="head"><h1>r1</h1><span class="muted">Goal text</span></div>');
   assert.equal(heading('r1'), '<div class="head"><h1>r1</h1></div>');
   clean(heading(BAD, BAD));
+  assert.equal(heading('Report', '', { inlineHtml: '<i>x</i>', actionsHtml: '<b>y</b>' }), '<div class="head"><h1>Report</h1><i>x</i><span class="acts"><b>y</b></span></div>');
+});
+
+test('mdActions: Download carries the text in a data: link and works without script; Copy only on the live page; no text, no buttons', () => {
+  const md = '# Retro\n- a & b <script>';
+  const off = mdActions(md, 'retro r1.md');
+  assert.match(off, /^<a class="btn sm" download="retro_r1\.md" href="data:text\/markdown;charset=utf-8,%23%20Retro%0A/);
+  assert.doesNotMatch(off, /<button|<script/);
+  const live = mdActions(md, 'x.md', { copy: true });
+  assert.match(live, /^<button type="button" class="btn sm" data-copy>Copy Markdown<\/button><a /);
+  assert.equal(decodeURIComponent(/href="data:[^,]*,([^"]*)"/.exec(live)[1]), md);
+  assert.equal(mdActions('  ', 'x.md'), '');
+  assert.equal(mdActions(undefined, 'x.md', { copy: true }), '');
+  clean(mdActions(BAD, BAD, { copy: true }));
 });
 
 test('kpis: label, value, small line and an optional bar per tile', () => {
@@ -65,6 +79,11 @@ test('table: a row given as an object carries its live key, class and id, escape
 
 test('kpis: a value given as trusted html, such as try marks', () => {
   assert.match(kpis([{ k: 'Tries', vHtml: tries(['fail', 'work']), s: 'try 2 of 4' }]), /<span class="v"><span class="tries" role="img" aria-label="try 1 failed, try 2 in progress">/);
+});
+
+test('table: a row given as { cls, cells } carries its class, escaped, for a page that filters rows', () => {
+  const html = table({ cols: [{ label: 'A' }], rows: [{ cls: 'a0 t', cells: ['x'] }, { cls: '"><b>', cells: ['y'] }, ['z']] });
+  assert.match(html, /<tr class="a0 t"><td>x<\/td><\/tr><tr class="&quot;&gt;&lt;b&gt;"><td>y<\/td><\/tr><tr><td>z<\/td><\/tr>/);
 });
 
 test('toneChip: the status word is always shown; tone is colour on top of it', () => {
@@ -226,4 +245,10 @@ test('restoreOpen: toggles and panels open or closed as the reader left them; un
   assert.deepEqual(nodes.map((n) => n.open), [true, false, true, false]);
   assert.deepEqual(map, { tl: false, 'ev-1': true, junk: 'yes' }, 'the same map, kept for the next toggles');
   for (const bad of [null, [], 'x', 3]) assert.deepEqual(restoreOpen([d('a', true)], bad), {}, `stored ${JSON.stringify(bad)}: nothing restored`);
+});
+
+test('rows: one li per item, the caller\'s HTML kept; none says the empty text, escaped', () => {
+  assert.equal(rows(['<b>a</b>', 'b']), '<ul class="rows"><li><b>a</b></li><li>b</li></ul>');
+  assert.equal(rows([]), '<p class="empty">None</p>');
+  assert.equal(rows([], { empty: 'No <run>' }), '<p class="empty">No &lt;run&gt;</p>');
 });

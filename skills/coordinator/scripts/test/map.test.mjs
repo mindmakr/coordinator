@@ -198,7 +198,23 @@ test('the map page: inline SVG graph, CSS-only filters, no script, escaped text,
   assert.ok(html.includes(`https://github.com/acme/app/blob/${'a'.repeat(40)}/src/routes/employer.ts#L11`));
   assert.match(html, /id="f-a\d+" checked/); assert.match(html, /id="f-w10"/); assert.match(html, /id="f-cycles"/);
   assert.match(html, /:root:has\(#f-a0:not\(:checked\)\)/);
-  assert.match(html, /href="hud.html">← r1 dashboard/);
+  assert.match(html, /<nav class="crumbs"[^>]*>[\s\S]*?<a href="hud.html">r1<\/a>/, 'the breadcrumb leads back to the run');
+});
+
+test('the map page: shared shell, KPIs, panels Imports, Surfaces, Reuse candidates, Settings and Shared helpers; rows keep their filter classes', () => {
+  const snap = load(join(dir, 'log1'));
+  const html = mapPage(snap, staticCtx(dir, 0), 'r1');
+  assert.match(html, /<span class="here" aria-current="location">Project map<\/span>/);
+  assert.match(html, /<div class="head"><h1>Project map · [^<]+<\/h1><span class="muted">build \d+/);
+  for (const k of ['Files', 'Modules', 'Surfaces', 'Settings', 'Reuse candidates']) assert.match(html, new RegExp(`<div class="kpi"><span class="k">${k}</span><span class="v">\\d+</span>`), k);
+  const titles = [...html.matchAll(/<details class="panel"[^>]*><summary>[\s\S]*?<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);
+  assert.deepEqual(titles, ['Imports', 'Surfaces', 'Reuse candidates', 'Settings', 'Shared helpers']);
+  assert.ok(html.indexOf('<h2>Reuse candidates</h2>') < html.indexOf('<div class="side">') && html.indexOf('<div class="side">') < html.indexOf('<h2>Settings</h2>'));
+  assert.match(html, /<details class="panel" data-d="helpers" data-a="panel-helpers"><summary>/, 'shared helpers start closed');
+  for (const k of ['map-graph', 'map-routes', 'map-screens', 'map-messages', 'map-settings', 'map-helpers', 'map-reuse']) assert.match(html, new RegExp(`data-k="${k}"`));
+  assert.match(html, /<details class="panel" data-d="imports"[\s\S]*?<div class="mapbox"><svg class="graph"/, 'the graph scrolls inside its panel');
+  assert.match(html, /<table class="t"><thead><tr><th scope="col">Route<\/th>[\s\S]*?<tbody><tr class="a\d+( t)?"><td><code>GET /, 'routes in the shared table, each row with its area class');
+  assert.doesNotMatch(html, /maptable|Touched by this run/);
 });
 
 // ---- CLI ----
@@ -297,7 +313,7 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
     assert.equal((await fetch(`${u.origin}/map`)).status, 403, 'no token, no map');
     const other = await fetch(`${u.origin}/run/m2/map${u.search}`);
     assert.equal(other.status, 200, 'another run\'s map at /run/<id>/map');
-    assert.match(await other.text(), /href="\/run\/m2\?t=[^"]+">← m2 dashboard[\s\S]*Project map · project/, 'its back link goes to that run');
+    assert.match(await other.text(), /<nav class="crumbs"[^>]*>[\s\S]*?href="\/run\/m2\?t=[^"]+">m2<\/a>[\s\S]*Project map · project/, 'its breadcrumb leads to that run');
     assert.equal((await fetch(`${u.origin}/run/m3/map${u.search}`)).status, 404, 'a run with no map has no map page');
     // A broken log on another run: the page names the cause, and its nav is that run's.
     const log = join(state, 'runs', 'm2', 'map', 'events.jsonl');
@@ -307,10 +323,20 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
       const broken = await (await fetch(`${u.origin}/run/m2/map${u.search}`)).text();
       assert.match(broken, /Project map · not readable/); assert.match(broken, /is not JSON[\s\S]*--fresh/);
       const nav = /<nav class="tabs"[\s\S]*?<\/nav>/.exec(broken)[0];
-      assert.match(nav, /href="\/run\/m2\?t=[^"]+">m2<\/a>/, 'the nav names m2, the run whose map this is');
+      assert.match(nav, /href="\/run\/m2\?t=[^"]+">Overview<\/a>/, 'the run tabs lead to m2, the run whose map this is');
       assert.match(nav, /href="\/run\/m2\/maps\?t=[^"]+">Maps<\/a>/);
       assert.match(nav, /href="\/run\/m2\/map\?t=[^"]+" aria-current="page">Project map<\/a>/);
       assert.ok(!/>m1</.test(nav), 'not the served run');
     } finally { writeFileSync(log, good); }
   } finally { child.kill(); }
+});
+
+test('the map page: the Settings and Shared helpers tables fit the side panel, with no minimum width forcing a sideways scroll', () => {
+  const snap = load(join(dir, 'log1'));
+  const html = mapPage(snap, staticCtx(dir, 0), 'r1');
+  const block = (k) => html.slice(html.indexOf(`data-k="${k}"`), html.indexOf('</section>', html.indexOf(`data-k="${k}"`)));
+  for (const k of ['map-settings', 'map-helpers']) {
+    assert.ok(block(k).includes('<table class="t"'), `${k} has a table`);
+    assert.ok(!/min-width/.test(block(k)), `${k} has no min-width`);
+  }
 });

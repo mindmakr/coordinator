@@ -4,6 +4,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { runTabs } from '../hud.mjs';
 import { esc } from '../links.mjs';
 import { page } from '../parts.mjs';
 import { withLock, writeAtomic } from '../store.mjs';
@@ -123,14 +124,12 @@ export function pitStop(runDir, dest) {
   return { dest: out, files: PIT_STOP };
 }
 
-// The header nav on a run's map page (live): that run's dashboard, its run maps and its
-// project map, then the coordinator's page. On /run/<other>/map it names <other>, not the served run.
-export function mapNav(ctx, id) {
-  const base = ctx.base ?? '';
+// The header nav on a run's map page (live): the run's tabs (runTabs, as on its other pages), then the
+// coordinator's page as the ctx has it. On /run/<other>/map the tabs lead to <other>, not the served run.
+export function mapNav(ctx) {
+  const at = { '': ctx.home, '/maps': ctx.maps, '/report': ctx.report, '/retro': ctx.retro };
   return [
-    { path: base || '/', label: id, href: ctx.home },
-    { path: `${base}/maps`, label: 'Maps', href: ctx.maps },
-    { path: `${base}/map`, label: 'Project map', href: ctx.mapHref },
+    ...runTabs({ base: ctx.base ?? '', href: (p) => at[p], map: ctx.mapHref }),
     ...(ctx.pages ?? []).filter((p) => p.path === '/coordinator'),
   ];
 }
