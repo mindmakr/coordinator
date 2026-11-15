@@ -137,7 +137,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         personNotes: personNotes.filter((n) => n.unit === u.id),
         // The lead's decisions, follow-ups and info about this unit (note --unit, #45).
         unitNotes: notes.filter((n) => n.unit === u.id && ['decision', 'follow-up', 'info'].includes(n.kind)).map((n) => ({ kind: n.kind, text: n.text, at: n.at })),
-        bar: u.bar, behaviours: u.behaviours ?? [], evidenceItems: u.evidence ?? [], links: u.links ?? [],
+        bar: u.bar, behaviours: u.behaviours ?? [], statechart: u.statechart ?? null, evidenceItems: u.evidence ?? [], links: u.links ?? [],
         who: whoUnit(u), // which model built and judged (lib/models.mjs)
         roundList: u.rounds, stopReason: u.stopReason ?? null,
         // Early reviews (verdict --early, #66): every one on the unit page, the ones since the last round counted.

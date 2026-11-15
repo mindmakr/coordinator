@@ -7,6 +7,7 @@ import { linkify } from './links.mjs';
 import { unitCalls } from './map/callsview.mjs';
 import { clip, duration } from './plain.mjs';
 import { whoRound } from './models.mjs';
+import { renderStatechartSvg } from './statechart.mjs';
 import { gapEvidence } from './view.mjs';
 import { activityBox, chainRow, lastGapHtml, liveCtx, noteForm, questionItem, runCrumbs, runFlag, scoreChart, scoreTrend, staticCtx, timelineList, timelineOl, tryStates, tryText, unitLinks } from './hud.mjs';
 import { behaviourList, blk, blocksLine, chip, cols, esc, evidenceList, grows, hash, keyed, kpis, linkWaits, page, panel, stamp, stateChip, table, timelineTools, toneChip, tries, unitDot, unitLink } from './parts.mjs';
@@ -87,6 +88,17 @@ function earlier(runs, repo, id) {
 // Every unit of the run, the current one marked: its dot, id and state in words.
 const unitBar = (v, u, ctx) => `<nav class="unitbar" aria-label="Units">${v.units.map((x) => `<a href="${esc(ctx.unitHref(x.id))}"${x.id === u.id ? ' aria-current="page"' : ''} data-a="ub-${esc(x.id)}">${unitDot(x)}<span class="mono">${esc(x.id)}</span><span class="muted">${esc(x.badge?.label ?? x.status)}</span></a>`).join('')}</nav>`;
 
+// Both the SVG statechart and a readable transition table so status marks, IDs, and titles never rely on colour alone.
+function statechartBody(chart) {
+  const svg = renderStatechartSvg(chart);
+  const cols = [{ label: 'ID' }, { label: 'From' }, { label: 'Action' }, { label: 'To' }, { label: 'Title' }, { label: 'Status' }];
+  const rows = (chart.transitions ?? []).map((t) => ({
+    key: `sc-${t.id}`,
+    cells: [t.id, t.from, t.action, t.to, t.title, { html: chip(t.status === 'pass' ? '✓ pass' : t.status === 'fail' ? '✕ fail' : '· open', t.status === 'unchecked' ? '' : t.status) }],
+  }));
+  return `${svg}${table({ cols, rows, min: 520, max: 280, empty: 'No transitions declared.' })}`;
+}
+
 export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
   const u = v.units.find((x) => x.id === id);
   if (!u) return null;
@@ -109,6 +121,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     + `${u.stopReason ? `<dt>Stopped</dt><dd>${esc(u.stopReason)}</dd>` : ''}</dl>${blocksLine(u, ctx)}${chainRow(u, ctx)}`;
   const main = [
     blk('summary', panel({ id: 'summary', title: 'Summary', bodyHtml: summary })),
+    u.statechart?.states?.length ? blk('statechart', panel({ id: 'statechart', title: 'Statechart', count: `${(u.statechart.transitions ?? []).length} transitions`, bodyHtml: statechartBody(u.statechart) })) : '',
     u.gap ? blk('last-gap', panel({ id: 'last-gap', title: 'Last gap', tone: 'bad', metaHtml: last ? `try ${esc(last.n)} · ${stamp(last.at)}` : '', bodyHtml: `<div class="lastgap">${lastGapHtml(u, r, false)}</div>` })) : '',
     blk('rounds', panel({ id: 'rounds', title: 'Rounds', count: u.roundList.length, bodyHtml: rounds(u, r) })),
     blk('evidence', panel({ id: 'evidence', title: 'Evidence and artifacts', count: loose.length, scroll: 480, bodyHtml: loose.length ? evidenceList(loose, r, ctx, `p-${u.id}-ev`) : '<p class="empty">No evidence outside the behaviours.</p>' })),

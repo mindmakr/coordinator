@@ -17,7 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { launchCostProblem } from './cost.mjs';
-import { checkHelpers } from './helpers.mjs';
+import { checkHelpers, helperConfig } from './helpers.mjs';
 import { ASKING } from './questions.mjs';
 
 export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'service', 'theme', 'budgets', 'merge', 'models', 'helpers', 'asking'];
@@ -111,4 +111,14 @@ export function checkSettings(s, project) {
     }
   }
   return out;
+}
+
+// Effective helper settings from .coordinator/coordinator.json, ignoring committed configs.
+export function activeHelpers(base) {
+  const { settings, error } = readSettings(base);
+  if (error) return { on: false, error: `${settingsFile(base)}: ${error}`, why: error };
+  if (settings.helpers !== undefined && settings.helpers !== false && settingsTracked(base)) {
+    return { on: false, tracked: true, why: trackedRefusal('helpers') };
+  }
+  return helperConfig(settings);
 }
