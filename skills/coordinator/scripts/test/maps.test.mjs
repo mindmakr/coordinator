@@ -193,3 +193,81 @@ test('snapshot writes maps.html; serve shows /maps and /run/<other>/maps behind 
   const sse = await new Promise((ok) => httpGet(`${origin}/events?t=${t}&p=/maps`, (res) => { res.once('data', () => { ok(res.statusCode); res.destroy(); }); }));
   assert.equal(sse, 200, 'the maps page updates live');
 });
+
+test('maps page: the shared shell, a panel per map, side panels Legend, Selected (live) and Export, each map scrolling in its panel', () => {
+  const v = viewOf([unit('u1', { behaviours: [{ id: 'B1', text: 't', status: 'pass' }] }), unit('u2', { after: 'u1' })]);
+  const html = mapsPage(v, T0, staticCtx('', 0));
+  assert.match(html, /<nav class="crumbs"[^>]*>[\s\S]*?<a href="hud.html">r<\/a>[\s\S]*?<span class="here" aria-current="location">Maps<\/span>/);
+  assert.match(html, /<div class="head"><h1>Maps<\/h1><span class="muted">2 units · 1 behaviour · 0 evidence items · continue · updated /);
+  const titles = [...html.matchAll(/<details class="panel"[^>]*><summary>[\s\S]*?<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);
+  assert.deepEqual(titles, ['Mind map', 'Flow', 'Activity by hour', 'Behaviours', 'Goal relevance', 'Calls', 'Legend', 'Export']);
+  assert.ok(html.indexOf('<div class="side">') < html.indexOf('<h2>Legend</h2>') && html.indexOf('<h2>Calls</h2>') < html.indexOf('<div class="side">'), 'maps in main, Legend and Export at the side');
+  for (const id of ['mind', 'flow', 'heat']) assert.match(html, new RegExp(`<details class="panel" data-d="${id}" data-a="panel-${id}" open>`));
+  for (const id of ['behaviours', 'relevance', 'calls', 'export']) assert.match(html, new RegExp(`<details class="panel" data-d="${id}" data-a="panel-${id}"><summary>`), `${id} starts closed`);
+  for (const id of ['mind', 'flow', 'heat', 'behaviours', 'relevance', 'calls']) {
+    const panelHtml = html.slice(html.indexOf(`data-d="${id}"`), html.indexOf('</details>', html.indexOf(`data-d="${id}"`)));
+    assert.match(panelHtml, new RegExp(`<section data-k="map-${id}" data-h="[^"]+" class="maps" id="map-${id}"`), `${id}: its keyed block and anchor`);
+    if (id !== 'calls') assert.match(panelHtml, /<div class="map-scroll[^"]*" tabindex="0" role="region"/, `${id}: the map scrolls inside its panel`);
+  }
+  assert.match(html, /<span class="chip">Critical path<\/span><span class="mono">u1 → u2<\/span>/, 'the flow panel names the critical path');
+  assert.doesNotMatch(html, /<h2>Selected<\/h2>|<div class="nav-panel"/, 'selecting needs the live script');
+  const live = mapsPage(v, T0, { token: 't', nonce: 'n' });
+  assert.match(live, /<h2>Selected<\/h2><\/summary><div class="body"><div class="nav-panel" data-nav-panel [^>]*hidden><\/div><p class="empty" data-nav-none>None<\/p>/);
+  assert.equal((live.match(/data-nav-panel /g) ?? []).length, 1, 'one selection panel for the page');
+  const tpl = readFileSync(new URL('../lib/hud.template.html', import.meta.url), 'utf8');
+  assert.match(tpl, /\.maps-page \.panel \.map-scroll \{ max-height: 70vh; \}/);
+});
+
+test('maps page: evidence shows its type in letters on the mind map and in Behaviours; rows link to their unit, behaviour and evidence', () => {
+  const items = [{ id: 'E1', kind: 'screenshot', behaviour: 'B1', file: 'u1/shot.png', label: 'home' }, { id: 'E2', kind: 'log', behaviour: 'B1', file: 'u1/run.log' },
+    { id: 'E3', kind: 'link', behaviour: 'B2', url: 'https://ci.example/7' }, { id: 'E4', kind: 'test', behaviour: 'B2', text: 'ok 1' }, { id: 'E5', kind: 'link', behaviour: 'B2', url: 'javascript:alert(1)', label: 'bad link' }];
+  const v = viewOf([unit('u1', { behaviours: [{ id: 'B1', text: 'loads', status: 'pass' }, { id: 'B2', text: 'saves', status: 'fail' }], evidenceItems: items })],
+    { goalCheck: { behaviours: [{ id: 'G1', text: 'goal one', status: 'unchecked' }], evidence: [], met: false } });
+  const ctx = staticCtx('', 0);
+  const mind = mindSvg(v, ctx);
+  for (const t of ['IMG', 'LOG', 'URL', 'TEST']) assert.match(mind, new RegExp(`<rect class="nd ev tagbox"[^>]*/><text [^>]*class="xs tagt"[^>]*>${t}</text>`), `${t} on the mind map`);
+  assert.doesNotMatch(mind, /<circle class="nd ev"[^>]*r="4.5"/, 'no colour-only dot for evidence');
+  assert.match(mind, /aria-label="u1 evidence \(IMG, screenshot\): home"/);
+  const html = mapsPage(v, T0, ctx);
+  const rows = html.slice(html.indexOf('<table class="t"'), html.indexOf('</table>'));
+  assert.match(rows, /<td><a class="mono" href="units\/u1\.html">u1<\/a><\/td><td><a href="units\/u1\.html"><b>B1<\/b> loads<\/a><\/td><td><span class="chip ok">Pass<\/span><\/td>/);
+  assert.match(rows, /<a class="evtag" href="artifacts\/u1\/shot\.png" title="home"><span class="tag" title="IMG">IMG<\/span><\/a> <a class="evtag" href="artifacts\/u1\/run\.log" title="log"><span class="tag" title="LOG">LOG<\/span><\/a>/);
+  assert.match(rows, /<a class="evtag" href="https:\/\/ci\.example\/7" target="_blank" rel="noopener noreferrer" title="link"><span class="tag" title="URL">URL<\/span><\/a>/);
+  assert.match(rows, /<a class="evtag" href="units\/u1\.html" title="test"><span class="tag" title="TEST">TEST<\/span><\/a>/, 'evidence with no file or link opens its unit');
+  assert.match(rows, /<span class="chip bad">Fail<\/span>/);
+  assert.match(rows, /<td><a href="hud.html">Goal<\/a><\/td><td><a href="hud.html"><b>G1<\/b> goal one<\/a><\/td><td><span class="chip">Unchecked<\/span><\/td>/);
+  assert.equal(html.includes('javascript:'), false);
+  const legend = html.slice(html.indexOf('<h2>Legend</h2>'), html.indexOf('<h2>Export</h2>'));
+  for (const t of ['IMG', 'LOG', 'CSV', 'TXT', 'PDF', 'URL', 'TEST']) assert.match(legend, new RegExp(`<span class="tag">${t}</span> `));
+  assert.match(legend, /<span class="chip ask">Needs you<\/span>/);
+});
+
+test('maps page: Export saves the mind map and flow as styled SVG and activity and behaviours as CSV, with no script', async () => {
+  const { svgFile, csvText, behavioursCsv } = await import('../lib/mapspage.mjs');
+  const v = viewOf([unit('u1', { behaviours: [{ id: 'B1', text: '=HYPERLINK("x")', status: 'pass' }], timeline: [ev(5, 'start'), ev(30, 'verdict fail', 'fail')] })]);
+  const html = mapsPage(v, T0 + 60 * 60_000, staticCtx('', 0));
+  const exp = html.slice(html.indexOf('<h2>Export</h2>'));
+  const links = [...exp.matchAll(/<a download="([^"]+)" href="data:([^;]+);base64,([^"]+)">([^<]+)<\/a>/g)].map((m) => ({ name: m[1], type: m[2], body: Buffer.from(m[3], 'base64').toString('utf8'), label: m[4] }));
+  assert.deepEqual(links.map((l) => [l.label, l.name, l.type]), [['Mind map SVG', 'r-mind-map.svg', 'image/svg+xml'], ['Flow SVG', 'r-flow.svg', 'image/svg+xml'], ['Activity CSV', 'r-activity.csv', 'text/csv'], ['Behaviours CSV', 'r-behaviours.csv', 'text/csv']]);
+  const svg = links[0].body;
+  assert.match(svg, /^<svg class="map mind"[^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"><style>:root\{[^}]*--surface:#ffffff/);
+  assert.match(svg, /svg\.map \.nd \{/, 'the map rules come with it');
+  assert.doesNotMatch(svg, /<script|--surface:#161a1f/, 'no script, light theme only');
+  assert.match(links[2].body, /^"unit","from \(UTC\)","tries","failed","heartbeats","other events","waited \(min\)"\r\n"u1","2026-11-06 06:00","\d+","1",/);
+  assert.match(links[3].body, /"u1","B1","pass","'=HYPERLINK\(""x""\)","0"/, 'a formula is kept as text');
+  assert.equal(csvText([['-1', '@a', 'plain']]), '"\'-1","\'@a","plain"\r\n');
+  assert.match(behavioursCsv(v), /^"unit","behaviour","status","text","evidence"\r\n/);
+  assert.equal(svgFile('<p>no map</p>'), null);
+  assert.match(mapsPage(viewOf([]), T0, staticCtx('', 0)), /<h2>Export<\/h2>[\s\S]*<p class="empty">None<\/p>/, 'nothing to export, nothing offered');
+});
+
+test('maps page: the Behaviours count, the heading and the table rows agree, the goal\'s own behaviours included', () => {
+  const v = viewOf([unit('u1', { behaviours: [{ id: 'B1', text: 'loads', status: 'pass' }, { id: 'B2', text: 'saves', status: 'fail' }] })],
+    { goalCheck: { behaviours: [{ id: 'G1', text: 'one', status: 'unchecked' }, { id: 'G2', text: 'two', status: 'unchecked' }], evidence: [], met: false } });
+  const html = mapsPage(v, T0);
+  const open = html.indexOf('data-d="behaviours"'); const panelHtml = html.slice(open, html.indexOf('</details>', open));
+  const rows = (panelHtml.slice(panelHtml.indexOf('<tbody>')).match(/<tr/g) ?? []).length;
+  assert.equal(rows, 4);
+  assert.match(panelHtml, /<h2>Behaviours<\/h2><span class="count">4<\/span>/, 'the panel count');
+  assert.ok(html.includes('4 behaviours'), 'the heading');
+});

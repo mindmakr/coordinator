@@ -12,7 +12,7 @@
 //   panel({ id, title, count?, metaHtml?, bodyHtml, open?, scroll?, flush?, tone? })
 //                                     details.panel: summary (chevron, h2, count, controls) and its body;
 //                                     `id` is data-d, so the live page keeps it open or closed per page
-//   table({ cols: [{ label, num? }], rows: [[cell]], min?, max?, empty? })
+//   table({ cols: [{ label, num? }], rows: [[cell] | { cls, cells }], min?, max?, empty? })
 //                                     table.t with a sticky header, in its own scrolling box
 //   toneChip(word, tone?)             span.chip: ask, ok, retry, bad or done; the word is always shown
 //   typeTag(kind, file?)              span.tag: IMG, LOG, CSV, TXT, PDF, URL or TEST
@@ -22,6 +22,7 @@
 //                                     script; Copy (only with `copy`, the live page) reads the same text from that link
 //   restoreOpen(nodes, saved)         the live page's memory of toggles and panels (live.client.js runs it)
 //   rememberToggle(map, d, armed)     records a toggle only after the reader clicked its summary
+//   rows([html], { empty? })          ul.rows: one short line per item, its parts wrapping; none says so
 import { esc } from './links.mjs';
 
 const text = esc;
@@ -64,13 +65,16 @@ export function panel({ id, title, count, metaHtml = '', bodyHtml = '', open = t
     + `<summary><span class="chev" aria-hidden="true">›</span><h2>${text(title)}</h2>${n}${metaHtml ? `<span class="meta">${metaHtml}</span>` : ''}</summary>${body}</details>`;
 }
 
+// A row is its cells, or { cls, cells } when the page's own CSS filters rows by class.
+const cellsOf = (r) => (Array.isArray(r) ? r : r.cells);
+const rowCls = (r) => (!Array.isArray(r) && r.cls ? ` class="${text(r.cls)}"` : '');
 export function table({ cols: heads, rows, min, max, empty = 'None' }) {
   if (!rows.length) return `<p class="empty">${text(empty)}</p>`;
   const num = (i) => (heads[i]?.num ? ' class="num"' : '');
   const w = length(min); const h = length(max);
   return `<div class="scroll tbox"${h ? ` style="max-height:${h}"` : ''}><table class="t"${w ? ` style="min-width:${w}"` : ''}>`
     + `<thead><tr>${heads.map((c, i) => `<th scope="col"${num(i)}>${text(c.label)}</th>`).join('')}</tr></thead>`
-    + `<tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td${num(i)}>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    + `<tbody>${rows.map((r) => `<tr${rowCls(r)}>${cellsOf(r).map((c, i) => `<td${num(i)}>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 // A status in words, coloured by tone: the colour never says it alone. No word, no chip.
@@ -112,4 +116,10 @@ const TRY = { pass: ['p', '✓', 'passed'], fail: ['f', '✕', 'failed'], work: 
 export function tries(states) {
   const marks = states.map((s, i) => { const [c, g, w] = TRY[s] ?? TRY.open; return { c, g: g ?? String(i + 1), w: `try ${i + 1} ${w}` }; });
   return `<span class="tries" role="img" aria-label="${text(marks.map((m) => m.w).join(', '))}">${marks.map((m) => `<span class="pip ${m.c}" aria-hidden="true">${m.g}</span>`).join('')}</span>`;
+}
+
+// Short lines, one per item (the canvas's .rows). Each item is HTML its caller built; none says `empty`.
+export function rows(items, { empty = 'None' } = {}) {
+  if (!items.length) return `<p class="empty">${text(empty)}</p>`;
+  return `<ul class="rows">${items.map((i) => `<li>${i}</li>`).join('')}</ul>`;
 }

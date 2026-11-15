@@ -68,7 +68,7 @@
       const path = svg ? sel.path.filter((k) => nodeEl(svg, k)) : [];
       sel = path.length ? { map: sel.map, path } : null;
     }
-    document.querySelectorAll('[data-nav-panel]').forEach((p) => { if (!sel || p.closest('[data-nav-tools]').dataset.navTools !== sel.map) { p.hidden = true; p.textContent = ''; } });
+    if (!sel) document.querySelectorAll('[data-nav-panel]').forEach((p) => { p.hidden = true; p.textContent = ''; });
     if (!sel) return;
     const svg = svgOf(sel.map); const key = sel.path.at(-1); const el = nodeEl(svg, key);
     svg.setAttribute('data-sel', ''); if (focusMode[sel.map]) svg.setAttribute('data-focus', '');
@@ -80,8 +80,9 @@
   }
 
   function panel(svg, el) {
-    const tools = document.querySelector(`[data-nav-tools="${sel.map}"]`); if (!tools) return;
-    const box = tools.querySelector('[data-nav-panel]'); box.textContent = ''; box.hidden = false;
+    const box = document.querySelector('[data-nav-panel]'); if (!box) return; // one for the page: the Selected panel
+    box.textContent = ''; box.hidden = false;
+    const side = box.closest('details'); if (side) side.open = true; // a selection made while the Selected panel is closed still shows
     const crumbs = h('nav', { class: 'crumbs', 'aria-label': 'Path to the selected node' }); const ol = h('ol');
     sel.path.forEach((k, i) => {
       const n = nodeEl(svg, k); const li = h('li'); if (i === sel.path.length - 1) li.setAttribute('aria-current', 'location');

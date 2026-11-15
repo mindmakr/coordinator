@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { bar, cols, heading, kpis, mdActions, page, panel, rememberToggle, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
+import { bar, cols, heading, kpis, mdActions, page, panel, rememberToggle, restoreOpen, rows, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
 import { privacy } from '../lib/quality/privacy.mjs';
 import { sourceFile } from '../lib/quality/source.mjs';
 
@@ -69,6 +69,11 @@ test('table: table.t with a sticky header row, inside its own scrolling box; cel
   clean(table({ cols: [{ label: BAD }], rows: [[BAD]] }));
   const tpl = readFileSync(new URL('../lib/hud.template.html', import.meta.url), 'utf8');
   assert.match(tpl, /\.t th \{[^}]*position: sticky; top: 0;/, 'the header row sticks');
+});
+
+test('table: a row given as { cls, cells } carries its class, escaped, for a page that filters rows', () => {
+  const html = table({ cols: [{ label: 'A' }], rows: [{ cls: 'a0 t', cells: ['x'] }, { cls: '"><b>', cells: ['y'] }, ['z']] });
+  assert.match(html, /<tr class="a0 t"><td>x<\/td><\/tr><tr class="&quot;&gt;&lt;b&gt;"><td>y<\/td><\/tr><tr><td>z<\/td><\/tr>/);
 });
 
 test('toneChip: the status word is always shown; tone is colour on top of it', () => {
@@ -230,4 +235,10 @@ test('restoreOpen: toggles and panels open or closed as the reader left them; un
   assert.deepEqual(nodes.map((n) => n.open), [true, false, true, false]);
   assert.deepEqual(map, { tl: false, 'ev-1': true, junk: 'yes' }, 'the same map, kept for the next toggles');
   for (const bad of [null, [], 'x', 3]) assert.deepEqual(restoreOpen([d('a', true)], bad), {}, `stored ${JSON.stringify(bad)}: nothing restored`);
+});
+
+test('rows: one li per item, the caller\'s HTML kept; none says the empty text, escaped', () => {
+  assert.equal(rows(['<b>a</b>', 'b']), '<ul class="rows"><li><b>a</b></li><li>b</li></ul>');
+  assert.equal(rows([]), '<p class="empty">None</p>');
+  assert.equal(rows([], { empty: 'No <run>' }), '<p class="empty">No &lt;run&gt;</p>');
 });

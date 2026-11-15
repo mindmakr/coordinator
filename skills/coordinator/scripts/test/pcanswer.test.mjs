@@ -144,7 +144,7 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     writeFileSync(join(home, 'dashboard.json'), JSON.stringify(rec));
 
     const page = await (await fetch(url)).text();
-    assert.match(page, /<h2 id="pc-waiting"[^>]*>Waiting on you<\/h2>.*<h3 id="pc-needs"[^>]*>Questions for you<\/h3>/s, 'the open questions are the first part of Waiting on you');
+    assert.match(page, /<div class="main"><details class="panel ask" data-d="pc-questions"[^>]* open><summary>.*?<h2>Questions<\/h2><span class="count">\d+<\/span>.*?<section data-k="pc-needs"[^>]* id="pc-needs"/s, 'the open questions are the first panel, with their count');
     assert.match(page, /gamma · gamma work \(rg\) › Task u1: Mobile card/);
     assert.match(page, /delta · delta work \(rd\) › Task u1: Mobile card/);
     const entries = readRegistry({ home });
