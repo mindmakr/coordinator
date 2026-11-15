@@ -31,12 +31,13 @@ function changes(v, ctx) {
 }
 
 // One labelled line of the devops panel: a list of items, or None.
-const line = (label, xs, fn) => `<div><span class="lbl">${esc(label)}</span><span class="val">${xs.length ? xs.map((x) => `<span>${fn(x)}</span>`).join('') : '<span class="muted">None found in the diffs</span>'}</span></div>`;
+const line = (label, xs, fn) => `<div><span class="lbl">${esc(label)} <span class="chip">${xs.length}</span></span><span class="val">${xs.length ? xs.map((x) => `<span>${fn(x)}</span>`).join('') : '<span class="muted">None found in the diffs</span>'}</span></div>`;
 function devops(d, run) {
-  if (!d) return { meta: '', body: `<p class="empty">Migrations, environment variables, scripts and jobs are read from git by <code>run.mjs report ${esc(run)} --draft</code>; not run yet.</p>` };
+  if (!d) return { meta: '', count: undefined, body: `<p class="empty">Migrations, environment variables, scripts and jobs are read from git by <code>run.mjs report ${esc(run)} --draft</code>; not run yet.</p>` };
   const unread = d.diffs.filter((x) => !x.ok);
   const unit = (x) => ` <span class="cause">${esc(x.unit)}</span>`;
   return {
+    count: d.migrations.length + d.env.length + d.scripts.length + d.jobs.length + d.copy.length,
     meta: `Read from git ${stamp(d.at)}`,
     body: `<p class="muted">Over ${d.files.length} changed files. A draft: the stored notes are what counts.</p><div class="rows">`
       + line('Migrations added', d.migrations, (m) => `${code(m.path)}${unit(m)}`)
@@ -124,8 +125,8 @@ function qualityPanels(q, run) {
 // The run's report as Markdown, for Copy and Download: the stored notes, else the draft from git.
 export function reportMarkdown(v, data = {}) {
   if (data.report?.text) return data.report.text;
-  if (data.draft) { try { return draftMarkdown(data.draft, { id: v.id }); } catch { return ''; } }
-  return '';
+  if (data.draft) { try { return draftMarkdown(data.draft, { id: v.id }); } catch { /* falls through to the not-written state */ } }
+  return `# Report · ${v.id}\n\nNot written yet. Run \`run.mjs report ${v.id} --draft\`, then store the release notes with \`run.mjs report ${v.id} --file notes.md\`.`;
 }
 
 // Signals of the changed files, else of the whole project: the KPI.
@@ -158,7 +159,7 @@ export function reportPage(v, nowMs = Date.now(), ctx = null, data = {}) {
   const main = blk('changes', panel({ id: 'changes', title: 'Changes, from the run', count: v.units.length, bodyHtml: changes(v, ctx), flush: v.units.length > 0 }))
     + blk('notes', panel({ id: 'notes', title: 'Release notes', metaHtml: n.meta, bodyHtml: n.body, tone: n.tone, scroll: n.tone ? undefined : 420 }))
     + files
-    + blk('devops', panel({ id: 'devops', title: 'For devops, from git', metaHtml: dv.meta, bodyHtml: dv.body, open: false }));
+    + blk('devops', panel({ id: 'devops', title: 'For devops, from git', count: dv.count, metaHtml: dv.meta, bodyHtml: dv.body, open: false }));
   const body = `<div class="stack">${[blk('head', head), blk('kpis', strip), cols(main, qualityPanels(data.quality, v.id))].join('\n')}</div>`;
   return page({ title: `Report · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/report`, closed: !v.open, crumbs: [{ label: v.id, href: ctx.home }, { label: 'Report' }] });
 }

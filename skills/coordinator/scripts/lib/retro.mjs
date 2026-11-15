@@ -9,7 +9,6 @@ import { blk, cols, esc, heading, kpis, mdActions, page, panel, stamp, table, to
 import { sameGap, stats } from './rules.mjs';
 
 const UPSTREAM = /^\s*upstream\s*:|github\.com\/mindmakr\/coordinator\b|mindmakr\/coordinator#\d/i;
-const SPEND = /\b(?:tokens?|spend|context\.mjs)\b/i;
 const DECIDED = ['done', 'done-with-gaps', 'stopped'];
 
 export const hasRetro = (run) => (run.notes ?? []).some((n) => n.kind === 'retro');
@@ -53,8 +52,8 @@ export function retroModel(run, { lessons = [], closed = [] } = {}) {
     checklist: [
       { label: 'Retro notes', done: retro.length > 0 },
       { label: 'Repeated gaps', done: repeated.length === 0 || lessons.some((l) => (l.from ?? []).includes(run.id)) },
-      { label: 'Stopped units', done: stopped.every((u) => retro.some((n) => n.text.split(/[^\w.-]+/).includes(u.id))) },
-      { label: 'Spend measured', done: retro.some((n) => SPEND.test(n.text)) },
+      // Only with a stopped unit, and done when each one recorded why it stopped.
+      ...(stopped.length ? [{ label: 'Stopped units', done: stopped.every((u) => !!u.stopReason) }] : []),
       { label: 'Run closed', done: !!run.closed },
     ],
     budget: {
@@ -63,7 +62,7 @@ export function retroModel(run, { lessons = [], closed = [] } = {}) {
       // A reset (run.mjs reset, after a crash) ends a build with no verdict, so no round: count builds from the log.
       builds: Math.max(0, ...run.units.map((u) => Math.max(u.rounds.length, (u.log ?? []).filter((e) => e.kind === 'start').length))),
       resets: run.units.reduce((n, u) => n + (u.log ?? []).filter((e) => e.kind === 'reset').length, 0),
-      units: run.units.length,
+      usedUnits: run.units.length,
       stopped: stopped.map((u) => ({ id: u.id, reason: u.stopReason ?? '' })),
       // Same rule as learning.md: the 80th percentile of rounds to pass, plus 1, at most 8.
       suggested: s?.p80RoundsToPass ? Math.min(8, s.p80RoundsToPass + 1) : null, from: sameTag.length,
@@ -119,7 +118,7 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
       ['Tries per unit', b.rounds, b.usedRounds, b.suggested ?? '–'],
       ['Builds started', '–', b.builds, '–'],
       ...(b.resets ? [['Resets', '–', b.resets, '–']] : []),
-      ['Units', b.units, b.units === undefined ? '–' : b.units, '–'],
+      ['Units', b.units, b.usedUnits, '–'],
       ['Time, minutes', b.minutes, '–', '–'],
     ].map(([item, ...rest]) => [item, ...rest.map(String)]),
     min: 420,

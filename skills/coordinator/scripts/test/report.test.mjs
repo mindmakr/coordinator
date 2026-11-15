@@ -248,6 +248,7 @@ test('report page: the shared shell, KPI row and panels for every section it had
   assert.deepEqual(ids(html), ['changes', 'notes', 'files', 'devops', 'quality']);
   assert.match(html, /<details class="panel" data-d="devops" data-a="panel-devops">/); // starts closed
   assert.match(html, /<h4 class="md">Fixed<\/h4>/);
+  assert.match(html, /<span class="lbl">Migrations added <span class="chip">1<\/span>/); assert.match(html, /<span class="lbl">Scripts added <span class="chip">0<\/span>/); // per-section counts
   assert.match(html, /drizzle\/1\.sql/); assert.match(html, /Not read from git: u2/); assert.match(html, /Not measured yet/);
   assert.match(html, /<a class="btn sm" download="report-r\.md"/);
   assert.doesNotMatch(html, /data-copy|<script/);
@@ -255,13 +256,13 @@ test('report page: the shared shell, KPI row and panels for every section it had
   assert.match(live, /data-copy>Copy Markdown<\/button>/);
   assert.match(live, /<a href="[^"]*u1[^"]*">u1<\/a>/); // the unit links
   const bare = reportPage(view({ units: [] }), Date.now(), null, {});
-  assert.match(bare, /Not written yet/); assert.match(bare, /No units\./); assert.doesNotMatch(bare, /download=/); // no notes and no draft: nothing to copy
+  assert.match(bare, /Not written yet/); assert.match(bare, /No units\./); assert.match(bare, /download="report-r\.md"/); // no notes and no draft: both buttons export the not-written state
 });
 
 test('report markdown: the stored notes, else the draft from git', () => {
   assert.equal(reportMarkdown(view(), { report: { text: 'stored' }, draft: {} }), 'stored');
   assert.match(reportMarkdown(view(), { draft: draftData() }), /^## r · 2026-11-15/);
-  assert.equal(reportMarkdown(view(), {}), '');
+  assert.match(reportMarkdown(view(), {}), /^# Report · r\n\nNot written yet\./);
 });
 
 test('retro: repeated gaps group a gap raised in two or more rounds by cause, then wording; the checklist reads the run', () => {
@@ -270,9 +271,21 @@ test('retro: repeated gaps group a gap raised in two or more rounds by cause, th
     units: [{ id: 'u1', status: 'pass', rounds: [rd('lock stays held', 'lock release'), rd('other words', 'lock release'), { verdict: 'pass' }] }, { id: 'u2', status: 'stopped', stopReason: 'budget', rounds: [rd('a one-off', 'x')] }, { id: 'u3', status: 'pass', rounds: [rd('lock still held', 'Lock  Release'), {}] }] };
   assert.deepEqual(repeatedGaps(s), [{ gap: 'lock stays held', cause: 'lock release', units: ['u1', 'u3'], rounds: 3 }]);
   const m = retroModel(s);
-  assert.deepEqual(m.checklist.map((c) => [c.label, c.done]), [['Retro notes', true], ['Repeated gaps', false], ['Stopped units', true], ['Spend measured', true], ['Run closed', false]]);
+  assert.deepEqual(m.checklist.map((c) => [c.label, c.done]), [['Retro notes', true], ['Repeated gaps', false], ['Stopped units', true], ['Run closed', false]]);
   const withLesson = retroModel(s, { lessons: [{ id: 'L1', tag: 'code', text: 't', from: ['r'], seen: 1 }] });
   assert.equal(withLesson.checklist[1].done, true);
+  // A stopped unit without a recorded reason leaves the item open; with none stopped the item is dropped, and nothing guesses at spend.
+  const noReason = retroModel({ ...s, units: [{ id: 'u2', status: 'stopped', rounds: [] }] });
+  assert.equal(noReason.checklist.find((c) => c.label === 'Stopped units').done, false);
+  assert.equal(retroModel({ ...s, units: [{ id: 'u1', status: 'pass', rounds: [] }] }).checklist.some((c) => c.label === 'Stopped units'), false);
+  assert.equal(m.checklist.some((c) => /spend/i.test(c.label)), false);
+});
+
+test('retro budget: the Units row shows the cap as the budget and the count as used', () => {
+  const s = { id: 'r', tag: 'code', budget: { maxRounds: 4, maxMinutes: 60, maxUnits: 6 }, notes: [], units: [{ id: 'u1', status: 'pass', rounds: [] }, { id: 'u2', status: 'pass', rounds: [] }] };
+  const m = retroModel(s);
+  assert.equal(m.budget.units, 6); assert.equal(m.budget.usedUnits, 2);
+  assert.match(retroPage(m, view(), Date.now(), null, false), /<td[^>]*>Units<\/td>\s*<td[^>]*>6<\/td>\s*<td[^>]*>2<\/td>/);
 });
 
 test('retro page: shared shell, KPI row and the panels, links to units, Download always and Copy only live', () => {
