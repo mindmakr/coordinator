@@ -9,7 +9,7 @@ import { count } from './self.mjs';
 import { KIND_LABEL, gapHaystack } from './gaps.mjs';
 import { clip } from './plain.mjs';
 import { ageText } from './age.mjs';
-import { badge, bar, blk, chip, cols, esc, hash, keyed, kpis, page, panel, rows, stamp, stateChip, table, toggle, unitDot } from './parts.mjs';
+import { badge, bar, blk, chip, cols, esc, hash, keyed, kpis, linkUnits, page, panel, rows, stamp, stateChip, table, toggle, unitDot } from './parts.mjs';
 import { progressBar, statusChip } from './hud.mjs';
 import { pcSection } from './dashboard.mjs';
 import { clock } from './progress.mjs';
@@ -36,11 +36,14 @@ const questionLink = (run, q, ctx, m) => (m.runIds.includes(run) ? `<a href="${e
 const stat = (label, value, help = '') => `<div class="card stat"${help ? ` title="${esc(help)}"` : ''}><span>${esc(label)}</span><b>${value}</b></div>`;
 const needsLine = (run, list, ctx, m) => (list.length ? `<p class="from"><b>Needs you:</b> ${list.map((q) => `${questionLink(run, q, ctx, m)} ${esc(q.text)}`).join(' · ')}</p>` : '');
 
+// What a run is doing, with the units it names linked to their pages (only for a run whose page is linked).
+const doingHtml = (st, ctx, m) => linkUnits(st.doing, st.current, (id) => (m.runIds.includes(st.run) ? unitHrefIn(ctx, st.run)(id) : null));
+
 // Active runs: what is still running, how far along, and when the machine frees up (lib/progress.mjs).
 function runRow(st, ctx, m) {
   const body = st.concluded
-    ? `<p class="say">${esc(st.reason)}.</p><p class="cause">Delivered: ${st.delivered.length ? st.delivered.map(esc).join('; ') : 'nothing'} · ${st.followUps} ${st.followUps === 1 ? 'follow-up' : 'follow-ups'} in <a href="#self-gaps">Gaps</a> · closed ${stamp(st.closedAt)}</p>`
-    : `<p class="say"><b>${esc(st.progress)}</b> · ${esc(st.doing)}</p>${progressBar(st, true)}<p class="cause">${esc(st.eta.text[0].toUpperCase() + st.eta.text.slice(1))}</p>${needsLine(st.run, st.needsYou, ctx, m)}`;
+    ? `<p class="say">${linkify(st.reason, null)}.</p><p class="cause">Delivered: ${st.delivered.length ? st.delivered.map((d) => linkify(d, null)).join('; ') : 'nothing'} · ${st.followUps} ${st.followUps === 1 ? 'follow-up' : 'follow-ups'} in <a href="#self-gaps">Gaps</a> · closed ${stamp(st.closedAt)}</p>`
+    : `<p class="say"><b>${esc(st.progress)}</b> · ${doingHtml(st, ctx, m)}</p>${progressBar(st, true)}<p class="cause">${esc(st.eta.text[0].toUpperCase() + st.eta.text.slice(1))}</p>${needsLine(st.run, st.needsYou, ctx, m)}`;
   return `<li class="card run-row${st.concluded ? ' fin' : ''}" data-a="run-${esc(st.run)}"><h3><span>${runLink(st.run, ctx, m)}${st.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${statusChip(st)}</h3>${body}</li>`;
 }
 function activeRuns(m, ctx) {
@@ -125,7 +128,7 @@ function trend(m, ctx) {
 // Work across runs (#36): a unit stopped in one run and finished in a follow-on run, counted once in the stats.
 function chains(m, ctx) {
   if (!m.chains?.length) return empty('No unit worked across runs.');
-  return `<ul class="rows">${m.chains.map((c) => `<li data-a="chain-${esc(c.links[0].run)}-${esc(c.unit)}"><b class="mono">${unitLink(c.links.at(-1).run, c.links.at(-1).unit, ctx, m)}</b>`
+  return `<p class="meta">A unit stopped in one run and finished in another counts once.</p><ul class="rows">${m.chains.map((c) => `<li data-a="chain-${esc(c.links[0].run)}-${esc(c.unit)}"><b class="mono">${unitLink(c.links.at(-1).run, c.links.at(-1).unit, ctx, m)}</b>`
     + `<span class="grow">${c.links.map((l) => `${runLink(l.run, ctx, m)}${l.unit !== c.unit ? `<span class="cause">:${unitLink(l.run, l.unit, ctx, m)}</span>` : ''} <span class="cause">(${l.rounds} ${l.rounds === 1 ? 'try' : 'tries'}, ${esc(l.status)})</span>`).join(' → ')}</span>`
     + `<span class="muted">${c.rounds} ${c.rounds === 1 ? 'round' : 'rounds'}</span>${chip(c.status, c.status)}</li>`).join('')}</ul>`;
 }
@@ -133,7 +136,7 @@ function chains(m, ctx) {
 function history(m, ctx) {
   return table({
     cols: [{ label: 'Run' }, { label: 'Outcome' }, { label: 'Units passed' }, { label: 'Started' }, { label: 'Closed' }],
-    rows: m.history.map((h) => [{ html: `${runLink(h.run, ctx, m)}<div class="muted">${esc(h.goal)}</div>` }, { html: h.status ? statusChip(h.status) : chip(h.outcome, h.outcome) },
+    rows: m.history.map((h) => [{ html: `${runLink(h.run, ctx, m)}<div class="muted">${linkify(h.goal, null)}</div>` }, { html: h.status ? statusChip(h.status) : chip(h.outcome, h.outcome) },
       { html: `${h.passed}/${h.units}${h.stopped ? ` <span class="cause">${h.stopped} stopped</span>` : ''}` }, { html: stamp(h.started) }, { html: stamp(h.closed) }]),
     min: 640, max: 420, empty: 'No closed run yet.',
   });
@@ -145,7 +148,7 @@ function plans(m, ctx) {
     const linked = m.runIds.includes(p.run);
     const left = p.left.length ? `<ul>${p.left.map((u) => `<li data-a="left-${esc(p.run)}-${esc(u.id)}">${u.dot ? `${unitDot(u)} ` : ''}<b>${unitLink(p.run, u.id, ctx, m)}</b>${u.title ? ` ${esc(u.title)}` : ''} ${stateChip(u, linked ? { unitHref: unitHrefIn(ctx, p.run) } : null)} <span class="cause">waits on ${esc(u.waitsOn)}</span></li>`).join('')}</ul>` : empty('Nothing left: integration and the retro.');
     return `<section class="card" data-a="plan-${esc(p.run)}"><h3><span>${runLink(p.run, ctx, m)}${p.run === m.current ? ' <span class="cause">this dashboard</span>' : ''}</span>${p.status ? statusChip(p.status) : chip(p.decision, p.decision)}</h3>`
-      + `<p class="say">${esc(p.goal)}</p><div class="row"><span>${p.status ? esc(p.status.progress) : `${p.done} of ${count(p.total, 'unit')} finished`}</span><span>phase ${esc(p.decision)}</span></div>${p.status ? progressBar(p.status, true) : bar(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
+      + `<p class="say">${linkify(p.goal, null)}</p><div class="row"><span>${p.status ? esc(p.status.progress) : `${p.done} of ${count(p.total, 'unit')} finished`}</span><span>phase ${esc(p.decision)}</span></div>${p.status ? progressBar(p.status, true) : bar(p.total ? Math.round((p.done / p.total) * 100) : 0)}`
       + `<div class="unit-next"><b>Next:</b> ${p.next.length ? esc(p.next.join(' · ')) : 'wait for the running agents'}</div>${needsLine(p.run, p.needsYou, ctx, m)}${left}</section>`;
   }).join('')}</div>`;
 }

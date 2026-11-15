@@ -73,7 +73,7 @@ About the coordinator itself, across every run in the state folder. `S/run.mjs s
 - **Working stats:** counted over all runs, open included (the page says so), with the closed-runs-only figures that `run.mjs stats` prints beside them: pass rate and stopped share of finished units, rounds to pass (median and p80), median time per unit (first build to last verdict) and the suggested `--max-rounds`. **Trend over runs:** a table of the same per run.
 - **Learning:** every lesson of both scopes, best first: tag, text, seen, used, **promote** once seen 3 or more times, the runs it came from (links) and its sources.
 - **Project facts:** `COORDINATOR.md` by section. **Your decisions:** your answers from past runs (with the decision notes that closed questions), each linked to its run and question.
-- **History:** closed runs with outcome, units passed and stopped, start and close, each linking to its dashboard. **Work across runs:** units stopped in one run and finished in a follow-on run, each linked.
+- **History:** closed runs with outcome, units passed and stopped, start and close, each linking to its dashboard. **Work across runs:** units stopped in one run and finished in a follow-on run, each linked. A note under it says such a unit counts once. Run goals, concluded reasons and loose-end text on this page and on This PC link their PRs, issues and URLs; the Current column of the Runs table links the unit it names.
 - **Proposals:** follow-ups, retro notes and `upstream:` notes from every run, and lessons ready to promote, newest first, linkified.
 - **Side study:** the rule, each run's studies against its cap, and the study log with sources and lessons (`learning.md`).
 

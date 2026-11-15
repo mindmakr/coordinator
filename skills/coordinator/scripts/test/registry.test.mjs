@@ -308,6 +308,26 @@ test('This PC page: tabs, KPI row, the six panels in a main and side column, and
   assert.ok(side.includes(`href="/p/${key}/coordinator?t=tok"`), 'the Coordinator panel opens the project\'s coordinator page');
 });
 
+test('This PC page: a goal, a concluded reason and the Current column link their PRs, issues and units', () => {
+  const goal = 'Fix acme/shop#12, PR https://github.com/acme/shop/pull/13';
+  assert.equal(cli('pclinks', ['init', 'pl1', '--goal', goal, '--bar', 'b', '--fence', 'f']).code, 0);
+  assert.equal(cli('pclinks', ['add', 'pl1', 'u1', '--bar', 'b']).code, 0);
+  assert.equal(cli('pclinks', ['freeze', 'pl1']).code, 0);
+  assert.equal(cli('pclinks', ['start', 'pl1', 'u1']).code, 0);
+  assert.equal(cli('pclinks', ['init', 'pl2', '--goal', 'g', '--bar', 'b', '--fence', 'f']).code, 0);
+  assert.equal(cli('pclinks', ['close', 'pl2', '--outcome', 'stopped', '--reason', 'see acme/shop#14']).code, 0);
+  const nowMs = Date.now();
+  const pc = pcModel(readRegistry({ home }).filter((e) => ['pl1', 'pl2'].includes(e.run)), { nowMs });
+  const key = pc.groups[0].key;
+  const ctx = { live: { token: 'tok', nonce: 'n' }, pages: [{ path: '/', label: 'This PC', href: '/?t=tok' }], answerForm: { token: 'tok' }, pcHref: (k, r, sub = '') => `/p/${k}/run/${r}${sub}?t=tok` };
+  const html = pcPage(pc, nowMs, ctx, []);
+  const a = (url, label) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  assert.ok(html.includes(a('https://github.com/acme/shop/issues/12', 'acme/shop#12')), 'the issue in the goal');
+  assert.ok(html.includes(a('https://github.com/acme/shop/pull/13', 'https://github.com/acme/shop/pull/13')), 'the PR URL in the goal');
+  assert.ok(html.includes(a('https://github.com/acme/shop/issues/14', 'acme/shop#14')), 'the issue in a concluded reason');
+  assert.ok(html.includes(`building <a class="ulink" href="/p/${key}/run/pl1/unit/u1?t=tok">u1</a> round 1`), 'Current links its unit');
+});
+
 // Design 5.7: runs whose state folder is in the system temporary folder stay off the PC list.
 // Every state folder in this file is under tmpdir(); COORDINATOR_REGISTRY '' is the person's default.
 const real = { COORDINATOR_REGISTRY: '' };

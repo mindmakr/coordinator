@@ -92,6 +92,18 @@ export function linkWaits(text, ids, ctx) {
   }
   return out;
 }
+// Escaped progress text ("building u1 round 2") with each running unit named after its phase turned into a link; hrefOf(id) null leaves it plain.
+export function linkUnits(text, units, hrefOf) {
+  let out = esc(text);
+  for (const { id, phase } of units ?? []) {
+    const href = hrefOf(id);
+    if (!href) continue;
+    const re = new RegExp(`(${esc(phase)} )${esc(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( round)`);
+    out = out.replace(re, (_, a, b) => `${a}<a class="ulink" href="${esc(href)}">${esc(id)}</a>${b}`);
+  }
+  return out;
+}
+
 // "Blocks: D, E": every unit still waiting on this one (whatever else it waits on), linked.
 export function blocksLine(u, ctx) {
   const ids = u.dot === 'passed' ? [] : u.dependents.filter((x) => x.dot && !['passed', 'stopped'].includes(x.dot)).map((x) => x.id);

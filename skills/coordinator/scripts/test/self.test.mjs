@@ -113,6 +113,25 @@ test('the page: a KPI row, then every section as a panel in a main and a side co
   assert.match(html, /<a href="runs\/r-a\/hud\.html">r-a<\/a> <a href="runs\/r-a\/hud\.html#q1">q1<\/a>/, 'a decision links to its run and question');
 });
 
+test('the page: goals, reasons and Current link their PRs, issues and units; the chains note says a unit counts once', () => {
+  const goal = 'Fix acme/shop#12, PR https://github.com/acme/shop/pull/13';
+  const a = oldRun('r-a', [unit('u1', 'pass', ['pass'])], { outcome: 'done', decision: 'done', at: at(60) }, { goal });
+  const b = oldRun('r-b', [unit('v1', 'building', [])], null, { goal });
+  b.createdAt = at(200);
+  const html = selfPage(selfModel({ runs: [a, b], nowMs: Date.parse(at(300)) }), Date.parse(at(300)), { ...staticCtx('', 0), runHref: (id) => `runs/${id}/hud.html` });
+  const issue = '<a href="https://github.com/acme/shop/issues/12" target="_blank" rel="noopener noreferrer">acme/shop#12</a>';
+  const pr = '<a href="https://github.com/acme/shop/pull/13" target="_blank" rel="noopener noreferrer">https://github.com/acme/shop/pull/13</a>';
+  const sect = (id) => html.slice(html.indexOf(`data-k="self-${id}"`), html.indexOf('</section>', html.indexOf(`data-k="self-${id}"`)));
+  for (const id of ['history', 'plans']) { assert.ok(sect(id).includes(issue), `${id}: the issue`); assert.ok(sect(id).includes(pr), `${id}: the PR`); }
+  assert.match(html, /building <a class="ulink" href="runs\/r-b\/units\/v1\.html">v1<\/a> round 1/, 'Current links its unit');
+  const c1 = oldRun('r-c1', [unit('u1', 'stopped', ['fail'])], { outcome: 'stopped', decision: 'done', at: at(60) });
+  const c2 = oldRun('r-c2', [unit('u1', 'pass', ['pass'])], { outcome: 'done', decision: 'done', at: at(120) });
+  c2.createdAt = at(70); c2.continues = [{ run: 'r-c1', unit: 'u1' }];
+  const chained = selfModel({ runs: [c1, c2] });
+  assert.equal(chained.chains.length, 1);
+  assert.match(selfPage(chained, Date.now(), { ...staticCtx('', 0), runHref: (id) => `runs/${id}/hud.html` }), /counts once/);
+});
+
 test('cli: study needs sources, keeps to the per-run cap; lessons take --source; retro notes after close; self prints', () => {
   assert.equal(run('init', 's1', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--study-budget', '1').code, 0);
   assert.equal(state('s1').budget.maxStudies, 1);

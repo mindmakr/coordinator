@@ -16,10 +16,10 @@ import { linkedRuns } from './chain.mjs';
 import { loadRun } from './events.mjs';
 import { harnessName, origin, versionWarning } from './harness.mjs';
 import { hud, originLine, questionItem, statusChip } from './hud.mjs';
-import { repoFromText } from './links.mjs';
+import { linkify, repoFromText } from './links.mjs';
 import { mapsPage } from './mapspage.mjs';
 import { ageText } from './age.mjs';
-import { bar, blk, chip, cols, esc, heading, kpis, page, panel, rows, stamp, table, toneChip, when } from './parts.mjs';
+import { bar, blk, chip, cols, esc, heading, kpis, linkUnits, page, panel, rows, stamp, table, toneChip, when } from './parts.mjs';
 import { runStatus } from './progress.mjs';
 import { needsAnchor } from './pcanswer.mjs';
 import { doctorFile } from './doctorrecord.mjs';
@@ -88,7 +88,7 @@ const flat = (pc) => pc.groups.flatMap((g) => g.runs.map((r) => ({ r, name: g.na
 
 // One run as a table row: status, run, project and the tool it ran in, progress, what it does, its end, start and last write.
 function runRow({ r, name, here }, ctx, nowMs) {
-  const runCell = `${link(pcLink(ctx, r.key, r.run), r.run, 'mono')}${r.alias ? ` <span class="muted">“${esc(r.alias)}”</span>` : ''}${r.title ? `<div class="muted">${esc(r.title)}</div>` : ''}`;
+  const runCell = `${link(pcLink(ctx, r.key, r.run), r.run, 'mono')}${r.alias ? ` <span class="muted">“${esc(r.alias)}”</span>` : ''}${r.title ? `<div class="muted">${linkify(r.title, r.repo)}</div>` : ''}`;
   const project = `${esc(name)}${here ? ' <span class="muted">this project</span>' : ''}${r.origin ? originLine({ ...r.origin, alias: null }) : ''}`;
   const updated = { html: stamp(r.lastSeen) };
   if (r.error) return [{ html: toneChip('unreadable', 'bad') }, { html: runCell }, { html: project }, '', r.error, '', '', updated];
@@ -96,7 +96,7 @@ function runRow({ r, name, here }, ctx, nowMs) {
   if (!st) return [{ html: chip(r.closed ? `closed: ${r.closed}` : 'open', r.closed ?? 'running') }, { html: runCell }, { html: project }, '', '', '', '', updated];
   const t = times(r, st, nowMs);
   const progress = `${esc(st.progress)}${bar(st.pct, { label: st.progress, tone: st.concluded ? '' : 'ok' })}`;
-  return [{ html: statusChip(st) }, { html: runCell }, { html: project }, { html: progress }, st.concluded ? String(st.reason).replace(/\.*$/, '') : st.doing, { html: t.end }, { html: t.start }, updated];
+  return [{ html: statusChip(st) }, { html: runCell }, { html: project }, { html: progress }, { html: st.concluded ? linkify(String(st.reason).replace(/\.*$/, ''), r.repo) : linkUnits(st.doing, st.current, (id) => pcLink(ctx, r.key, r.run, `/unit/${encodeURIComponent(id)}`)) }, { html: t.end }, { html: t.start }, updated];
 }
 const RUN_COLS = ['Status', 'Run', 'Project', 'Progress', 'Current', 'ETA', 'Started', 'Updated'].map((label) => ({ label }));
 const runsTable = (list, ctx, nowMs, empty) => table({ cols: RUN_COLS, rows: list.map((x) => runRow(x, ctx, nowMs)), min: 980, max: 420, empty });
@@ -139,10 +139,11 @@ export function looseEnds(pc, waiting, ctx = {}) {
     if (x.link.startsWith('/#')) return x.link.slice(1);
     return pcLink(ctx, x.key, x.run, x.link.slice(`/p/${x.key}/run/${encodeURIComponent(x.run)}`.length));
   };
+  const repoOf = (x) => flat(pc).find(({ r }) => r.key === x.key && r.run === x.run)?.r.repo ?? null;
   const item = (x) => {
     const where = x.run ? `${x.project} · ${x.name ? `${x.name} ` : ''}(${x.run})` : 'this PC';
-    const list = x.items?.length > 1 ? `<ul>${x.items.map((g) => `<li><span class="cause">${esc(g.id)}</span> ${esc(g.text)}</li>`).join('')}</ul>` : '';
-    return `${toneChip(x.what, x.kind === 'plugin' ? '' : 'ask')}<span class="grow">${link(href(x), where)}<span class="line">${esc(x.text)}</span>${list}`
+    const list = x.items?.length > 1 ? `<ul>${x.items.map((g) => `<li><span class="cause">${esc(g.id)}</span> ${linkify(g.text, repoOf(x))}</li>`).join('')}</ul>` : '';
+    return `${toneChip(x.what, x.kind === 'plugin' ? '' : 'ask')}<span class="grow">${link(href(x), where)}<span class="line">${linkify(x.text, repoOf(x))}</span>${list}`
       + `<span class="muted">waiting ${since(x, nowMs)}${x.fix ? ` · <code>${esc(x.fix)}</code>` : ''}</span></span>`;
   };
   return rows(looseOf(waiting).map(item), { empty: 'Nothing waits on you.' });
@@ -152,7 +153,7 @@ export function looseEnds(pc, waiting, ctx = {}) {
 function blockedRows(pc, ctx) {
   const list = flat(pc).filter(({ r }) => !isOver(r)).flatMap(({ r, name }) => (r.blocked ?? []).map((b) => ({ r, name, b })));
   return rows(list.map(({ r, name, b }) => `${toneChip(b.afterStatus === 'stopped' ? `${b.after} stopped` : `after ${b.after}`, b.afterStatus === 'stopped' ? 'bad' : '')}`
-    + `<span class="grow">${link(pcLink(ctx, r.key, r.run), r.run, 'mono')} / ${link(pcLink(ctx, r.key, r.run, `/unit/${encodeURIComponent(b.id)}`), b.id, 'mono')}${b.title ? ` <span class="muted">${esc(b.title)}</span>` : ''}</span>`
+    + `<span class="grow">${link(pcLink(ctx, r.key, r.run), r.run, 'mono')} / ${link(pcLink(ctx, r.key, r.run, `/unit/${encodeURIComponent(b.id)}`), b.id, 'mono')}${b.title ? ` <span class="muted">${linkify(b.title, r.repo)}</span>` : ''}</span>`
     + `<span class="muted">${esc(name)}</span>`), { empty: 'No blocked unit.' });
 }
 
@@ -163,7 +164,7 @@ function concludedRows(list, ctx, nowMs) {
     const { r, name } = x;
     const t = times(r, r.status, nowMs);
     return `${r.status ? statusChip(r.status) : chip(`closed: ${r.closed}`, r.closed)}<span class="grow">${link(pcLink(ctx, r.key, r.run), r.run, 'mono')}`
-      + `${r.alias ? ` <span class="muted">“${esc(r.alias)}”</span>` : ''} <span class="muted">${esc(name)}</span>${r.status?.reason ? `<span class="line muted">${esc(String(r.status.reason).replace(/\.*$/, ''))}</span>` : ''}</span>`
+      + `${r.alias ? ` <span class="muted">“${esc(r.alias)}”</span>` : ''} <span class="muted">${esc(name)}</span>${r.status?.reason ? `<span class="line muted">${linkify(String(r.status.reason).replace(/\.*$/, ''), r.repo)}</span>` : ''}</span>`
       + `<span class="muted">${t.end || (r.lastSeen ? `last written ${stamp(r.lastSeen)}` : '')}</span>`;
   }), { empty: 'No concluded run.' });
 }
