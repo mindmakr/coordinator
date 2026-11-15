@@ -5,17 +5,31 @@
 import { viewer, viewerEntries } from './evview.mjs';
 import { linkify } from './links.mjs';
 import { unitCalls } from './map/callsview.mjs';
-import { clip } from './plain.mjs';
+import { clip, duration } from './plain.mjs';
 import { whoRound } from './models.mjs';
 import { gapEvidence } from './view.mjs';
-import { chainRow, lastGapHtml, liveCtx, noteForm, questionItem, runCrumbs, runFlag, scoreChart, scoreTrend, staticCtx, timelineList, timelineOl, tryStates, tryText, unitLinks } from './hud.mjs';
+import { activityBox, chainRow, lastGapHtml, liveCtx, noteForm, questionItem, runCrumbs, runFlag, scoreChart, scoreTrend, staticCtx, timelineList, timelineOl, tryStates, tryText, unitLinks } from './hud.mjs';
 import { behaviourList, blk, blocksLine, chip, cols, esc, evidenceList, grows, hash, keyed, kpis, linkWaits, page, panel, stamp, stateChip, table, timelineTools, toneChip, tries, unitDot, unitLink } from './parts.mjs';
 
 // Depends on / Blocks: each linked unit with its state dot and badge, linked to its page.
 function links(u, ctx) {
   const row = (x) => `<li data-a="dep-${esc(x.id)}">${x.dot ? `${unitDot(x)} ${unitLink(x.id, ctx)}${x.title ? ` ${esc(x.title)}` : ''} ${stateChip(x, ctx)}` : `${esc(x.id)} <span class="cause">not in this run</span>`}</li>`;
   const part = (h, list, none) => `<h3 class="sub">${h}</h3>${list.length ? `<ul class="deps">${list.map(row).join('')}</ul>` : `<p class="empty">${none}</p>`}`;
-  return `${part('Depends on', u.dependsOn, 'Nothing: it can start on its own.')}${part('Blocks', u.dependents, 'No unit waits on it.')}`;
+  // Other units that change the same files (planned, or in their last checked diff).
+  const shared = (u.overlaps ?? []).map((x) => `<li data-a="ov-${esc(x.id)}">${unitLink(x.id, ctx)} <span class="mono cause">${esc(x.paths.slice(0, 4).join(', '))}${x.paths.length > 4 ? ` and ${x.paths.length - 4} more` : ''}</span></li>`).join('');
+  return `${part('Depends on', u.dependsOn, 'Nothing: it can start on its own.')}${part('Blocks', u.dependents, 'No unit waits on it.')}`
+    + `<h3 class="sub">Overlaps</h3>${shared ? `<ul class="deps">${shared}</ul>` : '<p class="empty">No other unit changes its files.</p>'}`;
+}
+
+// Minutes as words, or a dash when not stamped.
+const mins = (m) => (m === null || m === undefined ? '–' : duration(m));
+
+// The Time KPI: working time over the tries' start and end stamps (lib/timeline.mjs tryTimes), build and review.
+function timeKpi(u) {
+  const t = u.time;
+  if (!t || t.minutes === null) return { k: 'Time', v: '–', s: u.tries?.length ? 'no start recorded' : 'not started' };
+  const s = [`build ${mins(t.build)}`, `review ${mins(t.review)}`, t.open ? 'try running' : '', t.unstamped ? `${t.unstamped} not stamped` : ''].filter(Boolean).join(' · ');
+  return { k: 'Time', v: duration(t.minutes), s };
 }
 
 // The verdict a critic gave, as a chip; none given is a dash.
@@ -46,11 +60,12 @@ function round(r, repo) {
 function rounds(u, repo) {
   if (!u.roundList.length) return '<p class="empty">No round yet.</p>';
   const names = [...new Set(u.roundList.flatMap((r) => Object.keys(r.specialists ?? {})))];
-  const cols = [{ label: 'Try' }, { label: 'Judged' }, { label: 'Verdict' }, { label: 'General' }, ...names.map((n) => ({ label: n })), { label: 'Score', num: true }, { label: 'Gap' }];
-  const rows = u.roundList.map((r) => ({ key: `rrow-${r.n}`, cells: [`T${r.n}`, { html: stamp(r.at, 'abs') }, { html: verdictChip(r.verdict) },
+  const cols = [{ label: 'Try' }, { label: 'Started' }, { label: 'Build', num: true }, { label: 'Review', num: true }, { label: 'Judged' }, { label: 'Verdict' }, { label: 'General' }, ...names.map((n) => ({ label: n })), { label: 'Score', num: true }, { label: 'Gap' }];
+  const times = new Map((u.tries ?? []).map((t) => [t.n, t]));
+  const rows = u.roundList.map((r) => ({ key: `rrow-${r.n}`, cells: [`T${r.n}`, { html: times.get(r.n)?.start ? stamp(times.get(r.n).start, 'abs') : '<span class="cause">–</span>' }, mins(times.get(r.n)?.build), mins(times.get(r.n)?.review), { html: stamp(r.at, 'abs') }, { html: verdictChip(r.verdict) },
     { html: verdictChip(r.failedBy ? (r.general ?? 'pass') : r.verdict) }, ...names.map((n) => ({ html: verdictChip(r.specialists?.[n]?.verdict) })),
     typeof r.score === 'number' ? r.score : '–', { html: r.gap ? linkify(clip(r.gap, 160), repo) : '<span class="cause">–</span>' }] }));
-  return scoreChart(u.roundList) + table({ cols, rows, min: 560 + names.length * 80, max: 320 })
+  return scoreChart(u.roundList) + table({ cols, rows, min: 760 + names.length * 80, max: 320 })
     + `<div class="round-list">${[...u.roundList].reverse().map((x) => round(x, repo)).join('')}</div>`;
 }
 
@@ -97,9 +112,10 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     u.gap ? blk('last-gap', panel({ id: 'last-gap', title: 'Last gap', tone: 'bad', metaHtml: last ? `try ${esc(last.n)} · ${stamp(last.at)}` : '', bodyHtml: `<div class="lastgap">${lastGapHtml(u, r, false)}</div>` })) : '',
     blk('rounds', panel({ id: 'rounds', title: 'Rounds', count: u.roundList.length, bodyHtml: rounds(u, r) })),
     blk('evidence', panel({ id: 'evidence', title: 'Evidence and artifacts', count: loose.length, scroll: 480, bodyHtml: loose.length ? evidenceList(loose, r, ctx, `p-${u.id}-ev`) : '<p class="empty">No evidence outside the behaviours.</p>' })),
-    calls ? blk('calls', panel({ id: 'calls', title: 'Function calls', open: false, bodyHtml: unitCalls(calls, r, v.id, u.id) })) : '',
+    // Shown wherever the pages read call data (map/calls/); before `run.mjs calls` it says how to compute it.
+    ctx.calls ? blk('calls', panel({ id: 'calls', title: 'Function calls', count: calls ? calls.touchedTotal : null, open: false, bodyHtml: unitCalls(calls, r, v.id, u.id) })) : '',
     blk('timeline', panel({ id: 'unit-timeline', title: 'Unit timeline', count: u.timeline.length, open: false,
-      bodyHtml: `${ctx.live ? timelineTools() : ''}<div class="list-anchor">${timelineOl(timelineList([...u.timeline].reverse(), r, undefined, ctx))}</div>` }), 'div', ' id="timeline"'),
+      bodyHtml: `${ctx.live ? timelineTools() : ''}${activityBox(timelineOl(timelineList([...u.timeline].reverse(), r, undefined, ctx)))}` }), 'div', ' id="timeline"'),
   ];
   const side = [
     blk('behaviours', panel({ id: 'behaviours', title: 'Bar and behaviours', count: u.behaviours.length ? `${passing} / ${u.behaviours.length}` : null, scroll: 520,
@@ -119,6 +135,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
       { k: 'Tries', vHtml: tries(tryStates(u)), s: tryText(u) },
       { k: 'Scores', v: scoreTrend(u) || '–', s: u.early ? u.early.text : '' },
       { k: 'Behaviours', v: u.behaviours.length ? `${passing} of ${u.behaviours.length}` : 'none', s: failing ? `${failing} failing` : '' },
+      timeKpi(u),
     ])),
     cols(main.join('\n'), side.join('\n')),
     blk('evv', viewer(viewerEntries(v, u.id), ctx, r)),

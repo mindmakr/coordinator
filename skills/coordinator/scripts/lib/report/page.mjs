@@ -30,6 +30,19 @@ function changes(v, ctx) {
   return table({ cols: [{ label: 'Unit' }, { label: 'What' }, { label: 'Status' }, { label: 'Issues, PRs and merges' }], rows, min: 640, max: 340, empty: 'No units.' });
 }
 
+// Files the run changed, by file (with the units that changed each) and by unit, from the draft's
+// per-unit paths (changes[].paths; a draft stored before it has the counts only).
+function changedFiles(d, ctx) {
+  const mono = (f) => ({ html: `<span class="mono">${esc(f)}</span>` });
+  const link = (id) => `<a href="${esc(ctx.unitHref(id))}">${esc(id)}</a>`;
+  const by = (f) => d.changes.filter((c) => c.paths?.includes(f)).map((c) => link(c.unit)).join(', ');
+  const byFile = table({ cols: [{ label: 'File' }, { label: 'Units' }], rows: d.files.map((f) => [mono(f), { html: by(f) }]), max: 360, empty: 'No files recorded.' });
+  const units = d.changes.filter((c) => (c.paths ? c.paths.length : c.files));
+  if (!units.length) return byFile;
+  const rows = units.map((c) => [{ html: link(c.unit) }, c.paths?.length ?? c.files, { html: c.paths ? c.paths.map((f) => `<span class="mono">${esc(f)}</span>`).join('<br>') : '<span class="muted">not stored; run.mjs report --draft again</span>' }]);
+  return byFile + toggle('files-by-unit', `By unit · ${units.length}`, table({ cols: [{ label: 'Unit' }, { label: 'Files', num: true }, { label: 'Paths' }], rows, max: 360 }));
+}
+
 // One labelled line of the devops panel: a list of items, or None.
 const line = (label, xs, fn) => `<div><span class="lbl">${esc(label)} <span class="chip">${xs.length}</span></span><span class="val">${xs.length ? xs.map((x) => `<span>${fn(x)}</span>`).join('') : '<span class="muted">None found in the diffs</span>'}</span></div>`;
 function devops(d, run) {
@@ -157,7 +170,7 @@ export function reportPage(v, nowMs = Date.now(), ctx = null, data = {}) {
     { k: 'Files changed', v: data.draft ? data.draft.files.length : '–', s: data.draft ? `${data.draft.migrations.length} migrations · ${data.draft.env.length} variables` : 'not read from git' },
     signalsKpi(data.quality),
   ]);
-  const files = data.draft ? blk('files', panel({ id: 'files', title: 'Files the run changed', count: data.draft.files.length, bodyHtml: table({ cols: [{ label: 'File' }], rows: data.draft.files.map((f) => [{ html: `<span class="mono">${esc(f)}</span>` }]), max: 360, empty: 'No files recorded.' }), flush: data.draft.files.length > 0 })) : '';
+  const files = data.draft ? blk('files', panel({ id: 'files', title: 'Files the run changed', count: data.draft.files.length, bodyHtml: changedFiles(data.draft, ctx), flush: data.draft.files.length > 0 })) : '';
   const main = blk('changes', panel({ id: 'changes', title: 'Changes, from the run', count: v.units.length, bodyHtml: changes(v, ctx), flush: v.units.length > 0 }))
     + blk('notes', panel({ id: 'notes', title: 'Release notes', metaHtml: n.meta, bodyHtml: n.body, tone: n.tone, scroll: n.tone ? undefined : 420 }))
     + files

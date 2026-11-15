@@ -323,7 +323,7 @@ test('every list that grows live sits in its own anchor container (#23)', () => 
   const live = hud(v, Date.now(), { token: 't', nonce: 'n' });
   assert.match(live, /<summary>Evidence · 1<\/summary><div class="list-anchor"><ul class="evlist" data-ev-list>/, 'a unit\'s Evidence');
   assert.match(live, /<h2>Decisions<\/h2><span class="count">1<\/span><\/summary><div class="body scroll"[^>]*><div data-a="list-Decisions"><div class="list-anchor"><ul>/, 'Decisions');
-  assert.match(live, /<div data-k="activity"[^>]* id="timeline">[\s\S]*?<\/form><div class="list-anchor"><ol class="timeline" data-tl-list data-ev-list>/, 'the timeline');
+  assert.match(live, /<div data-k="activity"[^>]* id="timeline">[\s\S]*?<\/form><div class="scroll activity-box" style="max-height:360px"><div class="list-anchor"><ol class="timeline" data-tl-list data-ev-list>/, 'the timeline, in its bounded box');
   const unit = unitPage(v, 'u1', Date.now(), { token: 't', nonce: 'n' });
   assert.match(unit, /<h2>Evidence and artifacts<\/h2><span class="count">1<\/span><\/summary><div class="body scroll"[^>]*><div class="list-anchor"><ul class="evlist" data-ev-list>/, 'the unit page\'s Evidence');
   assert.match(unit, /<div class="list-anchor"><ul><li data-a="n-/, 'the unit page\'s notes');

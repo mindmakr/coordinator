@@ -16,9 +16,10 @@
 //   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--continues <run>:<unit>] this unit, under its own id, continues that unit of an earlier run
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
+//                  [--feature-map path] [--new-surface]   validate UI bar/behaviours against feature-map.json
 //   run.mjs add-specialist <run> <unit> <name> --reason R   a critic that must also pass, added after add: required from the
 //                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
-//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove   add, reword (back to unchecked) or remove;
+//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove [--feature-map path] [--new-surface]   add, reword (back to unchecked) or remove;
 //                  behaviour text (here and in add --behaviour) is 500 characters at most, refused over it, never cut
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link|reins|prism [--label L]
@@ -39,7 +40,7 @@
 //                  decision with no final verdict (open, building, judging or stopped): ends shipped ("Shipped without a final
 //                  verdict"; delivered, never a clean pass), links the merge, and files the missing verdict and its last round's
 //                  open findings as follow-ups; without --confirm or --answer, their latest note on the unit (lib/approval.mjs)
-//   run.mjs freeze <run>
+//   run.mjs freeze <run> [--feature-map path] [--new-surface]
 //   run.mjs pause <run> --reason R | resume <run>   the person stops the work by hand (overnight, a restart): until resume,
 //                  no minute counts toward the time budget, next says paused and starts no unit, and start is refused;
 //                  a second pause, or resume on a run that is not paused, is refused (lib/pause.mjs)
@@ -199,10 +200,11 @@ import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
+import { findFeatureMap, validateBehavioursAgainstFeatureMap } from './lib/featuremap.mjs';
 import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { prismRefusal } from './lib/prismreport.mjs';
 import { adopt, table } from './lib/adopt.mjs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { briefPrompt, buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
 import { afterFixIntegration, allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
@@ -259,9 +261,10 @@ const FLAGS = {
   extend: ['rounds', 'minutes', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
-  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
+  add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open', 'feature-map', 'new-surface'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', ...COST_FLAGS],
-  behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
+  behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open', 'feature-map', 'new-surface'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
+  freeze: ['feature-map', 'new-surface'],
   link: ['issue', 'pr', 'merge', 'url', 'label', 'continues', 'same-tree'], note: ['kind', 'text', 'recommend', 'answers', 'unit', 'confirm', 'asking'],
   ask: ['question', 'header', 'option', 'multi', 'unit', 'approves', 'grant-minutes', 'finish'], answer: ['choice', 'other', 'by', 'confirm'], serve: ['port'], watch: ['remote', 'every'], map: ['root', 'max-seconds', 'unit', 'pit-stop', 'dest', 'fresh', 'force', 'reset-stage'], touches: ['json', 'unit'], calls: ['root', 'base', 'head', 'files', 'max-seconds', 'json'], sync: ['text'], close: ['outcome', 'reason'], adopt: ['dry-run'], report: ['draft', 'file', 'i-checked'], quality: ['project', 'json'], stats: ['tag'], reset: ['reason'],
   brief: ['role', 'quote', 'source', 'where', 'findings-file', 'playbook', 'lessons', 'to'], dashboard: ['port', 'open', 'foreground'], list: ['all'], waiting: ['json'], 'status-line': ['json'],
@@ -274,6 +277,30 @@ for (const c of [...LEAD_STEPS, ...Object.keys(LEAD_FORMS)]) FLAGS[c] = [...new 
 // Notes about one unit (#45): scoped with --unit, shown on its page.
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
+
+function featureMapRoot() {
+  const cwd = resolve(process.cwd());
+  const tmp = resolve(tmpdir());
+  if (process.env.COORDINATOR_DIR && (cwd === tmp || cwd.startsWith(`${tmp}\\`) || cwd.startsWith(`${tmp}/`))) return cwd;
+  return projectDir();
+}
+function validateUnitSurfaceBar(u, o = {}) {
+  if (o['new-surface'] !== undefined && o['new-surface'] !== true) throw new Error('--new-surface takes no value');
+  if (o['feature-map'] !== undefined && (typeof o['feature-map'] !== 'string' || !o['feature-map'].trim())) {
+    throw new Error('--feature-map requires a non-empty path');
+  }
+  const fm = findFeatureMap(featureMapRoot(), o['feature-map'] ?? null);
+  if (!fm.found) return fm;
+  const res = validateBehavioursAgainstFeatureMap(u.behaviours ?? [], fm, {
+    allowNew: o['new-surface'] === true,
+    bar: u.bar ?? '',
+    priorContract: u.surfaceContract ?? [],
+  });
+  if (!res.ok) throw new Error(res.errors.map((e) => e.message).join('; '));
+  if (res.matched.length) u.surfaceContract = res.matched;
+  else delete u.surfaceContract;
+  return fm;
+}
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -753,6 +780,7 @@ const commands = {
       const u = { id: unit, bar: text(o.bar, 'bar'), ...(specialists.length ? { specialists } : {}), title: optText(o.title, 80), link, after: o.after ?? null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null, ...(links.length ? { links } : {}) };
       s.units.push(u);
       for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
+      validateUnitSurfaceBar(u, o);
       if (cont) addContinues(s, u, cont);
       warning = openCheck([{ what: `${unit}'s bar`, text: u.bar }, ...(u.behaviours ?? []).map((b) => ({ what: `${unit} ${b.id}`, text: b.text }))], o['accept-open'], s.notes);
     }, { unit });
@@ -774,11 +802,12 @@ const commands = {
       s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: specialist ${who} added, required from round ${u.rounds.length + 1}: ${reason}`, at: now() });
     }, { unit });
   },
-  freeze([run]) {
+  freeze([run], o = {}) {
     return change(run, 'run.freeze', (s) => {
       if (!s.units.length) throw new Error('add units first');
       const missing = (s.continues ?? []).filter((c) => !s.units.some((u) => u.id === childId(c)));
       if (missing.length) throw new Error(`freeze refused: the run continues ${missing.map((c) => `${c.run}:${c.unit}`).join(', ')}; add ${missing.map(childId).join(', ')} (or add a unit with --continues <run>:<unit>)`);
+      for (const u of s.units) validateUnitSurfaceBar(u, o);
       s.frozen = true;
     });
   },
@@ -873,6 +902,7 @@ const commands = {
       const changes = o.remove === true || (o.id !== undefined && list.some((b) => b.id === String(o.id).toUpperCase()));
       const reason = changes && st.frozen ? text(o.reason, 'reason (removing or rewording a behaviour after freeze changes the bar)', 300) : null;
       id = behave(st, u, { id: o.id, text: o.text, remove: o.remove === true });
+      if (u) validateUnitSurfaceBar(u, o);
       const what = o.remove ? `removed ${id}` : `${id}: ${optText(o.text, 300)}`;
       if (u) log(u, 'behaviour', reason ? `${what} (${reason})` : what);
       if (reason) st.notes.push({ kind: 'bar', text: `${u ? u.id : 'goal'} ${what}: ${reason}`, at: now() });

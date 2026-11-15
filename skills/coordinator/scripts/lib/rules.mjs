@@ -379,6 +379,26 @@ export function bySetup(runs) {
   return [...groups.values()].map((g) => ({ ...g, rate: Math.round((g.escapes / g.passed) * 100) / 100 })).sort((a, b) => a.setup.localeCompare(b.setup));
 }
 
+// Every critic setup (verdict --critic) that judged a round: the general critic's on the round, a specialist's
+// on its mark. Per setup and critic: rounds judged, how many it passed, and, for the general critic, the escapes
+// on units it passed (bySetup). A setup never recorded groups as "(not recorded)".
+export function criticSetups(runs) {
+  const groups = new Map();
+  const add = (setup, critic, verdict) => {
+    const key = `${critic}\u0000${setup}`;
+    const g = groups.get(key) ?? { setup, critic, rounds: 0, passed: 0, escapes: null };
+    g.rounds++; if (verdict === 'pass') g.passed++;
+    groups.set(key, g);
+  };
+  for (const run of runs) for (const u of run.units) for (const r of u.rounds) {
+    add(r.critic ?? '(not recorded)', 'general', r.failedBy ? (r.general ?? 'pass') : r.verdict);
+    for (const [name, m] of Object.entries(r.specialists ?? {})) add(m?.critic ?? '(not recorded)', name, m?.verdict);
+  }
+  const esc = new Map(bySetup(runs).map((g) => [g.setup, g.escapes]));
+  return [...groups.values()].map((g) => (g.critic === 'general' ? { ...g, escapes: esc.get(g.setup) ?? 0 } : g))
+    .sort((a, b) => (b.critic === 'general') - (a.critic === 'general') || a.critic.localeCompare(b.critic) || a.setup.localeCompare(b.setup));
+}
+
 // A unit finished in a follow-on run counts once, with its rounds added up (lib/chain.mjs).
 export function stats(runs) {
   const passRounds = [];

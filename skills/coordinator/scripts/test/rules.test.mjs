@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { afterFixIntegration, decide, decideUnit, noProgress, sameGap, stats } from '../lib/rules.mjs';
+import { afterFixIntegration, criticSetups, decide, decideUnit, noProgress, sameGap, stats } from '../lib/rules.mjs';
 
 const T0 = Date.parse('2026-01-01T00:00:00Z');
 const run = (units, extra = {}) => ({
@@ -145,4 +145,15 @@ test('after a failed integration check ends the run with gaps, one pass of the f
   const fixed = run([passed], { integration: { rounds: [{ verdict: 'fail', gap: 'red', at: at(100) }, { verdict: 'pass', afterFix: true, at: at(290) }] } });
   assert.equal(decide(fixed, late).decision, 'done');
   assert.equal(afterFixIntegration(fixed, late), false);
+});
+
+test('criticSetups: rounds and passes per critic setup, the general critic first, escapes only on its passes', () => {
+  const run = { notes: [{ kind: 'escape', unit: 'a', text: 'x' }], units: [
+    { id: 'a', status: 'pass', rounds: [{ verdict: 'fail', critic: 'opus full' }, { verdict: 'pass', critic: 'sonnet delta', specialists: { money: { verdict: 'pass', critic: 'opus money' } } }] },
+    { id: 'b', status: 'open', rounds: [{ verdict: 'fail', general: 'pass', failedBy: ['money'], specialists: { money: { verdict: 'fail' } } }] },
+  ] };
+  assert.deepEqual(criticSetups([run]).map((g) => [g.critic, g.setup, g.rounds, g.passed, g.escapes]), [
+    ['general', '(not recorded)', 1, 1, 0], ['general', 'opus full', 1, 0, 0], ['general', 'sonnet delta', 1, 1, 1],
+    ['money', '(not recorded)', 1, 0, null], ['money', 'opus money', 1, 1, null],
+  ]);
 });
