@@ -66,66 +66,47 @@ export function namedRounds(words) {
   return counts.size === 1 ? [...counts][0] : null;
 }
 
-// How many minutes of run time the person's own words grant (`run.mjs extend <run>`), as
-// { minutes, why }. An approval gate errs towards fewer minutes or a refusal, never more:
-// - An amount is a number with its unit: "90 minutes", "45 more mins", "60-minute", "2 hours",
-//   "1.5 hours", "1h", "90m", "1h30", "an hour", "another hour", "half an hour",
-//   "an hour and a half", "one and a half hours", "1 hour 30 minutes", "thirty minutes".
-// - A granted amount is tied to more, another, extra, additional, add, plus, longer,
-//   extension or "extend … by" ("30 more minutes", "add 30 minutes", "a 60-minute extension").
-//   When any amount is granted, only granted amounts count: a number given for context
-//   ("the run is 45 minutes over", "a 120 minute budget") is not what was approved.
-// - The amounts that count must all be the same, or nothing is granted: why names them.
-// - A time it cannot read for sure ("a couple of hours", "1.33 hours", "1 hour 30") grants
-//   nothing: why says so. No amount at all gives { minutes: null, why: null }.
-// Pure.
+// Run time is granted only as the amount stored on the question (`ask … --approves <label>
+// --grant-minutes N`), never read from free text. The person's words around it (the approving
+// option, their confirmed words) may repeat N, in digits or words ("60", "sixty"), and name no
+// other amount: why they do not, or null. Any other number ("30", ".5", "1,5", "30-45", "one"),
+// a part or vague amount (half, quarter, couple, few, several, dozen, hundred, thousand, double,
+// twice), any time in hours ("an hour", "1h", "2 hours": amounts are in minutes), "a minute", or
+// a total ("extend it to 60 minutes", "in total") is refused, never read. Pure.
 const SMALL = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
 const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
-const HR = String.raw`(?:hours?|hrs?)`;
-const MN = String.raw`(?:minutes?|mins?)`;
-const NUM = String.raw`(\d{1,5}(?:\.\d+)?|an?|another)`;
-const GAP = String.raw`(?:\s*-\s*|\s+)`; // "60 minutes", "60-minute"
-const MORE = String.raw`(?:(?:more|extra|additional)\s+)?`;
-const THEN = String.raw`(?!\s*(?:and\s+)?\d)`; // "1 hour 30", "1h 30": minutes with no unit stay unread, never dropped
-const AMOUNTS = [ // [pattern, minutes from the match]; longer forms first, so "an hour and a half" is not read as "an hour"
-  [String.raw`\b${NUM}\s+and\s+a\s+half\s+${MORE}${HR}`, (m) => one(m[1]) * 60 + 30],
-  [String.raw`\b${NUM}${GAP}${MORE}${HR}\s+and\s+a\s+half\b`, (m) => one(m[1]) * 60 + 30],
-  [String.raw`\bhalf\s+(?:an?\s+)?${HR}`, () => 30],
-  [String.raw`\b${NUM}${GAP}${MORE}${HR}\s+(?:and\s+)?(\d{1,2})${GAP}${MN}\b`, (m) => one(m[1]) * 60 + +m[2]],
-  [String.raw`\b(\d{1,3})h(?:(\d{1,2})m?|\s+(\d{1,2})\s*(?:m|mins?|minutes?))\b`, (m) => +m[1] * 60 + +(m[2] ?? m[3])],
-  [String.raw`\b${NUM}${GAP}${MORE}${HR}\b${THEN}`, (m) => one(m[1]) * 60],
-  [String.raw`\b(\d{1,3}(?:\.\d+)?)h\b${THEN}`, (m) => +m[1] * 60],
-  [String.raw`\b${NUM}${GAP}${MORE}${MN}\b`, (m) => one(m[1])],
-  [String.raw`\b(\d{1,5})m\b`, (m) => +m[1]],
-];
-const one = (n) => (/^(?:an?|another)$/.test(n) ? 1 : +n);
-const GRANT_IN = /\b(?:more|extra|additional|another)\b/;
-const GRANT_BEFORE = /\b(?:add(?:s|ed|ing)?|another|extra|additional|plus|extend(?:s|ed|ing)?(?:\s+\w+){0,2}\s+by)\s+$/;
-const GRANT_AFTER = /^\s*(?:more|extra|longer|extension)\b/;
-const UNREAD = new RegExp(String.raw`\d\s*-?\s*(?:h|m|${HR}|${MN})\b|\bhalf\b|\b(?:couple|few|several|dozen|hundred|thousand)\b[^.;,]{0,20}?\b(?:${HR}|${MN})\b|\b(?:an?|another)\s+${MORE}${HR}\b`);
-const WORDS = [
-  [new RegExp(String.raw`\b(${Object.keys(TENS).join('|')})(?:[-\s](${SMALL.slice(1, 10).join('|')}))?\b`, 'g'), (_, a, b) => String(TENS[a] + (b ? SMALL.indexOf(b) : 0))],
-  [new RegExp(String.raw`\b(${SMALL.slice(1).join('|')})\b`, 'g'), (w) => String(SMALL.indexOf(w))],
-];
+const AMOUNT = new RegExp([
+  String.raw`(?:\d+(?:[.,]\d+)*|[.,]\d+)\s*h\b`, // 1h, 1.5 h
+  String.raw`\d+(?:[.,]\d+)*|[.,]\d+`, // 60, 1,5, .5
+  String.raw`\b(?:an?|another|one)\s+(?:more\s+)?(?:minute|min)\b`,
+  String.raw`\b(?:hours?|hrs?)\b`,
+  String.raw`\b(?:half|quarter|couple|few|several|dozens?|hundreds?|thousands?|millions?|double|twice|triple)\b`,
+  String.raw`\b(?:${Object.keys(TENS).join('|')})(?:[-\s](?:${SMALL.slice(1, 10).join('|')})\b)?\b`,
+  String.raw`\b(?:${SMALL.join('|')})\b`,
+].join('|'), 'g');
+const TOTAL = /(?<!\bup\s)\bto\s+(?:\d+|[a-z]+ty\b|[a-z]+teen\b|ten\b)|\btotal\b/;
+const valueOf = (w) => {
+  if (/^\d+$/.test(w)) return +w;
+  const [a, b] = w.split(/[-\s]+/);
+  if (a in TENS) return TENS[a] + (b ? SMALL.indexOf(b) : 0);
+  return SMALL.includes(w) ? SMALL.indexOf(w) : NaN;
+};
+export function grantRefusal(words, n) {
+  const t = String(words ?? '').toLowerCase();
+  const other = [...t.matchAll(AMOUNT)].find((m) => valueOf(m[0]) !== n);
+  if (other) return `name an amount other than the ${n} minutes it grants: "${other[0]}"`;
+  const total = t.match(TOTAL);
+  if (total) return `name a total ("${total[0]}"), not an amount added`;
+  return null;
+}
 
-export function namedMinutes(words) {
-  let t = WORDS.reduce((s, [re, to]) => s.replace(re, to), ` ${String(words ?? '').toLowerCase()} `);
-  const found = [];
-  for (const [re, value] of AMOUNTS) {
-    t = t.replace(new RegExp(re, 'g'), (...m) => {
-      const at = m.at(-2);
-      const granted = GRANT_IN.test(m[0]) || GRANT_BEFORE.test(t.slice(0, at)) || GRANT_AFTER.test(t.slice(at + m[0].length));
-      found.push({ text: m[0].trim(), minutes: value(m), granted });
-      return ' '.repeat(m[0].length); // keeps the offsets of the amounts still to find
-    });
-  }
-  const left = t.match(UNREAD);
-  if (left) return { minutes: null, why: `they name a time that cannot be read for sure ("${left[0].trim()}")` };
-  const odd = found.find((f) => !(f.minutes > 0) || Math.abs(f.minutes - Math.round(f.minutes)) > 1e-9);
-  if (odd) return { minutes: null, why: `"${odd.text}" is not a whole number of minutes above 0` };
-  if (!found.length) return { minutes: null, why: null };
-  const counted = found.some((f) => f.granted) ? found.filter((f) => f.granted) : found;
-  const amounts = [...new Set(counted.map((f) => Math.round(f.minutes)))].sort((a, b) => a - b);
-  if (amounts.length > 1) return { minutes: null, why: `they name different amounts (${amounts.join(', ')} minutes)` };
-  return { minutes: amounts[0], why: null };
+// The approving option of a question that grants N minutes states it: an empty description becomes
+// "N more minutes"; any other must contain those words and, with the label, name no other amount.
+// Returns the option to store, or throws why not. Pure.
+export function grantOption(opt, n) {
+  const description = opt.description ?? `${n} more minutes`;
+  if (!description.toLowerCase().includes(`${n} more minutes`)) throw new Error(`the approving option "${opt.label}" must state "${n} more minutes" (or leave its description empty: it is then written for you)`);
+  const why = grantRefusal(`${opt.label} | ${description}`, n);
+  if (why) throw new Error(`the approving option "${opt.label}" ${why.replace(/^name /, 'names ').replace(`the ${n} minutes it grants`, `${n} minutes`)}`);
+  return { ...opt, description };
 }
