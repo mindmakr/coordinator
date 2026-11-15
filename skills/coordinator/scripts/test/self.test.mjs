@@ -89,6 +89,49 @@ test('the page: one keyed section per SECTIONS entry; state text escaped; COORDI
   assert.equal(parseContext('intro only').length, 0);
 });
 
+test('the page: a KPI row, then every section as a panel in a main and a side column; runs, units and questions linked', () => {
+  const a = oldRun('r-a', [unit('u1', 'pass', ['pass']), unit('u2', 'stopped', ['fail', 'fail'])], { outcome: 'partial', decision: 'done', at: at(120) });
+  a.notes.push({ kind: 'question', text: 'Merge now?', header: 'Merge', options: [{ label: 'Yes' }], at: at(5), history: [{ choices: ['Yes'], other: null, by: 'person', at: at(6) }] });
+  const b = oldRun('r-b', [unit('v1', 'building', []), unit('v2', 'open', [], { after: 'v1' })]);
+  b.notes.push({ kind: 'question', text: 'Which clock?', header: 'Clock', options: [{ label: 'Local' }], at: at(210), history: [] });
+  b.createdAt = at(200);
+  const m = selfModel({ runs: [a, b], context: '## Checks\n- `npm test`\n', nowMs: Date.parse(at(300)) });
+  const html = selfPage(m, Date.parse(at(300)), { ...staticCtx('', 0), runHref: (id) => `runs/${id}/hud.html` });
+  const k = [...html.matchAll(/<span class="k">([^<]+)<\/span>/g)].map((x) => x[1]);
+  assert.deepEqual(k, ['Age', 'Pass rate', 'Rounds to pass', 'Lessons', 'Open gaps']);
+  assert.ok(html.indexOf('class="kpis"') < html.indexOf('class="cols"'), 'the KPI row sits above the panels');
+  const main = html.slice(html.indexOf('<div class="main">'), html.indexOf('<div class="side">'));
+  const side = html.slice(html.indexOf('<div class="side">'));
+  const ids = (h) => [...h.matchAll(/<details class="panel[^"]*" data-d="self-([^"]+)"/g)].map((x) => x[1]);
+  assert.deepEqual(ids(main), SECTIONS.filter((s) => !s.side).map((s) => s.id));
+  assert.deepEqual(ids(side), SECTIONS.filter((s) => s.side).map((s) => s.id));
+  assert.deepEqual([...ids(main), ...ids(side)].sort(), ['active', 'age', 'chains', 'concluded', 'decisions', 'gaps', 'history', 'learning', 'memory', 'pc', 'plans', 'proposals', 'stats', 'study', 'trend'], 'every section of the old page, none lost');
+  for (const id of ['gaps', 'history', 'active', 'memory']) assert.match(html, new RegExp(`<section data-k="self-${id}"[^>]* id="self-${id}"`), `#self-${id} still lands`);
+  assert.match(html, /<h2>Trend over runs<\/h2>.*?<table class="t"/s, 'the trend is a shared table');
+  assert.match(html, /<b><a href="runs\/r-b\/units\/v2\.html">v2<\/a><\/b>/, 'a unit left in a plan links to its page');
+  assert.match(html, /<a href="runs\/r-b\/hud\.html#q1">q1<\/a> Clock/, 'an open question links to its card');
+  assert.match(html, /<a href="runs\/r-a\/hud\.html">r-a<\/a> <a href="runs\/r-a\/hud\.html#q1">q1<\/a>/, 'a decision links to its run and question');
+});
+
+test('the page: goals, reasons and Current link their PRs, issues and units; the chains note says a unit counts once', () => {
+  const goal = 'Fix acme/shop#12, PR https://github.com/acme/shop/pull/13';
+  const a = oldRun('r-a', [unit('u1', 'pass', ['pass'])], { outcome: 'done', decision: 'done', at: at(60) }, { goal });
+  const b = oldRun('r-b', [unit('v1', 'building', [])], null, { goal });
+  b.createdAt = at(200);
+  const html = selfPage(selfModel({ runs: [a, b], nowMs: Date.parse(at(300)) }), Date.parse(at(300)), { ...staticCtx('', 0), runHref: (id) => `runs/${id}/hud.html` });
+  const issue = '<a href="https://github.com/acme/shop/issues/12" target="_blank" rel="noopener noreferrer">acme/shop#12</a>';
+  const pr = '<a href="https://github.com/acme/shop/pull/13" target="_blank" rel="noopener noreferrer">https://github.com/acme/shop/pull/13</a>';
+  const sect = (id) => html.slice(html.indexOf(`data-k="self-${id}"`), html.indexOf('</section>', html.indexOf(`data-k="self-${id}"`)));
+  for (const id of ['history', 'plans']) { assert.ok(sect(id).includes(issue), `${id}: the issue`); assert.ok(sect(id).includes(pr), `${id}: the PR`); }
+  assert.match(html, /building <a class="ulink" href="runs\/r-b\/units\/v1\.html">v1<\/a> round 1/, 'Current links its unit');
+  const c1 = oldRun('r-c1', [unit('u1', 'stopped', ['fail'])], { outcome: 'stopped', decision: 'done', at: at(60) });
+  const c2 = oldRun('r-c2', [unit('u1', 'pass', ['pass'])], { outcome: 'done', decision: 'done', at: at(120) });
+  c2.createdAt = at(70); c2.continues = [{ run: 'r-c1', unit: 'u1' }];
+  const chained = selfModel({ runs: [c1, c2] });
+  assert.equal(chained.chains.length, 1);
+  assert.match(selfPage(chained, Date.now(), { ...staticCtx('', 0), runHref: (id) => `runs/${id}/hud.html` }), /counts once/);
+});
+
 test('cli: study needs sources, keeps to the per-run cap; lessons take --source; retro notes after close; self prints', () => {
   assert.equal(run('init', 's1', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--study-budget', '1').code, 0);
   assert.equal(state('s1').budget.maxStudies, 1);

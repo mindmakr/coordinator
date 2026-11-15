@@ -145,8 +145,19 @@ test('dashboard: serves every registered run, a second call reuses it, stop stop
   try {
     assert.match(first.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/\\?t=`));
     const page = await (await fetch(first.url)).text();
-    assert.match(page, /Coordinator · this PC/);
+    assert.match(page, /<div class="head"><h1>This PC<\/h1>/);
     assert.match(page, /payday-1275-onboarding/);
+    // The tabs: This PC (here) and Coordinator, a registered project's coordinator page, served read-only.
+    const tab = /<nav class="tabs" aria-label="Pages"><a href="\/\?t=[^"]+" aria-current="page">This PC<\/a><a href="(\/p\/[0-9a-f]{12}\/coordinator\?t=[^"]+)">Coordinator<\/a><\/nav>/.exec(page);
+    assert.ok(tab, 'tabs This PC and Coordinator');
+    const coord = await fetch(new URL(tab[1].replace(/&amp;/g, '&'), first.url));
+    assert.equal(coord.status, 200);
+    const coordPage = await coord.text();
+    assert.match(coordPage, /<div class="head"><h1>Coordinator<\/h1>/);
+    assert.match(coordPage, /<a href="\/\?t=[^"]+">This PC<\/a><a href="\/p\/[0-9a-f]{12}\/coordinator\?t=[^"]+" aria-current="page">Coordinator<\/a>/);
+    assert.match(coordPage, /data-path="\/p\/[0-9a-f]{12}\/coordinator"/, 'the live page refreshes this path');
+    assert.match(coordPage, /href="\/p\/[0-9a-f]{12}\/run\/payday-[^"?]+\?t=/, 'its runs link to their read-only pages');
+    assert.equal((await fetch(new URL(`/p/000000000000/coordinator?t=${new URL(first.url).searchParams.get('t')}`, first.url))).status, 404, 'unknown project key');
     assert.match(page, /payday-onboarding-filter/);
     const link = /href="(\/p\/[0-9a-f]{12}\/run\/payday-1275-onboarding\?t=[^"]+)"/.exec(page);
     assert.ok(link, 'the run links to its read-only page');
@@ -249,10 +260,10 @@ test('run cards on This PC show when the run started, when it ended or should en
   const start = at('live1').createdAt; const end = at('over1').closed.at;
   const nowMs = Date.parse(start) + 3 * 3600_000;
   const pc = pcModel(readRegistry({ home }).filter((e) => ['live1', 'over1'].includes(e.run)), { nowMs });
-  const card = (html, run) => html.split('<li ').find((li) => li.includes(`>${run}<`));
+  const card = (html, run) => html.split('<tr>').find((tr) => tr.includes(`>${run}<`));
   const html = pcSection({ pc }, {});
   const live = card(html, 'live1'); const over = card(html, 'over1');
-  assert.ok(live.includes(`started <time datetime="${start}" class="abs"`), 'the start, as a clock time the page localises');
+  assert.ok(live.includes(`<time datetime="${start}" class="abs"`), 'the start, as a clock time the page localises');
   assert.match(live, /ending: no estimate yet/, 'no estimate yet is said, not left out');
   assert.match(live, /age <time datetime="[^"]+" class="age" title="[^"]+ UTC">3 h<\/time>/, 'the age, from the start to now');
   assert.ok(over.includes(`ended <time datetime="${end}" class="abs"`), 'a finished run says when it ended');
@@ -267,6 +278,54 @@ test('run cards on This PC show when the run started, when it ended or should en
   assert.match(served, /const ageText = /);
   assert.match(served, /classList\.contains\('age'\)/);
   assert.match(served, /classList\.contains\('abs'\)/);
+});
+
+test('This PC page: tabs, KPI row, the six panels in a main and side column, and every run, unit and question linked', () => {
+  assert.equal(init('pcpage', 'pa1').code, 0);
+  assert.equal(cli('pcpage', ['add', 'pa1', 'u1', '--bar', 'b', '--title', 'Base']).code, 0);
+  assert.equal(cli('pcpage', ['add', 'pa1', 'u2', '--bar', 'b', '--after', 'u1', '--title', 'Totals']).code, 0);
+  assert.equal(cli('pcpage', ['ask', 'pa1', '--question', 'Ship it?', '--header', 'Ship', '--option', 'Yes|now', '--option', 'No|later']).code, 0);
+  assert.equal(init('pcpage', 'pa2').code, 0);
+  assert.equal(cli('pcpage', ['close', 'pa2', '--outcome', 'stopped', '--reason', 'test']).code, 0);
+  const nowMs = Date.now();
+  const pc = pcModel(readRegistry({ home }).filter((e) => ['pa1', 'pa2'].includes(e.run)), { nowMs });
+  const key = pc.groups[0].key;
+  const ctx = { live: { token: 'tok', nonce: 'n' }, pages: [{ path: '/', label: 'This PC', href: '/?t=tok' }], answerForm: { token: 'tok' }, pcHref: (k, r, sub = '') => `/p/${k}/run/${r}${sub}?t=tok` };
+  const html = pcPage(pc, nowMs, ctx, []);
+  assert.match(html, /<nav class="tabs" aria-label="Pages"><a href="\/\?t=tok" aria-current="page">This PC<\/a><a href="\/p\/[0-9a-f]{12}\/coordinator\?t=tok">Coordinator<\/a><\/nav>/);
+  const k = [...html.matchAll(/<span class="k">([^<]+)<\/span><span class="v">([^<]+)<\/span>/g)].map((x) => `${x[1]} ${x[2]}`);
+  assert.deepEqual(k.slice(0, 4), ['Active 1', 'Questions 1', 'Finished today 1', 'Loose ends 0']);
+  const main = html.slice(html.indexOf('<div class="main">'), html.indexOf('<div class="side">'));
+  const side = html.slice(html.indexOf('<div class="side">'));
+  const titles = (h) => [...h.matchAll(/<details class="panel[^"]*" data-d="([^"]+)"[^>]*?( open)?><summary>.*?<h2>([^<]+)<\/h2>/g)].map((x) => `${x[3]}${x[2] ? '' : ' (closed)'}`);
+  assert.deepEqual(titles(main), ['Questions', 'Runs', 'Blocked units']);
+  assert.deepEqual(titles(side), ['Loose ends', 'Coordinator', 'Concluded (closed)']);
+  assert.ok(main.includes('<form'), 'the answer form is in Questions');
+  assert.ok(main.includes(`href="/p/${key}/run/pa1?t=tok"`), 'the run links to its page');
+  assert.ok(main.includes(`href="/p/${key}/run/pa1/unit/u2?t=tok"`), 'the blocked unit links to its page');
+  assert.match(main, />after u1<\/span>/);
+  assert.ok(side.includes(`href="/p/${key}/run/pa2?t=tok"`), 'a concluded run links to its page');
+  assert.ok(side.includes(`href="/p/${key}/coordinator?t=tok"`), 'the Coordinator panel opens the project\'s coordinator page');
+});
+
+test('This PC page: a goal, a concluded reason and the Current column link their PRs, issues and units', () => {
+  const goal = 'Fix acme/shop#12, PR https://github.com/acme/shop/pull/13';
+  assert.equal(cli('pclinks', ['init', 'pl1', '--goal', goal, '--bar', 'b', '--fence', 'f']).code, 0);
+  assert.equal(cli('pclinks', ['add', 'pl1', 'u1', '--bar', 'b']).code, 0);
+  assert.equal(cli('pclinks', ['freeze', 'pl1']).code, 0);
+  assert.equal(cli('pclinks', ['start', 'pl1', 'u1']).code, 0);
+  assert.equal(cli('pclinks', ['init', 'pl2', '--goal', 'g', '--bar', 'b', '--fence', 'f']).code, 0);
+  assert.equal(cli('pclinks', ['close', 'pl2', '--outcome', 'stopped', '--reason', 'see acme/shop#14']).code, 0);
+  const nowMs = Date.now();
+  const pc = pcModel(readRegistry({ home }).filter((e) => ['pl1', 'pl2'].includes(e.run)), { nowMs });
+  const key = pc.groups[0].key;
+  const ctx = { live: { token: 'tok', nonce: 'n' }, pages: [{ path: '/', label: 'This PC', href: '/?t=tok' }], answerForm: { token: 'tok' }, pcHref: (k, r, sub = '') => `/p/${k}/run/${r}${sub}?t=tok` };
+  const html = pcPage(pc, nowMs, ctx, []);
+  const a = (url, label) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  assert.ok(html.includes(a('https://github.com/acme/shop/issues/12', 'acme/shop#12')), 'the issue in the goal');
+  assert.ok(html.includes(a('https://github.com/acme/shop/pull/13', 'https://github.com/acme/shop/pull/13')), 'the PR URL in the goal');
+  assert.ok(html.includes(a('https://github.com/acme/shop/issues/14', 'acme/shop#14')), 'the issue in a concluded reason');
+  assert.ok(html.includes(`building <a class="ulink" href="/p/${key}/run/pl1/unit/u1?t=tok">u1</a> round 1`), 'Current links its unit');
 });
 
 // Design 5.7: runs whose state folder is in the system temporary folder stay off the PC list.
@@ -342,7 +401,7 @@ test('B2: register entries for temporary state folders are not shown by readRegi
       child.on('exit', (c) => fail(new Error(`exited ${c}`)));
     });
     const page = await (await fetch(first.url)).text();
-    assert.match(page, /Coordinator · this PC/);
+    assert.match(page, /<h1>This PC<\/h1>/);
     assert.doesNotMatch(page, /old-q5|new-run/);
   } finally { child.kill(); }
   // list --all: hidden, and pruned from the file.
