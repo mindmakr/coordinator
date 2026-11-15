@@ -345,10 +345,11 @@ function runKpis(v) {
 
 const STATUS_TONE = { running: 'ok', waiting: 'ask', paused: 'retry', finishing: 'done' };
 const OUTCOME_TONE = { done: 'ok', partial: 'ask', stopped: 'bad' };
-// The breadcrumb: This PC (when the page knows where it is), the project, the run, and below it a unit.
-export function runCrumbs(v, ctx, unit = null) {
+// The breadcrumb: This PC (when the page knows where it is), the project, the run, and below it a unit or one of
+// the run's pages (Maps, Report, Retro, Project map).
+export function runCrumbs(v, ctx, sub = null) {
   const project = v.project ?? ctx.project ?? null;
-  return [...(ctx.pc ? [ctx.pc] : []), ...(project ? [{ label: project }] : []), unit ? { label: v.id, href: ctx.home } : { label: v.id }, ...(unit ? [{ label: unit }] : [])];
+  return [...(ctx.pc ? [ctx.pc] : []), ...(project ? [{ label: project }] : []), sub ? { label: v.id, href: ctx.home } : { label: v.id }, ...(sub ? [{ label: sub }] : [])];
 }
 export const runFlag = (st) => (st ? toneChip(st.word, st.concluded ? OUTCOME_TONE[st.outcome] : STATUS_TONE[st.kind]) : '');
 

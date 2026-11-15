@@ -4,7 +4,7 @@
 // Selected (live only: the walkable maps' selection) and Export. To add a map, add
 // an entry: { id, title, open, render(view, ctx, nowMs) }.
 import { readFileSync } from 'node:fs';
-import { liveCtx, staticCtx } from './hud.mjs';
+import { liveCtx, runCrumbs, staticCtx } from './hud.mjs';
 import { webUrl } from './links.mjs';
 import { blk, cols, esc, heading, page, panel, table, toneChip, typeTag, when } from './parts.mjs';
 import { behaviourSvg, flowSvg, heatSvg, mindSvg, relevanceSvg } from './mapsvg.mjs';
@@ -108,5 +108,5 @@ export function mapsPage(v, nowMs = Date.now(), ctx = null) {
     // One stats panel per unit, shared by every map's box for that unit (lib/maptips.mjs).
     blk('map-tips', unitTips(v, ctx, nowMs)),
   ].join('\n');
-  return page({ title: `Maps · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/maps`, closed: !v.open, crumbs: [{ label: v.id, href: ctx.home }, { label: 'Maps' }] });
+  return page({ title: `Maps · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/maps`, closed: !v.open, crumbs: runCrumbs(v, ctx, 'Maps') });
 }

@@ -198,6 +198,7 @@ test('maps page: the shared shell, a panel per map, side panels Legend, Selected
   const v = viewOf([unit('u1', { behaviours: [{ id: 'B1', text: 't', status: 'pass' }] }), unit('u2', { after: 'u1' })]);
   const html = mapsPage(v, T0, staticCtx('', 0));
   assert.match(html, /<nav class="crumbs"[^>]*>[\s\S]*?<a href="hud.html">r<\/a>[\s\S]*?<span class="here" aria-current="location">Maps<\/span>/);
+  assert.match(mapsPage(v, T0, { ...staticCtx('', 0), pc: { label: 'This PC', href: '/pc' }, project: 'proj' }), /<a href="\/pc">This PC<\/a><span class="sep"[^>]*>\/<\/span><span>proj<\/span><span class="sep"[^>]*>\/<\/span><a href="hud.html">r<\/a>/, 'This PC and the project, as on the run page');
   assert.match(html, /<div class="head"><h1>Maps<\/h1><span class="muted">2 units · 1 behaviour · 0 evidence items · continue · updated /);
   const titles = [...html.matchAll(/<details class="panel"[^>]*><summary>[\s\S]*?<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);
   assert.deepEqual(titles, ['Mind map', 'Flow', 'Activity by hour', 'Behaviours', 'Goal relevance', 'Calls', 'Legend', 'Export']);

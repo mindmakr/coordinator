@@ -3,7 +3,7 @@
 // what past runs suggest, its upstream proposals and its escapes. Pure: the
 // CLI passes the run, the lessons and the closed runs in. Also decides when a
 // run's retro is pending, for the dashboard's banner and close's warning.
-import { liveCtx, staticCtx } from './hud.mjs';
+import { liveCtx, runCrumbs, staticCtx } from './hud.mjs';
 import { linkify } from './links.mjs';
 import { blk, cols, esc, heading, kpis, mdActions, page, panel, stamp, table, toneChip } from './parts.mjs';
 import { sameGap, stats } from './rules.mjs';
@@ -147,5 +147,5 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
     blk('kpis', strip),
     cols(main, side),
   ].join('\n')}</div>`;
-  return page({ title: `Retro · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/retro`, closed: !v.open, crumbs: [{ label: v.id, href: ctx.home }, { label: 'Retro' }] });
+  return page({ title: `Retro · ${v.id}`, body, ctx, path: `${ctx.base ?? ''}/retro`, closed: !v.open, crumbs: runCrumbs(v, ctx, 'Retro') });
 }

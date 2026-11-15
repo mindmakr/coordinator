@@ -99,7 +99,7 @@ function runRow({ r, name, here }, ctx, nowMs) {
   return [{ html: statusChip(st) }, { html: runCell }, { html: project }, { html: progress }, { html: st.concluded ? linkify(String(st.reason).replace(/\.*$/, ''), r.repo) : linkUnits(st.doing, st.current, (id) => pcLink(ctx, r.key, r.run, `/unit/${encodeURIComponent(id)}`)) }, { html: t.end }, { html: t.start }, updated];
 }
 const RUN_COLS = ['Status', 'Run', 'Project', 'Progress', 'Current', 'ETA', 'Started', 'Updated'].map((label) => ({ label }));
-const runsTable = (list, ctx, nowMs, empty) => table({ cols: RUN_COLS, rows: list.map((x) => runRow(x, ctx, nowMs)), min: 980, max: 420, empty });
+const runsTable = (list, ctx, nowMs, empty, max = 420) => table({ cols: RUN_COLS, rows: list.map((x) => runRow(x, ctx, nowMs)), min: 980, max, empty });
 
 // The "This PC" runs: every registered run on this machine, active first, this project's first among equals.
 export function pcSection(m, ctx) {
@@ -206,13 +206,13 @@ export function pcPage(pc, nowMs, ctx, waiting = []) {
   const sub = `${count(pc.runs, 'run')} · ${count(pc.groups.length, 'project')} · skill ${pc.version}${tools.length ? ` · ${tools.join(', ')}` : ''}`;
   const main = [
     panel({ id: 'pc-questions', title: 'Questions', count: asked, tone: asked ? 'ask' : '', bodyHtml: blk('pc-needs', needsSection(pc, ctx), 'section', ' id="pc-needs"') }),
-    panel({ id: 'pc-runs', title: 'Runs', count: active.length, flush: active.length > 0, bodyHtml: blk('pc-runs', runsTable(active, ctx, nowMs, 'No active run.'), 'section', ' id="self-pc"') }),
-    panel({ id: 'pc-blocked', title: 'Blocked units', count: blocked, bodyHtml: blk('pc-blocked', blockedRows(pc, ctx), 'section', ' id="pc-blocked"') }),
+    panel({ id: 'pc-runs', title: 'Runs', count: active.length, flush: active.length > 0, bodyHtml: blk('pc-runs', runsTable(active, ctx, nowMs, 'No active run.', 380), 'section', ' id="self-pc"') }),
+    panel({ id: 'pc-blocked', title: 'Blocked units', count: blocked, scroll: 240, bodyHtml: blk('pc-blocked', blockedRows(pc, ctx), 'section', ' id="pc-blocked"') }),
   ].join('');
   const side = [
-    panel({ id: 'pc-loose', title: 'Loose ends', count: loose.length, bodyHtml: blk('pc-loose', looseEnds(pc, waiting, ctx), 'section', ' id="pc-loose"') }),
+    panel({ id: 'pc-loose', title: 'Loose ends', count: loose.length, scroll: 300, bodyHtml: blk('pc-loose', looseEnds(pc, waiting, ctx), 'section', ' id="pc-loose"') }),
     panel({ id: 'pc-coordinator', title: 'Coordinator', metaHtml: coord ? `<a href="${esc(coord)}">Open</a>` : '', bodyHtml: blk('pc-coordinator', coordinatorSummary(pc, active.length, tools, ctx)) }),
-    panel({ id: 'pc-concluded', title: 'Concluded', count: over.length, open: false, bodyHtml: blk('pc-concluded', concludedRows(over, ctx, nowMs), 'section', ' id="pc-concluded"') }),
+    panel({ id: 'pc-concluded', title: 'Concluded', count: over.length, open: false, scroll: 260, bodyHtml: blk('pc-concluded', concludedRows(over, ctx, nowMs), 'section', ' id="pc-concluded"') }),
   ].join('');
   const body = [
     blk('head', heading('This PC', sub)),
