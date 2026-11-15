@@ -4,7 +4,8 @@
 // map.html needs no script. Nodes and rows link to the files on GitHub when
 // the repo is known. Same shell and theme as the dashboard (lib/parts.mjs).
 import { anchor, esc } from '../links.mjs';
-import { blk, chip, page, toggle } from '../parts.mjs';
+import { blk, cols, heading, kpis, page, panel, table, toneChip } from '../parts.mjs';
+import { count } from '../self.mjs';
 import { TEST } from './js.mjs';
 
 const MAX_NODES = 60;
@@ -89,7 +90,9 @@ export function fileUrl(snap, file, line = null) {
 }
 const treeUrl = (snap, dir) => (ghBase(snap) ? `${ghBase(snap)}/tree/${ref(snap)}/${dir === '.' ? '' : dir.split('/').map(encodeURIComponent).join('/')}` : null);
 const fileLink = (snap, file, line = null, label = null) => { const u = fileUrl(snap, file, line); const text = label ?? `${file}${line ? `:${line}` : ''}`; return u ? anchor(u, text) : `<code>${esc(text)}</code>`; };
-const refLink = (snap, r) => { const i = r.lastIndexOf(':'); return fileLink(snap, r.slice(0, i), Number(r.slice(i + 1)) || null); };
+// The side panel is narrow: a file is its name and line, the full path in the hover text and in the link's address.
+const shortLink = (snap, file, line = null) => `<span title="${esc(file)}">${fileLink(snap, file, line, `${file.split('/').pop()}${line ? `:${line}` : ''}`)}</span>`;
+const shortRef = (snap, r) => { const i = r.lastIndexOf(':'); return shortLink(snap, r.slice(0, i), Number(r.slice(i + 1)) || null); };
 const few = (items, n = 4) => items.slice(0, n).join('<br>') + (items.length > n ? `<br><span class="meta">+${items.length - n} more</span>` : '');
 const clipLabel = (s, n = 26) => (s.length > n ? `…${s.slice(-(n - 1))}` : s);
 
@@ -150,17 +153,16 @@ function styles(gr, areaIds) {
 :root:has(#f-cycles:not(:checked)) .e.back{opacity:0}
 :root:has(#f-w3:checked) .e.w1,:root:has(#f-w10:checked) :is(.e.w1,.e.w3){display:none}
 :root:has(#f-tests:not(:checked)) .t{display:none}
-.maptable{width:100%;border-collapse:collapse;font-size:13px}.maptable th,.maptable td{text-align:left;padding:5px 8px;border-top:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
-.maptable code{font:12px var(--mono)}.mapfilters{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted);margin:10px 0}
+.mapfilters{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted);margin:10px 0}
 .mapfilters fieldset{display:flex;flex-wrap:wrap;gap:6px;border:0;padding:0;margin:0;align-items:center}.mapfilters legend{float:left;margin-right:6px}
 ${per}${areas}</style>`;
 }
 
-function rows(list, render, head, rowClass = () => '') {
-  const shown = list.slice(0, ROWS);
-  const body = shown.map((x) => `<tr class="${rowClass(x)}">${render(x).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
-  return list.length ? `<table class="maptable"><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>${list.length > ROWS ? `<p class="meta">Showing ${ROWS} of ${list.length}; the rest are in map.json.</p>` : ''}`
-    : '<p class="empty">None found.</p>';
+// A table of the shared kit; each row keeps its area and test classes, so the filters hide it.
+function rows(list, render, head, rowClass = () => '', min = 0) {
+  const shown = list.slice(0, ROWS).map((x) => ({ cls: rowClass(x), cells: render(x).map((html) => ({ html })) }));
+  return table({ cols: head.map((label) => ({ label })), rows: shown, empty: 'None found.', max: 360, min })
+    + (list.length > ROWS ? `<p class="meta">Showing ${ROWS} of ${list.length}; the rest are in map.json.</p>` : '');
 }
 
 export function mapPage(snap, ctx, run) {
@@ -172,32 +174,33 @@ export function mapPage(snap, ctx, run) {
   const commit = b.commit ? (ghBase(snap) && b.pushed ? anchor(`${ghBase(snap)}/commit/${b.commit}`, b.commit.slice(0, 10)) : esc(b.commit.slice(0, 10))) : '';
   const kinds = (k) => snap.surfaces.filter((s) => s.kind === k);
   const msgs = kinds('message');
+  const routes = kinds('route'); const screens = kinds('screen');
   const filters = '<form class="mapfilters" aria-label="Filter the map">'
     + `<fieldset><legend>Areas</legend>${areas.map((a) => `<label class="fchip"><input type="checkbox" id="f-a${areaIds.get(a)}" checked><span>${esc(a)}</span></label>`).join('')}</fieldset>`
     + '<fieldset><legend>Links</legend>'
     + ['all', '3', '10'].map((w) => `<label class="fchip"><input type="radio" name="w" id="f-w${w}"${w === 'all' ? ' checked' : ''}><span>${w === 'all' ? 'All' : `${w}+ imports`}</span></label>`).join('') + '</fieldset>'
     + '<fieldset><legend>Show</legend><label class="fchip"><input type="checkbox" id="f-tests" checked><span>Tests</span></label><label class="fchip"><input type="checkbox" id="f-cycles"><span>Cycles</span></label></fieldset></form>';
-  const body = [
-    styles(gr, areaIds),
-    `<a class="back" href="${esc(ctx.home)}">← ${esc(run)} dashboard</a>`,
-    blk('map-head', `<header class="run"><h1>Project map · ${esc(b.root ?? 'project')}</h1>${b.partial ? chip('partial', 'fail') : ''}`
-      + `<span class="meta">build ${b.n ?? 0}${b.at ? ` · ${esc(b.at.slice(0, 16).replace('T', ' '))} UTC` : ''}${commit ? ` · commit ${commit}` : ''}${b.unit ? ` · after ${esc(b.unit)}` : ''} · ${b.scanned ?? 0} files scanned in ${((b.ms?.total ?? 0) / 1000).toFixed(1)} s</span></header>`
-      + `<p class="say">${snap.modules.length} modules, ${snap.helpers.length} shared helpers, ${snap.settings.length} settings, ${kinds('route').length} routes, ${kinds('screen').length} screens, ${msgs.length} message keys in use or missing a locale, ${snap.reuse.length} reuse candidates.</p>`),
-    '<h2>Imports</h2>',
-    blk('map-graph', `${filters}<p class="meta">${gr.level === 'file' ? 'One box per file' : 'One box per folder'}; arrows point from the importer to what it imports, dashed ones close a cycle (shown with Cycles, or on hover), a green dot marks routes or screens. Hover, focus or tap a box to light its links and see its files and helpers; Escape closes; click it to open it on GitHub.</p>`
-      + `<div class="mapbox">${svg(snap, gr, areaIds)}</div>${moduleTips(snap, gr)}`),
-    '<h2>Surfaces</h2>',
-    blk('map-routes', toggle('map-routes', `Routes · ${kinds('route').length}`, rows(kinds('route'), (s) => [`<code>${esc(s.method)} ${esc(s.path)}</code>`, fileLink(snap, s.file, s.line), few(s.services.map((f) => fileLink(snap, f)))], ['Route', 'Declared in', 'Behind it'], (s) => rowArea(s.file)))),
-    blk('map-screens', toggle('map-screens', `Screens · ${kinds('screen').length}`, rows(kinds('screen'), (s) => [`<code>${esc(s.path)}</code>`, fileLink(snap, s.file), (s.calls ?? []).map((c) => `<code>${esc(c.split(' ').slice(0, 2).join(' ').replace(/^route:/, ''))}</code>`).join('<br>') || '<span class="meta">no calls found</span>'], ['Screen', 'File', 'Routes it calls'], (s) => rowArea(s.file)))),
-    blk('map-messages', `<p class="meta">${b.messages?.keys ?? 0} message keys in ${(b.messages?.catalogs ?? []).length} catalog folders (${esc((b.messages?.catalogs ?? []).join('; '))}); ${b.messages?.unused ?? 0} not found in code${b.messages?.unknownLookups ? `; ${b.messages.unknownLookups} lookups match no key` : ''}${msgs.some((m) => m.missing) ? `; ${msgs.filter((m) => m.missing).length} keys miss a locale` : ''}${b.messages?.from ? ` (counted in ${esc(b.messages.from)})` : ''}. Keys built at runtime are not counted.</p>`),
-    '<h2>Settings</h2>',
-    blk('map-settings', toggle('map-settings', `Env vars and settings keys · ${snap.settings.length}`, rows([...snap.settings].sort((x, y) => y.writes.length - x.writes.length || y.reads.length - x.reads.length), (s) => [`<code>${esc(s.id)}</code>`,
-      s.reads.slice(0, 4).map((r) => refLink(snap, r)).join('<br>') + (s.reads.length > 4 ? `<br><span class="meta">+${s.reads.length - 4}</span>` : ''),
-      s.writes.slice(0, 4).map((r) => refLink(snap, r)).join('<br>') + (s.writes.length > 4 ? `<br><span class="meta">+${s.writes.length - 4}</span>` : '') + (s.declared ? `<br><span class="meta">declared in ${esc(s.declared.join(', '))}</span>` : '')], ['Key', 'Read at', 'Written at']))),
-    '<h2>Shared helpers</h2>',
-    blk('map-helpers', toggle('map-helpers', `Used by two or more files · ${snap.helpers.length}`, rows([...snap.helpers].sort((x, y) => y.usedBy.length - x.usedBy.length), (h) => [`<code>${esc(h.name)}</code>`, fileLink(snap, h.file, h.line), `${h.usedBy.length}`], ['Helper', 'Defined in', 'Used by'], (h) => rowArea(h.file)))),
-    '<h2>Reuse candidates</h2>',
-    blk('map-reuse', toggle('map-reuse', `Functions with the same shape · ${snap.reuse.length}`, rows(snap.reuse, (r) => [`${r.lines}`, r.fns.map((f) => { const [file, rest] = f.split('#'); const [name, line] = rest.split(':'); return `${fileLink(snap, file, Number(line), `${file}#${name}`)}`; }).join('<br>')], ['Lines', 'Where']))),
-  ].join('\n');
-  return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map` });
+  const secs = ((b.ms?.total ?? 0) / 1000).toFixed(1);
+  const head = heading(`Project map · ${b.root ?? 'project'}`, [`build ${b.n ?? 0}`, b.at && `${b.at.slice(0, 16).replace('T', ' ')} UTC`, b.unit && `after ${b.unit}`].filter(Boolean).join(' · '))
+    + kpis([{ k: 'Files', v: b.scanned ?? 0, s: `scanned in ${secs} s` }, { k: 'Modules', v: snap.modules.length, s: count(snap.helpers.length, 'shared helper') },
+      { k: 'Surfaces', v: routes.length + screens.length, s: `${count(routes.length, 'route')}, ${count(screens.length, 'screen')}` }, { k: 'Settings', v: snap.settings.length, s: count(msgs.length, 'message key') },
+      { k: 'Reuse candidates', v: snap.reuse.length }]);
+  const imports = blk('map-graph', `${filters}<p class="meta">${gr.level === 'file' ? 'One box per file' : 'One box per folder'} · arrow: imports · dashed: cycle · dot: routes or screens</p>`
+    + `<div class="mapbox">${svg(snap, gr, areaIds)}</div>${moduleTips(snap, gr)}`);
+  const surfaces = blk('map-routes', `<h3 class="sub">Routes</h3>${rows(routes, (s) => [`<code>${esc(s.method)} ${esc(s.path)}</code>`, fileLink(snap, s.file, s.line), few(s.services.map((f) => fileLink(snap, f)))], ['Route', 'Declared in', 'Behind it'], (s) => rowArea(s.file))}`)
+    + blk('map-screens', `<h3 class="sub">Screens</h3>${rows(screens, (s) => [`<code>${esc(s.path)}</code>`, fileLink(snap, s.file), (s.calls ?? []).map((c) => `<code>${esc(c.split(' ').slice(0, 2).join(' ').replace(/^route:/, ''))}</code>`).join('<br>') || '<span class="meta">no calls found</span>'], ['Screen', 'File', 'Routes it calls'], (s) => rowArea(s.file))}`)
+    + blk('map-messages', `<p class="meta">${b.messages?.keys ?? 0} message keys in ${(b.messages?.catalogs ?? []).length} catalog folders (${esc((b.messages?.catalogs ?? []).join('; '))}); ${b.messages?.unused ?? 0} not found in code${b.messages?.unknownLookups ? `; ${b.messages.unknownLookups} lookups match no key` : ''}${msgs.some((m) => m.missing) ? `; ${msgs.filter((m) => m.missing).length} keys miss a locale` : ''}${b.messages?.from ? ` (counted in ${esc(b.messages.from)})` : ''}. Keys built at runtime are not counted.</p>`);
+  const settings = blk('map-settings', rows([...snap.settings].sort((x, y) => y.writes.length - x.writes.length || y.reads.length - x.reads.length), (s) => [`<code>${esc(s.id)}</code>`,
+    s.reads.slice(0, 4).map((r) => shortRef(snap, r)).join('<br>') + (s.reads.length > 4 ? `<br><span class="meta">+${s.reads.length - 4}</span>` : ''),
+    s.writes.slice(0, 4).map((r) => shortRef(snap, r)).join('<br>') + (s.writes.length > 4 ? `<br><span class="meta">+${s.writes.length - 4}</span>` : '') + (s.declared ? `<br><span class="meta">declared in ${esc(s.declared.join(', '))}</span>` : '')], ['Key', 'Read at', 'Written at']));
+  const helpers = blk('map-helpers', rows([...snap.helpers].sort((x, y) => y.usedBy.length - x.usedBy.length), (h) => [`<code>${esc(h.name)}</code>`, shortLink(snap, h.file, h.line), `${h.usedBy.length}`], ['Helper', 'Defined in', 'Used by'], (h) => rowArea(h.file)));
+  const reuse = blk('map-reuse', rows(snap.reuse, (r) => [`${r.lines}`, r.fns.map((f) => { const [file, rest] = f.split('#'); const [name, line] = rest.split(':'); return `${fileLink(snap, file, Number(line), `${file}#${name}`)}`; }).join('<br>')], ['Lines', 'Where']));
+  const main = panel({ id: 'imports', title: 'Imports', count: snap.modules.length, metaHtml: commit ? `commit ${commit}` : '', bodyHtml: imports })
+    + panel({ id: 'surfaces', title: 'Surfaces', count: routes.length + screens.length, bodyHtml: surfaces })
+    + panel({ id: 'reuse', title: 'Reuse candidates', count: snap.reuse.length, bodyHtml: reuse });
+  // No "Touched by this run" panel: the snapshot this page is given does not say which unit changed which file.
+  const side = panel({ id: 'settings', title: 'Settings', count: snap.settings.length, bodyHtml: settings })
+    + panel({ id: 'helpers', title: 'Shared helpers', count: snap.helpers.length, open: false, bodyHtml: helpers });
+  const body = [styles(gr, areaIds), blk('map-head', head), `<div class="pmap-page">${cols(main, side)}</div>`].join('\n');
+  return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map`, crumbs: [{ label: run, href: ctx.home }, { label: 'Project map' }], flag: b.partial ? toneChip('Partial', 'bad') : '' });
 }

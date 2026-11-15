@@ -152,3 +152,8 @@ test('lines from one box start apart, in the order of where they go, and inside 
   assert.ok(starts.every((y) => y > 0 && y < 46));
   assert.equal(port(1)[1], 123, 'a single line ends at the middle');
 });
+
+test('live maps page: a selection opens the Selected panel when it was closed', () => {
+  const html = mapsPage(chain(), T0, { token: 't', nonce: 'n' });
+  assert.match(html, /box\.closest\('details'\)[^\n]*\.open = true/);
+});
