@@ -1,6 +1,7 @@
 // In-memory adapter: same contract as postgres.mjs. For tests and a quick
 // local look; everything is gone on restart (the repo still has it all).
 import { alertTables } from '../alerts/store.mjs';
+import { atMs } from './index.mjs';
 
 const clone = (v) => (v === undefined ? undefined : structuredClone(v));
 const key = (...p) => p.join('\u0000');
@@ -149,10 +150,11 @@ export function memoryDb() {
     async finishCommand(installationId, commentId, status) { const c = commands.get(key(installationId, commentId)); if (c) c.status = status; },
     async releaseCommand(installationId, commentId) { commands.delete(key(installationId, commentId)); },
 
-    async putSession(s) { sessions.set(s.idHash, clone(s)); },
-    async session(idHash) {
+    // at: the app clock's time in ms; a session ends by the clock that dated it (session.mjs), not the wall clock.
+    async putSession(s, at) { atMs(at); sessions.set(s.idHash, clone(s)); },
+    async session(idHash, at) {
       const s = sessions.get(idHash);
-      if (s && s.expiresAt <= Date.now()) { sessions.delete(idHash); return null; }
+      if (s && s.expiresAt <= atMs(at)) { sessions.delete(idHash); return null; }
       return clone(s) ?? null;
     },
     async updateSessionTokens(idHash, t) { const s = sessions.get(idHash); if (s) Object.assign(s, clone(t)); },

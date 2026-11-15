@@ -3,16 +3,15 @@
 // in that project's state folder, with the page's token and origin required and nothing written on a refusal.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { needsSection, pcModel } from '../lib/dashboard.mjs';
-import { loadRun, updateRun } from '../lib/events.mjs';
+import { loadRun } from '../lib/events.mjs';
 import { childEnv, dashboardCaller, DASHBOARD_HARNESS, pcAnswer, VIA_ENV } from '../lib/pcanswer.mjs';
-import { answer } from '../lib/questions.mjs';
 import { VERSION } from '../lib/version.mjs';
 import { readRegistry } from '../lib/registry.mjs';
 
@@ -36,6 +35,19 @@ const setup = (name, run, header) => {
 const qOf = (name, run, id) => loadRun(join(state(name), 'runs', run)).notes.filter((n) => n.kind === 'question')[Number(id.slice(1)) - 1];
 const eventsSize = (name, run) => readFileSync(join(state(name), 'runs', run, 'events.jsonl'), 'utf8').length;
 const freePort = () => new Promise((ok) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); });
+// Takes the run's lock through updateRun, waits under it until the go file appears, then answers as the lead.
+const HOLD_AND_ANSWER = `
+import { existsSync } from 'node:fs';
+import { updateRun } from ${JSON.stringify(new URL('../lib/events.mjs', import.meta.url).href)};
+import { answer } from ${JSON.stringify(new URL('../lib/questions.mjs', import.meta.url).href)};
+const [dir, q, go, skill] = process.argv.slice(1);
+const nap = new Int32Array(new SharedArrayBuffer(4));
+updateRun(dir, { kind: 'answer', by: { harness: 'test', skill } }, (s) => {
+  for (let i = 0; i < 1200 && !existsSync(go); i++) Atomics.wait(nap, 0, 0, 25);
+  if (!existsSync(go)) throw new Error('no go file');
+  answer(s, q, { choices: ['No'], by: 'lead', via: 'cli' });
+});
+`;
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 test.after(() => {
   // Never leave a dashboard behind: stop the one this file started, if it is still up.
@@ -204,14 +216,22 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
 
     // An answer that lands while the dashboard's answer waits on the run's lock is never overwritten: the
     // dashboard's child checks again under the lock. Meanwhile the page still serves (the wait is async).
+    // The other writer holds the run's real lock from before the post until its own answer is written: a lock
+    // let go before that write is taken would let the waiting dashboard child in first (the old flake under load).
     const qe = setup('gamma', 're', 'Race');
-    const lock = join(state('gamma'), 'runs', 're', 'state.json.lock');
-    writeFileSync(lock, 'held by the test');
+    const reDir = join(state('gamma'), 'runs', 're');
+    const lock = join(reDir, 'state.json.lock');
+    const go = join(tmp, 're.go');
+    const holder = spawn(process.execPath, ['--input-type=module', '-e', HOLD_AND_ANSWER, reDir, qe, go, VERSION], { env: env('gamma'), stdio: ['ignore', 'ignore', 'pipe'] });
+    let holderErr = ''; holder.stderr.on('data', (d) => { holderErr += d; });
+    const held = new Promise((r) => holder.once('exit', r));
+    for (let i = 0; i < 400 && !existsSync(lock) && holder.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(existsSync(lock), `the other writer holds the lock ${holderErr}`);
     const pending = post({ key: readRegistry({ home }).find((x) => x.run === 're').key, run: 're', q: qe, choice: 'Yes' });
     await new Promise((r) => setTimeout(r, 600));
     assert.equal((await fetch(url)).status, 200, 'the page answers while an answer waits on a lock');
-    unlinkSync(lock);
-    updateRun(join(state('gamma'), 'runs', 're'), { kind: 'answer', by: { harness: 'test', skill: VERSION } }, (s) => { answer(s, qe, { choices: ['No'], by: 'lead', via: 'cli' }); });
+    writeFileSync(go, '');
+    assert.equal(await held, 0, holderErr);
     const raced = await pending;
     assert.equal(raced.status, 400);
     assert.match(await raced.text(), /no longer open/);
