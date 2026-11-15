@@ -14,6 +14,7 @@
 
   // Toggles and panels (details[data-d]) as the reader left them, per page: open or
   // closed by key; one never touched keeps the state the page rendered it in.
+  try { localStorage.removeItem(key('open')); } catch { /* no storage */ } // the old per-run key
   const openKey = key(`open:${path}`);
   const openMap = restoreOpen([], load(openKey, {})); // lib/ui.mjs
   const applyOpen = (root) => {

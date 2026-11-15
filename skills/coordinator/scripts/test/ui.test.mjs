@@ -173,6 +173,7 @@ test('theme.client.js: a choice kept under the old key is carried over once and 
   assert.deepEqual(b, {}, 'an unknown old value is dropped, nothing copied');
   const c = { 'coordinator.theme': 'light', 'coordinator:theme': '"dark"' };
   assert.equal(mk(c), 'light', 'the new key wins');
+  assert.deepEqual(c, { 'coordinator.theme': 'light' }, 'the old key is removed even when the new one is set');
 });
 
 test('rememberToggle: only a toggle after a click on the summary is stored; parsed-open and restored panels are not', () => {

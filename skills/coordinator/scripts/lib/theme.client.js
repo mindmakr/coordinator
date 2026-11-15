@@ -10,14 +10,14 @@
   let theme = 'system';
   try {
     let v = localStorage.getItem(KEY);
-    if (v === null) { // the choice made before this key: carry it over once
-      const raw = localStorage.getItem(OLD);
-      if (raw !== null) {
+    const raw = localStorage.getItem(OLD);
+    if (raw !== null) { // the choice made before this key: carry it over only if there is none, then drop it
+      if (v === null) {
         let old = raw;
         try { old = JSON.parse(raw); } catch { /* not JSON: use it as it is */ }
         if (CHOICES.includes(old)) { v = old; localStorage.setItem(KEY, old); }
-        localStorage.removeItem(OLD);
       }
+      localStorage.removeItem(OLD);
     }
     if (CHOICES.includes(v)) theme = v;
   } catch { /* no storage */ }
