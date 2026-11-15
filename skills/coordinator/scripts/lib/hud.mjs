@@ -397,7 +397,7 @@ export function hud(v, nowMs = Date.now(), ctx = null) {
   const st = v.status;
   const g = v.goalCheck;
   const fin = new Set(v.units.filter((u) => u.finished).map((u) => u.id));
-  const meta = `<p class="meta runmeta">${esc(v.tag)} · ${st ? `${esc(st.word)} · ` : ''}phase ${esc(v.phase)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}</p>`;
+  const meta = `<p class="meta runmeta">${esc(v.tag)} · ${st ? `${esc(st.word)} · ` : ''}phase ${esc(v.phase)} · started ${stamp(v.started)} · updated ${stamp(new Date(nowMs).toISOString())}${ctx.mapHref ? ` · <a class="open" href="${esc(ctx.mapHref)}">Project map →</a>` : ''}</p>`;
   const main = [
     blk('needs', needsPanel(v, form, ctx)),
     blk('units', unitsPanel(v, ctx, r), 'div', ' id="unit-list"'),
