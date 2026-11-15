@@ -15,6 +15,7 @@ import { unboundedRefusal, unboundedWords } from '../lib/openbar.mjs';
 import { precheck, precheckRules } from '../lib/precheck.mjs';
 import { parseDiff } from '../lib/gaming.mjs';
 import { gitCommonDir, holdLock } from '../lib/store.mjs';
+import { addedFiles, changedLines, commitOf, diffText, fileAt, namedIn } from '../lib/gitdiff.mjs';
 import { recordSuite, runSuite, sameHead, suiteFor, summaryLines } from '../lib/suites.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'coord-speed-'));
@@ -65,7 +66,8 @@ test('precheck: CHANGELOG edits, invisible characters, URL pathnames, unlisted t
     'diff --git a/CHANGELOG.md b/CHANGELOG.md', '@@ -1 +1,2 @@', '+- a line',
     'diff --git a/src/lib/a.mjs b/src/lib/a.mjs', '@@ -0,0 +1,3 @@',
     `+const s = 'a${String.fromCharCode(0x200b)}b';`,
-    "+const f = readFileSync(new URL('./x.json', import.meta.url).pathname);",
+    `+const f = readFileSync(new URL('./x.json', import.meta.url).${'path'}name);`, // split here so this file is no hit itself
+    `+// a comment that names new URL(x, import.meta.url).${'path'}name is no hit`,
     "+const ok = fileURLToPath(new URL('./x.json', import.meta.url));",
   ].join('\n');
   const hits = precheck({ files: parseDiff(diff), added: ['src/lib/a.mjs', 'test/new.test.mjs', 'test/listed.test.mjs'] }, rules, {
@@ -320,4 +322,21 @@ test('next --all lists the runs this window leads; the lead context budget warns
   assert.equal(refused.code, 1); assert.match(refused.err, /lead step refused: the lead's context is 310k/);
   assert.equal(cli(['note', 'n1', '--kind', 'decision', '--text', 'handover: n1 at freeze, nothing built'], env).code, 0);
   assert.equal(cli(['freeze', 'n1'], env).code, 0);
+});
+
+test('gitdiff.mjs: commits, the diff and its added files, changed lines, a file at a commit, and names in test files', () => {
+  const p = project('gd');
+  const a = p.commit({ 'lib/x.mjs': 'export const x = 1;\n', 'test/x.test.mjs': "import { x } from '../lib/x.mjs';\n" });
+  const b = p.commit({ 'lib/x.mjs': 'export const x = 2;\nexport const y = 3;\n', 'lib/new.mjs': 'export {};\n' });
+  assert.equal(commitOf(p.root, a.slice(0, 8)), a);
+  assert.throws(() => commitOf(p.root, '--upload-pack=x'), /bad --ref/);
+  assert.throws(() => commitOf(p.root, 'nope'), /not a commit here/);
+  assert.match(diffText(p.root, a, b), /\+export const y = 3;/);
+  assert.deepEqual(addedFiles(p.root, a, b), ['lib/new.mjs']);
+  assert.equal(changedLines(p.root, a, b), 4);
+  assert.equal(changedLines(p.root, a, 'nope'), null);
+  assert.equal(fileAt(p.root, b, 'lib/new.mjs'), 'export {};\n');
+  assert.equal(fileAt(p.root, b, 'missing.txt'), null);
+  assert.equal(namedIn(p.root, b, 'x.mjs', /\.test\.mjs$/), true);
+  assert.equal(namedIn(p.root, b, 'new.mjs', /\.test\.mjs$/), false);
 });

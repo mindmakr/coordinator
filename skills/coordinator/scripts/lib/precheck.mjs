@@ -33,11 +33,13 @@ export function precheckRules(setting) {
 
 // Zero-width, invisible and text-direction characters (U+200B-U+200F, U+202A-U+202E, U+2060-U+2064, U+2066-U+2069,
 // U+FEFF, U+00AD, U+061C, U+180E): written as escapes they are fine, typed literally they hide what code says.
-const INVISIBLE = /[­؜᠎​-‏‪-‮⁠-⁤⁦-⁩﻿]/u;
+const INVISIBLE_RANGES = [[0xad], [0x61c], [0x180e], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff]];
+const INVISIBLE = new RegExp(`[${INVISIBLE_RANGES.map(([a, b]) => (b ? `${String.fromCodePoint(a)}-${String.fromCodePoint(b)}` : String.fromCodePoint(a))).join('')}]`, 'u'); // built from code points: no such character is typed here
 // A URL's pathname where a file path is wanted: new URL(…, import.meta.url).pathname, or .pathname on a line that
 // reads or names files. fileURLToPath() is the safe form.
 const PATHNAME = /\bimport\.meta\.url\s*\)\s*\.pathname\b|\.pathname\b(?=.*\b(?:readFileSync|writeFileSync|existsSync|statSync|lstatSync|readdirSync|mkdirSync|rmSync|unlinkSync|createReadStream|createWriteStream|openSync|join|resolve|dirname|basename)\s*\()|\b(?:readFileSync|writeFileSync|existsSync|statSync|lstatSync|readdirSync|mkdirSync|rmSync|unlinkSync|createReadStream|createWriteStream|openSync|join|resolve|dirname|basename)\s*\([^)]*\.pathname\b/;
 const CODE = /\.(?:[cm]?[jt]sx?)$/i;
+const COMMENT = /^\s*(?:\/\/|\/\*|\*)/; // a comment line names a pattern, it does not use one
 const base = (p) => p.split('/').pop();
 const hex = (ch) => `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
 const clip = (s) => (s.length > 80 ? `${s.slice(0, 79)}…` : s).replace(INVISIBLE, (c) => `<${hex(c)}>`);
@@ -71,7 +73,7 @@ export function precheck({ files = [], added = [] }, rules, { lists = [], mentio
     for (const line of f.added) {
       const ch = on('invisible') ? line.match(INVISIBLE) : null;
       if (ch) hit('invisible', f.path, `${hex(ch[0])} in "${clip(line.trim())}": write it as an escape (\\u${ch[0].codePointAt(0).toString(16).padStart(4, '0')})`);
-      if (on('pathname') && CODE.test(f.path) && PATHNAME.test(line)) hit('pathname', f.path, `a URL's .pathname used as a file path in "${clip(line.trim())}": use fileURLToPath()`);
+      if (on('pathname') && CODE.test(f.path) && !COMMENT.test(line) && PATHNAME.test(line)) hit('pathname', f.path, `a URL's .pathname used as a file path in "${clip(line.trim())}": use fileURLToPath()`);
     }
   }
   const lists2 = lists.filter((l) => rules.testList.includes(l.file));
