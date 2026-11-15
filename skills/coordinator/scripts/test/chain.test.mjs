@@ -8,7 +8,8 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chainLine, chainOf, chainUnits, linkedRuns, parseContinues } from '../lib/chain.mjs';
-import { answerRefusal, grantRefusal, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
+import { answerRefusal, grantQuestion, grantRefusal, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
+import { text as argText } from '../lib/args.mjs';
 import { decide, decideUnit, stats } from '../lib/rules.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
 import { flowGraph } from '../lib/maps.mjs';
@@ -241,6 +242,62 @@ test('extend: a hand edit of state.json never approves', () => {
   edit((st) => { st.notes.filter((n) => n.kind === 'question')[1].approves = 'Yes'; });
   assert.match(run('extend', 'h', 'm1', '--reason', 'r', '--answer', 'q2').err, /q2 was last written by state\.edited, not by question/);
   assert.equal(state('h').units[0].status, 'stopped');
+});
+
+// f5 round 2 (both critics): a hand edit of the question's text to "Give it 30 more minutes?" or its header
+// to "30 min", on a question storing 600, still granted 600.
+test('extend <run>: a hand-edited question text or header never approves, and the refusal records nothing', () => {
+  let n = 0;
+  const probe = (edit, re, why) => {
+    const id = `he${(n += 1)}`;
+    const file = join(dir, 'runs', id, 'state.json');
+    run('init', id, '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+    run('add', id, 'm1', '--bar', 'b'); run('freeze', id);
+    const a = run('ask', id, '--question', 'Give the run 600 more minutes?', '--header', 'time', '--option', 'Yes', '--option', 'No|close it', '--approves', 'Yes', '--grant-minutes', '600');
+    assert.equal(a.code, 0, a.err);
+    run('answer', id, 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+    const st = JSON.parse(readFileSync(file, 'utf8')); edit(st.notes.find((x) => x.kind === 'question')); writeFileSync(file, JSON.stringify(st));
+    const before = state(id).notes.length;
+    const r = run('extend', id, '--reason', 'r', '--answer', 'q1');
+    assert.notEqual(r.code, 0, why); assert.match(r.err, re, why);
+    const s = state(id);
+    assert.equal(s.budget.maxMinutes, 60, `${why}: no minutes added`); assert.equal(s.budget.addedMinutes ?? 0, 0, why);
+    assert.equal(s.notes.length, before, `${why}: no decision logged`);
+    assert.equal(s.notes.find((x) => x.kind === 'question').usedAt ?? null, null, `${why}: the answer is not used up`);
+  };
+  // The critics' probes: the field check ask runs is run again on the stored question, whoever wrote it.
+  probe((q) => { q.text = 'Give it 30 more minutes?'; }, /extend refused: q1: the question names an amount other than 600 minutes: "30"/, 'text');
+  probe((q) => { q.header = '30 min'; }, /extend refused: q1: the header names an amount other than 600 minutes: "30"/, 'header');
+  probe((q) => { q.options[1].description = 'just 30 more minutes'; }, /extend refused: q1: option "No" names an amount other than 600 minutes: "30"/, 'option');
+  // An edit naming no amount: refused because a hand edit wrote it.
+  probe((q) => { q.text = 'Keep going?'; }, /q1 was last written by state\.edited, not by question/, 'text, no amount');
+  probe((q) => { q.header = 'urgent'; }, /q1 was last written by state\.edited, not by question/, 'header, no amount');
+});
+
+// f5 round 2 (finding 2): "Give it ‮600‬ more minutes?" displayed as "006".
+test('ask: text-direction overrides and zero-width characters are stripped from the question, header and options', () => {
+  const hidden = '‪‫‬‭‮⁦⁧⁨⁩​‌‍‎‏﻿';
+  assert.equal(argText(`Give it ‮600‬ more minutes?${hidden}`, 'question'), 'Give it 600 more minutes?');
+  assert.equal(argText(`6​0‍0`, 'x'), '600');
+  assert.throws(() => argText(hidden, 'header'), /missing --header/);
+  run('init', 'bd', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'bd', 'm1', '--bar', 'b'); run('freeze', 'bd');
+  const a = run('ask', 'bd', '--question', 'Give it ‮600‬ more minutes?', '--header', 't​ime', '--option', 'Y‮es', '--option', 'No|close ⁦it⁩', '--approves', 'Yes', '--grant-minutes', '600');
+  assert.equal(a.code, 0, a.err);
+  const q = state('bd').notes.find((x) => x.kind === 'question');
+  assert.equal(q.text, 'Give it 600 more minutes?'); assert.equal(q.header, 'time');
+  assert.deepEqual(q.options, [{ label: 'Yes', description: '600 more minutes' }, { label: 'No', description: 'close it' }]);
+});
+
+test('grantQuestion: every field of a stored question, the one check ask and extend share', () => {
+  const q = { text: 'Give the run 600 more minutes?', header: 'time', approves: 'Yes', options: [{ label: 'Yes', description: '600 more minutes' }, { label: 'No', description: 'close it' }] };
+  assert.deepEqual(grantQuestion(q, 600), q.options);
+  assert.deepEqual(grantQuestion({ ...q, options: [{ label: 'Yes', description: null }, q.options[1]] }, 600)[0], { label: 'Yes', description: '600 more minutes' });
+  assert.throws(() => grantQuestion({ ...q, text: 'Give it 30 more minutes?' }, 600), /^Error: the question names an amount other than 600 minutes: "30"$/);
+  assert.throws(() => grantQuestion({ ...q, header: '30 min' }, 600), /^Error: the header names an amount other than 600 minutes: "30"$/);
+  assert.throws(() => grantQuestion({ ...q, options: [{ label: 'Yes', description: 'more time' }, q.options[1]] }, 600), /the approving option "Yes" must state "600 more minutes"/);
+  assert.throws(() => grantQuestion({ ...q, options: [q.options[0], { label: 'No', description: 'an hour' }] }, 600), /option "No" names an amount other than 600 minutes: "hour"/);
+  assert.throws(() => grantQuestion({ ...q, header: undefined, text: 'Give it an hour?' }, 600), /the question names/);
 });
 
 test('the --confirm words pass the same yes check as a note', () => {

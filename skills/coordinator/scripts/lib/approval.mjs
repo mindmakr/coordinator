@@ -134,3 +134,16 @@ export function grantOption(opt, n) {
   grantFields([[`the approving option "${opt.label}"`, `${opt.label} | ${description}`]], n);
   return { ...opt, description };
 }
+
+// Every field of a question that grants N minutes ({ text, header, options, approves }): the question, the
+// header, the approving option (grantOption) and each other option name no amount but N minutes. `ask` runs it
+// before storing, `extend` again on the stored question before granting. Returns the options to store, or
+// throws the first field that does not. Pure.
+export function grantQuestion({ text, header, options, approves }, n) {
+  grantFields([['the question', text], ['the header', header]], n);
+  return options.map((x) => {
+    if (x.label === approves) return grantOption(x, n);
+    grantFields([[`option "${x.label}"`, `${x.label} | ${x.description ?? ''}`]], n);
+    return x;
+  });
+}

@@ -216,7 +216,7 @@ import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
-import { answerRefusal, confirmRefusal, decisionRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
+import { answerRefusal, confirmRefusal, decisionRefusal, grantQuestion, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
 import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
@@ -630,7 +630,7 @@ function approvingAnswer(q, written) {
   if (why) throw new Error(`extend refused: ${why}`);
   const qi = +q.id.slice(1) - 1; const hi = q.history.length - 1;
   written((st) => st?.notes?.filter((n) => n.kind === 'question')[qi]?.history?.[hi], ['answer'], `${q.id}'s answer`);
-  written((st) => { const n = st?.notes?.filter((x) => x.kind === 'question')[qi]; return n && { approves: n.approves, unit: n.unit, options: n.options, grantMinutes: n.grantMinutes }; }, ['question'], `${q.id}`);
+  written((st) => { const n = st?.notes?.filter((x) => x.kind === 'question')[qi]; return n && { text: n.text, header: n.header, approves: n.approves, unit: n.unit, options: n.options, grantMinutes: n.grantMinutes }; }, ['question'], `${q.id}`);
   const opt = q.options.find((x) => x.label === q.answer.choices[0]);
   return {
     words: [opt?.label, opt?.description, q.answer.confirm].filter(Boolean).join(' '), confirm: q.answer.confirm ?? null,
@@ -650,8 +650,12 @@ function extendTime(run, o) {
     const q = questions(s).find((x) => x.id === String(o.answer));
     if (!q) throw new Error(`--answer: no question ${o.answer}`);
     if (q.unit) throw new Error(`--answer: ${q.id} is about ${q.unit}; a question approving more time for the run names no unit`);
-    const { confirm, source } = approvingAnswer(q, writtenBy(run, s, 'extend'));
     const granted = q.grantMinutes;
+    // The stored question passes the check ask ran (lib/approval.mjs grantQuestion), whoever last wrote it.
+    if (Number.isInteger(granted) && granted >= 1) {
+      try { grantQuestion(q, granted); } catch (e) { throw new Error(`extend refused: ${q.id}: ${e.message}; ask again`); }
+    }
+    const { confirm, source } = approvingAnswer(q, writtenBy(run, s, 'extend'));
     if (!Number.isInteger(granted) || granted < 1) throw new Error(`extend refused: ${q.id} stores no amount of time: ask again with --grant-minutes N, e.g. --option "Yes" --approves Yes --grant-minutes 60`);
     const why = confirm && confirmRefusal(confirm, granted);
     if (why) throw new Error(`extend refused: ${q.id}'s confirmed words ${why}; ask again with the amount they want`);

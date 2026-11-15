@@ -62,14 +62,17 @@ export function score(value) {
   return Math.round(n * 10) / 10;
 }
 
-// Cleans control characters and masks anything that looks like a secret.
+// Removes control characters, text-direction overrides and zero-width characters (so what is shown is what
+// is stored and checked: "‮600‬" never displays as "006"), and masks anything that looks like a secret.
+const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g;
 export function text(value, name, max = 2000) {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`missing --${name}`);
-  return maskSecrets(value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim()).slice(0, max);
+  const v = typeof value === 'string' ? value.replace(HIDDEN, '').trim() : '';
+  if (!v) throw new Error(`missing --${name}`);
+  return maskSecrets(v).slice(0, max);
 }
 
 export function optText(value, max = 2000) {
-  return typeof value === 'string' && value.trim() ? text(value, 'value', max) : null;
+  return typeof value === 'string' && value.replace(HIDDEN, '').trim() ? text(value, 'value', max) : null;
 }
 
 export function oneOf(value, allowed, name) {
