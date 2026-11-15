@@ -76,6 +76,10 @@ test('the general critic of an unpinned unit runs on the cheaper model; pinned w
   assert.match(cheapCriticRefusal(cfg, 'sonnet', ['ui'], { ...unit, bar: 'the refund total matches the ledger' }), /pinned area/);
   assert.match(cheapCriticRefusal(cfg, 'haiku', ['ui'], unit), /below the critic model/);
   assert.match(cheapCriticRefusal(cfg, 'gpt-4o-mini', ['ui'], unit), /not the strong model/);
+  // route with the unit gives the same answer: strong, saying why, where verdict would refuse the cheaper critic.
+  assert.deepEqual(route(cfg, 'critic', 'ui', unit), { model: 'sonnet', why: 'no pinned area' });
+  assert.deepEqual(route(cfg, 'critic', 'ui', { ...unit, bar: 'the refund total matches the ledger' }), { model: 'opus', why: 'its title, bar or behaviours touch a pinned area' });
+  assert.deepEqual(route(cfg, 'critic', 'ui', { ...unit, specialists: ['security'] }), { model: 'opus', why: 'the unit has a specialist critic (security)' });
   for (const role of ['specialist', 'visual-critic', 'integrator']) assert.equal(judgeAllowed(cfg, 'sonnet', role, { classes: ['ui'], unit }), false);
   assert.equal(judgeAllowed(normalize(false), 'haiku', 'integrator'), true);
 });
@@ -143,6 +147,36 @@ test('verdict: a cheaper general critic judges an unpinned unit; never a special
   const integ = cli(dir, 'integrate', 'c', 'pass', '--evidence', 'e', '--model', 'sonnet');
   assert.equal(integ.code, 1); assert.match(integ.err, /integrator is never routed down/);
   assert.deepEqual(ok('models', '--role', 'critic', '--class', 'docs'), { role: 'critic', class: 'docs', model: 'sonnet', why: 'no pinned area' });
+});
+
+// hud-facelift: a sonnet critic was launched for a unit whose behaviours said "theme tokens", and its verdict was refused.
+test('models --role critic with a unit gives the answer verdict would: a pinned title, bar or behaviour names strong and why', () => {
+  const dir = folder(); const ok = okIn(dir);
+  ok('init', 'k', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  ok('add', 'k', 'ui', '--bar', 'the list filters as you type');
+  ok('add', 'k', 'theme', '--bar', 'the page reads its colours', '--behaviour', 'Given the theme tokens, when the page loads, then every colour comes from them');
+  ok('add', 'k', 'pay', '--bar', 'the totals add up', '--specialist', 'money', '--reason', 'pay');
+  ok('freeze', 'k');
+  // Unpinned unit: the cheaper critic, and verdict takes it.
+  assert.deepEqual(ok('models', 'k', 'ui', '--role', 'critic', '--class', 'search-ui'), { role: 'critic', class: 'search-ui', unit: 'ui', model: 'sonnet', why: 'no pinned area' });
+  // A pinned word in a behaviour: strong, with the reason verdict gives.
+  const pinnedWord = ok('models', 'k', 'theme', '--role', 'critic', '--class', 'theme-ui');
+  assert.equal(pinnedWord.model, 'opus'); assert.equal(pinnedWord.unit, 'theme');
+  assert.equal(pinnedWord.why, cheapCriticRefusal(normalize(undefined), 'sonnet', ['theme-ui'], { behaviours: [{ text: 'theme tokens' }] }));
+  assert.match(pinnedWord.why, /title, bar or behaviours touch a pinned area/);
+  // A specialist critic on the unit: strong.
+  assert.match(ok('models', 'k', 'pay', '--role', 'critic', '--class', 'ui').why, /specialist critic \(money\)/);
+  assert.equal(ok('models', 'k', 'pay', '--role', 'critic', '--class', 'ui').model, 'opus');
+  // The same answer verdict gives: the model models names is the one verdict takes, and the cheaper one is refused.
+  ok('start', 'k', 'theme'); ok('built', 'k', 'theme');
+  const refused = cli(dir, 'verdict', 'k', 'theme', 'pass', '--evidence', 'e', '--model', 'sonnet', '--class', 'theme-ui');
+  assert.equal(refused.code, 1); assert.ok(refused.err.includes(pinnedWord.why), refused.err);
+  ok('verdict', 'k', 'theme', 'pass', '--evidence', 'e', '--model', pinnedWord.model, '--class', 'theme-ui', '--behaviour', 'B1=pass:"seen"');
+  // Without a unit, as before; a unit with no run, or an unknown unit, is refused.
+  assert.equal(ok('models', '--role', 'critic', '--class', 'theme-ui').model, 'sonnet');
+  assert.match(cli(dir, 'models', 'k', '--role', 'critic', '--class', 'ui').err, /give the unit with its run/);
+  assert.match(cli(dir, 'models', 'k', 'nope', '--role', 'critic', '--class', 'ui').err, /no unit nope/);
+  assert.match(cli(dir, 'models', 'k', 'ui').err, /--role/);
 });
 
 test('routing off: any judging model is recorded, nothing refused', () => {

@@ -1,5 +1,5 @@
 // What counts as the person approving a step only they may approve (today:
-// `run.mjs extend`, more rounds for a unit). Two things must both hold:
+// `run.mjs extend`, more rounds for a unit or more time for the run). Two things must both hold:
 //
 // 1. It came from the person. Answers and notes carry `via`: "dashboard" (the
 //    local `serve` page), "web" (the hosted service, or a comment command,
@@ -62,4 +62,18 @@ const NUMBERS = { one: 1, two: 2, three: 3, four: 4, single: 1 };
 export function namedRounds(words) {
   const found = [...String(words ?? '').toLowerCase().matchAll(/\b([1-4]|one|two|three|four|single)\s+(?:more|rounds?)\b/g)].map((m) => NUMBERS[m[1]] ?? +m[1]);
   return found.length ? Math.max(...found) : null;
+}
+
+// How many minutes of run time the person's own words name, or null when they name none: then
+// nothing is added (`run.mjs extend <run> --minutes`). "90 minutes", "45 more mins", "2 hours",
+// "1.5 more hours", "an hour", "one hour", "half an hour". The largest one named wins.
+const HOURS = { an: 1, a: 1, one: 1, two: 2, three: 3, four: 4 };
+export function namedMinutes(words) {
+  let t = String(words ?? '').toLowerCase();
+  const found = [];
+  t = t.replace(/\bhalf\s+an?\s+hour\b/g, () => { found.push(30); return ' '; });
+  for (const m of t.matchAll(/\b(\d{1,5})\s+(?:more\s+)?(?:minutes?|mins?)\b/g)) found.push(+m[1]);
+  for (const m of t.matchAll(/\b(\d{1,3}(?:\.\d+)?|an?|one|two|three|four)\s+(?:more\s+)?(?:hours?|hrs?)\b/g)) found.push(Math.round((HOURS[m[1]] ?? +m[1]) * 60));
+  const ok = found.filter((n) => Number.isInteger(n) && n > 0);
+  return ok.length ? Math.max(...ok) : null;
 }

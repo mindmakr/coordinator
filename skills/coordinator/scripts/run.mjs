@@ -31,6 +31,9 @@
 //                  at or stopped by its round budget: qN asked with --approves and answered with that option by the
 //                  person (dashboard, web, or answer --by person --confirm "their words"), or else their note on
 //                  the unit since its last verdict saying "approved" (lib/approval.mjs); recorded as a decision
+//   run.mjs extend <run> --answer qN --reason R [--minutes N]   more time for the run: qN asked on the run (no --unit) with
+//                  --approves and answered with that option by the person; adds the minutes their words name (N: fewer),
+//                  recorded as a decision with their words (lib/approval.mjs namedMinutes)
 //   run.mjs ship <run> <unit> --merge URL --reason R (--confirm "their words" | --answer qN)   a unit merged on the person's
 //                  decision with no final verdict (open, building, judging or stopped): ends shipped ("Shipped without a final
 //                  verdict"; delivered, never a clean pass), links the merge, and files the missing verdict and its last round's
@@ -83,7 +86,8 @@
 //                  --fold-max-files (10) and --fold-max-lines (200), and have a clean detect.mjs run on it; next then says done, step merge
 //   run.mjs strategy <run> <unit> --text T                          only when next says change-strategy
 //   run.mjs integrate <run> pass|fail --evidence E [--gap G] [--cause C] [--behaviour G1=pass:"…" …] [--model M]
-//                  only when next says integrate; a pass needs every goal behaviour passing
+//                  only when next says integrate; a pass needs every goal behaviour passing. Once, at done-with-gaps after a
+//                  failed check: pass --evidence E, the fresh check that passed on the fixed result; the run is then done
 //   run.mjs note <run> --kind situation|decision|follow-up|retro|question|bar|info|person|escape --text T
 //                  escape: --unit U, a passed unit where a defect turned up later (a later review, verify, test, a person); counted by stats
 //                  [--recommend R] (question: the lead's pick) [--answers qN] (decision: closes question N)
@@ -162,7 +166,9 @@
 //   run.mjs bench plan|confirm|show|prices …   a run of the Coordinator Engineering Benchmark: the plan, its cost estimate at
 //                  the suite's pinned prices and the person's go-ahead; no model is called before that
 //                  (run.mjs bench --help lists the options; references/commands/bench.md)
-//   run.mjs models [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class
+//   run.mjs models [<run> <unit>] [--role builder|critic|… --class docs,auth]   the routing table, or the model for one role and task class;
+//                  with the unit, the critic's model is the one verdict takes: strong, with why, when its title, bar,
+//                  behaviours or a specialist critic pin it (lib/models.mjs cheapCriticRefusal)
 //   run.mjs list | stats [--tag T] | where      list: every run with its status word, progress, ETA and status line;
 //                  where prints the state folder for briefs (COORDINATOR_DIR)
 //   run.mjs push <run> [--to branch|./folder] [--message M]   pit stops only (a unit merged, a decision
@@ -196,14 +202,14 @@ import { adopt, table } from './lib/adopt.mjs';
 import { homedir } from 'node:os';
 import { briefPrompt, buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
-import { allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
+import { afterFixIntegration, allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
 import { usedMinutes } from './lib/clock.mjs';
 import { pauseNote, pausedRefusal, pauseRun, resumeRun } from './lib/pause.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
-import { answerRefusal, decisionRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
+import { answerRefusal, decisionRefusal, namedMinutes, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
 import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
@@ -247,7 +253,7 @@ import { build as buildMap, callsText, computeCalls, defaultDest, hasMap, mapAtt
 
 const FLAGS = {
   init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'max-launch-minutes', 'max-launch-cost', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
-  extend: ['rounds', 'reason', 'answer'], 'add-specialist': ['reason'],
+  extend: ['rounds', 'minutes', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
   study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
@@ -573,6 +579,49 @@ function writtenBy(run, s, cmd) {
     const by = lastWriter(events, locate, s);
     if (!kinds.includes(by)) throw new Error(`${cmd} refused: ${what} was last written by ${by ?? 'nothing in the log'}, not by ${kinds.join(' or ')} (a hand edit of state.json never approves)`);
   };
+}
+
+// The person's approving answer to q for `extend` (lib/approval.mjs): unused, the approving option picked by
+// the person, the answer and the question written by their commands (never a hand edit: lib/provenance.mjs).
+// Their words (option and confirmed text) and how the decision quotes them.
+function approvingAnswer(q, written) {
+  if (['used', 'decided'].includes(q.status)) throw new Error(`extend refused: ${q.id} is already ${q.status}; one approval is good for one extend: ask again`);
+  const why = answerRefusal(q);
+  if (why) throw new Error(`extend refused: ${why}`);
+  const qi = +q.id.slice(1) - 1; const hi = q.history.length - 1;
+  written((st) => st?.notes?.filter((n) => n.kind === 'question')[qi]?.history?.[hi], ['answer'], `${q.id}'s answer`);
+  written((st) => { const n = st?.notes?.filter((x) => x.kind === 'question')[qi]; return n && { approves: n.approves, unit: n.unit, options: n.options }; }, ['question'], `${q.id}`);
+  const opt = q.options.find((x) => x.label === q.answer.choices[0]);
+  return {
+    words: [opt?.label, opt?.description, q.answer.confirm].filter(Boolean).join(' '),
+    source: `${q.id} "${q.header ? `${q.header}: ` : ''}${clip(q.text, 160)}" answered "${q.answer.choices[0]}${opt?.description ? ` (${clip(opt.description, 120)})` : ''}" via ${q.answer.via}${q.answer.confirm ? `, their words: "${clip(q.answer.confirm, 200)}"` : ''}`,
+  };
+}
+
+// More minutes for the run's time budget (`extend <run> --minutes`), on the person's approving answer to a
+// question on the run: as many as their words name, at most. next reads the budget afresh, so units past it go on.
+function extendTime(run, o) {
+  if (o.rounds !== undefined) throw new Error('--rounds goes with a unit (extend <run> <unit>); more time for the run is --minutes');
+  if (o.answer === undefined || o.answer === true) throw new Error('extend refused: more time needs --answer qN, a question on the run (no --unit) asked with --approves and answered by the person with that option');
+  const reason = text(o.reason, 'reason', 300);
+  const asked = num(o.minutes, null, 1, 10_080); // at most what their words name; their number when left out
+  return change(run, 'run.extend', (s) => {
+    const q = questions(s).find((x) => x.id === String(o.answer));
+    if (!q) throw new Error(`--answer: no question ${o.answer}`);
+    if (q.unit) throw new Error(`--answer: ${q.id} is about ${q.unit}; a question approving more time for the run names no unit`);
+    const { words, source } = approvingAnswer(q, writtenBy(run, s, 'extend'));
+    const named = namedMinutes(words);
+    if (!named) throw new Error(`extend refused: ${q.id}'s approved words name no minutes or hours; ask with the time in the option, e.g. --option "Yes|60 more minutes"`);
+    const minutes = asked ?? named;
+    if (minutes > named) throw new Error(`extend refused: --minutes ${minutes}, but the approval names ${named}`);
+    const before = s.budget.maxMinutes; const total = before + minutes;
+    if (total > 10_080) throw new Error(`extend refused: the time budget would be ${total} minutes, over the 10080 limit`);
+    const used = Math.round(usedMinutes(s, Date.now()));
+    s.budget.maxMinutes = total;
+    s.budget.addedMinutes = (Number.isInteger(s.budget.addedMinutes) ? s.budget.addedMinutes : 0) + minutes;
+    const scope = minutes === named ? `their words name ${named}` : `their words name ${named}; ${minutes} added`;
+    s.notes.push({ kind: 'decision', answers: q.id, at: now(), text: `run time budget: ${minutes} more minutes (now ${total}, was ${before}; ${used} used; ${scope}), approved by the person (${source}): ${reason}` });
+  });
 }
 
 // The ready question next names for the unit (lib/rules.mjs): the finish line, or same files. Logged on the unit only when `next` asks for it.
@@ -998,6 +1047,8 @@ const commands = {
   },
   // A unit at, or stopped by, its round budget gets N more rounds once the person approved them (#36).
   extend([run, unit], o) {
+    if (unit === undefined) return extendTime(run, o); // no unit: more time for the run
+    if (o.minutes !== undefined) throw new Error('--minutes goes with the run, not a unit: extend <run> --minutes N --answer qN --reason R');
     const rounds = num(o.rounds, 1, 1, 4); // one unless the approval's words name more
     const reason = text(o.reason, 'reason', 300);
     return change(run, 'unit.extend', (s) => {
@@ -1013,16 +1064,8 @@ const commands = {
         const q = questions(s).find((x) => x.id === String(o.answer));
         if (!q) throw new Error(`--answer: no question ${o.answer}`);
         if (q.unit !== u.id) throw new Error(`--answer: ${q.id} ${q.unit ? `is about ${q.unit}` : 'names no unit'}; an approving question must name ${u.id} (ask … --unit ${u.id})`);
-        if (['used', 'decided'].includes(q.status)) throw new Error(`extend refused: ${q.id} is already ${q.status}; one approval is good for one extend: ask again`);
-        const why = answerRefusal(q);
-        if (why) throw new Error(`extend refused: ${why}`);
+        ({ words, source } = approvingAnswer(q, written));
         if (q.answer.at < since) throw new Error(`extend refused: ${q.id} was answered before ${u.id}'s last verdict; ask again`);
-        const qi = +q.id.slice(1) - 1; const hi = q.history.length - 1;
-        written((st) => st?.notes?.filter((n) => n.kind === 'question')[qi]?.history?.[hi], ['answer'], `${q.id}'s answer`);
-        written((st) => { const n = st?.notes?.filter((x) => x.kind === 'question')[qi]; return n && { approves: n.approves, unit: n.unit, options: n.options }; }, ['question'], `${q.id}`);
-        const opt = q.options.find((x) => x.label === q.answer.choices[0]);
-        words = [opt?.label, opt?.description, q.answer.confirm].filter(Boolean).join(' ');
-        source = `${q.id} "${q.header ? `${q.header}: ` : ''}${clip(q.text, 160)}" answered "${q.answer.choices[0]}${opt?.description ? ` (${clip(opt.description, 120)})` : ''}" via ${q.answer.via}${q.answer.confirm ? `, their words: "${clip(q.answer.confirm, 200)}"` : ''}`;
       } else {
         const n = (s.notes ?? []).findLast((x) => x.kind === 'person' && x.unit === u.id && x.at >= since);
         if (!n) throw new Error(`extend refused: no approval from the person since ${u.id}'s last verdict; give --answer qN (a question on ${u.id} asked with --approves, answered by them), or they add a note on ${u.id} that says "approved"`);
@@ -1125,15 +1168,21 @@ const commands = {
   integrate([run, v], o) {
     return change(run, 'run.integrate', (s) => {
       const d = decide(s).decision;
-      if (d !== 'integrate') throw new Error(`integrate refused: the run is at "${d}"`);
+      // After a failed check ended the run with gaps: the pass of a fresh check on the fixed result, once (lib/rules.mjs).
+      const afterFix = d !== 'integrate' && afterFixIntegration(s);
+      if (d !== 'integrate' && !afterFix) throw new Error(`integrate refused: the run is at "${d}"`);
       oneOf(v, ['pass', 'fail'], 'verdict');
       const evidence = optText(o.evidence);
+      if (afterFix && v !== 'pass') throw new Error(`integrate refused: the run is at "${d}" after a failed integration check; only one pass is recorded now, the fresh check of the fixed result`);
+      if (afterFix && !evidence) throw new Error('integrate refused: a pass after the failed integration check needs --evidence: the fix and the fresh check that passed on the fixed result');
       const judge = modelName(o.model, 'model');
       const rcfg = routing(baseDir('project'));
       if (judge && !judgeAllowed(rcfg, judge, 'integrator')) throw new Error(`integrate refused: the integrator is never routed down; ${judge} is below the strong model (references/routing.md)`);
       const j = judged(evidence, v, optText(o.gap, 500), optText(o.cause, 80));
       const marks = mark(s.goalBehaviours ?? [], o.behaviour, j.verdict);
-      s.integration.rounds.push({ ...j, evidence, at: now(), ...(judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {})), ...(marks.length ? { behaviours: marks } : {}) });
+      const failed = s.integration.rounds.at(-1);
+      s.integration.rounds.push({ ...j, evidence, at: now(), ...(judge ? { judgedBy: judge } : (rcfg.on ? { judgedBy: UNSPECIFIED } : {})), ...(marks.length ? { behaviours: marks } : {}), ...(afterFix ? { afterFix: true } : {}) });
+      if (afterFix) s.notes.push({ kind: 'decision', text: `integration passed after a fix: check ${s.integration.rounds.length - 1} failed ("${clip(failed.gap ?? 'no gap', 160)}"); the fresh check of the fixed result passed: ${clip(evidence, 300)}`, at: now() });
     });
   },
   note([run], o) {
@@ -1612,11 +1661,14 @@ const commands = {
   },
   // The routing table (references/routing.md), or the model for one role and task class.
   bench(pos, o) { return benchCommand(pos, o, { base: baseDir('project'), by: BY }); },
-  models(_, o) {
+  models([run, unit], o) {
+    if (run !== undefined && unit === undefined) throw new Error('usage: run.mjs models [<run> <unit>] --role R [--class C]: give the unit with its run');
+    if (unit !== undefined && o.role === undefined) throw new Error('--role goes with a unit: run.mjs models <run> <unit> --role critic --class C');
+    const u = unit === undefined ? null : unitOf(load(run), unit);
     const cfg = routing(baseDir('project'));
     for (const w of cfg.warnings) console.error(`warning: ${w}`);
     if (o.role === undefined) return cfg;
-    return { role: o.role, class: o.class ?? null, ...route(cfg, String(o.role), typeof o.class === 'string' ? o.class : null) };
+    return { role: o.role, class: o.class ?? null, ...(u ? { unit: u.id } : {}), ...route(cfg, String(o.role), typeof o.class === 'string' ? o.class : null, u) };
   },
 };
 

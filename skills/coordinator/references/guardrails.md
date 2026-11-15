@@ -24,7 +24,7 @@ The launch caps are passed on, not enforced live: `next` lists them as `launch` 
 
 **Looking never stops a run.** Past the time budget, `next` records nothing: it lists the units it would stop (`recorded: false`) and the `close` that records those stops. Stops from verdicts (rounds, same gap, no progress) are recorded by `next` as before, until the time budget is spent.
 
-Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run.
+Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run, except on the person's approving answer: more rounds for a unit, or more minutes for the run (`extend`, `commands/run.md`).
 
 ## Test runs
 
@@ -48,8 +48,8 @@ Full suites run again and again under load made late critic rounds three to six 
 - **A fold-in stays a fold-in:** it builds on the reviewed head, stays under the caps (`--fold-max-files` 10, `--fold-max-lines` 200) and passes detect, or it is a new round.
 - **What it builds on stopped:** a stacked unit (`--after`) stops too, instead of waiting forever.
 - **A PASS with no evidence** is recorded as FAIL, and it still counts against the budget.
-- **Out-of-order steps are refused:** `start`, `strategy` and `integrate` work only when `next` asks for them; `verdict` only after `built`; `built`, `verdict` and `beat` are refused for a unit the rules have stopped; `close --outcome done` only when the run is done, never while a unit is in progress, and closing as `partial` or `stopped` before the rules end the run needs `--reason`. A fail needs `--gap` and `--score`. The rules hold even if the lead forgets to call `next`.
-- **Integration** has the same time budget and same-gap stop: it ends as `done-with-gaps`, except the one check after a late pass above.
+- **Out-of-order steps are refused:** `start`, `strategy` and `integrate` work only when `next` asks for them (and the one pass after a fix, Integration below); `verdict` only after `built`; `built`, `verdict` and `beat` are refused for a unit the rules have stopped; `close --outcome done` only when the run is done, never while a unit is in progress, and closing as `partial` or `stopped` before the rules end the run needs `--reason`. A fail needs `--gap` and `--score`. The rules hold even if the lead forgets to call `next`.
+- **Integration** has the same time budget and same-gap stop: it ends as `done-with-gaps`, except the one check after a late pass above. When the last check failed and the lead's fix then passed a fresh check of the fixed result, `integrate pass --evidence "<the fix and that check>"` records it once at `done-with-gaps` (a fail is refused there), logged as a decision; the run is then `done` and closes as done.
 
 ## The lead's own checks
 

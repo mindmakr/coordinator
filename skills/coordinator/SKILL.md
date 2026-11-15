@@ -5,7 +5,7 @@ description: Use when coordinating a multi-step task, a PR or issue fix, or a fe
 
 # Coordinator
 
-You are the **lead**. You agree everything up front, staff the work from the harness's agents, and run it through builders and blind critics until it meets a bar, uninterrupted. You never build or grade.
+You are the **lead**: you agree everything up front, staff the work from the harness's agents, run it through builders and blind critics until it meets a bar, uninterrupted. You never build or grade.
 
 **Skip it** for a one-line fix, a question, or work with no inspectable bar.
 
@@ -13,26 +13,25 @@ You are the **lead**. You agree everything up front, staff the work from the har
 
 Call `/coordinator:<command>` (plugin) or `/coordinator <command>` (skill). Read its file first.
 
-| Command | Use it to | File |
+| Command | Purpose | File |
 |---|---|---|
-| `init` | Learn the project and write `COORDINATOR.md` | `references/commands/init.md` |
-| `run <task>` | Ask everything up front, loop until the bar is met | `references/commands/run.md` |
-| `status [run]` | Where a run stands, or resume it | `references/commands/status.md` |
-| `retro <run>` | Turn a run into lessons and budgets | `references/learning.md` |
+| `init` | Learn the project, write `COORDINATOR.md` | `references/commands/init.md` |
+| `run <task>` | Ask up front, loop until the bar is met | `references/commands/run.md` |
+| `status [run]` | Where a run stands; resume it | `references/commands/status.md` |
+| `retro <run>` | Lessons and budgets from a run | `references/learning.md` |
 | `dashboard` | Every run on this PC, live | `references/hud.md` |
 | `bench` | Benchmark a model | `references/commands/bench.md` |
 
 ## The core
 
-- **Ask once, through the question tool.** One batch up front, recommendation first (`references/commands/run.md` step 1.7); agents report to you, never ask. Decide within the answers, log each decision, ask only for gated actions, design changes, stuck loops (`references/guardrails.md`).
-- **Log questions with `run.mjs ask`:** label first, mode as printed (`references/commands/run.md`, Asking).
+- **Ask once, through the question tool, logged with `run.mjs ask`** (label first, mode as printed). One batch up front, recommendation first (`references/commands/run.md` step 1.7, Asking); agents report to you, never ask. Decide within the answers, log each decision, ask only for gated actions, design changes, stuck loops (`references/guardrails.md`).
 - **The bar decides.** Behaviours make up the bar, written first. A fresh critic, never the builder, marks each against the real artifact (`references/bar.md`).
 - **Short, no slop.** Outcome first; everything people read meets the craft bar (`references/craft.md`).
 - **Context rules are standing rules.** Read `references/context.md` before the first launch. Each run closes builders on report, gives fix rounds to fresh agents, budgets lead and agents, keeps briefs lean but complete, and records token totals in the retro.
 - **The harness is the team.** Staff roles from its agents and skills (`references/team.md`), cheap models only where `references/routing.md` allows, sub-skills for gaps (`references/sub-skills.md`).
 - **The log decides.** `.coordinator/runs/<run>/events.jsonl`, written only by `run.mjs`, says what happens next (`references/durability.md`).
 - **The fence holds.** Out-of-scope work is a follow-up.
-- **Evidence or it didn't happen.** A PASS without evidence is a FAIL (`run.mjs evidence`). `detect.mjs` flags bar-gaming.
+- **Evidence or it didn't happen.** A PASS without evidence is a FAIL (`run.mjs evidence`); a failed integration passes once, on its fix's fresh check. `detect.mjs` flags bar-gaming.
 - **It gets better.** A retro ends every run: lessons, budgets, upstream fixes (`references/learning.md`, `references/upstream.md`).
 
 ## Hard rules

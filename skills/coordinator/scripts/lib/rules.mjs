@@ -337,6 +337,15 @@ export function decide(run, nowMs = Date.now()) {
   return { decision: 'integrate', units };
 }
 
+// A failed integration check ends the run with gaps once its budget or same-gap rule says so. When the
+// lead then fixed it and a fresh check of the fixed result passed, that pass may be recorded once, with
+// evidence (run.mjs integrate pass), and the run is done. True when the run is at done-with-gaps because
+// its last integration check failed and no such pass was recorded before.
+export function afterFixIntegration(run, nowMs = Date.now()) {
+  const integ = run.integration?.rounds ?? [];
+  return integ.at(-1)?.verdict === 'fail' && !integ.some((r) => r.afterFix) && decide(run, nowMs).decision === 'done-with-gaps';
+}
+
 // Which step each command needs; the CLI refuses a step the loop did not ask for.
 // A stale builder is restarted (start); a stale critic is re-sent (beat, unit stays judging).
 export function allows(cmd, d) {

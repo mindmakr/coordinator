@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chainLine, chainOf, chainUnits, linkedRuns, parseContinues } from '../lib/chain.mjs';
-import { answerRefusal, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
+import { answerRefusal, namedMinutes, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
 import { decide, decideUnit, stats } from '../lib/rules.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
 import { flowGraph } from '../lib/maps.mjs';
@@ -257,6 +257,64 @@ test('the --confirm words pass the same yes check as a note', () => {
   run('answer', 'cf', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, go ahead with PR 1234');
   assert.match(run('extend', 'cf', 'm1', '--rounds', '4', '--reason', 'r', '--answer', 'q1').err, /--rounds 4, but the approval names 1/, 'PR 1234 is no round count');
   assert.equal(run('extend', 'cf', 'm1', '--reason', 'r', '--answer', 'q1').code, 0);
+});
+
+// hud-facelift: a session restart cost 25 minutes and no command could give the run that time back.
+test('extend --minutes: more time for the run only on the person\'s approving answer, as many minutes as they named', () => {
+  run('init', 't', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 't', 'm1', '--bar', 'b'); run('add', 't', 'm2', '--bar', 'b'); run('freeze', 't');
+  run('start', 't', 'm1'); run('built', 't', 'm1'); run('verdict', 't', 'm1', 'pass', '--evidence', 'green', '--score', '9');
+  // Past the budget: next would stop m2, which never started.
+  const file = join(dir, 'runs', 't', 'state.json');
+  const st = JSON.parse(readFileSync(file, 'utf8')); st.createdAt = new Date(Date.now() - 70 * 60_000).toISOString(); writeFileSync(file, JSON.stringify(st));
+  assert.equal(run('next', 't').out.units.find((u) => u.id === 'm2').reason, 'budget: time');
+  // Refused without an approving answer from the person.
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r').err, /more time needs --answer qN/);
+  run('ask', 't', '--question', 'More time?', '--header', 'time', '--option', 'Yes|60 more minutes', '--option', 'No|close it');
+  run('answer', 't', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q1').err, /q1 marks no option as approving/);
+  run('ask', 't', '--question', 'Give the run 60 more minutes?', '--header', 'time', '--option', 'Yes|60 more minutes', '--option', 'No|close it', '--approves', 'Yes');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /q2 has no answer yet/);
+  run('answer', 't', 'q2', '--choice', 'No', '--by', 'person', '--confirm', 'No, close it');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /q2 was answered "No", not "Yes"/);
+  run('answer', 't', 'q2', '--choice', 'Yes');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /not given by the person/, 'the lead cannot answer for the person');
+  run('answer', 't', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, but only if it is quick');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /do not clearly say yes/);
+  // A question on a unit approves nothing for the run; --rounds goes with a unit, --minutes with the run.
+  run('ask', 't', '--question', 'More for m2?', '--header', 'm2', '--option', 'Yes|60 more minutes', '--option', 'No|stop', '--unit', 'm2', '--approves', 'Yes');
+  run('answer', 't', 'q3', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q3').err, /q3 is about m2/);
+  assert.match(run('extend', 't', 'm2', '--minutes', '30', '--reason', 'r', '--answer', 'q3').err, /--minutes goes with the run/);
+  assert.match(run('extend', 't', '--minutes', '30', '--rounds', '1', '--reason', 'r', '--answer', 'q2').err, /--rounds goes with a unit/);
+  // Their words name 60: more is refused; nothing was recorded by any refusal.
+  run('answer', 't', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, take the hour');
+  assert.match(run('extend', 't', '--minutes', '90', '--reason', 'r', '--answer', 'q2').err, /--minutes 90, but the approval names 60/);
+  assert.equal(state('t').budget.maxMinutes, 60);
+  // Approved: that many minutes, logged as a decision with their words; the time-stopped unit opens again.
+  assert.equal(run('extend', 't', '--reason', 'session restart cost 25 minutes', '--answer', 'q2').code, 0);
+  const s = state('t');
+  assert.equal(s.budget.maxMinutes, 120); assert.equal(s.budget.addedMinutes, 60);
+  const d = s.notes.at(-1);
+  assert.equal(d.kind, 'decision'); assert.equal(d.answers, 'q2');
+  assert.match(d.text, /^run time budget: 60 more minutes \(now 120, was 60; 7\d used; their words name 60\), approved by the person \(q2 "time: Give the run 60 more minutes\?" answered "Yes \(60 more minutes\)" via cli, their words: "Yes, take the hour"\): session restart cost 25 minutes$/);
+  const m2 = run('next', 't').out.units.find((u) => u.id === 'm2');
+  assert.equal(m2.action, 'build', 'm2 is no longer past the budget');
+  // One approval, one use.
+  assert.match(run('extend', 't', '--minutes', '10', '--reason', 'r', '--answer', 'q2').err, /q2 is already decided/);
+});
+
+test('the minutes an approval names', () => {
+  assert.equal(namedMinutes('Yes|60 more minutes'), 60);
+  assert.equal(namedMinutes('give it 45 more mins'), 45);
+  assert.equal(namedMinutes('Yes, take the hour'), null, '"the hour" names no amount');
+  assert.equal(namedMinutes('an hour'), 60);
+  assert.equal(namedMinutes('two more hours'), 120);
+  assert.equal(namedMinutes('1.5 hours'), 90);
+  assert.equal(namedMinutes('half an hour'), 30, 'not an hour');
+  assert.equal(namedMinutes('approved, PR 1234 and 2 more rounds'), null, 'no time unit');
+  assert.equal(namedMinutes('30 minutes, or an hour at most'), 60, 'the largest named');
+  assert.equal(namedMinutes(''), null);
 });
 
 test('the rounds an approval names', () => {
