@@ -129,7 +129,8 @@ test('live: links carry the token, logs load on open, another run uses /run/<run
   assert.match(row(html, 'E1'), /src="\/artifacts\/u1\/E1-list-ar-360\.png\?t=tok"/);
   assert.match(overlay(html, 'E2'), /<pre class="evv-pre" data-src="\/artifacts\/u1\/E2-server\.log\?t=tok">Loading…<\/pre>/);
   assert.match(html, /<script nonce="n0">[\s\S]*data-evv-item[\s\S]*<\/script>/, 'the viewer script rides in the nonce script');
-  assert.equal(html.match(/<script/g).length, 1);
+  assert.equal(html.match(/<script/g).length, 2, 'the theme script in <head> and the page script');
+  assert.equal(html.match(/<script nonce="n0">/g).length, 2);
   assert.doesNotMatch(html, /\son[a-z]+=/i, 'no inline handlers');
   const other = liveCtx({ token: 'tok', nonce: 'n0' }, 'r0', null, 'r1'); other.has = () => true;
   const page = render(s, other, 'unit');

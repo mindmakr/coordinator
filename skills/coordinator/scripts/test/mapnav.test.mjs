@@ -98,7 +98,8 @@ test('live maps page: search, focus and selection panel per walkable map, the wa
   assert.ok(html.includes("addEventListener('coordinator:patched'"), 'and they put the selection and pin back');
   assert.match(html, /#sel=/, 'the selection goes in the URL hash');
   assert.match(html, /sessionStorage/);
-  assert.equal((html.match(/<script/g) ?? []).length, 1, 'one nonce script');
+  assert.equal((html.match(/<script nonce=/g) ?? []).length, 2, 'two nonce scripts: the theme in <head>, the page at the end');
+  assert.equal((html.match(/<script/g) ?? []).length, 2, 'and no other');
 });
 
 test('Export PDF: a button on every live page, a hint on every snapshot, and print styles in both', () => {
@@ -121,10 +122,10 @@ test('Export PDF: a button on every live page, a hint on every snapshot, and pri
       assert.match(html, /@media print \{/, `${name}: print styles`);
       assert.match(html, /break-inside: avoid/);
       assert.match(html, /details::details-content \{ content-visibility: visible/, 'toggles print open');
-      assert.match(html, /\.top \.tools, \.pages, \.tl-tools, \.nav-tools[^{]*\.tip[^{]*\{ display: none !important; \}/, 'live-only controls and panels hidden');
+      assert.match(html, /\.top \.tools, \.tabs, \.tl-tools, \.nav-tools[^{]*\.tip[^{]*\{ display: none !important; \}/, 'live-only controls and panels hidden');
       assert.match(html, /svg\.map \{ max-width: 100%; width: auto; height: auto; max-height: 190mm; \}/, 'maps fit the page');
       assert.match(html, /@page\{size:auto;margin:[^@]*@top-left\{content:"[^"]*"[^}]*\}@bottom-right\{content:"Page " counter\(page\) " of " counter\(pages\)/, 'header and page numbers');
-      assert.match(html, /@media print\{:root,:root:has\(#theme-dark:checked\),:root\[data-theme="dark"\]\{[^}]*--bg:#f6f6f3/, 'always light on paper');
+      assert.match(html, /@media print\{:root,:root:has\(#theme-dark:checked\),:root\[data-theme="dark"\]\{[^}]*--bg:#f4f5f7/, 'always light on paper');
       assert.ok(html.includes('<div class="print-head" aria-hidden="true"><span data-printed></span></div>'), 'the export time goes here');
     }
   }

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **One shell and one component set for every page (`lib/ui.mjs`, `lib/parts.mjs`, `lib/theme.mjs`, `lib/theme.client.js`).** Every dashboard page, the snapshot and the hosted service's pages now share the approved design's top bar (breadcrumb, connection, Export PDF, a System, Light and Dark switch) and tab row, its colours (new light and dark tokens; a project theme file maps onto them as before) and one set of components: heading, KPI row, main and side columns, collapsible panels, tables with a sticky header, status chips, evidence type tags, try marks and bars. Status chips always carry their word and type tags their letters, never colour alone. At 360 px the page has no sideways scroll: columns stack, and the tab row and wide tables scroll inside themselves. On the live dashboard the theme choice is kept as `coordinator.theme` and applied before the page first paints (a choice made before this release is not carried over), and each panel and toggle stays open or closed as left, per page, across reloads and live updates. The pages themselves move onto the components next.
+
 ## 1.7.0 (2026-11-15)
 One lead window per run and no second builder on a working task, questions that name their project, run and task, and a PC dashboard that outlives its window, takes every run's answers and lists what waits on you. The design is in `docs/design/one-boss.md`.
 

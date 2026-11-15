@@ -1,7 +1,7 @@
 // The live dashboard's only script (served with a per-response nonce; `matches`
 // is prepended from lib/timeline.mjs). It listens to /events, swaps only the
 // blocks whose hash changed, never a block holding a half-filled form, and
-// keeps open toggles, scroll, theme and timeline filters per browser.
+// keeps open toggles and panels, scroll and timeline filters per browser.
 (() => {
   const body = document.body;
   const run = body.dataset.run; const path = body.dataset.path; const token = body.dataset.token;
@@ -10,24 +10,22 @@
   const load = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window: no memory */ } };
 
-  // Theme: system, light or dark; the checked radio drives the CSS.
-  const theme = load('coordinator:theme', 'system');
-  const radio = document.getElementById(`theme-${theme}`);
-  if (radio) radio.checked = true;
-  document.querySelectorAll('input[name="theme"]').forEach((r) => r.addEventListener('change', () => save('coordinator:theme', r.value)));
+  // The theme is theme.client.js's, in <head>.
 
-  // Open toggles, by their data-d key, for every page of this run.
-  const openSet = new Set(load(key('open'), []));
+  // Toggles and panels (details[data-d]) as the reader left them, per page: open or
+  // closed by key; one never touched keeps the state the page rendered it in.
+  const openKey = key(`open:${path}`);
+  const openMap = restoreOpen([], load(openKey, {})); // lib/ui.mjs
   const applyOpen = (root) => {
     if (root.nodeType !== 1 && root !== document) return;
     const all = [...root.querySelectorAll('details[data-d]')];
     if (root.matches && root.matches('details[data-d]')) all.push(root);
-    all.forEach((d) => { d.open = openSet.has(d.dataset.d); });
+    restoreOpen(all, openMap);
   };
   document.addEventListener('toggle', (e) => {
     const d = e.target; if (!d.dataset || !d.dataset.d || d.dataset.po) return; // po: opened only for print
-    if (d.open) openSet.add(d.dataset.d); else openSet.delete(d.dataset.d);
-    save(key('open'), [...openSet]);
+    openMap[d.dataset.d] = d.open;
+    save(openKey, openMap);
   }, true);
 
   // Timeline: search, kinds, units, range and sort, remembered per page.
