@@ -223,19 +223,23 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     const lock = join(reDir, 'state.json.lock');
     const go = join(tmp, 're.go');
     const holder = spawn(process.execPath, ['--input-type=module', '-e', HOLD_AND_ANSWER, reDir, qe, go, VERSION], { env: env('gamma'), stdio: ['ignore', 'ignore', 'pipe'] });
-    let holderErr = ''; holder.stderr.on('data', (d) => { holderErr += d; });
-    const held = new Promise((r) => holder.once('exit', r));
-    for (let i = 0; i < 400 && !existsSync(lock) && holder.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
-    assert.ok(existsSync(lock), `the other writer holds the lock ${holderErr}`);
-    const pending = post({ key: readRegistry({ home }).find((x) => x.run === 're').key, run: 're', q: qe, choice: 'Yes' });
-    await new Promise((r) => setTimeout(r, 600));
-    assert.equal((await fetch(url)).status, 200, 'the page answers while an answer waits on a lock');
-    writeFileSync(go, '');
-    assert.equal(await held, 0, holderErr);
-    const raced = await pending;
-    assert.equal(raced.status, 400);
-    assert.match(await raced.text(), /no longer open/);
-    assert.deepEqual(qOf('gamma', 're', qe).history.map((h) => [h.choices, h.by]), [[['No'], 'lead']], 'the earlier answer stands');
+    try {
+      let holderErr = ''; holder.stderr.on('data', (d) => { holderErr += d; });
+      const held = new Promise((r) => holder.once('exit', r));
+      for (let i = 0; i < 400 && !existsSync(lock) && holder.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(existsSync(lock), `the other writer holds the lock ${holderErr}`);
+      const pending = post({ key: readRegistry({ home }).find((x) => x.run === 're').key, run: 're', q: qe, choice: 'Yes' });
+      await new Promise((r) => setTimeout(r, 600));
+      assert.equal((await fetch(url)).status, 200, 'the page answers while an answer waits on a lock');
+      writeFileSync(go, '');
+      assert.equal(await held, 0, holderErr);
+      const raced = await pending;
+      assert.equal(raced.status, 400);
+      assert.match(await raced.text(), /no longer open/);
+      assert.deepEqual(qOf('gamma', 're', qe).history.map((h) => [h.choices, h.by]), [[['No'], 'lead']], 'the earlier answer stands');
+    } finally {
+      holder.kill(); // never leave the lock held if an assertion above fails
+    }
 
     // A run.mjs answer that claims the dashboard but was not started by it is refused.
     const forged = cli('gamma', ['answer', 'rg', setup('gamma', 'rg2', 'Again'), '--choice', 'Yes', '--by', 'person'], { [VIA_ENV]: token });
