@@ -99,14 +99,33 @@ export function retroMarkdown(m) {
     '## Budget',
     `- Tries per unit: ${b.usedRounds} of ${b.rounds}${b.suggested ? `, suggested ${b.suggested}` : ''}`,
     `- Builds started: ${b.builds}${b.resets ? `, ${b.resets} reset` : ''}`,
-    `- Time: ${b.minutes} min`, '',
+    `- Time: ${b.usedMinutes} of ${b.minutes} min used`,
+    ...(b.reviewMedian === null ? [] : [`- Review minutes per try: ${b.reviewMedian} (median)`]), '',
     ...section('Retro notes', m.notes, (n) => n.text),
     ...section('Lessons', m.lessons, (l) => `${l.tag}: ${l.text} (${l.id})`),
     ...section('Repeated gaps', m.repeated, (g) => `${g.gap} (${g.units.join(', ')}; ${g.rounds} rounds)`),
     ...section('Stopped units', b.stopped, (s) => `${s.id}: ${s.reason}`),
     ...section('Upstream proposals', m.upstream, (n) => n.text),
     ...section('Escapes', m.escapes, (e) => `${e.unit}: ${e.text}`),
+    ...spendMd(m.spend), ...staffingMd(m.staffing),
   ].join('\n').trimEnd();
+}
+
+// The Spend and Staffing panels as Markdown: the same figures, and the same "not recorded".
+function spendMd(sp) {
+  if (!sp) return [];
+  const share = (g) => (g.share === null ? '' : ` (${g.share}% of ${g.shareOf === 'tokensIn' ? 'tokens in' : 'minutes'})`);
+  const units = sp.byUnit.filter((u) => u.entries);
+  return ['## Spend', `- Total: ${sp.line}`,
+    ...(sp.byKind.length ? ['', '### By agent kind', ...sp.byKind.map((g) => `- ${g.label}: ${costLine(g)}${share(g)}`)] : []),
+    ...(units.length ? ['', '### By unit', ...units.map((u) => `- ${u.id}: ${costLine(u)}`)] : []), ''];
+}
+function staffingMd(st) {
+  if (!st) return [];
+  const name = (g) => (g.critic === 'general' ? 'General' : `Specialist ${g.critic}`);
+  return ['## Staffing',
+    ...(st.critics.length ? st.critics.map((g) => `- ${name(g)}, ${g.setup}: ${g.rounds} rounds, ${g.passed} passed${g.escapes === null ? '' : `, ${g.escapes} escapes`}`) : ['- No round judged yet.']),
+    ...(st.builders.length || st.unrecorded ? [`- Builder models: ${modelLine(st.builders, st.unrecorded)}`] : []), ''];
 }
 
 // Spend per kind of agent and per unit: tokens in and out, minutes and money as recorded, a dash where none was.
@@ -126,8 +145,10 @@ function spendHtml(sp, ctx) {
 // Critic setups (verdict --critic) with the rounds each judged, passed and the escapes after its passes; builder models.
 function staffingHtml(st) {
   if (!st) return '<p class="empty">Not recorded.</p>';
-  const critics = table({ cols: [{ label: 'Critic' }, { label: 'Setup' }, { label: 'Rounds', num: true }, { label: 'Passed', num: true }, { label: 'Escapes', num: true }], min: 400,
-    empty: 'No round judged yet.', rows: st.critics.map((g) => [g.critic === 'general' ? 'General' : `Specialist ${g.critic}`, g.setup, String(g.rounds), String(g.passed), g.escapes === null ? '–' : String(g.escapes)]) });
+  // The setup sits under the critic's name, so the counts stay in view in the side column (no min width).
+  const who = (g) => ({ html: `${esc(g.critic === 'general' ? 'General' : `Specialist ${g.critic}`)}<div class="cause">${esc(g.setup)}</div>` });
+  const critics = table({ cols: [{ label: 'Critic and setup' }, { label: 'Rounds', num: true }, { label: 'Passed', num: true }, { label: 'Escapes', num: true }],
+    empty: 'No round judged yet.', rows: st.critics.map((g) => [who(g), String(g.rounds), String(g.passed), g.escapes === null ? '–' : String(g.escapes)]) });
   const builders = st.builders.length || st.unrecorded ? `<p class="cause">Builder models: ${esc(modelLine(st.builders, st.unrecorded))}</p>` : '';
   return `${critics}${builders}`;
 }

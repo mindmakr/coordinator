@@ -250,13 +250,18 @@ test('unit Time KPI: working time from each try\'s start, built and verdict stam
   ];
   const now = T0 + 140 * 60_000;
   const t = tryTimes(s.units[0], now);
-  assert.deepEqual(t.map((x) => [x.n, x.minutes, x.build, x.review, x.open]), [[1, 65, 41, 24, false], [2, 30, 10, 10, false], [3, 20, 10, 10, true]]);
+  assert.deepEqual(t.map((x) => [x.n, x.minutes, x.build, x.review, x.open]), [[1, 65, 41, 24, false], [2, 30, 20, 10, false], [3, 20, 10, 10, true]]); // try 2's crashed build counts as build: the parts add up
+  for (const x of t) assert.equal(x.build + x.review, x.minutes, `T${x.n}: build + review = minutes`);
   assert.deepEqual(t.map((x) => x.start), [at(0), at(70), at(120)]);
-  assert.deepEqual(workTime(t), { minutes: 115, build: 61, review: 44, unstamped: 0, open: true });
+  // A try whose stamps are the same instant took 0 minutes; it is stamped, not unknown. Also when it ended in a reset.
+  const zero = { status: 'pass', log: [{ kind: 'start', at: at(0) }, { kind: 'built', at: at(0) }, { kind: 'start', at: at(5) }, { kind: 'reset', at: at(5) }], rounds: [{ n: 1, verdict: 'fail', at: at(0) }, { n: 2, verdict: 'pass', at: at(5) }] };
+  assert.deepEqual(tryTimes(zero, now).map((x) => [x.minutes, x.build, x.review]), [[0, 0, 0], [0, null, null]]);
+  assert.deepEqual(workTime(tryTimes(zero, now)), { minutes: 0, build: 0, review: 0, unstamped: 0, open: false });
+  assert.deepEqual(workTime(t), { minutes: 115, build: 71, review: 44, unstamped: 0, open: true });
   const v = view(s, decide(s, now), now);
   assert.deepEqual(v.units[0].time, workTime(t), 'the view carries the same stamps and total');
   const page = unitPage(v, 'api', now);
-  assert.match(page, /<span class="k">Time<\/span><span class="v">1 h 55 min<\/span><span class="s">build 1 h 1 min · review 44 min · try running<\/span>/);
+  assert.match(page, /<span class="k">Time<\/span><span class="v">1 h 55 min<\/span><span class="s">build 1 h 11 min · review 44 min · try running<\/span>/);
   // The Rounds table shows each try's start, build and review minutes beside its verdict time.
   assert.match(page, /<th scope="col">Started<\/th><th scope="col" class="num">Build<\/th><th scope="col" class="num">Review<\/th><th scope="col">Judged<\/th>/);
   assert.match(page, /data-a="rrow-1"><td>T1<\/td><td><time datetime="2026-01-01T00:00:00\.000Z"[^>]*>[^<]*<\/time><\/td><td class="num">41 min<\/td><td class="num">24 min<\/td>/);
@@ -264,7 +269,7 @@ test('unit Time KPI: working time from each try\'s start, built and verdict stam
   s.units[0].log = s.units[0].log.slice(3); s.units[0].status = 'open';
   const v2 = view(s, decide(s, now), now);
   assert.equal(v2.units[0].time.unstamped, 1);
-  assert.match(unitPage(v2, 'api', now), /<span class="k">Time<\/span><span class="v">30 min<\/span><span class="s">build 10 min · review 10 min · 1 not stamped<\/span>/);
+  assert.match(unitPage(v2, 'api', now), /<span class="k">Time<\/span><span class="v">30 min<\/span><span class="s">build 20 min · review 10 min · 1 not stamped<\/span>/);
   // No try yet: a dash.
   assert.match(unitPage(v2, 'ui', now), /<span class="k">Time<\/span><span class="v">–<\/span><span class="s">not started<\/span>/);
 });

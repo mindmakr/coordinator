@@ -44,6 +44,7 @@ export function draft(run, { git }) {
   const changes = run.units.map((u) => ({
     unit: u.id, title: u.title ?? purpose(u), status: u.status, issues: links(u, 'issue'), prs: links(u, 'pr'), merges: links(u, 'merge'),
     files: diffs.find((d) => d.unit === u.id)?.files.length ?? 0,
+    paths: changedPaths(diffs.filter((d) => d.unit === u.id)), // the unit's own files, for the report's By unit view
   }));
   const migrations = []; const scripts = []; const env = []; const jobs = [];
   for (const d of diffs.filter((x) => x.ok)) {

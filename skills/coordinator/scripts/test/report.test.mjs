@@ -65,6 +65,9 @@ test('draft: migrations, env names, scripts and jobs from each unit\'s recorded 
   assert.equal(d.jobs.length, 1); assert.match(d.jobs[0].text, /boss\.work\("payout\.settle"/); assert.equal(d.jobs[0].file, 'src/jobs.js');
   assert.equal(d.copy.length, 1);
   assert.deepEqual(d.diffs.map((x) => x.ok), [true, false, false]);
+  // Each unit keeps its own changed paths (the report's By unit view); the run's list is their union.
+  assert.deepEqual(d.changes[0].paths, d.files); assert.ok(d.changes[0].paths.includes('drizzle/0042_add_payouts.sql'));
+  assert.deepEqual(d.changes.slice(1).map((c) => c.paths), [[], []]);
   const md = draftMarkdown(d, s);
   assert.match(md, /### Changes\n- Payouts settle once: TODO/);
   assert.match(md, /Not in this release \(not passed\): u2 \(stopped\), u3 \(open\)/);
@@ -265,6 +268,25 @@ test('report page: the shared shell, KPI row and panels for every section it had
   assert.match(bare, /Not written yet/); assert.match(bare, /No units\./); assert.match(bare, /download="report-r\.md"/); // no notes and no draft: both buttons export the not-written state
 });
 
+test('report page: Files the run changed, by file with the units that changed each, and by unit with each unit\'s count and paths', () => {
+  const changes = [
+    { unit: 'u1', status: 'pass', files: 2, paths: ['src/a.js', 'src/b.js'] },
+    { unit: 'u2', status: 'stopped', files: 1, paths: ['src/a.js'] },
+    { unit: 'u3', status: 'open', files: 0, paths: [] },
+  ];
+  const html = reportPage(view(), Date.now(), null, { draft: draftData({ changes, files: ['src/a.js', 'src/b.js'] }) });
+  const panel = html.slice(html.indexOf('data-d="files"'), html.indexOf('data-d="devops"'));
+  assert.match(panel, /<th scope="col">File<\/th><th scope="col">Units<\/th>/);
+  assert.match(panel, /<span class="mono">src\/a\.js<\/span><\/td><td><a href="units\/u1\.html">u1<\/a>, <a href="units\/u2\.html">u2<\/a><\/td>/);
+  assert.match(panel, /<span class="mono">src\/b\.js<\/span><\/td><td><a href="units\/u1\.html">u1<\/a><\/td>/);
+  assert.match(panel, /<summary>By unit · 2<\/summary>/); // u3 changed nothing: not listed
+  assert.match(panel, /<td><a href="units\/u1\.html">u1<\/a><\/td><td class="num">2<\/td><td><span class="mono">src\/a\.js<\/span><br><span class="mono">src\/b\.js<\/span><\/td>/);
+  assert.match(panel, /<td><a href="units\/u2\.html">u2<\/a><\/td><td class="num">1<\/td>/);
+  // A draft stored before per-unit paths: the counts, and how to get the paths.
+  const old = reportPage(view(), Date.now(), null, { draft: draftData({ changes: [{ unit: 'u1', status: 'pass', files: 3 }], files: ['src/a.js'] }) });
+  assert.match(old, /<td class="num">3<\/td><td><span class="muted">not stored; run\.mjs report --draft again<\/span>/);
+});
+
 test('report markdown: the stored notes, else the draft from git', () => {
   assert.equal(reportMarkdown(view(), { report: { text: 'stored' }, draft: {} }), 'stored');
   assert.match(reportMarkdown(view(), { draft: draftData() }), /^## r · 2026-11-15/);
@@ -337,8 +359,9 @@ test('retro: Spend per agent kind and per unit from launch figures, Staffing fro
   assert.match(spend, /<tr data-a="spend-u-u1"><td><a class="mono" href="[^"]*u1[^"]*">u1<\/a><\/td><td class="num">1000k<\/td>/);
   assert.doesNotMatch(spend, /spend-u-u2/, 'a unit with no recorded launch is not listed as zero');
   const staffing = panelOf('staffing');
-  assert.match(staffing, /<td>General<\/td><td>general, sonnet, delta review<\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">1<\/td>/);
-  assert.match(staffing, /<td>Specialist security<\/td><td>security, opus<\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">–<\/td>/);
+  assert.match(staffing, /<td>General<div class="cause">general, sonnet, delta review<\/div><\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">1<\/td>/);
+  assert.match(staffing, /<td>Specialist security<div class="cause">security, opus<\/div><\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">–<\/td>/);
+  assert.doesNotMatch(staffing, /min-width/, 'no min width: every column stays in view in the side column');
   assert.match(staffing, /Builder models: opus 0\/1 passed · sonnet 1\/1 passed/);
   assert.match(html, /<td>Time, minutes<\/td><td class="num">240<\/td><td class="num">120<\/td>/);
   assert.match(html, /<td>Review minutes per try<\/td><td class="num">–<\/td><td class="num">10<\/td>/);
@@ -346,4 +369,11 @@ test('retro: Spend per agent kind and per unit from launch figures, Staffing fro
   // Nothing recorded: the panels say so, nothing is guessed.
   const bare = retroPage(retroModel({ id: 'r', tag: 'code', budget: { maxRounds: 4, maxMinutes: 60 }, notes: [], units: [{ id: 'u1', status: 'open', rounds: [] }] }), view(), Date.now(), null, false);
   assert.match(bare, /Not recorded: the lead passes --tokens-in, --minutes or --cost/); assert.match(bare, /No round judged yet\./);
+  // Copy and Download carry the page's Spend and Staffing, and the time used.
+  const md = retroMarkdown(m);
+  assert.match(md, /- Time: 120 of 240 min used\n- Review minutes per try: 10 \(median\)\n/);
+  assert.match(md, /## Spend\n- Total: 1000k in tokens · 80 min · 1\.25 USD\n\n### By agent kind\n- Builders: 600k in tokens · 50 min \(60% of tokens in\)\n- General critics: 300k in tokens · 30 min \(30% of tokens in\)\n- Specialist critics: 100k in tokens · 1\.25 USD \(10% of tokens in\)\n\n### By unit\n- u1: 1000k in tokens · 80 min · 1\.25 USD\n/);
+  assert.doesNotMatch(md.slice(md.indexOf('## Spend'), md.indexOf('## Staffing')), /u2/, 'a unit with no recorded launch is not listed');
+  assert.match(md, /## Staffing\n- General, general, opus, full depth: 1 rounds, 0 passed, 0 escapes\n- General, general, sonnet, delta review: 1 rounds, 1 passed, 1 escapes\n- Specialist security, security, opus: 1 rounds, 1 passed\n- Builder models: opus 0\/1 passed · sonnet 1\/1 passed$/);
+  assert.match(retroMarkdown(retroModel({ id: 'r', tag: 'code', budget: { maxRounds: 4, maxMinutes: 60 }, notes: [], units: [{ id: 'u1', status: 'open', rounds: [] }] })), /## Spend\n- Total: not recorded\n\n## Staffing\n- No round judged yet\.$/);
 });

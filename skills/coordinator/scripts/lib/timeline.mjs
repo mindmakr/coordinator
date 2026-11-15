@@ -42,22 +42,23 @@ function noteEvents(run, keep) {
 // Each try's start and end stamps, from the unit's log (start, built, reset) and its rounds (the verdict
 // ends a try): { n, start, built, end, minutes, build, review, open }. Minutes are wall-clock time while an
 // agent worked on the try: start to the verdict, less the gap after a reset (a crashed build) until the next
-// start. build is the last start to the last built, review the last built to the verdict. A try whose start
-// fell out of the log has null minutes. The try in progress (building or judging) runs to nowMs, open: true.
+// start. review is the last built to the verdict, build the rest (a crashed build counts as build time), so
+// build + review = minutes. A try with a start stamp has minutes, 0 when its stamps are the same instant; one
+// whose start fell out of the log has null. The try in progress (building or judging) runs to nowMs, open: true.
 export function tryTimes(u, nowMs) {
   const log = (u.log ?? []).filter((e) => e && typeof e.at === 'string' && ['start', 'built', 'reset'].includes(e.kind));
   const mins = (a, b) => (a && b ? Math.max(0, Date.parse(b) - Date.parse(a)) / 60_000 : null);
   const one = (n, lo, end, open) => {
-    let from = null; let start = null; let last = null; let built = null; let worked = 0;
+    let from = null; let start = null; let built = null; let worked = 0;
     for (const e of log.filter((x) => x.at > lo && (!end || x.at <= end))) {
-      if (e.kind === 'start') { start ??= e.at; if (!from) { from = e.at; last = e.at; } }
+      if (e.kind === 'start') { start ??= e.at; from ??= e.at; }
       else if (e.kind === 'built') built = e.at;
       else if (from) { worked += mins(from, e.at); from = null; built = null; } // reset: the build ended with no verdict
     }
     const to = end ?? new Date(nowMs).toISOString();
     if (from) worked += mins(from, to);
-    const ok = start !== null && (from !== null || worked > 0);
-    return { n, start, built, end, open, minutes: ok ? worked : null, build: built && last ? mins(last, built) : null, review: built ? mins(built, to) : null };
+    const review = built ? mins(built, to) : null;
+    return { n, start, built, end, open, minutes: start === null ? null : worked, build: review === null ? null : Math.max(0, worked - review), review };
   };
   const out = []; let lo = '';
   for (const [i, r] of (u.rounds ?? []).entries()) { if (typeof r.at !== 'string') continue; out.push(one(r.n ?? i + 1, lo, r.at, false)); lo = r.at; }
