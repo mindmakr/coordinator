@@ -5,7 +5,7 @@
 // with its words in a <title> and an aria-label. State text is always escaped;
 // only http(s) URLs become external links.
 import { webUrl } from './links.mjs';
-import { esc } from './parts.mjs';
+import { esc, typeOf } from './parts.mjs';
 import { clip, DOTS, duration } from './plain.mjs';
 import { count } from './self.mjs';
 import { behaviourGrid, heat } from './heat.mjs';
@@ -39,7 +39,7 @@ const empty = (t) => `<p class="empty">${esc(t)}</p>`;
 const legend = (items) => `<p class="map-legend">${items.map(([c, l]) => `<span><i class="sw ${c}" aria-hidden="true"></i>${esc(l)}</span>`).join('')}</p>`;
 
 // Goal at the centre; units on the first ring (labelled boxes), their behaviours on the second, evidence outside.
-const PW = 140; const PH = 42; const PG = 12;
+const PW = 140; const PH = 42; const PG = 12; const TAG_W = 34;
 // The smallest ring on which neighbouring unit boxes clear each other (side by side or one above the other).
 export function ringRadius(n, base) {
   let r = base;
@@ -69,7 +69,7 @@ export function mindSvg(v, ctx) {
     const edges = []; const nodes = []; const pts = [];
     const line = (x1, y1, x2, y2, i) => edges.push(`<line class="edge ${near([i], 'e')}" x1="${r1(x1)}" y1="${r1(y1)}" x2="${r1(x2)}" y2="${r1(y2)}"/>`);
     const leaf = (n, x, y, a) => {
-      pts.push([x, y, n.kind === 'behaviour' && labels ? 34 : 12]);
+      pts.push([x, y, n.kind === 'behaviour' && labels ? 34 : n.kind === 'evidence' ? TAG_W / 2 + 2 : 12]);
       const unitHref = ctx.unitHref(n.unit);
       const c = cls(near([ix.get(n.unit)]));
       if (n.kind === 'behaviour') {
@@ -77,8 +77,11 @@ export function mindSvg(v, ctx) {
           + (labels ? txt(cx + (R2 + 16) * Math.cos(a), cy + (R2 + 16) * Math.sin(a) + 4, n.label, 'sm', Math.cos(a) < -0.2 ? 'end' : Math.cos(a) > 0.2 ? 'start' : 'middle') : ''), false, c));
       } else {
         const href = n.url ? n.url : (n.file && ctx.artHref(n.file)) || unitHref; // a file kept locally opens its unit
-        const shape = n.kind === 'more' ? `<circle class="nd ev" cx="${r1(x)}" cy="${r1(y)}" r="9"/>${txt(x, y + 3, n.label, 'xs', 'middle')}` : `<circle class="nd ev" cx="${r1(x)}" cy="${r1(y)}" r="4.5"/>`;
-        nodes.push(link(href, `${n.unit} evidence (${n.label}): ${clip(n.text, 160)}`, shape, !!n.url, c));
+        // Evidence says what it is in letters (IMG, LOG, TEST…), so its mark never rests on colour.
+        const type = typeOf(n.label, n.file);
+        const shape = n.kind === 'more' ? `<circle class="nd ev" cx="${r1(x)}" cy="${r1(y)}" r="9"/>${txt(x, y + 3, n.label, 'xs', 'middle')}`
+          : `<rect class="nd ev tagbox" x="${r1(x - TAG_W / 2)}" y="${r1(y - 8)}" width="${TAG_W}" height="16" rx="3"/>${txt(x, y + 3.5, type, 'xs tagt', 'middle')}`;
+        nodes.push(link(href, `${n.unit} evidence (${n.kind === 'more' ? n.label : `${type}, ${n.label}`}): ${clip(n.text, 160)}`, shape, !!n.url, c));
       }
     };
     units.forEach((u, i) => {

@@ -435,6 +435,29 @@ table.t { width: 100%; border: 0; border-radius: 0; background: none; border-col
   .wrap { padding: 16px; }
   .head h1 { font-size: 19px; }
 }
+/* page: maps / project-map */
+.maps-page section.maps > :first-child, .pmap-page .panel > .body > :first-child { margin-top: 0; }
+.maps-page .panel .map-scroll { max-height: 70vh; }
+.maps-page .panel .map-scroll.mind { max-height: 75vh; }
+svg.map .nd.ev.tagbox { fill: var(--surface); stroke: var(--text); stroke-width: 1.5; }
+svg.map .tagt { font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: .04em; fill: var(--text); }
+.maps-legend { display: flex; flex-direction: column; gap: 12px; font-size: 12px; }
+.maps-legend .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.maps-legend ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.maps-legend li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.maps-legend .marks b { display: inline-block; min-width: 1.2em; text-align: center; }
+.exports { display: flex; flex-wrap: wrap; gap: 8px; }
+.exports a { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; }
+.exports a:hover { border-color: var(--accent); }
+a.evtag { text-decoration: none; }
+[data-nav-panel]:not([hidden]) + [data-nav-none] { display: none; }
+@media (min-width: 1000px) {
+  .maps-page .cols > .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+  .maps-page .side .nav-panel { position: static; width: auto; max-height: none; box-shadow: none; border: 0; border-radius: 0; padding: 0; background: none; }
+}
+.pmap-page .panel .mapbox { max-height: 70vh; border: 0; }
+.pmap-page .sub { margin: 12px 0 6px; font-size: 13px; font-weight: 700; }
+.pmap-page .t code { font: 12px var(--mono); overflow-wrap: break-word; }
 /* Export PDF (the browser's print): light theme, everything open, live-only controls hidden, nothing cut across pages where it fits. */
 @media print {
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

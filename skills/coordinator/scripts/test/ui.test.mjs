@@ -57,6 +57,11 @@ test('table: table.t with a sticky header row, inside its own scrolling box; cel
   assert.match(tpl, /\.t th \{[^}]*position: sticky; top: 0;/, 'the header row sticks');
 });
 
+test('table: a row given as { cls, cells } carries its class, escaped, for a page that filters rows', () => {
+  const html = table({ cols: [{ label: 'A' }], rows: [{ cls: 'a0 t', cells: ['x'] }, { cls: '"><b>', cells: ['y'] }, ['z']] });
+  assert.match(html, /<tr class="a0 t"><td>x<\/td><\/tr><tr class="&quot;&gt;&lt;b&gt;"><td>y<\/td><\/tr><tr><td>z<\/td><\/tr>/);
+});
+
 test('toneChip: the status word is always shown; tone is colour on top of it', () => {
   for (const tone of ['ask', 'ok', 'retry', 'bad', 'done']) assert.equal(toneChip('Waiting on you', tone), `<span class="chip ${tone}">Waiting on you</span>`);
   assert.equal(toneChip('Queued'), '<span class="chip">Queued</span>');
