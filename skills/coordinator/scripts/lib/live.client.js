@@ -12,27 +12,8 @@
 
   // The theme is theme.client.js's, in <head>.
 
-  // Toggles and panels (details[data-d]) as the reader left them, per page: open or
-  // closed by key; one never touched keeps the state the page rendered it in.
-  try { localStorage.removeItem(key('open')); } catch { /* no storage */ } // the old per-run key
-  const openKey = key(`open:${path}`);
-  const openMap = restoreOpen([], load(openKey, {})); // lib/ui.mjs
-  const applyOpen = (root) => {
-    if (root.nodeType !== 1 && root !== document) return;
-    const all = [...root.querySelectorAll('details[data-d]')];
-    if (root.matches && root.matches('details[data-d]')) all.push(root);
-    restoreOpen(all, openMap);
-  };
-  // Only a click on a summary (the mouse, Enter or Space) is the reader's: the browser also fires
-  // toggle for panels parsed open and for restoreOpen, and those must not be stored.
-  const armed = new WeakSet();
-  document.addEventListener('click', (e) => {
-    const s = e.target && e.target.closest ? e.target.closest('summary') : null;
-    if (s && s.parentElement && s.parentElement.dataset && s.parentElement.dataset.d) armed.add(s.parentElement);
-  }, true);
-  document.addEventListener('toggle', (e) => {
-    if (rememberToggle(openMap, e.target, armed)) save(openKey, openMap); // po: opened only for print
-  }, true);
+  // Toggles and panels (details[data-d]) as the reader left them, per page (panels.client.js).
+  const applyOpen = panelMemory(run, path);
 
   // Timeline: search, kinds, units, range and sort, remembered per page.
   const tools = document.querySelector('form[data-tl]');

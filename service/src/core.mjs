@@ -7,13 +7,15 @@ export { parseLog, replay, canonical, sha256 } from '../../skills/coordinator/sc
 export { validateEvent, validRun, KINDS, V } from '../../skills/coordinator/scripts/lib/eventschema.mjs';
 export { decide } from '../../skills/coordinator/scripts/lib/rules.mjs';
 export { view as runView } from '../../skills/coordinator/scripts/lib/view.mjs';
-export { hud } from '../../skills/coordinator/scripts/lib/hud.mjs';
+export { hud, runTabs } from '../../skills/coordinator/scripts/lib/hud.mjs';
 export { unitPage } from '../../skills/coordinator/scripts/lib/unitpage.mjs';
 export { selfModel } from '../../skills/coordinator/scripts/lib/self.mjs';
 export { selfPage } from '../../skills/coordinator/scripts/lib/selfpage.mjs';
-export { page, chip, stamp, blk, esc } from '../../skills/coordinator/scripts/lib/parts.mjs';
+export { page, chip, stamp, blk, esc, csp } from '../../skills/coordinator/scripts/lib/parts.mjs';
+export { reportPage } from '../../skills/coordinator/scripts/lib/report/page.mjs';
+export { retroModel, retroPage } from '../../skills/coordinator/scripts/lib/retro.mjs';
 export { maskSecrets } from '../../skills/coordinator/scripts/lib/secrets.mjs';
-export { mapPage as projectMapPage } from '../../skills/coordinator/scripts/lib/map/page.mjs';
+export { mapPage as projectMapPage, touchedBy } from '../../skills/coordinator/scripts/lib/map/page.mjs';
 export { fromText as mapFromText } from '../../skills/coordinator/scripts/lib/map/log.mjs';
 export { mapsPage } from '../../skills/coordinator/scripts/lib/mapspage.mjs';
 export { unitRefs } from '../../skills/coordinator/scripts/lib/maps.mjs';

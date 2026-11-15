@@ -4,7 +4,8 @@
 // map.html needs no script. Nodes and rows link to the files on GitHub when
 // the repo is known. Same shell and theme as the dashboard (lib/parts.mjs).
 import { anchor, esc } from '../links.mjs';
-import { blk, cols, heading, kpis, page, panel, table, toneChip } from '../parts.mjs';
+import { blk, cols, heading, kpis, page, panel, table, toneChip, unitLink } from '../parts.mjs';
+import { normPath, unitPaths } from '../overlap.mjs';
 import { count } from '../self.mjs';
 import { runCrumbs } from '../hud.mjs';
 import { TEST } from './js.mjs';
@@ -166,6 +167,24 @@ function rows(list, render, head, rowClass = () => '', min = 0) {
     + (list.length > ROWS ? `<p class="meta">Showing ${ROWS} of ${list.length}; the rest are in map.json.</p>` : '');
 }
 
+// "Touched by this run": [{ unit, files }], each unit's files from the run's state (the paths the lead
+// planned for it and its last checked diff: lib/overlap.mjs unitPaths) and, where the caller has the map's
+// log, from fromMap(unit) (lib/map/index.mjs: the files a map build tagged with the unit changed).
+// Units with no files are left out.
+export function touchedBy(units = [], fromMap = () => []) {
+  return units.map((u) => ({ unit: u.id, files: [...new Set([...unitPaths(u), ...fromMap(u.id).map(normPath)])].filter(Boolean).sort() }))
+    .filter((t) => t.files.length);
+}
+
+function touchedPanel(snap, touched, ctx) {
+  if (!touched.length) return '';
+  const files = new Set(touched.flatMap((t) => t.files)).size;
+  const body = table({ cols: [{ label: 'Unit' }, { label: 'Files' }], max: 360,
+    rows: touched.map((t) => ({ key: `touched-${t.unit}`, cells: [{ html: unitLink(t.unit, ctx) }, { html: t.files.map((f) => shortLink(snap, f)).join('<br>') }] })) });
+  return panel({ id: 'touched', title: 'Touched by this run', count: files, bodyHtml: blk('map-touched', body) });
+}
+
+// ctx.touched: touchedBy()'s list for the run, when the caller has the run's state.
 export function mapPage(snap, ctx, run) {
   const b = snap.build ?? {};
   const gr = graph(snap);
@@ -199,8 +218,7 @@ export function mapPage(snap, ctx, run) {
   const main = panel({ id: 'imports', title: 'Imports', count: snap.modules.length, metaHtml: commit ? `commit ${commit}` : '', bodyHtml: imports })
     + panel({ id: 'surfaces', title: 'Surfaces', count: routes.length + screens.length, bodyHtml: surfaces })
     + panel({ id: 'reuse', title: 'Reuse candidates', count: snap.reuse.length, bodyHtml: reuse });
-  // No "Touched by this run" panel: the snapshot this page is given does not say which unit changed which file.
-  const side = panel({ id: 'settings', title: 'Settings', count: snap.settings.length, bodyHtml: settings })
+  const side = touchedPanel(snap, ctx.touched ?? [], ctx) + panel({ id: 'settings', title: 'Settings', count: snap.settings.length, bodyHtml: settings })
     + panel({ id: 'helpers', title: 'Shared helpers', count: snap.helpers.length, open: false, bodyHtml: helpers });
   const body = [styles(gr, areaIds), blk('map-head', head), `<div class="pmap-page">${cols(main, side)}</div>`].join('\n');
   return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map`, crumbs: runCrumbs({ id: run }, ctx, 'Project map'), flag: b.partial ? toneChip('Partial', 'bad') : '' });

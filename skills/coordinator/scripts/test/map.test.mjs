@@ -9,7 +9,7 @@ import { buildMap } from '../lib/map/build.mjs';
 import { lex } from '../lib/map/lex.mjs';
 import { analyse } from '../lib/map/js.mjs';
 import { fromText, load, record, serialise, validate } from '../lib/map/log.mjs';
-import { mapPage } from '../lib/map/page.mjs';
+import { mapPage, touchedBy } from '../lib/map/page.mjs';
 import { exportTarget, jsonc } from '../lib/map/resolve.mjs';
 import { callMatches } from '../lib/map/surfaces.mjs';
 import { text, touches } from '../lib/map/touches.mjs';
@@ -218,6 +218,27 @@ test('the map page: shared shell, KPIs, panels Imports, Surfaces, Reuse candidat
   assert.doesNotMatch(html, /maptable|Touched by this run/);
 });
 
+test('touchedBy: each unit\'s files from its planned paths, its checked diff and the map builds tagged with it; units with none left out', () => {
+  const units = [{ id: 'a', touches: ['src/x.ts', './src/y.ts'], detect: { paths: ['src\\x.ts', 'lib/z.ts'] } }, { id: 'b' }, { id: 'c', touches: [] }];
+  const fromMap = (u) => ({ a: ['src/m.ts'], c: ['src/n.ts'] })[u] ?? [];
+  assert.deepEqual(touchedBy(units, fromMap), [{ unit: 'a', files: ['lib/z.ts', 'src/m.ts', 'src/x.ts', 'src/y.ts'] }, { unit: 'c', files: ['src/n.ts'] }]);
+  assert.deepEqual(touchedBy(units), [{ unit: 'a', files: ['lib/z.ts', 'src/x.ts', 'src/y.ts'] }], 'no map log: the state alone');
+  assert.deepEqual(touchedBy(), []);
+});
+
+test('the map page: "Touched by this run" lists each unit\'s files, linked to the unit, first in the side column', () => {
+  const snap = load(join(dir, 'log1'));
+  const touched = [{ unit: 'u1', files: ['src/a.ts', 'src/b.ts'] }, { unit: 'u<2>', files: ['src/a.ts'] }];
+  const html = mapPage(snap, { ...staticCtx(dir, 0), touched }, 'r1');
+  const panelHtml = /<details class="panel" data-d="touched"[^>]*>([\s\S]*?)<\/details>/.exec(html)?.[1] ?? '';
+  assert.match(panelHtml, /<h2>Touched by this run<\/h2><span class="count">2<\/span>/, 'counts distinct files');
+  assert.match(panelHtml, /<a class="ulink" href="units\/u1\.html">u1<\/a>/);
+  assert.match(panelHtml, /href="units\/u%3C2%3E\.html">u&lt;2&gt;<\/a>/, 'the unit id is escaped');
+  assert.match(panelHtml, /title="src\/a\.ts"[\s\S]*title="src\/b\.ts"/);
+  assert.ok(html.indexOf('<div class="side">') < html.indexOf('data-d="touched"') && html.indexOf('data-d="touched"') < html.indexOf('<h2>Settings</h2>'), 'first in the side column');
+  assert.doesNotMatch(mapPage(snap, { ...staticCtx(dir, 0), touched: [] }, 'r1'), /Touched by this run/, 'none: no panel');
+});
+
 // ---- CLI ----
 const state = join(dir, 'state');
 function cli(...args) {
@@ -296,6 +317,11 @@ test('a corrupt log is named, with --fresh as the way out; the page says so too'
 test('the live dashboard serves /map and /run/<id>/map behind the token', async () => {
   assert.equal(cli('init', 'm2', '--goal', 'g', '--bar', 'b', '--fence', 'f').code, 0);
   assert.equal(cli('map', 'm2', '--root', copy).code, 0);
+  // A unit's planned files: in the map.html a build writes, and on the live map page.
+  assert.equal(cli('add', 'm2', 'u9', '--bar', 'b').code, 0);
+  assert.equal(cli('touches', 'm2', 'src/server.ts', '--unit', 'u9').code, 0);
+  assert.equal(cli('map', 'm2', '--root', copy, '--unit', 'u9').code, 0);
+  assert.match(readFileSync(join(state, 'runs', 'm2', 'map.html'), 'utf8'), /<h2>Touched by this run<\/h2>[\s\S]*?<a class="ulink" href="units\/u9\.html">u9<\/a>[\s\S]*?title="src\/server\.ts"/);
   assert.equal(cli('init', 'm3', '--goal', 'g', '--bar', 'b', '--fence', 'f').code, 0);
   const child = spawn(process.execPath, [join(scripts, 'run.mjs'), 'serve', 'm1'], { env: { ...process.env, COORDINATOR_DIR: state } });
   try {
@@ -314,6 +340,8 @@ test('the live dashboard serves /map and /run/<id>/map behind the token', async 
     assert.equal((await fetch(`${u.origin}/map`)).status, 403, 'no token, no map');
     const other = await fetch(`${u.origin}/run/m2/map${u.search}`);
     assert.equal(other.status, 200, 'another run\'s map at /run/<id>/map');
+    const otherHtml = await other.clone().text();
+    assert.match(otherHtml, /<h2>Touched by this run<\/h2>[\s\S]*?<a class="ulink" href="\/run\/m2\/unit\/u9\?t=[^"]+">u9<\/a>[\s\S]*?title="src\/server\.ts"/, 'the live map lists the unit\'s files, linked to the unit');
     assert.match(await other.text(), /<nav class="crumbs"[^>]*>[\s\S]*?href="\/run\/m2\?t=[^"]+">m2<\/a>[\s\S]*Project map · project/, 'its breadcrumb leads to that run');
     assert.equal((await fetch(`${u.origin}/run/m3/map${u.search}`)).status, 404, 'a run with no map has no map page');
     // A broken log on another run: the page names the cause, and its nav is that run's.

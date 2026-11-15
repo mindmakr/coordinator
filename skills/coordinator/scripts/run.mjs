@@ -1306,7 +1306,7 @@ const commands = {
         ctx.calls = readCalls(runDir(id));
         const rest = m ? (m[2] ?? '/') : path;
         if (hasMap(runDir(id))) ctx.mapHref = `${ctx.base}/map?t=${encodeURIComponent(live.token)}`;
-        if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx) }) : null;
+        if (rest === '/map' || path === '/map') return ctx.mapHref ? mapView(id, runDir(id), { ...ctx, pages: mapNav(ctx), units: s.units }) : null;
         if (rest === '/maps') return mapsPage(v, Date.now(), ctx);
         if (rest === '/report' || rest === '/retro') return reportPages(s, v, runDir(id), ctx, rest.slice(1))[0][1];
         return rest === '/' ? hud(v, Date.now(), ctx) : unitPage(v, decodeURIComponent(rest.slice('/unit/'.length)), Date.now(), ctx);
@@ -1601,7 +1601,7 @@ const commands = {
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`--root must be a folder: ${root}`);
     if (o.unit !== undefined) unitOf(s, o.unit);
     if (o.dest !== undefined && o['pit-stop'] !== true) throw new Error('--dest goes with --pit-stop');
-    const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: staticCtx(runDir(run), 0, themeFor(s)), fresh: o.fresh === true, force: o.force === true, resetStage: o['reset-stage'] === true });
+    const snap = buildMap(run, runDir(run), { root, maxSeconds: num(o['max-seconds'], 60, 1, 3600), unit: o.unit ?? null, ctx: { ...staticCtx(runDir(run), 0, themeFor(s)), units: s.units }, fresh: o.fresh === true, force: o.force === true, resetStage: o['reset-stage'] === true });
     // A build after a unit merged also finds the functions that unit touched (map/calls/<unit>.json), in what is left of the cap.
     const calls = o.unit !== undefined ? unitCallsFor(run, s, o.unit, { root, deadline: t0 + num(o['max-seconds'], 60, 1, 3600) * 1000 }) : null;
     commands.hud([run]); // the dashboard links to the map

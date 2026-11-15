@@ -22,7 +22,7 @@
 //   bar(pct, { label?, tone? })       div.bar: a meter with its percent as its label
 //   mdActions(markdown, file, { copy? })  Copy Markdown and Download for a page: Download is a link that works without
 //                                     script; Copy (only with `copy`, the live page) reads the same text from that link
-//   restoreOpen(nodes, saved)         the live page's memory of toggles and panels (live.client.js runs it)
+//   restoreOpen(nodes, saved)         the pages' memory of toggles and panels (panels.client.js runs it)
 //   rememberToggle(map, d, armed)     records a toggle only after the reader clicked its summary
 //   rows([html], { empty? })          ul.rows: one short line per item, its parts wrapping; none says so
 import { esc } from './links.mjs';
@@ -98,7 +98,7 @@ export function typeOf(kind, file) {
 export const typeTag = (kind, file) => { const t = typeOf(kind, file); return `<span class="tag" title="${t}">${t}</span>`; };
 
 // Toggles and panels (details[data-d]) as the reader left them: `saved` is { key: open }, kept per
-// page by live.client.js. One never touched keeps the state it was rendered in. Returns the map to keep.
+// page by panels.client.js. One never touched keeps the state it was rendered in. Returns the map to keep.
 export function restoreOpen(nodes, saved) {
   const map = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
   for (const d of nodes) { const v = map[d.dataset.d]; if (typeof v === 'boolean' && d.open !== v) d.open = v; }

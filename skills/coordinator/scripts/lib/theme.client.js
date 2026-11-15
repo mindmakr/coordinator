@@ -1,5 +1,5 @@
-// The theme switch's memory, run in <head> before the first paint (live pages only: a
-// static page runs no script, and its switch works by CSS alone). Applies the stored
+// The theme switch's memory, run in <head> before the first paint (live pages and the
+// hosted service's pages: a static page runs no script, and its switch works by CSS alone). Applies the stored
 // choice as <html data-theme>, checks its radio once the page is parsed, and stores a
 // new choice. Storage blocked or broken: the system theme, nothing remembered.
 (() => {
