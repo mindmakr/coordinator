@@ -148,8 +148,53 @@ test('page: a live page applies the stored theme from <head>, with the nonce, be
   assert.match(html, /script-src 'nonce-N1'/);
   assert.equal((html.match(/<script nonce="N1">/g) ?? []).length, 2);
   assert.match(html, /const restoreOpen = function restoreOpen/, 'the page runs restoreOpen from lib/ui.mjs');
-  assert.match(html, /const openKey = key\(`open:\$\{path\}`\)/, 'panels are remembered per page');
+  assert.match(html, /const applyOpen = panelMemory\(run, path\)/, 'panels are remembered per page (panels.client.js)');
+  assert.ok(html.indexOf('const panelMemory =') < html.indexOf('const applyOpen = panelMemory'), 'defined before the live script runs it');
   assert.equal((html.match(/coordinator:theme/g) ?? []).length, 1, 'the old theme key appears once, to be migrated');
+});
+
+test('page: ctx.nonce without live runs the theme and the panels\' memory only, by that nonce, and connects nowhere', () => {
+  const html = page({ title: 'r1', body: '<details class="panel" data-d="units" open><summary>Units</summary></details>', ctx: { ...ctx(null, PAGES), run: 'r1', nonce: 'N2' }, path: '/r/a/b/run/r1' });
+  const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(html)[1];
+  assert.equal(csp, "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-N2'; form-action 'self'; base-uri 'none'");
+  assert.equal((html.match(/<script nonce="N2">/g) ?? []).length, 2);
+  assert.equal((html.match(/<script/g) ?? []).length, 2, 'no other script');
+  assert.match(html.slice(0, html.indexOf('</head>')), /<script nonce="N2">\/\/ The theme switch's memory/);
+  assert.match(html, /<body data-run="r1" data-path="\/r\/a\/b\/run\/r1">/, 'no token: nothing to connect with');
+  assert.match(html, /panelMemory\(document\.body\.dataset\.run, document\.body\.dataset\.path\)\(document\);<\/script>/);
+  assert.doesNotMatch(html, /EventSource|\/events\?t=|data-token/, 'not the live script');
+  assert.match(html, /Snapshot · read-only/);
+  const plain = page({ title: 'r1', body: '', ctx: ctx(null, PAGES), path: '/' });
+  assert.doesNotMatch(plain, /<script|nonce/, 'no nonce: no script, as before');
+});
+
+// panels.client.js in a fake page: details[data-d] nodes, a document that dispatches click and toggle, localStorage.
+function panelsPage(store, run = 'r1', path = '/r/a/b/run/r1') {
+  const on = {};
+  const node = (d, open) => ({ dataset: { d }, open, parentElement: null });
+  const nodes = [node('units', true), node('tl', true), node('ev-1', false)];
+  const summaries = nodes.map((n) => ({ parentElement: n, closest: function closest() { return this; } }));
+  const document = { nodeType: 9, addEventListener: (t, f) => { on[t] = f; }, querySelectorAll: () => nodes };
+  const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } };
+  const src = `${readFileSync(new URL('../lib/panels.client.js', import.meta.url), 'utf8')}\npanelMemory(${JSON.stringify(run)}, ${JSON.stringify(path)})(document);`;
+  runInNewContext(src, { document, localStorage, restoreOpen, rememberToggle, WeakSet });
+  const click = (i) => { on.click({ target: summaries[i] }); nodes[i].open = !nodes[i].open; on.toggle({ target: nodes[i] }); };
+  return { nodes, click, toggle: (i) => on.toggle({ target: nodes[i] }) };
+}
+
+test('panels.client.js: a panel the reader opened or closed stays so after a reload, per run and page; one never clicked keeps its render', () => {
+  const store = { 'coordinator:r1:open': '{"old":true}' };
+  const p = panelsPage(store);
+  assert.equal('coordinator:r1:open' in store, false, 'the old per-run key is dropped');
+  p.toggle(1); assert.deepEqual(Object.keys(store), [], 'a toggle with no click (parsed open, restored) is not stored');
+  p.click(0); p.click(2);
+  assert.deepEqual(JSON.parse(store['coordinator:r1:open:/r/a/b/run/r1']), { units: false, 'ev-1': true });
+  const again = panelsPage(store);
+  assert.deepEqual(again.nodes.map((n) => n.open), [false, true, true], 'reloaded: closed and opened as left; tl as rendered');
+  assert.deepEqual(panelsPage(store, 'r1', '/r/a/b/run/r1/maps').nodes.map((n) => n.open), [true, true, false], 'another page keeps its own');
+  assert.deepEqual(panelsPage(store, 'r2').nodes.map((n) => n.open), [true, true, false], 'another run keeps its own');
+  const broken = { 'coordinator:r1:open:/r/a/b/run/r1': 'not json' };
+  assert.deepEqual(panelsPage(broken).nodes.map((n) => n.open), [true, true, false], 'unreadable memory: as rendered');
 });
 
 // A fake page for theme.client.js: <html>, the three radios, localStorage.
@@ -231,7 +276,7 @@ test('theme.client.js: storage that throws is caught; the switch still works for
 });
 
 test('theme.client.js and live.client.js: their storage keys pass the privacy rule', () => {
-  for (const f of ['theme.client.js', 'live.client.js']) {
+  for (const f of ['theme.client.js', 'live.client.js', 'panels.client.js']) {
     const text = readFileSync(new URL(`../lib/${f}`, import.meta.url), 'utf8');
     const store = privacy([sourceFile(`lib/${f}`, text)]).signals.find((s) => s.id === 'web-storage');
     assert.equal(store, undefined, f);

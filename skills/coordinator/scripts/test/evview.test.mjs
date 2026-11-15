@@ -155,4 +155,5 @@ test('only a run snapshot may load its own artifacts; every other static page ke
   assert.equal(plain, "default-src 'none'; style-src 'unsafe-inline'; img-src data:", 'pages without a run folder (the web service, the coordinator page)');
   assert.equal(csp(null), "default-src 'none'; style-src 'unsafe-inline'; img-src data:", 'the string service/src/alerts/routes.mjs replaces');
   assert.equal(csp({ nonce: 'n' }), "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'nonce-n'; connect-src 'self'; form-action 'self'; base-uri 'none'", 'the live page, unchanged');
+  assert.equal(csp(null, false, 'n'), "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-n'; form-action 'self'; base-uri 'none'", 'the web service\'s pages: scripts by nonce, no connections');
 });

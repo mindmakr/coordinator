@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
 import { boardConfig } from '../src/board.mjs';
-import { appendEvent, makeRun, signIn, startApp, stateFiles } from './helpers.mjs';
+import { appendEvent, makeRun, scripts, signIn, startApp, stateFiles } from './helpers.mjs';
 
 const PR = 'https://github.com/acme/web/pull/12';
 const MOBILE_PR = 'https://github.com/acme/mobile/pull/5';
@@ -173,12 +173,13 @@ test('maps page renders; evidence files show as kept locally; a reader sees why 
   const t = await world({ runOpts: { file: true } });
   try {
     const cookie = await signIn(t, 'reader');
-    const get = async (p) => { const r = await fetch(`${t.base}${p}`, { headers: { Cookie: cookie } }); return { status: r.status, html: await r.text() }; };
+    const get = async (p) => { const r = await fetch(`${t.base}${p}`, { headers: { Cookie: cookie } }); return { status: r.status, html: await r.text(), csp: r.headers.get('content-security-policy') }; };
     const maps = await get('/r/acme/web/run/r1/maps');
     assert.equal(maps.status, 200);
     assert.match(maps.html, /<svg/);
     assert.match(maps.html, /Mind map/);
-    assert.equal(/<script/i.test(maps.html), false);
+    const sc = scripts(maps.html, maps.csp);
+    assert.ok(sc.tags === 2 && sc.tagged, 'only the theme and panel scripts, by this response\'s nonce');
     assert.match(maps.html, /href="\/r\/acme\/web\/run\/r1\/unit\/u1"/, 'map nodes open unit pages here');
     const run = await get('/r/acme/web/run/r1');
     assert.match(run.html, /href="\/r\/acme\/web\/run\/r1\/maps"/);

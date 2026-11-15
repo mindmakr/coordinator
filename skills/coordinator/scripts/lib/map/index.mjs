@@ -11,7 +11,7 @@ import { withLock, writeAtomic } from '../store.mjs';
 import { buildMap } from './build.mjs';
 import { callsText, unitCalls } from './calls.mjs';
 import { files, load, record } from './log.mjs';
-import { mapPage } from './page.mjs';
+import { mapPage, touchedBy } from './page.mjs';
 import { summary } from './summary.mjs';
 import { text, touches } from './touches.mjs';
 
@@ -105,7 +105,7 @@ export function build(run, runDir, { root, maxSeconds, unit = null, ctx, fresh =
   let snap;
   try { snap = record(mapDir(runDir), built, { unit, ...(resetStage ? { reset: replaces } : {}) }); } catch (e) { throw recover(run, e); }
   writeAtomic(join(mapDir(runDir), 'map.md'), summary(snap, run));
-  writeAtomic(mapHtml(runDir), mapPage(snap, ctx, run));
+  writeAtomic(mapHtml(runDir), mapPage(snap, withTouched(ctx, runDir), run));
   if (resetStage) pitStop(runDir, defaultDest(runDir)); // staged at once: the reset is meant to be pushed
   return snap;
 }
@@ -135,8 +135,9 @@ export function mapNav(ctx) {
 }
 
 // The map page, live or static. A broken log renders a page that says what broke and how to recover.
+// ctx.units: the run's units (state.json), for the "Touched by this run" panel.
 export function mapView(run, runDir, ctx) {
-  try { return mapPage(loadMap(run, runDir), ctx, run); } catch (e) {
+  try { return mapPage(loadMap(run, runDir), withTouched(ctx, runDir), run); } catch (e) {
     const body = `<a class="back" href="${esc(ctx.home)}">← ${esc(run)} dashboard</a><header class="run"><h1>Project map · not readable</h1></header>`
       + `<div class="needs"><p><b>The map's log could not be read.</b></p><p>${esc(e.message)}</p></div>`;
     return page({ title: `Map · ${run}`, body, ctx, path: `${ctx.base ?? ''}/map` });
@@ -154,14 +155,26 @@ export function computeCalls(runDir, opts) {
 }
 export { callsText };
 
-// The files a map build tagged with this unit changed (modules set or removed): the fallback when no diff is recorded.
-export function unitFiles(runDir, unit) {
+// The map's log, read once for any number of units; none yet: [].
+function mapEvents(runDir) {
   const f = files(mapDir(runDir)).events;
   if (!existsSync(f)) return [];
-  const events = readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  return readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+}
+
+// The files a map build tagged with this unit changed (modules set or removed): the fallback when no diff is recorded.
+export const unitFiles = (runDir, unit) => filesOfUnit(mapEvents(runDir), unit);
+function filesOfUnit(events, unit) {
   const n = events.filter((e) => e.kind === 'map.build' && e.unit === unit).at(-1)?.build;
   if (n === undefined || n === events.find((e) => e.kind === 'map.build')?.build) return []; // a first build has no baseline: every file is new to it
   return [...new Set(events.filter((e) => e.kind === 'map.delta' && e.build === n && e.coll === 'modules').flatMap((e) => [...e.set.map((r) => r.id), ...e.del]))].sort();
+}
+
+// The map page's ctx with "Touched by this run" (lib/map/page.mjs touchedBy), when ctx.units gives the run's units.
+function withTouched(ctx, runDir) {
+  if (!Array.isArray(ctx.units)) return ctx;
+  const events = mapEvents(runDir);
+  return { ...ctx, touched: touchedBy(ctx.units, (unit) => filesOfUnit(events, unit)) };
 }
 
 // What the pages read: one unit's data, or every unit's, read once per render.
