@@ -35,7 +35,7 @@
 //   run.mjs extend <run> --answer qN --reason R [--minutes M]   more time for the run: qN asked on the run (no --unit) with
 //                  --approves and --grant-minutes N, and answered with that option by the person; adds exactly N (M: fewer,
 //                  never more), recorded as a decision with their words; refused for a question with no N, or confirmed
-//                  words that name another amount (lib/approval.mjs grantRefusal)
+//                  words that name another amount or ask for less (lib/approval.mjs confirmRefusal)
 //   run.mjs ship <run> <unit> --merge URL --reason R (--confirm "their words" | --answer qN)   a unit merged on the person's
 //                  decision with no final verdict (open, building, judging or stopped): ends shipped ("Shipped without a final
 //                  verdict"; delivered, never a clean pass), links the merge, and files the missing verdict and its last round's
@@ -109,7 +109,7 @@
 //   run.mjs ask <run> --question Q --header H --option "label|description" (2-4, recommended first) [--multi] [--unit U]
 //                  [--approves <label>] the option that approves a step only the person may approve (extend)
 //                  [--grant-minutes N] with --approves, on a run question: the run time (1-1440 minutes) that option grants;
-//                  its description states "N more minutes" (written for you when empty) and names no other amount
+//                  its description states "N more minutes" (written for you when empty); the question, header and every option name no other amount
 //   run.mjs ask <run> --finish <unit>   only when next says ask-person: the ready question next names, the finish line
 //                  (ship with follow-ups, one more round, stop) or, with reason "same-files: <file>", same files
 //                  (change the bar, simplify the design, accept as is, one more round); next acts on the person's pick
@@ -214,7 +214,7 @@ import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/
 import { openWarning } from './lib/openbar.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
 import { childId, continuesOf, linkedRuns, parseContinues } from './lib/chain.mjs';
-import { answerRefusal, decisionRefusal, grantRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
+import { answerRefusal, confirmRefusal, decisionRefusal, namedRounds, noteRefusal } from './lib/approval.mjs';
 import { lastWriter } from './lib/provenance.mjs';
 import { clip } from './lib/plain.mjs';
 import { ordered, runStatus } from './lib/progress.mjs';
@@ -630,7 +630,7 @@ function approvingAnswer(q, written) {
 
 // More minutes for the run's time budget (`extend <run> --minutes`), on the person's approving answer to a
 // question on the run: exactly the minutes stored on it (ask --grant-minutes N), or fewer with --minutes, never read from
-// their words; their confirmed words may only repeat N (lib/approval.mjs grantRefusal). next reads the budget afresh, so units past it go on.
+// their words; their confirmed words may only repeat N and ask for no less (lib/approval.mjs confirmRefusal). next reads the budget afresh, so units past it go on.
 function extendTime(run, o) {
   if (o.rounds !== undefined) throw new Error('--rounds goes with a unit (extend <run> <unit>); more time for the run is --minutes');
   if (o.answer === undefined || o.answer === true) throw new Error('extend refused: more time needs --answer qN, a question on the run (no --unit) asked with --approves and answered by the person with that option');
@@ -643,7 +643,7 @@ function extendTime(run, o) {
     const { confirm, source } = approvingAnswer(q, writtenBy(run, s, 'extend'));
     const granted = q.grantMinutes;
     if (!Number.isInteger(granted) || granted < 1) throw new Error(`extend refused: ${q.id} stores no amount of time: ask again with --grant-minutes N, e.g. --option "Yes" --approves Yes --grant-minutes 60`);
-    const why = confirm && grantRefusal(confirm, granted);
+    const why = confirm && confirmRefusal(confirm, granted);
     if (why) throw new Error(`extend refused: ${q.id}'s confirmed words ${why}; ask again with the amount they want`);
     const minutes = asked ?? granted;
     if (minutes > granted) throw new Error(`extend refused: --minutes ${minutes}, but ${q.id} grants ${granted}`);

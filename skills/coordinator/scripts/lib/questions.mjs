@@ -5,7 +5,7 @@
 import { basename, dirname } from 'node:path';
 import { clip } from './plain.mjs';
 import { num, oneOf, optText, text } from './args.mjs';
-import { grantOption } from './approval.mjs';
+import { grantFields, grantOption } from './approval.mjs';
 import { maskSecrets } from './secrets.mjs';
 
 export const HEADER_MAX = 12;
@@ -41,11 +41,21 @@ export function ask(s, o) {
   const approves = o.approves === undefined ? null : options.find((x) => x.label.toLowerCase() === String(o.approves).trim().toLowerCase())?.label;
   if (approves === undefined) throw new Error(`--approves must name one of the options (${options.map((x) => x.label).join(', ')})`);
   if (approves && o.multi === true) throw new Error('--approves goes with a single-answer question');
-  // --grant-minutes N: the run time the approving option grants (`extend <run> --answer qN`); its text states it.
+  const question = text(o.question, 'question', 1000);
+  // --grant-minutes N: the run time the approving option grants (`extend <run> --answer qN`); its text states it,
+  // and no field of the question names another amount of time (lib/approval.mjs grantRefusal).
   const grant = grantMinutes(o['grant-minutes'], approves, o.unit);
-  if (grant) options[options.findIndex((x) => x.label === approves)] = grantOption(options.find((x) => x.label === approves), grant);
+  if (grant) {
+    try {
+      grantFields([['the question', question], ['the header', header]], grant);
+      options.forEach((x, i) => {
+        if (x.label === approves) options[i] = grantOption(x, grant);
+        else grantFields([[`option "${x.label}"`, `${x.label} | ${x.description ?? ''}`]], grant);
+      });
+    } catch (e) { throw new Error(`ask refused: ${e.message}`); }
+  }
   s.notes.push({
-    kind: 'question', text: text(o.question, 'question', 1000), header, options, multi: o.multi === true,
+    kind: 'question', text: question, header, options, multi: o.multi === true,
     unit: hasUnit(s, o.unit), recommend: options[0].label, at: now(), history: [], usedAt: null, ...(approves ? { approves } : {}), ...(grant ? { grantMinutes: grant } : {}),
   });
   return `q${asked(s).length}`;

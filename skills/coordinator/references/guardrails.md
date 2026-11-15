@@ -24,7 +24,7 @@ The launch caps are passed on, not enforced live: `next` lists them as `launch` 
 
 **Looking never stops a run.** Past the time budget, `next` records nothing: it lists the units it would stop (`recorded: false`) and the `close` that records those stops. Stops from verdicts (rounds, same gap, no progress) are recorded by `next` as before, until the time budget is spent.
 
-Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run, except on the person's approving answer: more rounds for a unit, or more minutes for the run (`extend`, `commands/run.md`). Run time is granted only as the amount stored on the question (`ask --approves <label> --grant-minutes N`), never read from anyone's words.
+Take the defaults from `run.mjs stats`, which reports past rounds-to-pass (see `learning.md`). Set them at intake; they are not raised mid-run, except on the person's approving answer: more rounds for a unit, or more minutes for the run (`extend`, `commands/run.md`). Run time is granted only as the amount stored on the question (`ask --approves <label> --grant-minutes N`), never read from anyone's words: `ask` is refused when the question, its header or any option names another amount of time, and `extend` when the person's confirmed words do or ask for less (what counts: `commands/run.md`, More time for the run).
 
 ## Test runs
 
