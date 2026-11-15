@@ -16,10 +16,10 @@
 //   run.mjs add <run> <unit> --bar B [--after U] [--reason R] [--title T] [--link URL] [--specialist a,b] (critics that must also pass)
 //                  [--continues <run>:<unit>] this unit, under its own id, continues that unit of an earlier run
 //                  [--issue owner/repo#n|URL …] [--pr …] [--behaviour "Given … when … then …" …]   (--reason required after freeze)
-//                  [--feature-map path] [--new-surface]   validate UI bar/behaviours against feature-map.json
+//                  [--feature-map path] [--new-surface] [--statechart path|json]   validate UI bar and attach unit statechart
 //   run.mjs add-specialist <run> <unit> <name> --reason R   a critic that must also pass, added after add: required from the
 //                  unit's next build on (or the one being judged), refused once the unit passed or stopped; logged as a decision
-//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove [--feature-map path] [--new-surface]   add, reword (back to unchecked) or remove;
+//   run.mjs behave <run> <unit>|--goal [--id B1] --text T | --id B1 --remove [--feature-map path] [--new-surface] [--statechart path|json]   add, reword (back to unchecked) or remove;
 //                  behaviour text (here and in add --behaviour) is 500 characters at most, refused over it, never cut
 //   run.mjs behaviours <run>        every behaviour of the goal and the units, with status and evidence
 //   run.mjs evidence <run> <unit>|--goal [--behaviour B1] (--text T | --file path | --url U) --kind test|screenshot|log|link|reins|prism [--label L]
@@ -36,7 +36,7 @@
 //                  decision with no final verdict (open, building, judging or stopped): ends shipped ("Shipped without a final
 //                  verdict"; delivered, never a clean pass), links the merge, and files the missing verdict and its last round's
 //                  open findings as follow-ups; without --confirm or --answer, their latest note on the unit (lib/approval.mjs)
-//   run.mjs freeze <run> [--feature-map path] [--new-surface]
+//   run.mjs freeze <run> [--feature-map path] [--new-surface] [--statechart path|json] [--skip-feasibility]
 //   run.mjs pause <run> --reason R | resume <run>   the person stops the work by hand (overnight, a restart): until resume,
 //                  no minute counts toward the time budget, next says paused and starts no unit, and start is refused;
 //                  a second pause, or resume on a run that is not paused, is refused (lib/pause.mjs)
@@ -52,7 +52,7 @@
 //   run.mjs lead <run> [--takeover --reason R] [--lead ID]   who leads the run, since when, last active (minutes ago and
 //                  local time); claims the run when it has no lead or its lead is gone (logged "took over from <id>: <why>");
 //                  --takeover --reason R takes it from a lead still active, only with the person's yes (the one way to)
-//   run.mjs start <run> <unit> [--model M] [--why W]   only when next says build, or check-stale with phase building;
+//   run.mjs start <run> <unit> [--model M] [--why W] [--skip-feasibility]   only when next says build, or check-stale with phase building;
 //                  a unit being built or judged whose last beat is younger than the stale minutes keeps its agent:
 //                  start refuses unless [--takeover --reason R] from the window that already leads the run, logged on the unit
 //                  M: the model that builds this try, W: the task class that chose it (e.g. docs-only);
@@ -76,6 +76,7 @@
 //                  [--fold "…" …] on a pass: lows and nits ("nit: …") folded in before merge; never one in a pinned area; next then says fold-in
 //                  [--full-suite yes|no] whether the critic ran the full suite this round
 //                  [--head <sha>] the commit the critic judged; a specialist may mark a round the general fail just closed
+//                  [--reins-packet path] inspect reins_state snapshot transitions against the unit's statechart
 //   run.mjs verdict <run> <unit> pass|fail --early --score N --evidence E [--gap G --severity S] [--specialist NAME] [--head <sha>]
 //                  an early review of work on an open or building unit (started before its try): recorded apart, never a
 //                  round, moves and passes nothing; next, show and the unit page list it (early)
@@ -185,18 +186,18 @@
 //   --harness NAME (any command): the tool running it (claude-code, codex, antigravity, gemini …); else
 //                  COORDINATOR_HARNESS, else detected. Every write stamps the run with it and the skill version
 // Every change appends one event to the run's events.jsonl; state.json is a snapshot derived from it.
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, lstatSync, rmSync, statSync, truncateSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, lstatSync, rmSync, statSync, truncateSync } from 'node:fs';
 import { execFile, spawn as spawnProcess } from 'node:child_process';
 import { get as httpGet } from 'node:http';
 import { basename, extname, join, resolve } from 'node:path';
 import { helpAndExit, num, oneOf, optText, parse, score, text } from './lib/args.mjs';
 import { behave, mark, reopen } from './lib/behaviours.mjs';
 import { findFeatureMap, validateBehavioursAgainstFeatureMap } from './lib/featuremap.mjs';
-import { buildStatechart, checkBarFeasibility, isStatefulUnit, syncStatechartStatuses, verifyStateTransitions } from './lib/statechart.mjs';
+import { applyPacketTransitionVerdict, attachUnitStatechart, behaviourSignature, checkBarFeasibility, readBoundedJsonFile, resolveAllowedRoots, resolveWorktreeRoot, syncStatechartStatuses } from './lib/statechart.mjs';
 import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { prismRefusal } from './lib/prismreport.mjs';
 import { adopt, table } from './lib/adopt.mjs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { briefPrompt, buildBrief } from './lib/briefs.mjs';
 import { markUsed, topLessons } from './lib/lessonstore.mjs';
 import { allows, decide, decideUnit, earlySummary, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
@@ -270,11 +271,19 @@ for (const c of [...LEAD_STEPS, ...Object.keys(LEAD_FORMS)]) FLAGS[c] = [...new 
 const UNIT_NOTES = ['decision', 'follow-up', 'info'];
 const REPEAT = { init: ['continues'], study: ['source', 'lesson'], ask: ['option'], answer: ['choice'], add: ['behaviour', 'issue', 'pr'], verdict: ['behaviour', 'fold', 'finding'], integrate: ['behaviour'], link: ['issue', 'pr', 'merge'], brief: ['quote', 'source'], bench: BENCH_REPEAT };
 
-function featureMapRoot() {
-  const cwd = resolve(process.cwd());
-  const tmp = resolve(tmpdir());
-  if (process.env.COORDINATOR_DIR && (cwd === tmp || cwd.startsWith(`${tmp}\\`) || cwd.startsWith(`${tmp}/`))) return cwd;
-  return projectDir();
+const featureMapRoot = () => resolveWorktreeRoot({ project: projectDir(), base: baseDir('project'), cwd: process.cwd() });
+function readJsonOpt(raw, { flag, allowInline = false, maxBytes, run = null } = {}) {
+  const project = projectDir();
+  const base = baseDir('project');
+  const cwd = process.cwd();
+  const runDirPath = run && isSafeId(run) ? runDir(run) : null;
+  return readBoundedJsonFile(raw, {
+    flag,
+    allowInline,
+    maxBytes,
+    baseDir: resolveWorktreeRoot({ project, base, cwd }),
+    allowedRoots: resolveAllowedRoots({ project, base, runDirPath, cwd }),
+  });
 }
 function validateUnitSurfaceBar(u, o = {}) {
   if (o['new-surface'] !== undefined && o['new-surface'] !== true) throw new Error('--new-surface takes no value');
@@ -293,37 +302,6 @@ function validateUnitSurfaceBar(u, o = {}) {
   else delete u.surfaceContract;
   return fm;
 }
-
-function readBoundedJsonOption(raw, { flag, allowInline = false, maxBytes = 256 * 1024, run = null } = {}) {
-  if (typeof raw !== 'string' || !raw.trim()) throw new Error(`${flag} requires a non-empty file path${allowInline ? ' or JSON object' : ''}`);
-  const trimmed = raw.trim();
-  if (allowInline && trimmed.startsWith('{')) {
-    if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) throw new Error(`${flag} JSON exceeds ${Math.ceil(maxBytes / 1024)} KB`);
-    try { return JSON.parse(trimmed); } catch (e) { throw new Error(`${flag} invalid JSON: ${e.message}`); }
-  }
-  const root = featureMapRoot();
-  const abs = resolve(root, trimmed);
-  let st;
-  try { st = lstatSync(abs); } catch { throw new Error(`${flag}: no file ${raw}`); }
-  if (!st.isFile()) throw new Error(`${flag}: must be a regular file, not a symlink or directory: ${raw}`);
-  if (st.size > maxBytes) throw new Error(`${flag}: file exceeds ${Math.ceil(maxBytes / 1024)} KB`);
-  const real = realpathSync(abs);
-  const candidates = [root, baseDir('project'), ...(run && isSafeId(run) ? [runDir(run)] : []), ...(process.env.COORDINATOR_DIR ? [resolve(tmpdir())] : [])];
-  const allowedRoots = candidates.map((r) => { try { return realpathSync(r); } catch { return resolve(r); } });
-  const inside = allowedRoots.some((r) => real === r || real.startsWith(`${r}\\`) || real.startsWith(`${r}/`));
-  if (!inside) throw new Error(`${flag}: path escapes allowed project root: ${raw}`);
-  try { return JSON.parse(readFileSync(real, 'utf8')); } catch (e) { throw new Error(`${flag}: invalid JSON in ${raw}: ${e.message}`); }
-}
-
-function attachOrUpdateStatechart(u, fm, o = {}, rawChart = null) {
-  const raw = rawChart ?? (o.statechart !== undefined ? readBoundedJsonOption(o.statechart, { flag: '--statechart', allowInline: true }) : null);
-  if (raw !== null) u.statechart = buildStatechart(u, fm?.found ? fm : null, { raw });
-  else if (u.statechart && !u.statechart.generated) syncStatechartStatuses(u);
-  else if (isStatefulUnit(u, fm?.found ? fm : null)) u.statechart = buildStatechart(u, fm?.found ? fm : null);
-  else delete u.statechart;
-}
-
-const behaviourSignature = (u) => JSON.stringify((u.behaviours ?? []).map((b) => `${b.id}:${b.text}`));
 
 // Stops cascade (a stopped unit stops the units stacked on it): apply until nothing changes.
 function applyStops(st) {
@@ -758,7 +736,7 @@ const commands = {
       s.units.push(u);
       for (const b of o.behaviour ?? []) { const id = behave(s, u, { text: b }); log(u, 'behaviour', `${id}: ${optText(b, 300)}`); }
       const fm = validateUnitSurfaceBar(u, o);
-      attachOrUpdateStatechart(u, fm, o);
+      attachUnitStatechart(u, fm, { rawStatechart: o.statechart !== undefined ? readJsonOpt(o.statechart, { flag: '--statechart', allowInline: true, run }) : null });
       if (cont) addContinues(s, u, cont);
       warning = openCheck([{ what: `${unit}'s bar`, text: u.bar }, ...(u.behaviours ?? []).map((b) => ({ what: `${unit} ${b.id}`, text: b.text }))], o['accept-open'], s.notes);
     }, { unit });
@@ -786,7 +764,7 @@ const commands = {
     if (!pre.units.length) throw new Error('add units first');
     const preMissing = (pre.continues ?? []).filter((c) => !pre.units.some((u) => u.id === childId(c)));
     if (preMissing.length) throw new Error(`freeze refused: the run continues ${preMissing.map((c) => `${c.run}:${c.unit}`).join(', ')}; add ${preMissing.map(childId).join(', ')} (or add a unit with --continues <run>:<unit>)`);
-    const rawChart = o.statechart !== undefined ? readBoundedJsonOption(o.statechart, { flag: '--statechart', allowInline: true, run }) : null;
+    const rawChart = o.statechart !== undefined ? readJsonOpt(o.statechart, { flag: '--statechart', allowInline: true, run }) : null;
     for (const u of pre.units) validateUnitSurfaceBar(structuredClone(u), o);
     const feasMap = new Map();
     if (o['skip-feasibility'] !== true) {
@@ -806,7 +784,7 @@ const commands = {
       if (missing.length) throw new Error(`freeze refused: the run continues ${missing.map((c) => `${c.run}:${c.unit}`).join(', ')}; add ${missing.map(childId).join(', ')} (or add a unit with --continues <run>:<unit>)`);
       for (const u of s.units) {
         const fm = validateUnitSurfaceBar(u, o);
-        attachOrUpdateStatechart(u, fm, o, rawChart);
+        attachUnitStatechart(u, fm, { rawStatechart: rawChart });
         const feas = feasMap.get(u.id);
         if (feas) u.feasibility = feas;
       }
@@ -924,7 +902,7 @@ const commands = {
       if (u) {
         delete u.feasibility;
         const fm = validateUnitSurfaceBar(u, o);
-        attachOrUpdateStatechart(u, fm, o);
+        attachUnitStatechart(u, fm, { rawStatechart: o.statechart !== undefined ? readJsonOpt(o.statechart, { flag: '--statechart', allowInline: true, run }) : null });
       }
       const what = o.remove ? `removed ${id}` : `${id}: ${optText(o.text, 300)}`;
       if (u) log(u, 'behaviour', reason ? `${what} (${reason})` : what);
@@ -971,7 +949,7 @@ const commands = {
     return out;
   },
   verdict([run, unit, v], o) {
-    const packetData = o['reins-packet'] !== undefined ? readBoundedJsonOption(o['reins-packet'], { flag: '--reins-packet', maxBytes: 2 * 1024 * 1024, run }) : null;
+    const packetData = o['reins-packet'] !== undefined ? readJsonOpt(o['reins-packet'], { flag: '--reins-packet', maxBytes: 2 * 1024 * 1024, run }) : null;
     return change(run, 'unit.verdict', (s) => {
       const u = unitOf(s, unit);
       // A required specialist whose mark arrives after the general critic's fail closed the round:
@@ -1017,27 +995,14 @@ const commands = {
       let effectiveCause = optText(o.cause, 80);
       let evidence = optText(o.evidence);
       let behaviourRaws = o.behaviour;
-      const transCheck = packetData ? verifyStateTransitions(u.statechart, packetData) : null;
-      if (transCheck && !transCheck.ok && !early) {
-        const eid = addEvidence(s, u, { kind: 'log', text: transCheck.evidenceText, label: 'undeclared state transition' }, runDir(run));
-        log(u, 'evidence', `${eid} log: undeclared state transition`);
-        evidence = evidence ? `${evidence}\n${transCheck.evidenceText}` : transCheck.evidenceText;
-        if (effectiveV === 'pass') {
-          effectiveV = 'fail';
-          effectiveScore = effectiveScore ?? 0;
-          effectiveSeverity = 'high';
-          effectiveGap = effectiveGap ?? transCheck.summary;
-          effectiveCause = effectiveCause ?? 'undeclared state transition';
-        }
-        const badIds = new Set(
-          (u.statechart?.transitions ?? [])
-            .filter((t) => transCheck.undeclared.some((x) => t.from === x.from || t.to === x.to || x.action === t.action))
-            .map((t) => String(t.id).toUpperCase()),
-        );
-        const stateBehs = (u.behaviours ?? []).filter((b) => badIds.has(b.id) || /\b(state|transition|snapshot|reins_state)\b/i.test(b.text));
-        const failTargets = stateBehs.length ? stateBehs : (u.behaviours ?? []);
-        behaviourRaws = [...(behaviourRaws ?? []), ...failTargets.map((b) => `${b.id}=fail:${transCheck.evidenceText}`)];
-      }
+      const packetRes = applyPacketTransitionVerdict({
+        unit: u, packetData, early,
+        verdict: effectiveV, score: effectiveScore, severity: effectiveSeverity,
+        gap: effectiveGap, cause: effectiveCause, evidence, behaviours: behaviourRaws ?? [],
+        addEvidenceFn: (ev) => addEvidence(s, u, ev, runDir(run)),
+        logFn: (kind, msg) => log(u, kind, msg),
+      });
+      ({ verdict: effectiveV, score: effectiveScore, severity: effectiveSeverity, gap: effectiveGap, cause: effectiveCause, evidence, behaviours: behaviourRaws } = packetRes);
       const { verdict, gap, cause } = judged(evidence, effectiveV, effectiveGap, effectiveCause);
       const extra = { ...(verdict === 'fail' && effectiveSeverity ? { severity: effectiveSeverity } : {}), ...(findings.length ? { findings } : {}), ...(verdict === 'pass' && folds.length ? { folds } : {}), ...(fullSuite === null ? {} : { fullSuite }) };
       const critic = optText(o.critic, 120);
@@ -1066,7 +1031,10 @@ const commands = {
         if (gate) throw new Error(gate);
         const markObj = { verdict, score: effectiveScore, gap, cause, evidence, ...extra, ...(critic ? { critic } : {}), ...judgedBy, at: now() };
         if (late) { (closed.specialists ??= {})[name] = { ...markObj, late: true }; log(u, 'verdict', `${name}: ${verdict} on round ${closed.n ?? u.rounds.length}, after the round closed`); }
-        else (u.specialistMarks ??= {})[name] = markObj;
+        else {
+          (u.specialistMarks ??= {})[name] = markObj;
+          if (packetRes.transCheck && !packetRes.transCheck.ok) { mark(u.behaviours ?? [], behaviourRaws, verdict); syncStatechartStatuses(u); }
+        }
         addCost(s, u, costEntry(o, { step: 'verdict', role: `critic:${name}`, model: judge, at: now() }));
         return;
       }

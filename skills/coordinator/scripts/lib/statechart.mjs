@@ -1,13 +1,17 @@
-// Accessible statecharts, Jev noul bar-feasibility pre-checks, and reins_state
-// transition verification against declared statechart edges (#160). Pure logic;
-// all HTML/SVG labels are escaped and every status is shown in text and shape,
-// never colour alone.
+// Accessible statecharts, Jev noul bar-feasibility pre-checks, bounded JSON input loading,
+// and reins_state transition verification against declared statechart edges (#160). Pure logic;
+// all HTML/SVG labels are escaped and every status is shown in text and shape, never colour alone.
+import { execFileSync } from 'node:child_process';
+import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { isAbsolute, parse, relative, resolve } from 'node:path';
 import { askNoul } from './helpers.mjs';
 import { esc } from './links.mjs';
 
 export const FEASIBILITY_FLOOR = 0.30;
 const MAX_STATES = 40;
 const MAX_TRANSITIONS = 80;
+const DEFAULT_JSON_MAX_BYTES = 256 * 1024;
 
 const STATUS_META = {
   pass: { mark: '✓', word: 'pass', cls: 'sc-pass', dash: '' },
@@ -241,7 +245,7 @@ export function renderStatechartSvg(chart) {
   const rows = Math.ceil(states.length / cols);
   const rowH = 128;
   const padX = 24;
-  const padY = 26;
+  const padY = 36;
   const w = padX * 2 + (cols - 1) * colW + boxW;
   const h = padY * 2 + (rows - 1) * rowH + boxH + (transitions.length ? 30 : 0);
 
@@ -258,12 +262,19 @@ export function renderStatechartSvg(chart) {
   const defs = `<defs><marker id="${esc(markerId)}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 1L10 5L0 9z" fill="currentColor"/></marker></defs>`;
 
   const edgeSvg = transitions.map((tr, i) => {
-    const from = pos.get(tr.from);
-    const to = pos.get(tr.to);
-    if (!from || !to) return '';
     const m = metaOf(tr.status);
     const label = `${m.mark} ${tr.id}: ${clipText(tr.action || tr.title, 22)}`;
     const aria = `Transition ${tr.id} (${tr.title}) from ${tr.from} to ${tr.to}: ${m.word}`;
+    const to = pos.get(tr.to);
+    if (!to) return '';
+    if (tr.from === '*') {
+      const sx = Math.max(4, to.x - 22);
+      const sy = to.cy;
+      const d = `M${sx},${sy} L${to.x},${to.cy}`;
+      return `<g class="sc-edge ${m.cls}" role="group" aria-label="${esc(aria)}"><title>${esc(aria)}</title><path d="${d}"${m.dash ? ` stroke-dasharray="${m.dash}"` : ''} marker-end="url(#${esc(markerId)})"/><text class="sc-elabel" x="${Math.max(4, sx)}" y="${sy - 8}" text-anchor="start">${esc(`* / ${label}`)}</text></g>`;
+    }
+    const from = pos.get(tr.from);
+    if (!from) return '';
     if (from.x === to.x && from.y === to.y) {
       const lx = from.cx;
       const ly = from.y - 16;
@@ -319,6 +330,9 @@ export async function checkBarFeasibility(unit, helpersCfg, { askNoulFn = askNou
   if (!helpersCfg?.on) {
     return { ok: true, skipped: true, why: helpersCfg?.why ?? 'helpers disabled', threshold, scores: [], blocked: [] };
   }
+  if (!helpersCfg.models?.noul && !helpersCfg.models?.decide) {
+    return { ok: true, skipped: true, why: 'no noul model configured', threshold, scores: [], blocked: [] };
+  }
   const ctx = `Unit ${unit.id}${unit.title ? ` (${unit.title})` : ''}\nBar: ${unit.bar ?? ''}\nRule: Reject wishes requiring impossible guarantees such as exact-once delivery or linearizable state across unlinked parties sharing no state.`;
   const res = await askNoulFn(helpersCfg, { propositions, context: ctx }, { completeFn, env, fetchImpl, timeoutMs });
   if (res?.fallback) {
@@ -350,6 +364,7 @@ export async function checkBarFeasibility(unit, helpersCfg, { askNoulFn = askNou
 }
 
 function unwrapState(snap) {
+  if (typeof snap === 'string' || typeof snap === 'number' || typeof snap === 'boolean') return { state: snap };
   if (!isObj(snap)) return {};
   if (isObj(snap.state)) return snap.state;
   const copy = {};
@@ -371,10 +386,10 @@ function collectScalars(obj, prefix = '', out = new Map(), depth = 0) {
   return out;
 }
 
-const STATE_FIELD = /(?:^|\.)(state|status|phase|mode|step|stage|screen)$/i;
+const STATE_FIELD = /(?:^|\.|_)(state|status|phase|mode|step|stage|screen|route|value)$|(?:State|Status|Phase|Mode|Step|Stage|Screen|Route)$/;
 
 // Extracts ordered state transitions from reins_state snapshots, packets, or transition arrays.
-export function extractObservedTransitions(input) {
+export function extractObservedTransitions(input, { declaredStates = null } = {}) {
   if (!input) return [];
   if (isObj(input) && Array.isArray(input.transitions)) {
     return input.transitions.filter(isObj).map((t, index) => ({
@@ -387,11 +402,12 @@ export function extractObservedTransitions(input) {
       after: t.after ?? { state: t.to },
     })).filter((t) => t.from || t.to);
   }
-  let snaps = Array.isArray(input) ? input
+  const snaps = Array.isArray(input) ? input
     : isObj(input) && Array.isArray(input.snapshots) ? input.snapshots
       : isObj(input) && Array.isArray(input.states) ? input.states
         : isObj(input) && input.before !== undefined && input.after !== undefined ? [{ state: input.before }, { state: input.after, action: input.action }]
           : [];
+  const stateSet = declaredStates instanceof Set && declaredStates.size > 0 ? declaredStates : null;
   const out = [];
   for (let i = 1; i < snaps.length; i++) {
     const prev = snaps[i - 1];
@@ -408,28 +424,20 @@ export function extractObservedTransitions(input) {
       const vb = flatB.get(k);
       if (va !== vb) {
         changed.push({ key: k, from: va, to: vb });
-        if (STATE_FIELD.test(k)) primaryChanges.push({ key: k, from: va, to: vb });
+        const valueMatchesDeclared = stateSet
+          && ((typeof va === 'string' && stateSet.has(normState(va))) || (typeof vb === 'string' && stateSet.has(normState(vb))));
+        if (STATE_FIELD.test(k) || valueMatchesDeclared) {
+          primaryChanges.push({ key: k, from: va, to: vb });
+        }
       }
     }
-    if (!changed.length) continue;
+    if (!primaryChanges.length) continue;
     const action = isObj(curr) ? (curr.action ?? curr.tool ?? null) : null;
-    if (primaryChanges.length) {
-      for (const ch of primaryChanges) {
-        out.push({
-          index: i,
-          from: String(ch.from ?? 'unset'),
-          to: String(ch.to ?? 'unset'),
-          action,
-          changedKeys: changed.map((c) => `${c.key}: ${c.from} -> ${c.to}`),
-          before: a,
-          after: b,
-        });
-      }
-    } else {
+    for (const ch of primaryChanges) {
       out.push({
         index: i,
-        from: changed.map((c) => `${c.key}=${c.from ?? 'unset'}`).join(','),
-        to: changed.map((c) => `${c.key}=${c.to ?? 'unset'}`).join(','),
+        from: String(ch.from ?? 'unset'),
+        to: String(ch.to ?? 'unset'),
         action,
         changedKeys: changed.map((c) => `${c.key}: ${c.from} -> ${c.to}`),
         before: a,
@@ -440,12 +448,26 @@ export function extractObservedTransitions(input) {
   return out;
 }
 
+function actionMatches(edgeAction, obsAction) {
+  const eNorm = normState(edgeAction);
+  const oNorm = normState(obsAction);
+  if (!eNorm || !oNorm) return true;
+  if (eNorm === oNorm) return true;
+  const oTail = normState(String(obsAction).split(/[/:.]+/).pop());
+  const eTail = normState(String(edgeAction).split(/[/:.]+/).pop());
+  if (oTail && eTail && oTail === eTail) return true;
+  const eWords = String(edgeAction).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const oLower = String(oTail || oNorm).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return eWords.length > 1 && oLower.length >= 3 && eWords.includes(oLower);
+}
+
 // Verifies observed reins_state transitions against declared statechart edges.
 export function verifyStateTransitions(chart, input) {
   const declared = chart?.transitions ?? [];
-  const observed = extractObservedTransitions(input);
-  if (!declared.length) {
-    return { ok: true, checked: observed.length, declared: 0, undeclared: [], evidenceText: null, summary: null };
+  const declaredStates = new Set((chart?.states ?? []).map((s) => normState(s.id)).filter(Boolean));
+  const observed = extractObservedTransitions(input, { declaredStates });
+  if (!chart || (!chart.states?.length && !declared.length)) {
+    return { ok: true, skipped: true, checked: observed.length, declared: 0, undeclared: [], evidenceText: null, summary: null };
   }
   const undeclared = [];
   for (const obs of observed) {
@@ -458,8 +480,7 @@ export function verifyStateTransitions(chart, input) {
       const stateOk = (edge.from === '*' || eFrom === fromN) && eTo === toN;
       if (!stateOk) return false;
       if (!actN || !edge.action || edge.action === edge.id) return true;
-      const eAct = normState(edge.action);
-      return eAct === actN || eAct.includes(actN) || actN.includes(eAct);
+      return actionMatches(edge.action, obs.action);
     });
     if (!match) {
       undeclared.push({
@@ -486,4 +507,125 @@ export function verifyStateTransitions(chart, input) {
     summary: clipText(summary, 400),
     evidenceText: `Statechart transition violation (${undeclared.length} undeclared):\n${lines.join('\n')}`,
   };
+}
+
+const pathKey = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+const isContainedPath = (root, target) => {
+  const rel = relative(pathKey(resolve(root)), pathKey(resolve(target)));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+};
+
+// Enumerates git worktrees anchored to `project`; returns [] if `project` is not a git repo.
+export function gitWorktreeRoots(project) {
+  if (!project) return [];
+  try {
+    const out = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.split(/\r?\n/).filter((l) => l.startsWith('worktree ')).map((l) => resolve(l.slice(9).trim()));
+  } catch { return []; }
+}
+
+// Active checkout root: returns `cwd` if it sits inside `project` or any of its git worktrees (or a non-tmp isolated workspace), else `project`.
+export function resolveWorktreeRoot({ project, base, cwd = process.cwd(), worktreeRoots = null } = {}) {
+  const absCwd = resolve(cwd);
+  const absTmp = resolve(tmpdir());
+  const worktrees = worktreeRoots ?? gitWorktreeRoots(project);
+  const wtMatch = worktrees.find((wt) => isContainedPath(wt, absCwd));
+  if (wtMatch) return wtMatch;
+  if (base && isContainedPath(absCwd, base) && absCwd !== absTmp && parse(absCwd).root !== absCwd) return absCwd;
+  return project ?? absCwd;
+}
+
+// Allowed roots for bounded JSON inputs (--statechart / --reins-packet); never allows os.tmpdir() globally.
+export function resolveAllowedRoots({ project, base, runDirPath = null, cwd = process.cwd(), worktreeRoots = null } = {}) {
+  const home = resolve(homedir());
+  const absTmp = resolve(tmpdir());
+  const absCwd = resolve(cwd);
+  const candidates = [project, base, runDirPath, ...(worktreeRoots ?? gitWorktreeRoots(project))];
+  if (base && isContainedPath(absCwd, base) && absCwd !== absTmp) candidates.push(absCwd);
+  return [...new Set(candidates.filter(Boolean).map((r) => resolve(r)))]
+    .filter((r) => r !== absTmp && parse(r).root !== r && !isContainedPath(r, home));
+}
+
+// Reads and parses bounded JSON from inline string or a single-link regular file inside `allowedRoots`.
+export function readBoundedJsonFile(raw, { flag, allowInline = false, maxBytes = DEFAULT_JSON_MAX_BYTES, baseDir, allowedRoots } = {}) {
+  if (typeof raw !== 'string' || !raw.trim() || raw.includes('\0')) {
+    throw new Error(`${flag} requires a non-empty file path${allowInline ? ' or JSON object' : ''}`);
+  }
+  const trimmed = raw.trim();
+  if (allowInline && trimmed.startsWith('{')) {
+    if (Buffer.byteLength(trimmed, 'utf8') > maxBytes) throw new Error(`${flag} JSON exceeds ${Math.ceil(maxBytes / 1024)} KB`);
+    try { return JSON.parse(trimmed); } catch (e) { throw new Error(`${flag} invalid JSON: ${e.message}`); }
+  }
+  const anchor = baseDir ?? allowedRoots?.[0];
+  if (!anchor || !allowedRoots?.length) throw new Error(`${flag}: no allowed root available`);
+  const abs = resolve(anchor, trimmed);
+  let st;
+  try { st = lstatSync(abs); } catch { throw new Error(`${flag}: no file ${raw}`); }
+  if (st.isSymbolicLink() || !st.isFile() || st.nlink > 1) {
+    throw new Error(`${flag}: must be a regular file, not a symlink, hard link, or directory: ${raw}`);
+  }
+  if (st.size > maxBytes) throw new Error(`${flag}: file exceeds ${Math.ceil(maxBytes / 1024)} KB`);
+  const real = realpathSync(abs);
+  const realRoots = allowedRoots.map((r) => { try { return realpathSync(r); } catch { return resolve(r); } });
+  if (!realRoots.some((r) => isContainedPath(r, real))) {
+    throw new Error(`${flag}: path escapes allowed project root: ${raw}`);
+  }
+  let fd;
+  try {
+    fd = openSync(real, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const fst = fstatSync(fd);
+    if (!fst.isFile() || fst.nlink > 1 || fst.ino !== st.ino || fst.dev !== st.dev) {
+      throw new Error(`${flag}: file changed or linked during read: ${raw}`);
+    }
+    if (fst.size > maxBytes) throw new Error(`${flag}: file exceeds ${Math.ceil(maxBytes / 1024)} KB`);
+    const content = readFileSync(fd, 'utf8');
+    if (Buffer.byteLength(content, 'utf8') > maxBytes) throw new Error(`${flag}: file exceeds ${Math.ceil(maxBytes / 1024)} KB`);
+    try { return JSON.parse(content); } catch (e) { throw new Error(`${flag}: invalid JSON in ${raw}: ${e.message}`); }
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+export const behaviourSignature = (u) => JSON.stringify((u?.behaviours ?? []).map((b) => `${b.id}:${b.text}`));
+
+export function attachUnitStatechart(u, fm = null, { rawStatechart = null } = {}) {
+  const validFm = fm?.found ? fm : null;
+  if (rawStatechart !== null && rawStatechart !== undefined) {
+    u.statechart = buildStatechart(u, validFm, { raw: rawStatechart });
+  } else if (u.statechart && !u.statechart.generated) {
+    syncStatechartStatuses(u);
+  } else if (isStatefulUnit(u, validFm)) {
+    u.statechart = buildStatechart(u, validFm);
+  } else {
+    delete u.statechart;
+  }
+  return u.statechart ?? null;
+}
+
+// Applies reins_state transition checking to a verdict submission; returns updated fields and check outcome.
+export function applyPacketTransitionVerdict({ unit, packetData, early = false, verdict, score, severity, gap, cause, evidence, behaviours = [], addEvidenceFn, logFn }) {
+  const transCheck = packetData ? verifyStateTransitions(unit?.statechart, packetData) : null;
+  const out = { verdict, score, severity, gap, cause, evidence, behaviours: [...(behaviours ?? [])], transCheck };
+  if (!transCheck || transCheck.ok || early) return out;
+  if (addEvidenceFn) {
+    const eid = addEvidenceFn({ kind: 'log', text: transCheck.evidenceText, label: 'undeclared state transition' });
+    if (logFn) logFn('evidence', `${eid} log: undeclared state transition`);
+  }
+  out.evidence = out.evidence ? `${out.evidence}\n${transCheck.evidenceText}` : transCheck.evidenceText;
+  if (out.verdict === 'pass') {
+    out.verdict = 'fail';
+    out.score = out.score ?? 0;
+    out.severity = 'high';
+    out.gap = out.gap ?? transCheck.summary;
+    out.cause = out.cause ?? 'undeclared state transition';
+  }
+  const badIds = new Set(
+    (unit?.statechart?.transitions ?? [])
+      .filter((t) => transCheck.undeclared.some((x) => normState(t.from) === normState(x.from) || normState(t.to) === normState(x.to) || (x.action && actionMatches(t.action, x.action))))
+      .map((t) => String(t.id).toUpperCase()),
+  );
+  const stateBehs = (unit?.behaviours ?? []).filter((b) => badIds.has(b.id) || /\b(state|transition|snapshot|reins_state)\b/i.test(b.text));
+  const failTargets = stateBehs.length ? stateBehs : (unit?.behaviours ?? []);
+  out.behaviours = [...out.behaviours, ...failTargets.map((b) => `${b.id}=fail:${transCheck.evidenceText}`)];
+  return out;
 }

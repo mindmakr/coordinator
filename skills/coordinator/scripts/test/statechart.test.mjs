@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,9 +8,14 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
+  applyPacketTransitionVerdict,
   buildStatechart,
   checkBarFeasibility,
+  extractObservedTransitions,
+  readBoundedJsonFile,
   renderStatechartSvg,
+  resolveAllowedRoots,
+  resolveWorktreeRoot,
   syncStatechartStatuses,
   verifyStateTransitions,
 } from '../lib/statechart.mjs';
@@ -211,46 +216,147 @@ test('statecharts & Jev bar-feasibility pre-check (#160)', async (t) => {
       assert.match(u1.behaviours[0].evidence, /empty -> orphaned-refund/);
       assert.ok(u1.evidence.some((e) => /orphaned-refund/.test(e.text)), 'state evidence must be attached to unit evidence');
 
-      // Pure verifyStateTransitions accepts valid transitions cleanly.
-      const good = verifyStateTransitions(u1.statechart, {
+      // Pure verifyStateTransitions accepts valid transitions and ignores non-state field mutations (cart.count).
+      const validWithCounter = {
         snapshots: [
-          { action: 'init', state: { status: 'empty' } },
-          { action: 'addItem', state: { status: 'has-items' } },
+          { action: 'init', state: { cart: { status: 'empty', count: 0 } } },
+          { action: 'cart/addItem', state: { cart: { status: 'has-items', count: 1 } } },
+          { action: 'incQty', state: { cart: { status: 'has-items', count: 2 }, draftText: 'note' } },
         ],
-      });
+      };
+      assert.equal(extractObservedTransitions(validWithCounter).length, 1, 'non-state count mutation must not invent a transition');
+      const good = verifyStateTransitions(u1.statechart, validWithCounter);
       assert.equal(good.ok, true);
       assert.equal(good.undeclared.length, 0);
+
+      // Substring action match ("pay" vs "repay") must NOT match, and states-only chart rejects any transition.
+      const payChart = { states: [{ id: 'due' }, { id: 'paid' }], transitions: [{ id: 'B1', from: 'due', to: 'paid', action: 'pay' }] };
+      const repayRes = verifyStateTransitions(payChart, { snapshots: [{ state: 'due' }, { action: 'repay', state: 'paid' }] });
+      assert.equal(repayRes.ok, false, 'substring action repay must not match pay');
+
+      const statesOnlyRes = verifyStateTransitions(
+        { states: [{ id: 'idle' }, { id: 'done' }], transitions: [] },
+        { snapshots: [{ state: 'idle' }, { action: 'jump', state: 'done' }] },
+      );
+      assert.equal(statesOnlyRes.ok, false, 'states-only chart must flag transitions when none are declared');
+
+      // Direct unit check for applyPacketTransitionVerdict with normalized state matching and evidence hook.
+      const evCalls = [];
+      const resVerdict = applyPacketTransitionVerdict({
+        unit: { id: 'u1', behaviours: [{ id: 'B1', text: 'cart state moves empty to has-items' }], statechart: u1.statechart },
+        packetData: { snapshots: [{ state: 'Empty' }, { action: 'rogue', state: 'orphaned' }] },
+        verdict: 'pass',
+        score: 9,
+        behaviours: ['B1=pass:ok'],
+        addEvidenceFn: (ev) => { evCalls.push(ev); return 'E2'; },
+      });
+      assert.equal(resVerdict.verdict, 'fail');
+      assert.equal(resVerdict.severity, 'high');
+      assert.equal(resVerdict.cause, 'undeclared state transition');
+      assert.equal(evCalls.length, 1);
+      assert.ok(resVerdict.behaviours.some((b) => b.startsWith('B1=fail:')));
     } finally {
       ws.cleanup();
     }
   });
 
-  await t.test('rejects symlinks and path traversal on --statechart and --reins-packet', async () => {
+  await t.test('rejects path traversal, hard links, oversized files, and directory inputs unconditionally', async () => {
     const ws = withTempWorkspace();
     const outside = mkdtempSync(join(tmpdir(), 'outside-sc-'));
+    const subdir = join(ws.dir, 'nested');
+    mkdirSync(subdir, { recursive: true });
     try {
       await runCli(['init', 'sc-sec', '--goal', 'Sec', '--bar', 'Safe', '--fence', 'src/'], { cwd: ws.dir, coordDir: ws.coordDir });
       const outsideFile = join(outside, 'secret.json');
       writeFileSync(outsideFile, JSON.stringify({ transitions: [{ from: 'a', to: 'b' }] }));
-      const symPath = join(ws.dir, 'link.json');
-      try { symlinkSync(outsideFile, symPath); } catch { return; /* Windows unprivileged symlink skip */ }
-      const err = await runCli([
+      const outsidePacket = join(outside, 'packet.json');
+      writeFileSync(outsidePacket, JSON.stringify({ snapshots: [{ state: 'a' }, { state: 'b' }] }));
+
+      // 1. CLI --statechart and --reins-packet must refuse traversal outside ws.dir even though both live under tmpdir().
+      const relEscapeChart = join('..', outside.split(/[\\/]/).pop(), 'secret.json');
+      const scErr = await runCli([
         'add', 'sc-sec', 'u1',
         '--bar', 'Safe',
         '--behaviour', 'B1',
-        '--statechart', 'link.json',
+        '--statechart', relEscapeChart,
       ], { cwd: ws.dir, coordDir: ws.coordDir, expectFail: true });
-      assert.match(err.stderr, /regular file|symlink/i);
+      assert.match(scErr.stderr, /escapes allowed project root/i);
+
+      await runCli(['add', 'sc-sec', 'u1', '--bar', 'Safe', '--behaviour', 'B1'], { cwd: ws.dir, coordDir: ws.coordDir });
+      await runCli(['freeze', 'sc-sec', '--skip-feasibility'], { cwd: ws.dir, coordDir: ws.coordDir });
+      await runCli(['start', 'sc-sec', 'u1', '--skip-feasibility'], { cwd: ws.dir, coordDir: ws.coordDir });
+      await runCli(['built', 'sc-sec', 'u1', '--report', 'built'], { cwd: ws.dir, coordDir: ws.coordDir });
+
+      const relEscapePacket = join('..', outside.split(/[\\/]/).pop(), 'packet.json');
+      const pktErr = await runCli([
+        'verdict', 'sc-sec', 'u1', 'pass',
+        '--score', '9', '--evidence', 'ok', '--behaviour', 'B1=pass:ok',
+        '--reins-packet', relEscapePacket,
+      ], { cwd: ws.dir, coordDir: ws.coordDir, expectFail: true });
+      assert.match(pktErr.stderr, /escapes allowed project root/i);
+
+      // 2. Direct unit checks on readBoundedJsonFile & resolveWorktreeRoot / resolveAllowedRoots.
+      assert.throws(() => readBoundedJsonFile('nested', { flag: '--statechart', baseDir: ws.dir, allowedRoots: [ws.dir] }), /regular file|directory/i);
+      const bigFile = join(ws.dir, 'huge.json');
+      writeFileSync(bigFile, `{"data":"${'x'.repeat(2048)}"}`);
+      assert.throws(() => readBoundedJsonFile('huge.json', { flag: '--statechart', maxBytes: 512, baseDir: ws.dir, allowedRoots: [ws.dir] }), /exceeds/i);
+      assert.throws(() => readBoundedJsonFile('{"a":1}\0.json', { flag: '--statechart', baseDir: ws.dir, allowedRoots: [ws.dir] }), /requires/i);
+
+      const hlPath = join(ws.dir, 'hardlink.json');
+      try {
+        linkSync(outsideFile, hlPath);
+        assert.throws(() => readBoundedJsonFile('hardlink.json', { flag: '--reins-packet', baseDir: ws.dir, allowedRoots: [ws.dir] }), /hard link/i);
+      } catch (e) {
+        if (!['EXDEV', 'EPERM', 'EACCES'].includes(e.code)) throw e;
+      }
+
+      const wt = join(outside, 'wt-fake');
+      mkdirSync(wt, { recursive: true });
+      assert.equal(resolveWorktreeRoot({ project: ws.dir, base: ws.coordDir, cwd: wt, worktreeRoots: [ws.dir, wt] }), wt);
+      const allowed = resolveAllowedRoots({ project: ws.dir, base: ws.coordDir, cwd: wt, worktreeRoots: [ws.dir, wt] });
+      assert.ok(allowed.includes(wt));
+      assert.ok(!allowed.includes(tmpdir()), 'global os.tmpdir() must never be in allowedRoots');
     } finally {
       rmSync(outside, { recursive: true, force: true });
       ws.cleanup();
     }
   });
 
-  await t.test('checkBarFeasibility skips gracefully offline or unconfigured', async () => {
+  await t.test('rejects symlinks on --statechart and --reins-packet', async (sub) => {
+    const ws = withTempWorkspace();
+    const outside = mkdtempSync(join(tmpdir(), 'outside-sym-'));
+    try {
+      const outsideFile = join(outside, 'secret.json');
+      writeFileSync(outsideFile, JSON.stringify({ transitions: [{ from: 'a', to: 'b' }] }));
+      const symPath = join(ws.dir, 'link.json');
+      try {
+        symlinkSync(outsideFile, symPath);
+      } catch (e) {
+        if (['EPERM', 'EACCES'].includes(e.code)) { sub.skip('OS symlink creation requires privileges'); return; }
+        throw e;
+      }
+      await runCli(['init', 'sc-sym', '--goal', 'Sec', '--bar', 'Safe', '--fence', 'src/'], { cwd: ws.dir, coordDir: ws.coordDir });
+      const err1 = await runCli(['add', 'sc-sym', 'u1', '--bar', 'Safe', '--behaviour', 'B1', '--statechart', 'link.json'], { cwd: ws.dir, coordDir: ws.coordDir, expectFail: true });
+      assert.match(err1.stderr, /regular file|symlink/i);
+      assert.throws(() => readBoundedJsonFile('link.json', { flag: '--reins-packet', baseDir: ws.dir, allowedRoots: [ws.dir] }), /regular file|symlink/i);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+      ws.cleanup();
+    }
+  });
+
+  await t.test('checkBarFeasibility degrades cleanly offline/without model & SVG handles wildcards', async () => {
     const off = await checkBarFeasibility({ id: 'u1', bar: 'x', behaviours: [{ id: 'B1', text: 'y' }] }, { on: false, why: 'disabled' });
     assert.equal(off.ok, true);
     assert.equal(off.skipped, true);
+
+    const noModel = await checkBarFeasibility(
+      { id: 'u1', bar: 'x', behaviours: [{ id: 'B1', text: 'y' }] },
+      { on: true, provider: 'custom', endpoint: 'http://127.0.0.1:1/v1', models: {} },
+    );
+    assert.equal(noModel.ok, true);
+    assert.equal(noModel.skipped, true);
+    assert.equal(noModel.why, 'no noul model configured');
 
     const offline = await checkBarFeasibility(
       { id: 'u1', bar: 'x', behaviours: [{ id: 'B1', text: 'y' }] },
@@ -259,5 +365,13 @@ test('statecharts & Jev bar-feasibility pre-check (#160)', async (t) => {
     );
     assert.equal(offline.ok, true);
     assert.equal(offline.fallback, true);
+
+    const wildChart = buildStatechart(
+      { id: 'u1', title: 'Reset', behaviours: [{ id: 'B1', text: 'resets from anywhere' }] },
+      null,
+      { raw: { states: [{ id: 'idle', kind: 'initial' }], transitions: [{ id: 'B1', from: '*', to: 'idle', action: 'reset' }] } },
+    );
+    const svg = renderStatechartSvg(wildChart);
+    assert.match(svg, /\* \/ .*B1: reset/);
   });
 });
