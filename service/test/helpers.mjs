@@ -16,11 +16,21 @@ import { createApp } from '../src/server.mjs';
 const RUN_MJS = fileURLToPath(new URL('../../skills/coordinator/scripts/run.mjs', import.meta.url));
 export const XSS = '<script>alert("x")</script>';
 
+// A page's scripts against its response's CSP header: the nonce the header allows, how many script tags the
+// page has, and whether each one carries exactly that nonce and the page's own CSP names it too.
+export function scripts(html, header) {
+  const nonce = /script-src 'nonce-([A-Za-z0-9_-]+)'/.exec(header ?? '')?.[1] ?? null;
+  const tags = [...html.matchAll(/<script\b([^>]*)>/gi)].map((m) => m[1].trim());
+  const meta = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/i.exec(html)?.[1] ?? '';
+  return { nonce, tags: tags.length, tagged: !!nonce && tags.every((a) => a === `nonce="${nonce}"`) && meta.includes(`'nonce-${nonce}'`) };
+}
+
 // Builds run `id` with the CLI and returns its events.jsonl bytes.
 // links: GitHub refs for u1 ('acme/web#12' or a URL; a /pull/ URL is a PR); file: attach an evidence file to u1.
 // alias: the run's --alias; askUnit: also ask a question on u1 (its label names the task).
+// touches: paths recorded as u1's (run.mjs touches --unit).
 // mapOut: an object that gets .map, the run's project map log (run.mjs map --pit-stop over a tiny project).
-export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = false, issues = [], prs = [], file = false, mapOut = null, alias = null, askUnit = false } = {}) {
+export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = false, issues = [], prs = [], file = false, mapOut = null, alias = null, askUnit = false, touches = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'coord-svc-'));
   const cli = (...a) => {
     const r = spawnSync(process.execPath, [RUN_MJS, ...a], { cwd: dir, env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
@@ -32,6 +42,7 @@ export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = fals
     cli('add', id, 'u1', '--bar', `the total is right <img src=x onerror=alert(1)>`, '--title', 'Totals');
     cli('ask', id, '--question', `Which total? ${XSS}`, '--header', 'Total', '--option', 'server|use the server total', '--option', 'client|sum on the client');
     if (askUnit) cli('ask', id, '--question', 'Round to cents?', '--header', 'Rounding', '--option', 'yes|round half up', '--option', 'no|keep full precision', '--unit', 'u1');
+    for (const p of touches) cli('touches', id, p, '--unit', 'u1');
     for (const x of issues) cli('link', id, 'u1', '--issue', x);
     for (const x of prs) cli('link', id, 'u1', '--pr', x);
     if (file) { const f = join(dir, 'run-log.txt'); writeFileSync(f, 'log'); cli('evidence', id, 'u1', '--file', f, '--kind', 'log', '--label', 'full log'); }

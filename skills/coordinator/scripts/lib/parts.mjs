@@ -20,10 +20,16 @@ export { bar, cols, heading, kpis, mdActions, panel, rememberToggle, restoreOpen
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
 // The theme switch's memory, in <head> so the stored theme applies before the first paint.
 const THEME_CLIENT = readFileSync(new URL('./theme.client.js', import.meta.url), 'utf8');
-// The live page's script: updates, then the map panels (lib/maptips.mjs), walking a map (lib/mapnav.mjs) and the evidence viewer (lib/evview.mjs).
-const CLIENT = ['./live.client.js', './maptips.client.js', './mapnav.client.js', './evview.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
+// The panels' memory (panels.client.js): the live page's script runs it, and on a page with scripts but no
+// live updates (ctx.nonce: the hosted service's) it runs alone.
+const PANELS = readFileSync(new URL('./panels.client.js', import.meta.url), 'utf8');
+// The live page's script: the panels' memory, updates, then the map panels (lib/maptips.mjs), walking a map (lib/mapnav.mjs) and the evidence viewer (lib/evview.mjs).
+const CLIENT = ['./panels.client.js', './live.client.js', './maptips.client.js', './mapnav.client.js', './evview.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
 const SERVED = [matches, morph, findMatches, highlight, unhighlight, ageText, restoreOpen, rememberToggle];
+const served = (fns) => fns.map((f) => `const ${f.name} = ${f.toString()};`).join('\n');
+// A page with scripts but no live updates: the panels' memory, keyed by the body's data-run and data-path.
+const PANELS_ONLY = `${served([restoreOpen, rememberToggle])}\n${PANELS}\npanelMemory(document.body.dataset.run, document.body.dataset.path)(document);`;
 
 export const cls = (s) => String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '');
 export const when = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
@@ -59,9 +65,10 @@ const THEME_TOGGLE = '<fieldset class="themes"><legend class="sr">Colour theme</
 
 // files: a run's snapshot (ctx.artifacts), which shows its own artifacts/ by relative path. Every
 // other static page keeps `img-src data:` exactly: the web service rewrites that string (service/src).
-export function csp(live, files = false) {
-  return live
-    ? `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'nonce-${live.nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'`
+// nonce (no live): the page runs the theme's and the panels' scripts by that nonce, and connects nowhere.
+export function csp(live, files = false, nonce = null) {
+  if (live) return `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'nonce-${live.nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'`;
+  return nonce ? `default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'nonce-${nonce}'; form-action 'self'; base-uri 'none'`
     : `default-src 'none'; style-src 'unsafe-inline'; img-src ${files ? "'self' " : ''}data:`;
 }
 
@@ -137,16 +144,19 @@ const pageRules = (title) => `@page{size:auto;margin:14mm 12mm 16mm;@top-left{co
 // crumbs: the breadcrumb, [{ label, href? }] (default: the title); flag: HTML after it, such as a toneChip.
 export function page({ title, body, ctx, path, closed = false, crumbs: trail = [{ label: title }], flag = '' }) {
   const live = ctx.live;
+  // ctx.nonce: a page that is not live but may run the theme's and the panels' memory (the hosted service's pages).
+  const nonce = live ? live.nonce : ctx.nonce ?? null;
   const status = closed ? `<span id="live" class="live" role="status" data-state="finished">Finished${live ? '' : ' · snapshot'}</span>`
     : live ? '<span id="live" class="live" role="status" aria-live="polite" data-state="connecting">Connecting…</span><button id="live-retry" class="retry" type="button" hidden>Retry</button>'
       : '<span class="live" data-state="snapshot">Snapshot · read-only</span>';
   const parts = {
-    csp: csp(live && { nonce: esc(live.nonce) }, !!ctx.artifacts), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }) + pageRules(title),
+    csp: csp(live && { nonce: esc(live.nonce) }, !!ctx.artifacts, nonce && esc(nonce)), title: esc(`${title} · Coordinator by mindmakr`), favicon: FAVICON, theme: css(ctx.theme ?? { light: LIGHT, dark: DARK }) + pageRules(title),
     top: `${printHead()}<header class="top">${crumbs(trail, flag)}<div class="tools">${status}${printTool(live)}${THEME_TOGGLE}</div></header>${tabs(ctx, path)}`,
-    head: live ? `<script nonce="${esc(live.nonce)}">${THEME_CLIENT}</script>` : '',
+    head: nonce ? `<script nonce="${esc(nonce)}">${THEME_CLIENT}</script>` : '',
     body, footer: footer(),
-    attrs: live ? ` data-run="${esc(ctx.store ?? ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}` : '',
-    script: live ? `<script nonce="${esc(live.nonce)}">${SERVED.map((f) => `const ${f.name} = ${f.toString()};`).join('\n')}\n${CLIENT}</script>` : '',
+    attrs: live ? ` data-run="${esc(ctx.store ?? ctx.run)}" data-path="${esc(path)}" data-token="${esc(live.token)}"${closed ? ' data-closed="1"' : ''}`
+      : nonce ? ` data-run="${esc(ctx.store ?? ctx.run ?? '')}" data-path="${esc(path)}"` : '',
+    script: live ? `<script nonce="${esc(nonce)}">${served(SERVED)}\n${CLIENT}</script>` : nonce ? `<script nonce="${esc(nonce)}">${PANELS_ONLY}</script>` : '',
   };
   return SHELL.replace(/\{\{(\w+)\}\}/g, (_, k) => parts[k] ?? '');
 }
