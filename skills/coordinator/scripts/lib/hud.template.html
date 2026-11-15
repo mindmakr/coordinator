@@ -474,6 +474,17 @@ tr.fin td { opacity: .78; }
 .seg.f { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
 .seg.j { background: var(--ok-bg); color: var(--ok); border-style: dashed; border-color: var(--ok); }
 .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lane-rows { position: relative; }
+.lanes .marks { position: absolute; top: 0; bottom: 0; left: 72px; right: 0; pointer-events: none; z-index: 1; }
+.lanes .marks > * { position: absolute; top: 0; bottom: 0; }
+.lanes .held, .held-key { background: repeating-linear-gradient(135deg, var(--line) 0 4px, transparent 4px 9px); }
+.lanes .held { opacity: .8; }
+.held-key { display: inline-block; width: 14px; height: 10px; margin-right: 4px; border: 1px solid var(--line); vertical-align: -1px; }
+.lanes .mark.now { width: 0; border-left: 2px solid var(--accent); }
+.lanes .mark.eta { width: 0; border-left: 1.5px dashed var(--muted); }
+.lanes .axis { position: relative; height: 18px; margin-left: 72px; font-size: 11px; color: var(--muted); }
+.lanes .axis > span { position: absolute; top: 2px; transform: translateX(-100%); padding-right: 4px; white-space: nowrap; color: var(--accent); font-weight: 600; }
+.activity-box { margin: 0 -2px; padding: 0 2px; }
 .budget-rows { display: grid; gap: 10px; font-size: 13px; }
 .brow .row { margin: 0; } .brow ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
 .panel .timeline { margin-top: 0; }

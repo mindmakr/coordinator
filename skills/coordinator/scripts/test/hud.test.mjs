@@ -231,3 +231,124 @@ test('Last gap of a round a specialist failed shows that specialist\'s evidence,
   s.units[0].rounds[0] = { ...s.units[0].rounds[0], failedBy: ['money', 'screen'], gap: 'money: g1; screen: g2', specialists: { money: { verdict: 'fail', evidence: 'pay.ts:40' }, screen: { verdict: 'fail', evidence: 'shot.png' } } };
   assert.equal(view(s, decide(s, T0), T0).units[0].evidence, 'money: pay.ts:40; screen: shot.png');
 });
+
+// Run hud-followups f2. B1: the unit's Time KPI adds up each try's start and end stamps (view.mjs tries, time).
+test('unit Time KPI: working time from each try\'s start, built and verdict stamps, the try in progress to now', async () => {
+  const { tryTimes, workTime } = await import('../lib/timeline.mjs');
+  const s = state();
+  // Try 1: start 0, built 41, verdict 65. Try 2: start 70, a crash reset at 80, start 90, built 100, verdict 110.
+  // Try 3: start 120, built 130, still being judged at 140.
+  s.units[0].rounds = [
+    { n: 1, verdict: 'fail', score: 4, gap: 'g1', at: at(65) },
+    { n: 2, verdict: 'fail', score: 5, gap: 'g2', at: at(110) },
+  ];
+  s.units[0].status = 'judging';
+  s.units[0].log = [
+    { kind: 'start', text: 'try 1', at: at(0) }, { kind: 'beat', text: 'b', at: at(20) }, { kind: 'built', text: 'r', at: at(41) },
+    { kind: 'start', text: 'try 2', at: at(70) }, { kind: 'reset', text: 'crash', at: at(80) }, { kind: 'start', text: 'try 2', at: at(90) }, { kind: 'built', text: 'r', at: at(100) },
+    { kind: 'start', text: 'try 3', at: at(120) }, { kind: 'built', text: 'r', at: at(130) },
+  ];
+  const now = T0 + 140 * 60_000;
+  const t = tryTimes(s.units[0], now);
+  assert.deepEqual(t.map((x) => [x.n, x.minutes, x.build, x.review, x.open]), [[1, 65, 41, 24, false], [2, 30, 20, 10, false], [3, 20, 10, 10, true]]); // try 2's crashed build counts as build: the parts add up
+  for (const x of t) assert.equal(x.build + x.review, x.minutes, `T${x.n}: build + review = minutes`);
+  assert.deepEqual(t.map((x) => x.start), [at(0), at(70), at(120)]);
+  // A try whose stamps are the same instant took 0 minutes; it is stamped, not unknown. Also when it ended in a reset.
+  const zero = { status: 'pass', log: [{ kind: 'start', at: at(0) }, { kind: 'built', at: at(0) }, { kind: 'start', at: at(5) }, { kind: 'reset', at: at(5) }], rounds: [{ n: 1, verdict: 'fail', at: at(0) }, { n: 2, verdict: 'pass', at: at(5) }] };
+  assert.deepEqual(tryTimes(zero, now).map((x) => [x.minutes, x.build, x.review]), [[0, 0, 0], [0, null, null]]);
+  assert.deepEqual(workTime(tryTimes(zero, now)), { minutes: 0, build: 0, review: 0, unstamped: 0, open: false });
+  assert.deepEqual(workTime(t), { minutes: 115, build: 71, review: 44, unstamped: 0, open: true });
+  const v = view(s, decide(s, now), now);
+  assert.deepEqual(v.units[0].time, workTime(t), 'the view carries the same stamps and total');
+  const page = unitPage(v, 'api', now);
+  assert.match(page, /<span class="k">Time<\/span><span class="v">1 h 55 min<\/span><span class="s">build 1 h 11 min · review 44 min · try running<\/span>/);
+  // The Rounds table shows each try's start, build and review minutes beside its verdict time.
+  assert.match(page, /<th scope="col">Started<\/th><th scope="col" class="num">Build<\/th><th scope="col" class="num">Review<\/th><th scope="col">Judged<\/th>/);
+  assert.match(page, /data-a="rrow-1"><td>T1<\/td><td><time datetime="2026-01-01T00:00:00\.000Z"[^>]*>[^<]*<\/time><\/td><td class="num">41 min<\/td><td class="num">24 min<\/td>/);
+  // A try whose start fell out of the log is not guessed at: a dash, and the KPI says how many.
+  s.units[0].log = s.units[0].log.slice(3); s.units[0].status = 'open';
+  const v2 = view(s, decide(s, now), now);
+  assert.equal(v2.units[0].time.unstamped, 1);
+  assert.match(unitPage(v2, 'api', now), /<span class="k">Time<\/span><span class="v">30 min<\/span><span class="s">build 20 min · review 10 min · 1 not stamped<\/span>/);
+  // No try yet: a dash.
+  assert.match(unitPage(v2, 'ui', now), /<span class="k">Time<\/span><span class="v">–<\/span><span class="s">not started<\/span>/);
+});
+
+// B2: a long run's Activity scrolls inside its panel; the search and filters stay above the list.
+test('Activity has a height limit and scrolls inside itself, below its search and filters', async () => {
+  const { liveCtx } = await import('../lib/hud.mjs');
+  const s = state({ notes: Array.from({ length: 250 }, (_, i) => ({ kind: 'decision', text: `step ${i}`, at: at(i) })) });
+  const v = view(s, decide(s, T0), T0);
+  const live = hud(v, T0, liveCtx({ token: 't', nonce: 'n' }, 'r1'));
+  for (const html of [hud(v, T0), live]) {
+    const i = html.indexOf('data-d="activity"');
+    const p = html.slice(i, html.indexOf('</details>', i));
+    assert.match(p, /<div class="scroll activity-box" style="max-height:360px"><div class="list-anchor"><ol class="timeline" data-tl-list/);
+    assert.ok((p.match(/<li /g) ?? []).length >= 250, 'every row is still there, inside the box');
+  }
+  { const a = live.indexOf('data-d="activity"'); assert.ok(a < live.indexOf('<form class="tl-tools"', a) && live.indexOf('<form class="tl-tools"', a) < live.indexOf('class="scroll activity-box"', a), 'the filters sit above the scrolling list'); }
+  // The unit page's timeline is bounded the same way.
+  assert.match(unitPage(v, 'api', T0), /data-d="unit-timeline"[\s\S]*?<div class="scroll activity-box" style="max-height:360px">/);
+});
+
+// B3: canvas panels whose data the run records.
+test('Run page: ETA and time left as show prints them, Now and ETA on the timeline, pauses hatched', () => {
+  const s = state({ notes: [], pauses: [{ from: at(5), to: at(8), reason: 'lunch' }] });
+  s.units[0].log = [{ kind: 'start', text: 'try 1', at: at(1) }];
+  const now = T0 + 30 * 60_000;
+  const v = view(s, decide(s, now), now);
+  assert.ok(v.status.eta.readyAt, 'an estimate exists');
+  const out = text(v); const html = hud(v, now);
+  const etaText = /^eta {8}(.+)$/m.exec(out)[1]; const left = /^time left {2}(.+)$/m.exec(out)[1];
+  const kpi = new RegExp(`<span class="k">ETA</span><span class="v"><time datetime="${v.status.eta.readyAt}" class="abs"[^>]*>[^<]+</time></span><span class="s">([^<]+)</span>`).exec(html);
+  assert.equal(kpi?.[1], etaText, 'the ETA KPI: the ready time, then show\'s words');
+  assert.ok(html.includes(`<span class="cause">Time left</span><span>${left}</span>`), 'the Lead panel says the time left as show does');
+  const i = html.indexOf('<div class="lanes">');
+  const lanes = html.slice(i, html.indexOf('</details>', i));
+  assert.ok(lanes.includes(`<span>ETA <time datetime="${v.status.eta.readyAt}" class="abs"`), 'the axis runs to the ETA');
+  assert.match(lanes, /<div class="marks" aria-hidden="true"><span class="held" style="left:[\d.]+%;width:[\d.]+%"><\/span><span class="mark now" style="left:[\d.]+%"><\/span><span class="mark eta" style="left:100\.00%"><\/span><\/div>/);
+  assert.match(lanes, /<div class="axis"><span class="now" style="left:[\d.]+%">Now<\/span><\/div>/);
+  assert.match(html, /<h2>Timeline<\/h2><span class="meta"><span class="held-key" aria-hidden="true"><\/span>paused<\/span>/);
+  // A closed run: no Now, no ETA; the axis ends at the close.
+  const ended = { ...s, closed: { outcome: 'partial', at: at(90) } };
+  assert.doesNotMatch(hud(view(ended, decide(ended, now), now), now), /class="mark now"|class="mark eta"|>Now</);
+});
+
+test('Budget: spend per unit and per agent kind from the recorded launch figures, and each critic setup', () => {
+  const s = state();
+  s.units[0].costs = [
+    { step: 'start', role: 'builder', at: at(1), tokensIn: 300_000, minutes: 40 },
+    { step: 'verdict', role: 'critic', at: at(10), tokensIn: 100_000, minutes: 10 },
+    { step: 'verdict', role: 'critic:security', at: at(10), tokensIn: 100_000, minutes: 12, cost: { amount: 0.5, currency: 'USD' } },
+  ];
+  s.units[0].rounds[0].critic = 'general, opus, full depth';
+  s.units[0].rounds[1] = { ...s.units[0].rounds[1], critic: 'general, sonnet, delta review', specialists: { security: { verdict: 'fail', critic: 'security, opus' } } };
+  const v = view(s, decide(s, T0), T0);
+  assert.deepEqual(v.cost.byKind.map((g) => [g.label, g.line, g.share]), [['Builders', '300k in tokens · 40 min', 60], ['General critics', '100k in tokens · 10 min', 20], ['Specialist critics', '100k in tokens · 12 min · 0.5 USD', 20]]);
+  assert.deepEqual(v.critics.map((g) => [g.critic, g.setup, g.rounds, g.passed]), [['general', 'general, opus, full depth', 1, 0], ['general', 'general, sonnet, delta review', 1, 0], ['security', 'security, opus', 1, 0]]);
+  const html = hud(v, T0);
+  assert.match(html, /<li>api: 500k in tokens · 62 min · 0\.5 USD<\/li>/, 'per unit');
+  assert.match(html, /<li data-a="cost-builder">Builders: 300k in tokens · 40 min · 60% of tokens in<\/li>/, 'per agent kind');
+  assert.match(html, /<li data-a="cost-specialist">Specialist critics: 100k in tokens · 12 min · 0\.5 USD · 20% of tokens in<\/li>/);
+  assert.match(html, /<span>critic setups<\/span><b>3<\/b>/);
+  assert.match(html, /general critic, general, sonnet, delta review: 0 of 1 passed · 0 escapes<\/li>/);
+  assert.match(html, /specialist security, security, opus: 0 of 1 passed<\/li>/);
+  // Nothing recorded: no card, no guess.
+  const bare = state(); bare.units[0].rounds = [];
+  assert.doesNotMatch(hud(view(bare, decide(bare, T0), T0), T0), /critic setups|data-a="cost-/);
+});
+
+test('Unit page: Overlaps beside Depends on / Blocks, and Function calls wherever call data is read', async () => {
+  const { staticCtx } = await import('../lib/hud.mjs');
+  const s = state();
+  s.units[0].touches = ['lib/a.mjs', 'lib/b.mjs']; s.units[1].detect = { paths: ['lib/b.mjs', 'lib/c.mjs'] };
+  const v = view(s, decide(s, T0), T0);
+  assert.deepEqual(v.units[0].overlaps, [{ id: 'ui', paths: ['lib/b.mjs'] }]);
+  assert.match(unitPage(v, 'api', T0), /<h3 class="sub">Overlaps<\/h3><ul class="deps"><li data-a="ov-ui"><a [^>]*>ui<\/a> <span class="mono cause">lib\/b\.mjs<\/span><\/li><\/ul>/);
+  const plain = state();
+  assert.match(unitPage(view(plain, decide(plain, T0), T0), 'api', T0), /<h3 class="sub">Overlaps<\/h3><p class="empty">No other unit changes its files\.<\/p>/);
+  // Call data read but none for this unit yet: the panel says how to compute it.
+  const none = { get: () => null, list: () => [] };
+  assert.match(unitPage(v, 'api', T0, { ...staticCtx('', 1), calls: none }), /<h2>Function calls<\/h2><\/summary>[\s\S]*?run\.mjs calls r1 api/);
+  assert.doesNotMatch(unitPage(v, 'api', T0), /Function calls/, 'a page that reads no call data (the hosted copy) leaves it out');
+});

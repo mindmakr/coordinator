@@ -5,11 +5,11 @@ import { byModel, modelLine, unrecorded, UNSPECIFIED, whoUnit } from './models.m
 import { attention, attentionLabel, clip, dotState, sentence, situation, stateBadge, timeLeft, waitIds } from './plain.mjs';
 import { answerText, questions } from './questions.mjs';
 import { chainLine, chainOf } from './chain.mjs';
-import { pendingSyncs, syncStep } from './overlap.mjs';
-import { bySetup, earlySummary, escapes, roundCap, unmet } from './rules.mjs';
-import { runTimeline, unitTimeline } from './timeline.mjs';
+import { overlapsOf, pendingSyncs, syncStep } from './overlap.mjs';
+import { bySetup, criticSetups, earlySummary, escapes, roundCap, unmet } from './rules.mjs';
+import { runTimeline, tryTimes, unitTimeline, workTime } from './timeline.mjs';
 import { retroPending } from './retro.mjs';
-import { costByModel, costLine, runCost, unitCost } from './cost.mjs';
+import { costByKind, costByModel, costLine, runCost, unitCost } from './cost.mjs';
 import { agoText, runStatus } from './progress.mjs';
 import { leadInfo } from './lead.mjs';
 import { pauseParts, usedMinutes } from './clock.mjs';
@@ -101,12 +101,21 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     models: byModel([run]).roundsByBuilderModel.filter((m) => !['(not recorded)', UNSPECIFIED].includes(m.model)),
     modelsUnrecorded: unrecorded(run),
     // Tokens, minutes and money the lead recorded per launch (lib/cost.mjs); "not recorded" where none was.
-    cost: { run: costLine(runCost(run)), byModel: costByModel([run]).map((m) => ({ model: m.model, line: costLine(m) })), byUnit: run.units.map((u) => ({ id: u.id, line: costLine(unitCost(u)) })) },
+    cost: {
+      run: costLine(runCost(run)), byModel: costByModel([run]).map((m) => ({ model: m.model, line: costLine(m) })), byUnit: run.units.map((u) => ({ id: u.id, line: costLine(unitCost(u)) })),
+      // Per kind of agent (builders, general and specialist critics, fold-in checks), with its share.
+      byKind: costByKind([run]).map((g) => ({ kind: g.kind, label: g.label, line: costLine(g), share: g.share, shareOf: g.shareOf })),
+    },
+    // Each critic setup (verdict --critic) with the rounds it judged and passed (lib/rules.mjs).
+    critics: criticSetups([run]),
+    // Pauses by hand, for the timeline: [{ from, to }], to null while one is open.
+    pauses: (Array.isArray(run.pauses) ? run.pauses : []).filter((p) => p?.from).map((p) => ({ from: p.from, to: p.to ?? null })),
     escapes: { ...escapes(run), bySetup: bySetup([run]), list: notes.filter((n) => n.kind === 'escape').map((n) => ({ unit: n.unit, round: n.round ?? null, text: n.text, at: n.at })) },
     units: run.units.map((u) => {
       const last = u.rounds.at(-1);
       const d = next.get(u.id);
       const chain = chainOf(linked ?? new Map([[run.id, run]]), run.id, u.id);
+      const tries = tryTimes(u, end);
       return {
         id: u.id, title: u.title ?? null, link: u.link ?? null, status: u.status, shipped: u.shipped ?? null, after: u.after ?? null,
         sentence: sentence(u, d), attention: attention(u, d), attentionLabel: attentionLabel(attention(u, d)),
@@ -136,6 +145,10 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         // Files in the unit's last checked diff (the gaming check records the count); null before one.
         files: typeof u.detect?.files === 'number' ? u.detect.files : null,
         asks: qs.filter((q) => q.unit === u.id), timeline: unitTimeline(run, u.id),
+        // Each try's start and end stamps, and the working time they add up to (lib/timeline.mjs).
+        tries, time: workTime(tries),
+        // Other units that change the same files (planned, or in their last checked diff).
+        overlaps: overlapsOf(run, u),
       };
     }),
     integration: integ.map((r) => r.verdict),

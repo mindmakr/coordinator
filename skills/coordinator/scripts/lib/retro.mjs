@@ -6,7 +6,12 @@
 import { liveCtx, runCrumbs, staticCtx } from './hud.mjs';
 import { linkify } from './links.mjs';
 import { blk, cols, esc, heading, kpis, mdActions, page, panel, stamp, table, toneChip } from './parts.mjs';
-import { sameGap, stats } from './rules.mjs';
+import { criticSetups, sameGap, stats } from './rules.mjs';
+import { costByKind, costCells, costLine, runCost, unitCost } from './cost.mjs';
+import { byModel, modelLine, unrecorded, UNSPECIFIED } from './models.mjs';
+import { tryTimes } from './timeline.mjs';
+import { usedMinutes } from './clock.mjs';
+import { duration } from './plain.mjs';
 
 const UPSTREAM = /^\s*upstream\s*:|github\.com\/mindmakr\/coordinator\b|mindmakr\/coordinator#\d/i;
 const DECIDED = ['done', 'done-with-gaps', 'stopped'];
@@ -34,13 +39,17 @@ export function repeatedGaps(run) {
 }
 
 // lessons: [{ id, tag, text, seen, used, from, scope }] of both scopes; closed: the folder's closed runs (for the suggested budget).
-export function retroModel(run, { lessons = [], closed = [] } = {}) {
+export function retroModel(run, { lessons = [], closed = [], nowMs = Date.now() } = {}) {
   const notes = run.notes ?? [];
   const retro = notes.filter((n) => n.kind === 'retro');
   const sameTag = closed.filter((r) => r.tag === run.tag && r.id !== run.id);
   const s = sameTag.length ? stats(sameTag) : null;
   const repeated = repeatedGaps(run);
   const stopped = run.units.filter((u) => u.status === 'stopped');
+  const end = run.closed?.at ? Date.parse(run.closed.at) : nowMs;
+  // Review minutes per try: the median from each try's built stamp to its verdict (lib/timeline.mjs).
+  const reviews = run.units.flatMap((u) => tryTimes(u, end)).filter((t) => !t.open && t.review !== null).map((t) => t.review).sort((a, b) => a - b);
+  const total = runCost(run);
   return {
     id: run.id, tag: run.tag, closed: run.closed ?? null, has: retro.length > 0,
     notes: retro.filter((n) => !UPSTREAM.test(n.text)).map((n) => ({ text: n.text, at: n.at })),
@@ -48,6 +57,10 @@ export function retroModel(run, { lessons = [], closed = [] } = {}) {
     lessons: lessons.filter((l) => (l.from ?? []).includes(run.id)),
     escapes: notes.filter((n) => n.kind === 'escape').map((n) => ({ unit: n.unit, round: n.round ?? null, text: n.text, at: n.at })),
     repeated,
+    // What each launch cost, as the lead recorded it (lib/cost.mjs): per kind of agent and per unit.
+    spend: { line: costLine(total), tokensIn: total.recorded.tokensIn ? total.tokensIn : null, byKind: costByKind([run]), byUnit: run.units.map((u) => ({ id: u.id, ...unitCost(u) })) },
+    // Who judged and built: each critic setup (verdict --critic) and each builder model, with their rounds.
+    staffing: { critics: criticSetups([run]), builders: byModel([run]).roundsByBuilderModel.filter((m) => !['(not recorded)', UNSPECIFIED].includes(m.model)), unrecorded: unrecorded(run) },
     // What learning.md asks of a retro, as far as the run's own data shows it done.
     checklist: [
       { label: 'Retro notes', done: retro.length > 0 },
@@ -63,6 +76,8 @@ export function retroModel(run, { lessons = [], closed = [] } = {}) {
       builds: Math.max(0, ...run.units.map((u) => Math.max(u.rounds.length, (u.log ?? []).filter((e) => e.kind === 'start').length))),
       resets: run.units.reduce((n, u) => n + (u.log ?? []).filter((e) => e.kind === 'reset').length, 0),
       usedUnits: run.units.length,
+      usedMinutes: Math.round(usedMinutes(run, end)),
+      reviewMedian: reviews.length ? Math.round(reviews[Math.floor((reviews.length - 1) / 2)]) : null,
       stopped: stopped.map((u) => ({ id: u.id, reason: u.stopReason ?? '' })),
       // Same rule as learning.md: the 80th percentile of rounds to pass, plus 1, at most 8.
       suggested: s?.p80RoundsToPass ? Math.min(8, s.p80RoundsToPass + 1) : null, from: sameTag.length,
@@ -84,14 +99,58 @@ export function retroMarkdown(m) {
     '## Budget',
     `- Tries per unit: ${b.usedRounds} of ${b.rounds}${b.suggested ? `, suggested ${b.suggested}` : ''}`,
     `- Builds started: ${b.builds}${b.resets ? `, ${b.resets} reset` : ''}`,
-    `- Time: ${b.minutes} min`, '',
+    `- Time: ${b.usedMinutes} of ${b.minutes} min used`,
+    ...(b.reviewMedian === null ? [] : [`- Review minutes per try: ${b.reviewMedian} (median)`]), '',
     ...section('Retro notes', m.notes, (n) => n.text),
     ...section('Lessons', m.lessons, (l) => `${l.tag}: ${l.text} (${l.id})`),
     ...section('Repeated gaps', m.repeated, (g) => `${g.gap} (${g.units.join(', ')}; ${g.rounds} rounds)`),
     ...section('Stopped units', b.stopped, (s) => `${s.id}: ${s.reason}`),
     ...section('Upstream proposals', m.upstream, (n) => n.text),
     ...section('Escapes', m.escapes, (e) => `${e.unit}: ${e.text}`),
+    ...spendMd(m.spend), ...staffingMd(m.staffing),
   ].join('\n').trimEnd();
+}
+
+// The Spend and Staffing panels as Markdown: the same figures, and the same "not recorded".
+function spendMd(sp) {
+  if (!sp) return [];
+  const share = (g) => (g.share === null ? '' : ` (${g.share}% of ${g.shareOf === 'tokensIn' ? 'tokens in' : 'minutes'})`);
+  const units = sp.byUnit.filter((u) => u.entries);
+  return ['## Spend', `- Total: ${sp.line}`,
+    ...(sp.byKind.length ? ['', '### By agent kind', ...sp.byKind.map((g) => `- ${g.label}: ${costLine(g)}${share(g)}`)] : []),
+    ...(units.length ? ['', '### By unit', ...units.map((u) => `- ${u.id}: ${costLine(u)}`)] : []), ''];
+}
+function staffingMd(st) {
+  if (!st) return [];
+  const name = (g) => (g.critic === 'general' ? 'General' : `Specialist ${g.critic}`);
+  return ['## Staffing',
+    ...(st.critics.length ? st.critics.map((g) => `- ${name(g)}, ${g.setup}: ${g.rounds} rounds, ${g.passed} passed${g.escapes === null ? '' : `, ${g.escapes} escapes`}`) : ['- No round judged yet.']),
+    ...(st.builders.length || st.unrecorded ? [`- Builder models: ${modelLine(st.builders, st.unrecorded)}`] : []), ''];
+}
+
+// Spend per kind of agent and per unit: tokens in and out, minutes and money as recorded, a dash where none was.
+const COST_COLS = [{ label: 'Tokens in', num: true }, { label: 'Tokens out', num: true }, { label: 'Minutes', num: true }, { label: 'Cost', num: true }];
+const costRow = (sum) => { const c = costCells(sum); return [c.tokensIn, c.tokensOut, c.minutes, c.money]; };
+function spendHtml(sp, ctx) {
+  if (!sp) return '<p class="empty">Not recorded.</p>';
+  const none = 'Not recorded: the lead passes --tokens-in, --minutes or --cost to start, built and verdict.';
+  const kinds = table({ cols: [{ label: 'Agent kind' }, ...COST_COLS, { label: 'Share', num: true }], min: 560, empty: none,
+    rows: sp.byKind.map((g) => ({ key: `spend-${g.kind}`, cells: [g.label, ...costRow(g), g.share === null ? '–' : `${g.share}%`] })) });
+  const units = table({ cols: [{ label: 'Unit' }, ...COST_COLS], min: 520, max: 320, empty: none,
+    rows: sp.byUnit.filter((u) => u.entries).map((u) => ({ key: `spend-u-${u.id}`, cells: [{ html: unitLink(ctx, u.id) }, ...costRow(u)] })) });
+  const share = sp.byKind.find((g) => g.share !== null);
+  return `<h3 class="sub">By agent kind</h3>${kinds}${share ? `<p class="cause">Share of ${share.shareOf === 'tokensIn' ? 'tokens in' : 'minutes'}; the lead's own turns are not launches.</p>` : ''}<h3 class="sub">By unit</h3>${units}`;
+}
+
+// Critic setups (verdict --critic) with the rounds each judged, passed and the escapes after its passes; builder models.
+function staffingHtml(st) {
+  if (!st) return '<p class="empty">Not recorded.</p>';
+  // The setup sits under the critic's name, so the counts stay in view in the side column (no min width).
+  const who = (g) => ({ html: `${esc(g.critic === 'general' ? 'General' : `Specialist ${g.critic}`)}<div class="cause">${esc(g.setup)}</div>` });
+  const critics = table({ cols: [{ label: 'Critic and setup' }, { label: 'Rounds', num: true }, { label: 'Passed', num: true }, { label: 'Escapes', num: true }],
+    empty: 'No round judged yet.', rows: st.critics.map((g) => [who(g), String(g.rounds), String(g.passed), g.escapes === null ? '–' : String(g.escapes)]) });
+  const builders = st.builders.length || st.unrecorded ? `<p class="cause">Builder models: ${esc(modelLine(st.builders, st.unrecorded))}</p>` : '';
+  return `${critics}${builders}`;
 }
 
 const rows = (xs, fn, none) => (xs.length ? `<div class="rows">${xs.map((x) => `<div>${fn(x)}</div>`).join('')}</div>` : `<p class="empty">${esc(none)}</p>`);
@@ -119,7 +178,9 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
       ['Builds started', '–', b.builds, '–'],
       ...(b.resets ? [['Resets', '–', b.resets, '–']] : []),
       ['Units', b.units ?? '–', b.usedUnits, '–'],
-      ['Time, minutes', b.minutes, '–', '–'],
+      ['Time, minutes', b.minutes, b.usedMinutes ?? '–', '–'],
+      ['Review minutes per try', '–', b.reviewMedian ?? '–', '–'],
+      ['Tokens in', '–', m.spend?.tokensIn === null || m.spend?.tokensIn === undefined ? '–' : costCells({ tokensIn: m.spend.tokensIn, recorded: { tokensIn: true } }).tokensIn, '–'],
     ].map(([item, ...rest]) => [item, ...rest.map(String)]),
     min: 420,
   });
@@ -136,9 +197,11 @@ export function retroPage(m, v, nowMs = Date.now(), ctx = null, pending = false)
     + blk('retro-notes', panel({ id: 'notes', title: 'Retro notes', count: m.notes.length, bodyHtml: rows(m.notes, (n) => `<span class="grow">${linkify(n.text, r)}</span><span class="cause">${stamp(n.at)}</span>`, 'None yet: run.mjs note <run> --kind retro --text "…"') }))
     + blk('retro-lessons', panel({ id: 'lessons', title: 'Lessons', count: m.lessons.length, bodyHtml: lessons }))
     + blk('retro-gaps', panel({ id: 'gaps', title: 'Repeated gaps', count: m.repeated.length, bodyHtml: gaps, flush: m.repeated.length > 0, open: false }))
-    + blk('retro-stopped', panel({ id: 'stopped', title: 'Stopped units', count: b.stopped.length, bodyHtml: stopped, open: false }));
+    + blk('retro-stopped', panel({ id: 'stopped', title: 'Stopped units', count: b.stopped.length, bodyHtml: stopped, open: false }))
+    + blk('retro-spend', panel({ id: 'spend', title: 'Spend', metaHtml: esc(m.spend?.line ?? ''), bodyHtml: spendHtml(m.spend, ctx), open: false }));
   const side = blk('retro-checklist', panel({ id: 'checklist', title: 'Checklist', count: `${done} / ${m.checklist.length}`, bodyHtml: checklist }))
     + blk('retro-upstream', panel({ id: 'upstream', title: 'Upstream proposals', count: m.upstream.length, bodyHtml: rows(m.upstream, (n) => `<span class="grow">${linkify(n.text, r)}</span><span class="cause">${esc(n.kind)}, ${stamp(n.at)}</span>`, 'None.') }))
+    + blk('retro-staffing', panel({ id: 'staffing', title: 'Staffing', count: m.staffing?.critics.length ?? 0, bodyHtml: staffingHtml(m.staffing), open: false }))
     + blk('retro-escapes', panel({ id: 'escapes', title: 'Escapes', count: m.escapes.length, open: false, bodyHtml: rows(m.escapes, (e) => `${unitLink(ctx, e.unit)}${e.round ? `<span class="cause">passed in try ${e.round}</span>` : ''}<span class="grow">${linkify(e.text, r)}</span>`, 'No defect turned up after a pass.') }));
   const body = `<div class="stack">${[
     blk('head', head),

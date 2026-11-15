@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { decide, decideUnit, noProgress, sameGap, stats } from '../lib/rules.mjs';
+import { criticSetups, decide, decideUnit, noProgress, sameGap, stats } from '../lib/rules.mjs';
 
 const T0 = Date.parse('2026-01-01T00:00:00Z');
 const run = (units, extra = {}) => ({
@@ -129,4 +129,15 @@ test('a no-progress stop names the one behaviour that kept failing while the res
   assert.equal(noProgress(unit([r(8, m('fail', 'fail')), r(8, m('fail', 'fail')), r(6, m('fail', 'fail'))])), 'no progress', 'two failing');
   assert.equal(noProgress(unit([r(8, [{ id: 'B2', status: 'fail' }]), r(8, [{ id: 'B2', status: 'fail' }])])), 'no progress', 'nothing else passed');
   assert.equal(noProgress(unit([fail('a', 6), fail('b', 5), fail('c', 6)])), 'no progress', 'rounds without marks');
+});
+
+test('criticSetups: rounds and passes per critic setup, the general critic first, escapes only on its passes', () => {
+  const run = { notes: [{ kind: 'escape', unit: 'a', text: 'x' }], units: [
+    { id: 'a', status: 'pass', rounds: [{ verdict: 'fail', critic: 'opus full' }, { verdict: 'pass', critic: 'sonnet delta', specialists: { money: { verdict: 'pass', critic: 'opus money' } } }] },
+    { id: 'b', status: 'open', rounds: [{ verdict: 'fail', general: 'pass', failedBy: ['money'], specialists: { money: { verdict: 'fail' } } }] },
+  ] };
+  assert.deepEqual(criticSetups([run]).map((g) => [g.critic, g.setup, g.rounds, g.passed, g.escapes]), [
+    ['general', '(not recorded)', 1, 1, 0], ['general', 'opus full', 1, 0, 0], ['general', 'sonnet delta', 1, 1, 1],
+    ['money', '(not recorded)', 1, 0, null], ['money', 'opus money', 1, 1, null],
+  ]);
 });

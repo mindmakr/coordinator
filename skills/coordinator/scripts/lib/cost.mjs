@@ -88,6 +88,32 @@ export function costByModel(runs) {
   return [...groups].map(([model, sum]) => ({ model, ...sum })).sort((a, b) => a.model.localeCompare(b.model));
 }
 
+// The kind of agent a launch was, from the role its entry recorded: builders, the general critic, the
+// specialist critics (critic:<name>) and fold-in checks. The lead's own work is not a launch, so never here.
+export const KINDS = [['builder', 'Builders'], ['critic', 'General critics'], ['specialist', 'Specialist critics'], ['fold-in check', 'Fold-in checks']];
+const kindOf = (role) => (role === 'builder' || role === 'critic' || role === 'fold-in check' ? role : /^critic:/.test(role ?? '') ? 'specialist' : '(not recorded)');
+
+// Per kind of agent over every unit of the given runs, in KINDS order, with each kind's share of the tokens
+// in (or of the minutes when no tokens were recorded); kinds with no entry are left out.
+export function costByKind(runs) {
+  const groups = new Map();
+  for (const run of runs) for (const u of run.units) for (const e of entries(u)) { const key = kindOf(e.role); groups.set(key, add(groups.get(key) ?? empty(), e)); }
+  const order = [...KINDS.map(([key]) => key), '(not recorded)'];
+  const list = order.filter((key) => groups.has(key)).map((key) => ({ kind: key, label: KINDS.find(([x]) => x === key)?.[1] ?? 'Role not recorded', ...groups.get(key) }));
+  const by = list.some((g) => g.recorded.tokensIn) ? 'tokensIn' : 'minutes';
+  const total = list.reduce((n, g) => n + g[by], 0);
+  return list.map((g) => ({ ...g, share: total ? Math.round((100 * g[by]) / total) : null, shareOf: by }));
+}
+
+// One sum as table cells: tokens in, tokens out, minutes and money, a dash where nothing was recorded.
+export function costCells(sum) {
+  const r = sum?.recorded ?? {};
+  return {
+    tokensIn: r.tokensIn ? k(sum.tokensIn) : '–', tokensOut: r.tokensOut ? k(sum.tokensOut) : '–', minutes: r.minutes ? String(sum.minutes) : '–',
+    money: Object.entries(sum?.money ?? {}).sort().map(([cur, amt]) => `${amt} ${cur}`).join(', ') || '–',
+  };
+}
+
 const k = (n) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n));
 // "12.3k in / 4.1k out tokens · 34 min · 0.42 USD", or "not recorded".
 export function costLine(sum) {
