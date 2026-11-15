@@ -18,6 +18,7 @@
 //   tries([state])                    try marks: pass ✓, fail ✕, work …, queued (its number), open (empty)
 //   bar(pct, { label?, tone? })       div.bar: a meter with its percent as its label
 //   restoreOpen(nodes, saved)         the live page's memory of toggles and panels (live.client.js runs it)
+//   rememberToggle(map, d, armed)     records a toggle only after the reader clicked its summary
 import { esc } from './links.mjs';
 
 const text = esc;
@@ -83,6 +84,15 @@ export function restoreOpen(nodes, saved) {
   const map = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
   for (const d of nodes) { const v = map[d.dataset.d]; if (typeof v === 'boolean' && d.open !== v) d.open = v; }
   return map;
+}
+
+// A toggle event is the reader's only if a click on the panel's summary armed it (the browser also fires
+// `toggle` for every details parsed open, and for restoreOpen): then record it, once. `armed` is a WeakSet.
+export function rememberToggle(map, d, armed) {
+  if (!d || !d.dataset || !d.dataset.d || d.dataset.po || !armed.has(d)) return false;
+  armed.delete(d);
+  map[d.dataset.d] = d.open;
+  return true;
 }
 
 // One mark per try, in order. Each says its state in a glyph and in its label.

@@ -133,7 +133,8 @@ test('option text is escaped in the file and on the answer page', () => {
   const live = hud(view(s, decide(s)), Date.now(), { token: 'tok"en', nonce: 'n0nce' });
   assert.match(live, /value="tok&quot;en"/);
   assert.match(live, /script-src 'nonce-n0nce'/);
-  assert.equal(live.match(/<script/g).length, 1, 'only the nonce script');
+  assert.equal(live.match(/<script/g).length, 2, 'the theme script in <head> and the live script');
+  assert.equal(live.match(/<script nonce="n0nce">/g).length, 2, 'both carry the nonce');
   assert.doesNotMatch(live, /http-equiv="refresh"/, 'no meta refresh on the answer page');
   assert.match(live, /<input type="radio" name="choice" value="Plain">/);
   assert.match(live, /Recommended/);

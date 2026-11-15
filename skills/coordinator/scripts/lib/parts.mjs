@@ -13,17 +13,17 @@ import { eventEvidence, itemBody } from './evview.mjs';
 import { BADGES, matches, RANGES } from './timeline.mjs';
 import { VERSION } from './version.mjs';
 import { ageText } from './age.mjs';
-import { restoreOpen } from './ui.mjs';
+import { rememberToggle, restoreOpen } from './ui.mjs';
 
 export { esc };
-export { bar, cols, heading, kpis, panel, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from './ui.mjs';
+export { bar, cols, heading, kpis, panel, rememberToggle, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from './ui.mjs';
 const SHELL = readFileSync(new URL('./hud.template.html', import.meta.url), 'utf8');
 // The theme switch's memory, in <head> so the stored theme applies before the first paint.
 const THEME_CLIENT = readFileSync(new URL('./theme.client.js', import.meta.url), 'utf8');
 // The live page's script: updates, then the map panels (lib/maptips.mjs), walking a map (lib/mapnav.mjs) and the evidence viewer (lib/evview.mjs).
 const CLIENT = ['./live.client.js', './maptips.client.js', './mapnav.client.js', './evview.client.js'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 // Pure functions the page runs from the same source the tests check.
-const SERVED = [matches, morph, findMatches, highlight, unhighlight, ageText, restoreOpen];
+const SERVED = [matches, morph, findMatches, highlight, unhighlight, ageText, restoreOpen, rememberToggle];
 
 export const cls = (s) => String(s ?? '').toLowerCase().replace(/[^a-z-]/g, '');
 export const when = (iso) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');

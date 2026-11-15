@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { bar, cols, heading, kpis, page, panel, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
+import { bar, cols, heading, kpis, page, panel, rememberToggle, restoreOpen, table, toneChip, tries, typeOf, typeTag, TYPES } from '../lib/parts.mjs';
 import { privacy } from '../lib/quality/privacy.mjs';
 import { sourceFile } from '../lib/quality/source.mjs';
 
@@ -120,7 +120,7 @@ test('page: a live page applies the stored theme from <head>, with the nonce, be
   assert.equal((html.match(/<script nonce="N1">/g) ?? []).length, 2);
   assert.match(html, /const restoreOpen = function restoreOpen/, 'the page runs restoreOpen from lib/ui.mjs');
   assert.match(html, /const openKey = key\(`open:\$\{path\}`\)/, 'panels are remembered per page');
-  assert.doesNotMatch(html, /coordinator:theme/, 'one theme key');
+  assert.equal((html.match(/coordinator:theme/g) ?? []).length, 1, 'the old theme key appears once, to be migrated');
 });
 
 // A fake page for theme.client.js: <html>, the three radios, localStorage.
@@ -156,6 +156,39 @@ test('theme.client.js: the stored choice applies before the first paint, the swi
   assert.equal(themePage({ stored: '"><x' }).root.dataset.theme, 'system', 'an unknown value: the system theme');
   const parsed = themePage({ stored: 'light', ready: 'complete' });
   assert.equal(parsed.radios[1].checked, true, 'already parsed: bound at once');
+});
+
+test('theme.client.js: a choice kept under the old key is carried over once and the old key removed', () => {
+  const mk = (store) => {
+    const document = { readyState: 'complete', documentElement: { dataset: {} }, getElementById: () => null, querySelectorAll: () => [], addEventListener() {} };
+    const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } };
+    runInNewContext(readFileSync(new URL('../lib/theme.client.js', import.meta.url), 'utf8'), { document, localStorage });
+    return document.documentElement.dataset.theme;
+  };
+  const a = { 'coordinator:theme': '"dark"' };
+  assert.equal(mk(a), 'dark');
+  assert.deepEqual(a, { 'coordinator.theme': 'dark' }, 'copied to the new key, old key gone');
+  const b = { 'coordinator:theme': '"><x' };
+  assert.equal(mk(b), 'system');
+  assert.deepEqual(b, {}, 'an unknown old value is dropped, nothing copied');
+  const c = { 'coordinator.theme': 'light', 'coordinator:theme': '"dark"' };
+  assert.equal(mk(c), 'light', 'the new key wins');
+});
+
+test('rememberToggle: only a toggle after a click on the summary is stored; parsed-open and restored panels are not', () => {
+  const d = (key, open, extra = {}) => ({ dataset: { d: key, ...extra }, open });
+  const map = {}; const armed = new WeakSet();
+  const parsed = d('units', true);
+  assert.equal(rememberToggle(map, parsed, armed), false, 'a panel parsed open fires toggle with no click');
+  assert.deepEqual(map, {}, 'nothing pinned');
+  armed.add(parsed); parsed.open = false;
+  assert.equal(rememberToggle(map, parsed, armed), true, 'the reader closed it');
+  assert.deepEqual(map, { units: false });
+  assert.equal(rememberToggle(map, parsed, armed), false, 'armed once: the restore that follows is not stored');
+  const printed = d('tl', true, { po: '1' }); armed.add(printed);
+  assert.equal(rememberToggle(map, printed, armed), false, 'opened only for print');
+  assert.equal(rememberToggle(map, { dataset: {} }, armed), false);
+  assert.deepEqual(map, { units: false });
 });
 
 test('theme.client.js: storage that throws is caught; the switch still works for the page', () => {

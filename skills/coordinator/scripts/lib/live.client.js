@@ -22,10 +22,15 @@
     if (root.matches && root.matches('details[data-d]')) all.push(root);
     restoreOpen(all, openMap);
   };
+  // Only a click on a summary (the mouse, Enter or Space) is the reader's: the browser also fires
+  // toggle for panels parsed open and for restoreOpen, and those must not be stored.
+  const armed = new WeakSet();
+  document.addEventListener('click', (e) => {
+    const s = e.target && e.target.closest ? e.target.closest('summary') : null;
+    if (s && s.parentElement && s.parentElement.dataset && s.parentElement.dataset.d) armed.add(s.parentElement);
+  }, true);
   document.addEventListener('toggle', (e) => {
-    const d = e.target; if (!d.dataset || !d.dataset.d || d.dataset.po) return; // po: opened only for print
-    openMap[d.dataset.d] = d.open;
-    save(openKey, openMap);
+    if (rememberToggle(openMap, e.target, armed)) save(openKey, openMap); // po: opened only for print
   }, true);
 
   // Timeline: search, kinds, units, range and sort, remembered per page.
