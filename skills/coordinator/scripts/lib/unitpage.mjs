@@ -108,7 +108,7 @@ export function unitPage(v, id, nowMs = Date.now(), ctx = null) {
     blk('notes', panel({ id: 'notes', title: 'Notes and questions', count: u.asks.length + u.personNotes.length + (u.unitNotes ?? []).length,
       bodyHtml: `${u.asks.length ? `<ul class="qs">${u.asks.map((q) => questionItem(q, form, r)).join('')}</ul>` : ''}`
         + (notes ? grows(`<ul>${notes}</ul>`) : (u.asks.length ? '' : '<p class="empty">None.</p>')) + (form ? noteForm(form, u.id) : '') })),
-    u.earlyList?.length ? blk('early', panel({ id: 'early', title: 'Early reviews', count: u.earlyList.length, open: false, bodyHtml: earlyReviews(u.earlyList, r) })) : '',
+    u.earlyList?.length ? blk('early', panel({ id: 'early', title: 'Early reviews', count: u.earlyList.length, metaHtml: 'not rounds', open: false, bodyHtml: earlyReviews(u.earlyList, r) })) : '',
     earlierRuns.length ? blk('earlier', panel({ id: 'earlier', title: 'Earlier runs', count: earlierRuns.length, open: false, bodyHtml: earlier(earlierRuns, r, u.id) })) : '',
   ];
   const head = `<div class="head"><span class="mono muted">${esc(u.id)}</span><h1>${unitDot(u)} ${esc(u.title ?? u.id)}</h1>${stateChip(u, ctx)}<span class="meta">updated ${stamp(new Date(nowMs).toISOString())}</span></div>${unitLinks(u, r)}`;

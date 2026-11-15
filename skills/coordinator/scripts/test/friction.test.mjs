@@ -61,7 +61,7 @@ test('verdict --early records a review of a stacked unit apart: counted by next 
   assert.deepEqual([n.early.count, n.early.text], [2, '2 early reviews, not rounds (security pass 9.3; critic fail 7)']);
   assert.match(cli('show', 'early').out, /◦ 2 early reviews, not rounds/);
   const page = readFileSync(join(dir, 'runs', 'early', 'units', 'b.html'), 'utf8');
-  assert.match(page, /Early reviews \(not rounds\)/);
+  assert.match(page, /<h2>Early reviews<\/h2><span class="count">2<\/span><span class="meta">not rounds<\/span>/);
   assert.match(page, /B2: the list misses one state/);
   // It never bypasses the formal rules.
   assert.match(cli('verdict', 'early', 'b', 'pass', '--early', '--score', '9', '--evidence', 'e', '--fold', 'nit: x').err, /--fold does not go with --early/);
