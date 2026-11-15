@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { criticSetups, decide, decideUnit, noProgress, sameGap, stats } from '../lib/rules.mjs';
+import { afterFixIntegration, criticSetups, decide, decideUnit, noProgress, sameGap, stats } from '../lib/rules.mjs';
 
 const T0 = Date.parse('2026-01-01T00:00:00Z');
 const run = (units, extra = {}) => ({
@@ -129,6 +129,22 @@ test('a no-progress stop names the one behaviour that kept failing while the res
   assert.equal(noProgress(unit([r(8, m('fail', 'fail')), r(8, m('fail', 'fail')), r(6, m('fail', 'fail'))])), 'no progress', 'two failing');
   assert.equal(noProgress(unit([r(8, [{ id: 'B2', status: 'fail' }]), r(8, [{ id: 'B2', status: 'fail' }])])), 'no progress', 'nothing else passed');
   assert.equal(noProgress(unit([fail('a', 6), fail('b', 5), fail('c', 6)])), 'no progress', 'rounds without marks');
+});
+
+test('after a failed integration check ends the run with gaps, one pass of the fixed result may be recorded', () => {
+  const passed = { ...unit([{ verdict: 'pass', score: 9, at: new Date(T0 + 60_000).toISOString() }]), status: 'pass' };
+  const at = (min) => new Date(T0 + min * 60_000).toISOString();
+  const late = T0 + 300 * 60_000; // past the 240-minute budget
+  const failedOnce = run([passed], { integration: { rounds: [{ verdict: 'fail', gap: 'red', at: at(100) }] } });
+  assert.equal(decide(failedOnce, late).decision, 'done-with-gaps');
+  assert.equal(afterFixIntegration(failedOnce, late), true);
+  // Inside the budget the run is still at integrate: the next check is an ordinary one.
+  assert.equal(afterFixIntegration(failedOnce, T0 + 120 * 60_000), false);
+  // No failed check, or a pass already recorded: nothing to record.
+  assert.equal(afterFixIntegration(run([passed]), late), false);
+  const fixed = run([passed], { integration: { rounds: [{ verdict: 'fail', gap: 'red', at: at(100) }, { verdict: 'pass', afterFix: true, at: at(290) }] } });
+  assert.equal(decide(fixed, late).decision, 'done');
+  assert.equal(afterFixIntegration(fixed, late), false);
 });
 
 test('criticSetups: rounds and passes per critic setup, the general critic first, escapes only on its passes', () => {

@@ -8,7 +8,8 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chainLine, chainOf, chainUnits, linkedRuns, parseContinues } from '../lib/chain.mjs';
-import { answerRefusal, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
+import { answerRefusal, grantQuestion, grantRefusal, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
+import { text as argText } from '../lib/args.mjs';
 import { decide, decideUnit, stats } from '../lib/rules.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
 import { flowGraph } from '../lib/maps.mjs';
@@ -211,9 +212,9 @@ test('extend: one approval, one use; only after the last verdict; on the named u
   // A note is used once too, and with no number it is one round.
   stop('m2');
   run('note', 'x', '--kind', 'person', '--unit', 'm2', '--text', 'Approved', '--confirm');
-  assert.match(run('extend', 'x', 'm2', '--rounds', '2', '--reason', 'r').err, /names no number, so it is for one round/);
+  assert.match(run('extend', 'x', 'm2', '--rounds', '2', '--reason', 'r').err, /names no single number, so it is for one round/);
   assert.equal(run('extend', 'x', 'm2', '--reason', 'r').code, 0);
-  assert.match(state('x').notes.at(-1).text, /their words name no number: one round/);
+  assert.match(state('x').notes.at(-1).text, /their words name no single number: one round/);
   stop('m2');
   assert.match(run('extend', 'x', 'm2', '--reason', 'r').err, /no approval from the person since m2's last verdict/);
 });
@@ -243,6 +244,62 @@ test('extend: a hand edit of state.json never approves', () => {
   assert.equal(state('h').units[0].status, 'stopped');
 });
 
+// f5 round 2 (both critics): a hand edit of the question's text to "Give it 30 more minutes?" or its header
+// to "30 min", on a question storing 600, still granted 600.
+test('extend <run>: a hand-edited question text or header never approves, and the refusal records nothing', () => {
+  let n = 0;
+  const probe = (edit, re, why) => {
+    const id = `he${(n += 1)}`;
+    const file = join(dir, 'runs', id, 'state.json');
+    run('init', id, '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+    run('add', id, 'm1', '--bar', 'b'); run('freeze', id);
+    const a = run('ask', id, '--question', 'Give the run 600 more minutes?', '--header', 'time', '--option', 'Yes', '--option', 'No|close it', '--approves', 'Yes', '--grant-minutes', '600');
+    assert.equal(a.code, 0, a.err);
+    run('answer', id, 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+    const st = JSON.parse(readFileSync(file, 'utf8')); edit(st.notes.find((x) => x.kind === 'question')); writeFileSync(file, JSON.stringify(st));
+    const before = state(id).notes.length;
+    const r = run('extend', id, '--reason', 'r', '--answer', 'q1');
+    assert.notEqual(r.code, 0, why); assert.match(r.err, re, why);
+    const s = state(id);
+    assert.equal(s.budget.maxMinutes, 60, `${why}: no minutes added`); assert.equal(s.budget.addedMinutes ?? 0, 0, why);
+    assert.equal(s.notes.length, before, `${why}: no decision logged`);
+    assert.equal(s.notes.find((x) => x.kind === 'question').usedAt ?? null, null, `${why}: the answer is not used up`);
+  };
+  // The critics' probes: the field check ask runs is run again on the stored question, whoever wrote it.
+  probe((q) => { q.text = 'Give it 30 more minutes?'; }, /extend refused: q1: the question names an amount other than 600 minutes: "30"/, 'text');
+  probe((q) => { q.header = '30 min'; }, /extend refused: q1: the header names an amount other than 600 minutes: "30"/, 'header');
+  probe((q) => { q.options[1].description = 'just 30 more minutes'; }, /extend refused: q1: option "No" names an amount other than 600 minutes: "30"/, 'option');
+  // An edit naming no amount: refused because a hand edit wrote it.
+  probe((q) => { q.text = 'Keep going?'; }, /q1 was last written by state\.edited, not by question/, 'text, no amount');
+  probe((q) => { q.header = 'urgent'; }, /q1 was last written by state\.edited, not by question/, 'header, no amount');
+});
+
+// f5 round 2 (finding 2): "Give it ‮600‬ more minutes?" displayed as "006".
+test('ask: text-direction overrides and zero-width characters are stripped from the question, header and options', () => {
+  const hidden = '‪‫‬‭‮⁦⁧⁨⁩​‌‍‎‏﻿';
+  assert.equal(argText(`Give it ‮600‬ more minutes?${hidden}`, 'question'), 'Give it 600 more minutes?');
+  assert.equal(argText(`6​0‍0`, 'x'), '600');
+  assert.throws(() => argText(hidden, 'header'), /missing --header/);
+  run('init', 'bd', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'bd', 'm1', '--bar', 'b'); run('freeze', 'bd');
+  const a = run('ask', 'bd', '--question', 'Give it ‮600‬ more minutes?', '--header', 't​ime', '--option', 'Y‮es', '--option', 'No|close ⁦it⁩', '--approves', 'Yes', '--grant-minutes', '600');
+  assert.equal(a.code, 0, a.err);
+  const q = state('bd').notes.find((x) => x.kind === 'question');
+  assert.equal(q.text, 'Give it 600 more minutes?'); assert.equal(q.header, 'time');
+  assert.deepEqual(q.options, [{ label: 'Yes', description: '600 more minutes' }, { label: 'No', description: 'close it' }]);
+});
+
+test('grantQuestion: every field of a stored question, the one check ask and extend share', () => {
+  const q = { text: 'Give the run 600 more minutes?', header: 'time', approves: 'Yes', options: [{ label: 'Yes', description: '600 more minutes' }, { label: 'No', description: 'close it' }] };
+  assert.deepEqual(grantQuestion(q, 600), q.options);
+  assert.deepEqual(grantQuestion({ ...q, options: [{ label: 'Yes', description: null }, q.options[1]] }, 600)[0], { label: 'Yes', description: '600 more minutes' });
+  assert.throws(() => grantQuestion({ ...q, text: 'Give it 30 more minutes?' }, 600), /^Error: the question names an amount other than 600 minutes: "30"$/);
+  assert.throws(() => grantQuestion({ ...q, header: '30 min' }, 600), /^Error: the header names an amount other than 600 minutes: "30"$/);
+  assert.throws(() => grantQuestion({ ...q, options: [{ label: 'Yes', description: 'more time' }, q.options[1]] }, 600), /the approving option "Yes" must state "600 more minutes"/);
+  assert.throws(() => grantQuestion({ ...q, options: [q.options[0], { label: 'No', description: 'an hour' }] }, 600), /option "No" names an amount other than 600 minutes: "hour"/);
+  assert.throws(() => grantQuestion({ ...q, header: undefined, text: 'Give it an hour?' }, 600), /the question names/);
+});
+
 test('the --confirm words pass the same yes check as a note', () => {
   run('init', 'cf', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-rounds', '1');
   run('add', 'cf', 'm1', '--bar', 'b'); run('freeze', 'cf');
@@ -259,6 +316,223 @@ test('the --confirm words pass the same yes check as a note', () => {
   assert.equal(run('extend', 'cf', 'm1', '--reason', 'r', '--answer', 'q1').code, 0);
 });
 
+// hud-facelift: a session restart cost 25 minutes and no command could give the run that time back.
+test('extend <run>: more time only on the person\'s approving answer, exactly the minutes the question stores', () => {
+  run('init', 't', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 't', 'm1', '--bar', 'b'); run('add', 't', 'm2', '--bar', 'b'); run('freeze', 't');
+  run('start', 't', 'm1'); run('built', 't', 'm1'); run('verdict', 't', 'm1', 'pass', '--evidence', 'green', '--score', '9');
+  // Past the budget: next would stop m2, which never started.
+  const file = join(dir, 'runs', 't', 'state.json');
+  const st = JSON.parse(readFileSync(file, 'utf8')); st.createdAt = new Date(Date.now() - 70 * 60_000).toISOString(); writeFileSync(file, JSON.stringify(st));
+  assert.equal(run('next', 't').out.units.find((u) => u.id === 'm2').reason, 'budget: time');
+  // Refused without an approving answer from the person.
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r').err, /more time needs --answer qN/);
+  run('ask', 't', '--question', 'More time?', '--header', 'time', '--option', 'Yes|60 more minutes', '--option', 'No|close it');
+  run('answer', 't', 'q1', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q1').err, /q1 marks no option as approving/);
+  const q2 = run('ask', 't', '--question', 'Give the run 60 more minutes?', '--header', 'time', '--option', 'Yes', '--option', 'No|close it', '--approves', 'Yes', '--grant-minutes', '60');
+  assert.equal(q2.code, 0, q2.err);
+  const asked = state('t').notes.filter((n) => n.kind === 'question')[1];
+  assert.equal(asked.grantMinutes, 60, 'the amount is stored on the question');
+  assert.deepEqual(asked.options[0], { label: 'Yes', description: '60 more minutes' }, 'the approving option states it');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /q2 has no answer yet/);
+  run('answer', 't', 'q2', '--choice', 'No', '--by', 'person', '--confirm', 'No, close it');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /q2 was answered "No", not "Yes"/);
+  run('answer', 't', 'q2', '--choice', 'Yes');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /not given by the person/, 'the lead cannot answer for the person');
+  run('answer', 't', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, but only if it is quick');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q2').err, /do not clearly say yes/);
+  // A question on a unit approves nothing for the run; --rounds goes with a unit, --minutes with the run.
+  run('ask', 't', '--question', 'More for m2?', '--header', 'm2', '--option', 'Yes|one more round', '--option', 'No|stop', '--unit', 'm2', '--approves', 'Yes');
+  run('answer', 't', 'q3', '--choice', 'Yes', '--by', 'person', '--confirm', 'yes');
+  assert.match(run('extend', 't', '--minutes', '30', '--reason', 'r', '--answer', 'q3').err, /q3 is about m2/);
+  assert.match(run('extend', 't', 'm2', '--minutes', '30', '--reason', 'r', '--answer', 'q3').err, /--minutes goes with the run/);
+  assert.match(run('extend', 't', '--minutes', '30', '--rounds', '1', '--reason', 'r', '--answer', 'q2').err, /--rounds goes with a unit/);
+  // The question stores 60: more is refused; nothing was recorded by any refusal.
+  run('answer', 't', 'q2', '--choice', 'Yes', '--by', 'person', '--confirm', 'Yes, go ahead');
+  assert.match(run('extend', 't', '--minutes', '90', '--reason', 'r', '--answer', 'q2').err, /--minutes 90, but q2 grants 60/);
+  assert.equal(state('t').budget.maxMinutes, 60);
+  // Approved: exactly that many minutes, logged as a decision with their words; the time-stopped unit opens again.
+  assert.equal(run('extend', 't', '--reason', 'session restart cost 25 minutes', '--answer', 'q2').code, 0);
+  const s = state('t');
+  assert.equal(s.budget.maxMinutes, 120); assert.equal(s.budget.addedMinutes, 60);
+  const d = s.notes.at(-1);
+  assert.equal(d.kind, 'decision'); assert.equal(d.answers, 'q2');
+  assert.match(d.text, /^run time budget: 60 more minutes \(now 120, was 60; 7\d used; q2 grants 60\), approved by the person \(q2 "time: Give the run 60 more minutes\?" answered "Yes \(60 more minutes\)" via cli, their words: "Yes, go ahead"\): session restart cost 25 minutes$/);
+  const m2 = run('next', 't').out.units.find((u) => u.id === 'm2');
+  assert.equal(m2.action, 'build', 'm2 is no longer past the budget');
+  // One approval, one use.
+  assert.match(run('extend', 't', '--minutes', '10', '--reason', 'r', '--answer', 'q2').err, /q2 is already decided/);
+});
+
+test('ask --grant-minutes: a whole number stored on a run question with an approving option that states it', () => {
+  run('init', 'ga', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'ga', 'm1', '--bar', 'b'); run('freeze', 'ga');
+  const ask = (...extra) => run('ask', 'ga', '--question', 'More time?', '--header', 'time', '--option', 'No|close it', ...extra);
+  for (const n of ['0', '1.5', 'abc', '1441']) assert.match(ask('--option', 'Yes', '--approves', 'Yes', '--grant-minutes', n).err, /--grant-minutes: expected a whole number 1-1440/, n);
+  assert.match(ask('--option', 'Yes', '--grant-minutes', '60').err, /--grant-minutes goes with --approves/);
+  assert.match(ask('--option', 'Yes', '--approves', 'Yes', '--grant-minutes', '60', '--unit', 'm1').err, /--grant-minutes is for the run's time: a question on a unit grants rounds/);
+  // The option's own text must say the same amount, and nothing else.
+  assert.match(ask('--option', 'Yes|90 more minutes', '--approves', 'Yes', '--grant-minutes', '60').err, /the approving option "Yes" must state "60 more minutes"/);
+  assert.match(ask('--option', 'Yes|an hour', '--approves', 'Yes', '--grant-minutes', '60').err, /must state "60 more minutes"/);
+  assert.match(ask('--option', 'Yes|60 more minutes (the run is 45 minutes over)', '--approves', 'Yes', '--grant-minutes', '60').err, /the approving option "Yes" names an amount other than 60 minutes: "45"/);
+  assert.match(ask('--option', 'Yes 2|60 more minutes', '--approves', 'Yes 2', '--grant-minutes', '60').err, /names an amount other than 60 minutes: "2"/);
+  assert.equal(state('ga').notes.filter((n) => n.kind === 'question').length, 0, 'no refused question was stored');
+  assert.equal(ask('--option', 'Yes|keep going, 45 more minutes', '--approves', 'Yes', '--grant-minutes', '45').code, 0);
+  assert.equal(JSON.parse(run('questions', 'ga').out)[0].grantMinutes, 45, 'questions shows the amount');
+});
+
+// Round-2 critic, f4 (E5): natural wordings granted more than was approved. Each is now refused, or grants exactly the stored amount.
+test('extend <run>: the critic\'s probe wordings are refused or grant exactly the stored amount', () => {
+  run('init', 'cx', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'cx', 'm1', '--bar', 'b'); run('freeze', 'cx');
+  let n = 0;
+  const approve = (options, confirm, grant, extend = true) => {
+    const r = run('ask', 'cx', '--question', 'More time?', '--header', 'time', ...options.flatMap((o) => ['--option', o]), '--approves', 'Yes', ...(grant ? ['--grant-minutes', String(grant)] : []));
+    if (r.code !== 0) return { asked: r.err };
+    n += 1; const id = `q${n}`;
+    run('answer', 'cx', id, '--choice', 'Yes', '--by', 'person', '--confirm', confirm);
+    return { id, ...(extend ? run('extend', 'cx', '--reason', 'probe', '--answer', id) : {}) };
+  };
+  // An amount only in the option's text (no stored amount): refused for run time, whatever it says.
+  for (const o of ['Yes|.5 hours', 'Yes|1,5 hours', 'Yes|quarter of an hour', 'Yes|30-45 more minutes', 'Yes|between 30 and 60 minutes', 'Yes|keep going (the run is 45 minutes over)', 'Yes|60 more minutes', 'Yes|a hundred and twenty minutes']) {
+    const r = approve([o, 'No|close it'], 'Yes');
+    assert.match(r.err, new RegExp(`extend refused: ${r.id} stores no amount of time: ask again with --grant-minutes N`), o);
+  }
+  // The same wordings with a stored amount: the ask is refused when the option's text says another amount.
+  for (const o of ['Yes|.5 hours', 'Yes|1,5 hours', 'Yes|quarter of an hour', 'Yes|30-45 more minutes', 'Yes|between 30 and 60 minutes', 'Yes|a hundred and twenty minutes', 'Yes|30 more minutes (the run is 45 minutes over)']) {
+    assert.match(approve([o, 'No|close it'], 'Yes', 30).asked, /ask refused|the approving option/, o);
+  }
+  assert.equal(state('cx').budget.maxMinutes, 60, 'nothing added so far');
+  // Their confirmed words name another amount: refused, never read as one.
+  for (const c of ['Yes, but only 30', 'Yes, only 30', 'Yes, extend it to 2 hours', 'Yes, a hundred and twenty minutes', 'Yes, .5 hours', 'Yes, 1,5 hours', 'Yes, a quarter of an hour', 'Yes, 30-45 more minutes', 'Yes, between 30 and 60 minutes', 'Yes, half an hour', 'Yes, another hour', 'Yes, thirty more', 'Yes, extend it to 60 minutes']) {
+    const r = approve(['Yes|60 more minutes', 'No|close it'], c, 60);
+    assert.match(r.err, /extend refused: q\d+'s confirmed words (do not clearly say yes|name an amount other than the 60 minutes it grants|name a total)/, c);
+  }
+  assert.equal(state('cx').budget.maxMinutes, 60, 'no refusal recorded anything');
+  // Their words agree: exactly the stored amount, never more; --minutes may give fewer.
+  let r = approve(['Yes|60 more minutes', 'No|close it'], 'Yes, sixty more minutes', 60);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(state('cx').budget.maxMinutes, 120);
+  r = approve(['Yes|60 more minutes (the run is over)', 'No|close it'], 'Yes, 60 more minutes', 60);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(state('cx').budget.maxMinutes, 180);
+  r = approve(['Yes|45 more minutes', 'No|close it'], 'go ahead', 45, false);
+  assert.match(run('extend', 'cx', '--reason', 'r', '--answer', r.id, '--minutes', '46').err, /--minutes 46, but q\d+ grants 45/);
+  assert.equal(run('extend', 'cx', '--reason', 'r', '--answer', r.id, '--minutes', '20').code, 0);
+  const s = state('cx');
+  assert.equal(s.budget.maxMinutes, 200); assert.equal(s.budget.addedMinutes, 140);
+  assert.match(s.notes.at(-1).text, /^run time budget: 20 more minutes \(now 200, was 180; \d+ used; q\d+ grants 45; 20 added\), approved by the person \(.*their words: "go ahead"\): r$/);
+});
+
+// Round-3 critic, f5 (E10, finding 1): only the approving option was checked against N. The question, the header and
+// every option's label and description are now checked: another amount of time anywhere refuses the ask, which records nothing.
+test('ask --grant-minutes N: the question, the header and every option name no amount of time but N minutes', () => {
+  run('init', 'gq', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'gq', 'm1', '--bar', 'b'); run('freeze', 'gq');
+  const ask = ({ question = 'More time?', header = 'time', yes = 'Yes', no = 'No|close it', grant = '60' } = {}) => run('ask', 'gq', '--question', question, '--header', header, '--option', yes, '--option', no, '--approves', yes.split('|')[0], '--grant-minutes', grant);
+  // The critic's probes.
+  assert.match(ask({ question: 'Give it 30 more minutes?', yes: 'Yes', grant: '600' }).err, /ask refused: the question names an amount other than 600 minutes: "30"/);
+  assert.match(ask({ header: '60 min', grant: '600' }).err, /ask refused: the header names an amount other than 600 minutes: "60"/);
+  assert.match(ask({ no: 'No|30 more minutes' }).err, /ask refused: option "No" names an amount other than 60 minutes: "30"/);
+  // Per field, each kind of amount: digits, number words, fractions, hours, seconds, a range.
+  const probes = [
+    ['digits', '30 more minutes', '30'], ['other digits', '３０ more minutes', '30'], ['Arabic-Indic digits', '٣٠ more minutes', '٣٠'],
+    ['number words', 'thirty more minutes', 'thirty'], ['fraction', 'half an hour', 'half'], ['fraction sign', '½ hour', '1'],
+    ['hours', 'an hour more', 'hour'], ['1h', 'another 1h', '1h'], ['seconds', '60 seconds more', 'seconds'], ['90s', 'another 90s', '90s'],
+    ['range', '45-90 minutes', '45'], ['range in words', 'sixty to ninety minutes', 'ninety'], ['days', 'a day more', 'day'],
+  ];
+  const fields = (t) => [
+    ['the question', { question: `Give it ${t}?` }],
+    ...(t.length <= 12 ? [['the header', { header: t }]] : []), // a header is 12 characters at most
+    [`the approving option "Yes ${t}"`, { yes: `Yes ${t}` }], // its description is then written for you: "60 more minutes"
+    ['the approving option "Yes"', { yes: `Yes|60 more minutes (${t})` }],
+    [`option "No ${t}"`, { no: `No ${t}|close it` }],
+    ['option "No"', { no: `No|not ${t}` }],
+  ];
+  let headers = 0;
+  for (const [kind, t, hit] of probes) {
+    for (const [field, o] of fields(t)) {
+      if (field === 'the header') headers += 1;
+      const r = ask(o);
+      assert.notEqual(r.code, 0, `${kind} in ${field}`);
+      assert.ok(r.err.includes(`ask refused: ${field} names an amount other than 60 minutes: "${hit}"`), `${kind} in ${field}: ${r.err}`);
+    }
+  }
+  assert.ok(headers >= 6, 'the header is probed with most kinds');
+  // A total in the question: refused too.
+  assert.match(ask({ question: 'Extend the run to 60 minutes?' }).err, /ask refused: the question names a total \("to 60"\)/);
+  assert.equal(state('gq').notes.filter((n) => n.kind === 'question').length, 0, 'no refused question was stored');
+  // N itself, in digits or words, and text with no amount: accepted.
+  const ok = ask({ question: 'The run has used its time. Give it sixty more minutes?', header: '60 min', no: 'No|close the run' });
+  assert.equal(ok.code, 0, ok.err);
+  assert.equal(state('gq').notes.filter((n) => n.kind === 'question').length, 1);
+});
+
+// Round-3 critic, f5 (E10, findings 2-4): confirmed words asking for less, in another unit, or with other digits granted N.
+test('extend <run>: confirmed words asking for less, in seconds or hours, or with any number but N are refused', () => {
+  run('init', 'cl', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-minutes', '60');
+  run('add', 'cl', 'm1', '--bar', 'b'); run('freeze', 'cl');
+  let n = 0;
+  const approve = (confirm) => {
+    assert.equal(run('ask', 'cl', '--question', 'More time?', '--header', 'time', '--option', 'Yes', '--option', 'No|close it', '--approves', 'Yes', '--grant-minutes', '60').code, 0);
+    n += 1; const id = `q${n}`;
+    run('answer', 'cl', id, '--choice', 'Yes', '--by', 'person', '--confirm', confirm);
+    return run('extend', 'cl', '--reason', 'probe', '--answer', id);
+  };
+  const cases = [
+    // Asking for less.
+    ['Yes, a bit less please', /ask for less than the 60 minutes it grants \("less"\)/],
+    ['Yes, fewer minutes', /ask for less than the 60 minutes it grants \("fewer"\)/],
+    ['Yes, but shorter', /do not clearly say yes|ask for less/],
+    ['Yes, a shorter extension', /ask for less than the 60 minutes it grants \("shorter"\)/],
+    ['Yes, only some of it', /ask for less than the 60 minutes it grants \("only"\)/],
+    ['Yes, some more time', /ask for less than the 60 minutes it grants \("some"\)/],
+    ['Yes, just a little', /ask for less than the 60 minutes it grants \("little"\)/],
+    ['Yes, part of it', /ask for less than the 60 minutes it grants \("part"\)/],
+    ['Yes, partly', /ask for less than the 60 minutes it grants \("partly"\)/],
+    ['Yes, half of it', /name an amount other than the 60 minutes it grants: "half"/],
+    ['Yes, halfway', /ask for less than the 60 minutes it grants \("halfway"\)/],
+    ['Yes, only that', /ask for less than the 60 minutes it grants \("only"\)/],
+    // Another unit.
+    ['Yes, 60 seconds is fine', /name an amount other than the 60 minutes it grants: "seconds"/],
+    ['Yes, 60 secs', /name an amount other than the 60 minutes it grants: "secs"/],
+    ['Yes, 60s', /name an amount other than the 60 minutes it grants: "60s"/],
+    ['Yes, 60 hours', /name an amount other than the 60 minutes it grants: "hours"/],
+    ['Yes, 1 hr', /name an amount other than the 60 minutes it grants: "1"/],
+    // Other digits and number words.
+    ['Yes, ３０ minutes', /name an amount other than the 60 minutes it grants: "30"/],
+    ['Yes, ٣٠ minutes', /name an amount other than the 60 minutes it grants: "٣٠"/],
+    ['Yes, ३० minutes', /name an amount other than the 60 minutes it grants: "३०"/],
+    ['Yes, ½', /name an amount other than the 60 minutes it grants: "1"/],
+    ['Yes, forty minutes', /name an amount other than the 60 minutes it grants: "forty"/],
+    ['Yes, ninety', /name an amount other than the 60 minutes it grants: "ninety"/],
+  ];
+  for (const [c, why] of cases) {
+    const r = approve(c);
+    assert.notEqual(r.code, 0, c);
+    assert.match(r.err, /extend refused: q\d+'s confirmed words /, c);
+    assert.match(r.err, why, c);
+  }
+  assert.equal(state('cl').budget.maxMinutes, 60, 'no refusal recorded anything');
+  // N in fullwidth digits is N; plain words grant exactly N.
+  assert.equal(approve('Yes, ６０ more minutes').code, 0);
+  assert.equal(approve('Yes, go ahead').code, 0);
+  assert.equal(state('cl').budget.maxMinutes, 180);
+});
+
+test('the numbers in a person\'s words, against the amount a question grants', () => {
+  for (const t of ['Yes', 'Yes, go ahead', 'Yes|60 more minutes', 'yes, sixty more minutes', '60 more minutes, approved', 'up to 60 more minutes']) assert.equal(grantRefusal(t, 60), null, t);
+  for (const [t, hit] of [['Yes, but only 30', '30'], ['.5 hours', '.5'], ['1,5 hours', '1,5'], ['30-45 more minutes', '30'], ['between 30 and 60 minutes', '30'], ['the run is 45 minutes over', '45'], ['Yes, this one', 'one'], ['thirty more', 'thirty'], ['sixty-five minutes', 'sixty-five']]) {
+    assert.equal(grantRefusal(t, 60), `name an amount other than the 60 minutes it grants: "${hit}"`, t);
+  }
+  for (const [t, hit] of [['quarter of an hour', 'quarter'], ['half an hour', 'half'], ['a hundred and twenty minutes', 'hundred'], ['a couple more hours', 'couple'], ['a few more minutes', 'few'], ['another hour', 'hour'], ['1h', '1h'], ['90m', '90'], ['another minute', 'another minute']]) {
+    assert.equal(grantRefusal(t, 60), `name an amount other than the 60 minutes it grants: "${hit}"`, t);
+  }
+  assert.equal(grantRefusal('extend it to 60 minutes', 60), 'name a total ("to 60"), not an amount added');
+  assert.equal(grantRefusal('60 minutes in total', 60), 'name a total ("total"), not an amount added');
+});
+
 test('the rounds an approval names', () => {
   assert.equal(namedRounds('Yes, one more round'), 1);
   assert.equal(namedRounds('two more rounds'), 2);
@@ -267,6 +541,10 @@ test('the rounds an approval names', () => {
   assert.equal(namedRounds('approved once PR 1234 lands'), null, 'nor is a PR number');
   assert.equal(namedRounds('5 more rounds'), null, 'only 1-4');
   assert.equal(namedRounds('fix #2 and 1 more'), 1);
+  // A count given for context never wins (round-1 critic, f4): the one tied to "more" does; counts that still differ name none.
+  assert.equal(namedRounds('two more rounds; it used 3 rounds'), 2);
+  assert.equal(namedRounds('2 rounds or 3 rounds'), null, 'different counts: one round');
+  assert.equal(namedRounds('one more, then two more'), null);
   for (const t of ['approved once PR 1234 lands', 'approved after the demo', 'approved when CI is green', 'approved until Friday']) assert.equal(noteApproves(t), false, t);
   assert.equal(namedRounds('Approved'), null);
 });

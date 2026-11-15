@@ -420,6 +420,37 @@ test('a pass from a critic started inside the time budget integrates and closes 
   assert.match(cli('close', 'lateint4', '--outcome', 'done').err, /close --outcome done refused/);
 });
 
+// hud-facelift: the integration check failed after the budget, the fix passed a fresh check and merged,
+// and the run still could not close as done.
+test('a failed integration whose fix passed a fresh check: integrate pass once, with evidence, and the run closes done', () => {
+  setup('fixint'); build('fixint', 'a'); age('fixint', 5, 3);
+  ok('verdict', 'fixint', 'a', 'pass', '--score', '9', '--evidence', 'e');
+  ok('integrate', 'fixint', 'fail', '--evidence', 'merged tree: two pages lose the breadcrumb', '--gap', 'breadcrumb short on four pages');
+  assert.equal(ok('next', 'fixint').decision, 'done-with-gaps');
+  assert.match(cli('close', 'fixint', '--outcome', 'done').err, /close --outcome done refused/);
+  // Only a pass, and only with evidence.
+  assert.match(cli('integrate', 'fixint', 'fail', '--evidence', 'e', '--gap', 'g').err, /only one pass is recorded now/);
+  assert.match(cli('integrate', 'fixint', 'pass').err, /needs --evidence/);
+  assert.equal(state('fixint').integration.rounds.length, 1, 'refused steps record nothing');
+  ok('integrate', 'fixint', 'pass', '--evidence', 'fix PR #171 merged; fresh check of main: full suite green');
+  const s = state('fixint');
+  assert.deepEqual(s.integration.rounds.map((r) => [r.verdict, r.afterFix ?? false]), [['fail', false], ['pass', true]]);
+  assert.equal(s.notes.at(-1).kind, 'decision');
+  assert.equal(s.notes.at(-1).text, 'integration passed after a fix: check 1 failed ("breadcrumb short on four pages"); the fresh check of the fixed result passed: fix PR #171 merged; fresh check of main: full suite green');
+  assert.equal(ok('next', 'fixint').decision, 'done');
+  // Once: the run is done, so another check is refused.
+  assert.match(cli('integrate', 'fixint', 'pass', '--evidence', 'again').err, /integrate refused: the run is at "done"/);
+  ok('close', 'fixint', '--outcome', 'done');
+  assert.equal(state('fixint').closed.outcome, 'done');
+  // Inside the budget the usual rule holds: a pass after a fail is the next check, not an after-fix pass.
+  setup('fixint2'); build('fixint2', 'a');
+  ok('verdict', 'fixint2', 'a', 'pass', '--score', '9', '--evidence', 'e');
+  ok('integrate', 'fixint2', 'fail', '--evidence', 'e', '--gap', 'red');
+  assert.equal(ok('next', 'fixint2').decision, 'integrate');
+  ok('integrate', 'fixint2', 'pass', '--evidence', 'green');
+  assert.equal(state('fixint2').integration.rounds.at(-1).afterFix, undefined);
+});
+
 test('note --unit scopes a decision, follow-up or info to the unit and shows it on its page (#45 B2)', () => {
   setup('unote', ['a', 'b']);
   ok('note', 'unote', '--kind', 'decision', '--unit', 'a', '--text', 'allowed snapshot-rewritten:src/ui for a');

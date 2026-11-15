@@ -51,6 +51,8 @@ export const KINDS = {
   'unit.detect': { unit: 'required', payload: changes },
   'unit.link': { unit: 'required', payload: changes },
   'unit.extend': { unit: 'required', payload: changes },
+  // More minutes for the run's time budget on the person's approving answer (run.mjs extend <run> --minutes).
+  'run.extend': { unit: 'none', payload: changes },
   // A unit merged on the person's decision without a final verdict (run.mjs ship, #66).
   'unit.ship': { unit: 'required', payload: changes },
   // A specialist added after the unit was (run.mjs add-specialist, #45).

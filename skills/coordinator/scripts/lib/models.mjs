@@ -118,14 +118,17 @@ function forClass(cfg, cls) {
 
 // The model for a role and its task classes (one, a list, or "a,b"): { model, why }.
 // model null means the harness's default. A unit in several classes gets the strongest choice.
-export function route(cfg, role, classes = []) {
+// Given the unit, the general critic gets the answer verdict would give it (cheapCriticRefusal).
+export function route(cfg, role, classes = [], unit = null) {
   if (!ROLES.includes(role)) throw new Error(`role must be one of ${ROLES.join(', ')}`);
   if (!cfg.on) return { model: null, why: 'routing off' };
   const list = (Array.isArray(classes) ? classes : String(classes ?? '').split(',')).map((c) => String(c).trim().toLowerCase()).filter(Boolean);
   if (role === CHEAP_JUDGE && !atLeast(cfg.table[role], cfg.strong)) {
     if (!list.length) return { model: cfg.strong, why: 'no task class given: name the classes for the cheaper critic' };
     const pin = list.find((c) => pinned(c));
-    return pin ? { model: cfg.strong, why: `${pin} (always strong)` } : { model: cfg.table[role], why: 'no pinned area' };
+    if (pin) return { model: cfg.strong, why: `${pin} (always strong)` };
+    const refusal = cheapCriticRefusal(cfg, cfg.table[role], list, unit);
+    return refusal ? { model: cfg.strong, why: refusal } : { model: cfg.table[role], why: 'no pinned area' };
   }
   if (JUDGES.includes(role)) return { model: own(cfg.table, role) ? cfg.table[role] : cfg.strong, why: 'review depth is not where to save' };
   if (role === 'builder' && list.length) {

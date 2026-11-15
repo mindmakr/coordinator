@@ -4,7 +4,8 @@
 // by older versions with `note --kind question` keep their ids and still load.
 import { basename, dirname } from 'node:path';
 import { clip } from './plain.mjs';
-import { oneOf, optText, text } from './args.mjs';
+import { num, oneOf, optText, text } from './args.mjs';
+import { grantQuestion } from './approval.mjs';
 import { maskSecrets } from './secrets.mjs';
 
 export const HEADER_MAX = 12;
@@ -40,11 +41,27 @@ export function ask(s, o) {
   const approves = o.approves === undefined ? null : options.find((x) => x.label.toLowerCase() === String(o.approves).trim().toLowerCase())?.label;
   if (approves === undefined) throw new Error(`--approves must name one of the options (${options.map((x) => x.label).join(', ')})`);
   if (approves && o.multi === true) throw new Error('--approves goes with a single-answer question');
+  const question = text(o.question, 'question', 1000);
+  // --grant-minutes N: the run time the approving option grants (`extend <run> --answer qN`); its text states it,
+  // and no field of the question names another amount of time (lib/approval.mjs grantRefusal).
+  const grant = grantMinutes(o['grant-minutes'], approves, o.unit);
+  let stored = options;
+  if (grant) {
+    try { stored = grantQuestion({ text: question, header, options, approves }, grant); } catch (e) { throw new Error(`ask refused: ${e.message}`); }
+  }
   s.notes.push({
-    kind: 'question', text: text(o.question, 'question', 1000), header, options, multi: o.multi === true,
-    unit: hasUnit(s, o.unit), recommend: options[0].label, at: now(), history: [], usedAt: null, ...(approves ? { approves } : {}),
+    kind: 'question', text: question, header, options: stored, multi: o.multi === true,
+    unit: hasUnit(s, o.unit), recommend: options[0].label, at: now(), history: [], usedAt: null, ...(approves ? { approves } : {}), ...(grant ? { grantMinutes: grant } : {}),
   });
   return `q${asked(s).length}`;
+}
+
+export const GRANT_MAX = 1440; // a day: more run time than that is a new run, not an extend
+function grantMinutes(value, approves, unit) {
+  if (value === undefined) return null;
+  if (!approves) throw new Error('--grant-minutes goes with --approves: the option that grants the time');
+  if (unit !== undefined) throw new Error("--grant-minutes is for the run's time: a question on a unit grants rounds (extend <run> <unit>)");
+  try { return num(value, null, 1, GRANT_MAX); } catch (e) { throw new Error(`--grant-minutes: ${e.message}`); }
 }
 
 // Records an answer, or changes it until the lead has used it. Every answer is kept.
@@ -97,7 +114,7 @@ export function questions(run, { project = null } = {}) {
     const status = n.usedAt ? 'used' : decided(run, id) ? 'decided' : history.length ? 'answered' : 'open';
     return {
       id, text: n.text, header: n.header ?? null, options: n.options ?? [], multi: !!n.multi, unit: n.unit ?? null,
-      recommend: n.recommend ?? null, approves: n.approves ?? null, at: n.at, answer: history.at(-1) ?? null, history, usedAt: n.usedAt ?? null,
+      recommend: n.recommend ?? null, approves: n.approves ?? null, grantMinutes: n.grantMinutes ?? null, at: n.at, answer: history.at(-1) ?? null, history, usedAt: n.usedAt ?? null,
       status, open: status === 'open', label: questionLabel(run, n.unit ?? null, project),
     };
   });
