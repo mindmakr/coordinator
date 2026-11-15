@@ -435,6 +435,37 @@ table.t { width: 100%; border: 0; border-radius: 0; background: none; border-col
   .wrap { padding: 16px; }
   .head h1 { font-size: 19px; }
 }
+/* page: report / retro */
+.head .acts { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.btn { box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-decoration: none; }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.btn:hover { background: var(--surface2); text-decoration: none; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.doc { background: var(--surface2); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; font-size: 13px; line-height: 1.6; }
+.md { overflow-wrap: anywhere; }
+.md h2, .md h3, .md h4, .md h5 { margin: 16px 0 6px; }
+.md > :first-child, .md > .report-rule + :first-child { margin-top: 0; }
+.md ul, .md ol { padding-left: 20px; }
+.md table { margin: 6px 0; }
+.report-rule { margin: 0 0 10px; }
+.rows > * { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 9px 0; border-bottom: 1px solid var(--line2); min-width: 0; }
+.rows > *:first-child { padding-top: 0; }
+.rows > *:last-child { border-bottom: 0; padding-bottom: 0; }
+.rows .lbl { flex: 0 0 150px; font-size: 12px; color: var(--muted); }
+.rows .val { flex: 1 1 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.rows .grow { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.t th.num { text-align: right; }
+.tag.open { color: var(--muted); border-color: var(--muted); border-style: dashed; }
+.panel .body h3.sub { margin: 14px 0 6px; font-size: 13px; }
+.panel .body h3.sub:first-child { margin-top: 0; }
+.panel .body ul.plain { margin-top: 0; }
+.ev { font: 12px var(--mono); overflow-wrap: anywhere; }
+.ev li { margin: 2px 0; }
+.panel .body pre { overflow: auto; max-width: 100%; }
+.panel > .body > p:first-child { margin-top: 0; }
+.panel > .body > p:last-child { margin-bottom: 0; }
+.panel > .body > p + p, .panel > .body > p + .t, .panel > .body > p + .tbox { margin-top: 10px; }
+@media print { .head .acts { display: none; } }
 /* Export PDF (the browser's print): light theme, everything open, live-only controls hidden, nothing cut across pages where it fits. */
 @media print {
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

@@ -5,7 +5,8 @@
 // Text arguments are escaped. Arguments named *html (and a cell given as { html })
 // are HTML the caller built from these helpers or other escaping code.
 //
-//   heading(title, sub?)              <div class="head">: h1 and a muted line
+//   heading(title, sub?, { inlineHtml?, actionsHtml? })
+//                                     <div class="head">: h1, inline HTML (a status chip), a muted line, and actions pushed to the right
 //   kpis([{ k, v, s?, bar? }])        <div class="kpis">: label, value, small line, optional bar (0-100)
 //   cols(mainHtml, sideHtml)          <div class="cols">: main and side columns; the side stacks under main when narrow
 //   panel({ id, title, count?, metaHtml?, bodyHtml, open?, scroll?, flush?, tone? })
@@ -17,6 +18,8 @@
 //   typeTag(kind, file?)              span.tag: IMG, LOG, CSV, TXT, PDF, URL or TEST
 //   tries([state])                    try marks: pass ✓, fail ✕, work …, queued (its number), open (empty)
 //   bar(pct, { label?, tone? })       div.bar: a meter with its percent as its label
+//   mdActions(markdown, file, { copy? })  Copy Markdown and Download for a page: Download is a link that works without
+//                                     script; Copy (only with `copy`, the live page) reads the same text from that link
 //   restoreOpen(nodes, saved)         the live page's memory of toggles and panels (live.client.js runs it)
 //   rememberToggle(map, d, armed)     records a toggle only after the reader clicked its summary
 import { esc } from './links.mjs';
@@ -27,7 +30,16 @@ const cell = (c) => (c && typeof c === 'object' && 'html' in c ? String(c.html) 
 const length = (v) => (typeof v === 'number' && v > 0 ? `${v}px` : typeof v === 'string' && /^\d+(\.\d+)?(px|rem|em|vh|%)$/.test(v) ? v : '');
 const pct = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.round(Math.min(100, Math.max(0, n))) : 0; };
 
-export const heading = (title, sub = '') => `<div class="head"><h1>${text(title)}</h1>${sub ? `<span class="muted">${text(sub)}</span>` : ''}</div>`;
+export const heading = (title, sub = '', { inlineHtml = '', actionsHtml = '' } = {}) => `<div class="head"><h1>${text(title)}</h1>${inlineHtml}${sub ? `<span class="muted">${text(sub)}</span>` : ''}${actionsHtml ? `<span class="acts">${actionsHtml}</span>` : ''}</div>`;
+
+// Copy Markdown and Download for a page's Markdown. The text rides in the Download link's data: URL, the one copy of it;
+// the live page's Copy button (data-copy, live.client.js) reads it from there. No text, no buttons.
+export function mdActions(markdown, file, { copy = false } = {}) {
+  if (typeof markdown !== 'string' || !markdown.trim()) return '';
+  const name = String(file ?? 'report.md').replace(/[^A-Za-z0-9._-]/g, '_');
+  return `${copy ? '<button type="button" class="btn sm" data-copy>Copy Markdown</button>' : ''}`
+    + `<a class="btn sm" download="${text(name)}" href="data:text/markdown;charset=utf-8,${text(encodeURIComponent(markdown))}">Download</a>`;
+}
 
 export function bar(value, { label, tone = '' } = {}) {
   const p = pct(value);
