@@ -1,33 +1,62 @@
 // Helper models: small, cheap models for small jobs (a pick-one decision, a
-// one-line summary of an agent's steps, a first look at a screenshot), so the
-// strong model is not paid to do them. Off unless `.coordinator/coordinator.json`
-// has `"helpers"`; everything works without it. See references/helpers.md.
+// one-line summary of an agent's steps, a first look at a screenshot, or a
+// System One Jev evaluation: noul, choice, score), so the strong model is not
+// paid to do them. Off unless `.coordinator/coordinator.json` has `"helpers"`;
+// everything works without it. See references/helpers.md.
 //
-//   "helpers": { "provider": "ollama" | "lmstudio" | "openrouter" | "openai" | "custom",
+//   "helpers": { "provider": "ollama" | "lmstudio" | "openrouter" | "openai" | "jev" | "custom",
 //                "endpoint": "<OpenAI-compatible base URL>",   (the provider's by default)
 //                "keyEnv": "OPENROUTER_API_KEY",               (the NAME of an env variable, never the key)
-//                "models": { "decide": "...", "summarize": "...", "look": "..." },
-//                "minConfidence": 0.8 }
+//                "models": { "decide": "...", "summarize": "...", "look": "...", "noul": "...", "choice": "...", "score": "..." },
+//                "minConfidence": 0.8,
+//                "thresholds": { "passAbove": 0.85, "failBelow": 0.20 } }
 //
-// Pure: building requests and reading answers. The one network call is in
-// helpercall.mjs.
+// Pure request/response handling plus resilient System One adapters (askNoul, askChoice, askScore).
+// The one network call is in helpercall.mjs.
+import { complete } from './helpercall.mjs';
 import { maskSecrets } from './secrets.mjs';
 
-export const JOBS = ['decide', 'summarize', 'look'];
+export const CORE_JOBS = ['decide', 'summarize', 'look'];
+export const JEV_JOBS = ['noul', 'choice', 'score'];
+export const JOBS = [...CORE_JOBS, ...JEV_JOBS];
 export const PROVIDERS = {
   ollama: { endpoint: 'http://127.0.0.1:11434/v1', models: { decide: 'gemma3:4b', summarize: 'gemma3:1b', look: 'qwen2.5vl:7b' } },
   lmstudio: { endpoint: 'http://127.0.0.1:1234/v1', models: { decide: 'google/gemma-3-4b', summarize: 'google/gemma-3-1b', look: 'qwen/qwen2.5-vl-7b' } },
-  openrouter: { endpoint: 'https://openrouter.ai/api/v1', keyEnv: 'OPENROUTER_API_KEY', models: { decide: 'google/gemini-2.5-flash-lite', summarize: 'google/gemini-2.5-flash-lite', look: 'google/gemini-2.5-flash-lite' } },
+  openrouter: {
+    endpoint: 'https://openrouter.ai/api/v1',
+    keyEnv: 'OPENROUTER_API_KEY',
+    models: {
+      decide: 'google/gemini-2.5-flash-lite',
+      summarize: 'google/gemini-2.5-flash-lite',
+      look: 'google/gemini-2.5-flash-lite',
+      noul: 'typesafe/jev-noul',
+      choice: 'typesafe/jev-choice',
+      score: 'typesafe/jev-score',
+    },
+  },
   openai: { endpoint: 'https://api.openai.com/v1', keyEnv: 'OPENAI_API_KEY', models: { decide: 'gpt-4.1-nano', summarize: 'gpt-4.1-nano', look: 'gpt-4.1-mini' } },
+  jev: {
+    endpoint: 'https://api.typesafe.ai/v1',
+    keyEnv: 'JEV_API_KEY',
+    models: {
+      decide: 'typesafe/jev-noul',
+      summarize: 'typesafe/jev-noul',
+      look: 'typesafe/jev-noul',
+      noul: 'typesafe/jev-noul',
+      choice: 'typesafe/jev-choice',
+      score: 'typesafe/jev-score',
+    },
+  },
   custom: { models: {} },
 };
 export const DEFAULT_MIN_CONFIDENCE = 0.8;
+export const DEFAULT_JEV_THRESHOLDS = Object.freeze({ passAbove: 0.85, failBelow: 0.20 });
 // What a first look at a screen checks when no question is given (references/helpers.md).
 export const LOOK_CHECKS = ['blank or half-loaded screen', 'error message, popup or crash screen', 'text cut off, overlapping or overflowing its box',
   'raw translation keys or placeholders (like home.title or {name})', 'text in the wrong language for the screen', 'layout mirrored wrongly for the text direction',
   'broken image or missing icon', 'element drawn off screen or hidden behind another'];
 
-const KEYS = ['provider', 'endpoint', 'keyEnv', 'models', 'minConfidence'];
+const KEYS = ['provider', 'endpoint', 'keyEnv', 'models', 'minConfidence', 'thresholds'];
 const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
 const MODEL = /^[A-Za-z0-9._:/@+-]{1,120}$/;
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -62,7 +91,7 @@ export function checkHelpers(h) {
   const out = [];
   const bad = (text, level = 'fail') => out.push({ level, text });
   if (h === false) return out;
-  if (!isObj(h)) return [{ level: 'fail', text: 'helpers must be false or an object { provider, endpoint, keyEnv, models, minConfidence }' }];
+  if (!isObj(h)) return [{ level: 'fail', text: 'helpers must be false or an object { provider, endpoint, keyEnv, models, minConfidence, thresholds }' }];
   for (const k of Object.keys(h)) {
     if (/key|token|secret|password|auth/i.test(k) && k !== 'keyEnv') bad(`helpers.${k}: never store a key here; put it in an environment variable and name it in keyEnv`);
     else if (!KEYS.includes(k)) bad(`helpers: unknown key "${k}" (known: ${KEYS.join(', ')})`, 'warn');
@@ -74,17 +103,27 @@ export function checkHelpers(h) {
   else { const p = endpointProblem(endpoint); if (p) bad(`helpers.${p}`); else if (new URL(endpoint).protocol === 'http:' && hostKind(new URL(endpoint).hostname) === 'private') bad('helpers.endpoint is plain http on a private network: prompts and screenshots cross it unencrypted', 'warn'); }
   if (h.keyEnv !== undefined && (typeof h.keyEnv !== 'string' || !ENV_NAME.test(h.keyEnv))) bad('helpers.keyEnv must be the NAME of an environment variable (like OPENROUTER_API_KEY), never the key itself');
   if (h.models !== undefined) {
-    if (!isObj(h.models)) bad('helpers.models must be an object { decide, summarize, look }');
+    if (!isObj(h.models)) bad(`helpers.models must be an object { ${JOBS.join(', ')} }`);
     else for (const [job, m] of Object.entries(h.models)) {
       if (!JOBS.includes(job)) bad(`helpers.models: unknown job "${job}" (known: ${JOBS.join(', ')})`, 'warn');
       else if (m !== false && (typeof m !== 'string' || !MODEL.test(m))) bad(`helpers.models.${job} must be a model name or false`);
     }
   }
   if (h.minConfidence !== undefined && !(typeof h.minConfidence === 'number' && h.minConfidence >= 0.5 && h.minConfidence <= 1)) bad('helpers.minConfidence must be a number from 0.5 to 1');
+  if (h.thresholds !== undefined) {
+    if (!isObj(h.thresholds)) bad('helpers.thresholds must be an object { passAbove, failBelow }');
+    else {
+      const pa = h.thresholds.passAbove ?? DEFAULT_JEV_THRESHOLDS.passAbove;
+      const fb = h.thresholds.failBelow ?? DEFAULT_JEV_THRESHOLDS.failBelow;
+      if (typeof pa !== 'number' || !Number.isFinite(pa) || pa <= 0 || pa > 1) bad('helpers.thresholds.passAbove must be a number in (0, 1]');
+      if (typeof fb !== 'number' || !Number.isFinite(fb) || fb < 0 || fb >= 1) bad('helpers.thresholds.failBelow must be a number in [0, 1)');
+      if (typeof pa === 'number' && typeof fb === 'number' && fb >= pa) bad('helpers.thresholds.failBelow must be smaller than passAbove');
+    }
+  }
   return out;
 }
 
-// The settings resolved over the provider's defaults: { on, provider, endpoint, keyEnv, models, minConfidence, local, host }.
+// The settings resolved over the provider's defaults: { on, provider, endpoint, keyEnv, models, minConfidence, thresholds, local, host }.
 // on is false when helpers are absent, false, or broken (problems lists why).
 export function helperConfig(settings) {
   const h = settings?.helpers;
@@ -99,11 +138,15 @@ export function helperConfig(settings) {
     keyEnv: h.keyEnv ?? preset.keyEnv ?? null,
     models: { ...preset.models, ...(isObj(h.models) ? h.models : {}) },
     minConfidence: h.minConfidence ?? DEFAULT_MIN_CONFIDENCE,
+    thresholds: {
+      passAbove: h.thresholds?.passAbove ?? DEFAULT_JEV_THRESHOLDS.passAbove,
+      failBelow: h.thresholds?.failBelow ?? DEFAULT_JEV_THRESHOLDS.failBelow,
+    },
   };
 }
 
 // The `helpers` object `helper.mjs setup` writes: the provider and only what differs from its defaults.
-export function setupHelpers(provider, { endpoint, keyEnv, models = {}, minConfidence } = {}) {
+export function setupHelpers(provider, { endpoint, keyEnv, models = {}, minConfidence, thresholds } = {}) {
   if (!Object.hasOwn(PROVIDERS, provider)) throw new Error(`provider must be one of: ${Object.keys(PROVIDERS).join(', ')}`);
   const h = { provider };
   if (endpoint !== undefined) h.endpoint = endpoint;
@@ -111,6 +154,7 @@ export function setupHelpers(provider, { endpoint, keyEnv, models = {}, minConfi
   const own = Object.fromEntries(Object.entries(models).filter(([job, m]) => m !== undefined && PROVIDERS[provider].models[job] !== m));
   if (Object.keys(own).length) h.models = own;
   if (minConfidence !== undefined) h.minConfidence = minConfidence;
+  if (thresholds !== undefined) h.thresholds = thresholds;
   if (provider === 'custom' && !h.endpoint) throw new Error('a custom provider needs --endpoint');
   const fails = checkHelpers(h).filter((p) => p.level === 'fail');
   if (fails.length) throw new Error(fails.map((p) => p.text).join('; '));
@@ -120,13 +164,62 @@ export function setupHelpers(provider, { endpoint, keyEnv, models = {}, minConfi
 const clean = (s, max) => maskSecrets(String(s ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')).slice(0, max);
 const schema = (name, properties, required) => ({ type: 'json_schema', json_schema: { name, strict: true, schema: { type: 'object', properties, required, additionalProperties: false } } });
 
+// Enforces atomic single-proposition wording for Jev `noul` checks.
+export function checkAtomicProposition(text) {
+  const s = String(text ?? '').trim();
+  if (!s) throw new Error('noul proposition must be non-empty');
+  const qMarks = (s.match(/\?/g) ?? []).length;
+  if (qMarks > 1) throw new Error('noul expects one atomic proposition per evaluation (found multiple questions)');
+  if (/\n\s*[-*]\s+[\s\S]*\n\s*[-*]\s+/.test(`\n${s}`)) throw new Error('noul expects one atomic proposition per item (pass an array in propositions instead of a bulleted list)');
+  return s;
+}
+
+export function classifyProbability(probability, thresholds = DEFAULT_JEV_THRESHOLDS) {
+  const passAbove = thresholds?.passAbove ?? DEFAULT_JEV_THRESHOLDS.passAbove;
+  const failBelow = thresholds?.failBelow ?? DEFAULT_JEV_THRESHOLDS.failBelow;
+  if (probability === null || !Number.isFinite(probability)) {
+    return { verdict: 'uncertain', escalate: true, why: 'probability missing' };
+  }
+  if (probability > passAbove) return { verdict: 'pass', escalate: false };
+  if (probability < failBelow) return { verdict: 'fail', escalate: false };
+  return {
+    verdict: 'uncertain',
+    escalate: true,
+    why: `probability ${probability} is inside uncertain band [${failBelow}, ${passAbove}]`,
+  };
+}
+
+function resolveModel(cfg, job) {
+  const explicit = cfg?.models?.[job];
+  if (explicit === false) return null;
+  if (explicit) return explicit;
+  return JEV_JOBS.includes(job) ? (cfg?.models?.decide ?? null) : null;
+}
+
+function normalizePropositions(input) {
+  if (Array.isArray(input.propositions)) {
+    if (!input.propositions.length || input.propositions.length > 50) throw new Error('noul propositions must contain 1-50 items');
+    return input.propositions.map((item, idx) => {
+      const id = isObj(item) && item.id ? clean(item.id, 64).trim() : `P${idx + 1}`;
+      const raw = isObj(item) ? (item.proposition ?? item.text ?? '') : item;
+      const text = clean(checkAtomicProposition(raw), 1000);
+      return { id, proposition: text };
+    });
+  }
+  const text = clean(checkAtomicProposition(input.proposition), 1000);
+  return [{ id: 'P1', proposition: text }];
+}
+
 // The chat request for one job. Text is masked for secrets before it leaves; the caller adds the key.
 //   decide:    { question, choices: [..2-20], context? }          → { answer: one of choices, confidence }
 //   summarize: { text, maxWords? }                                 → { summary }
 //   look:      { image: { mime, base64 }, question?, context? }    → { problems: [..], confidence }
+//   noul:      { proposition, context? } | { propositions: [...], context? } → calibrated probability / batch
+//   choice:    { question, choices: [..2-20], context? }          → { answer, probability }
+//   score:     { criterion, context?, min?, max? }                 → { score, probability }
 export function buildRequest(job, cfg, input) {
   if (!JOBS.includes(job)) throw new Error(`job must be one of: ${JOBS.join(', ')}`);
-  const model = cfg.models?.[job];
+  const model = resolveModel(cfg, job);
   if (!model) throw new Error(`no helper model set for ${job} (helpers.models.${job})`);
   let messages; let format;
   if (job === 'decide') {
@@ -146,7 +239,7 @@ export function buildRequest(job, cfg, input) {
       { role: 'user', content: clean(input.text, 32_000) },
     ];
     format = schema('summary', { summary: { type: 'string' } }, ['summary']);
-  } else {
+  } else if (job === 'look') {
     const img = input.image;
     if (!img || !/^image\/(png|jpeg|webp|gif)$/.test(img.mime) || typeof img.base64 !== 'string' || !img.base64) throw new Error('look needs a png, jpeg, webp or gif image');
     const ask = input.question ? clean(input.question, 1000) : `List every problem of these kinds you can see: ${LOOK_CHECKS.join('; ')}.`;
@@ -155,8 +248,54 @@ export function buildRequest(job, cfg, input) {
       { role: 'user', content: [{ type: 'text', text: `${input.context ? `Screen: ${clean(input.context, 2000)}\n` : ''}${ask}` }, { type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.base64}` } }] },
     ];
     format = schema('look', { problems: { type: 'array', items: { type: 'string' } }, confidence: { type: 'number' } }, ['problems', 'confidence']);
+  } else if (job === 'noul') {
+    const batch = Array.isArray(input.propositions);
+    const items = normalizePropositions(input);
+    const ctx = input.context ? `Context:\n${clean(input.context, 32_000)}\n\n` : '';
+    if (batch) {
+      messages = [
+        { role: 'system', content: 'You are a calibrated System One verifier (Jev noul). For each atomic proposition, return the calibrated probability (0 to 1) that it holds given the context, plus a brief rationale. Reply with JSON only.' },
+        { role: 'user', content: `${ctx}Propositions:\n${items.map((x) => `${x.id}: ${x.proposition}`).join('\n')}` },
+      ];
+      format = schema('jev_noul_batch', {
+        results: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { id: { type: 'string' }, probability: { type: 'number' }, rationale: { type: 'string' } },
+            required: ['id', 'probability', 'rationale'],
+            additionalProperties: false,
+          },
+        },
+      }, ['results']);
+    } else {
+      messages = [
+        { role: 'system', content: 'You are a calibrated System One verifier (Jev noul). Return the calibrated probability (0 to 1) that the atomic proposition holds given the context, plus a brief rationale. Reply with JSON only.' },
+        { role: 'user', content: `${ctx}Proposition: ${items[0].proposition}` },
+      ];
+      format = schema('jev_noul', { probability: { type: 'number' }, rationale: { type: 'string' } }, ['probability', 'rationale']);
+    }
+  } else if (job === 'choice') {
+    const choices = (input.choices ?? []).map((c) => clean(c, 200).trim()).filter(Boolean);
+    if (choices.length < 2 || choices.length > 20 || new Set(choices).size !== choices.length) throw new Error('choice needs 2-20 different choices');
+    if (!String(input.question ?? '').trim()) throw new Error('choice needs a question');
+    messages = [
+      { role: 'system', content: 'You are a calibrated System One classifier (Jev choice). Pick exactly one choice and give your calibrated probability (0 to 1) that it is right. Reply with JSON only.' },
+      { role: 'user', content: `${input.context ? `Context:\n${clean(input.context, 24_000)}\n\n` : ''}Question: ${clean(input.question, 1000)}\nChoices: ${JSON.stringify(choices)}` },
+    ];
+    format = schema('jev_choice', { answer: { type: 'string', enum: choices }, probability: { type: 'number' }, rationale: { type: 'string' } }, ['answer', 'probability', 'rationale']);
+  } else {
+    if (!String(input.criterion ?? '').trim()) throw new Error('score needs a criterion');
+    const min = Number.isFinite(input.min) ? input.min : 0;
+    const max = Number.isFinite(input.max) && input.max > min ? input.max : 1;
+    messages = [
+      { role: 'system', content: `You are a calibrated System One scorer (Jev score). Return a numeric score between ${min} and ${max} and your calibrated confidence probability (0 to 1). Reply with JSON only.` },
+      { role: 'user', content: `${input.context ? `Context:\n${clean(input.context, 24_000)}\n\n` : ''}Criterion: ${clean(input.criterion, 1000)}` },
+    ];
+    format = schema('jev_score', { score: { type: 'number' }, probability: { type: 'number' }, rationale: { type: 'string' } }, ['score', 'probability', 'rationale']);
   }
-  return { url: `${cfg.endpoint}/chat/completions`, body: { model, messages, temperature: 0, max_tokens: job === 'summarize' ? 300 : 600, ...(job === 'summarize' ? { frequency_penalty: 0.6 } : {}), stream: false, response_format: format } };
+  const maxTokens = job === 'summarize' ? 300 : (job === 'noul' && Array.isArray(input?.propositions) ? Math.min(2400, 120 * input.propositions.length) : 600);
+  return { url: `${cfg.endpoint}/chat/completions`, body: { model, messages, temperature: 0, max_tokens: maxTokens, ...(job === 'summarize' ? { frequency_penalty: 0.6 } : {}), stream: false, response_format: format } };
 }
 
 // The first JSON object in a model's reply (some local servers wrap it in prose or a code fence).
@@ -172,11 +311,11 @@ function firstObject(text) {
 const conf = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v > 1 && v <= 100 ? v / 100 : v, 0), 1) : null);
 
 // The answer from a chat completion. escalate: true means "hand this to the strong model": the reply did not
-// parse, picked something not offered, or its confidence is below minConfidence. A helper never guesses past that.
+// parse, picked something not offered, or its confidence/probability lands in the uncertain band. A helper never guesses past that.
 export function readAnswer(job, cfg, input, response) {
   const content = response?.choices?.[0]?.message?.content;
   const usage = response?.usage ? { tokensIn: response.usage.prompt_tokens ?? null, tokensOut: response.usage.completion_tokens ?? null } : null;
-  const base = { job, model: response?.model ?? cfg.models?.[job] ?? null, provider: cfg.provider, local: cfg.local, ...(usage ? { usage } : {}) };
+  const base = { job, model: response?.model ?? resolveModel(cfg, job), provider: cfg.provider, local: cfg.local, ...(usage ? { usage } : {}) };
   const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((c) => c?.text ?? '').join('') : '';
   const o = firstObject(text);
   if (job === 'summarize' && (!o || typeof o !== 'object')) {
@@ -185,10 +324,77 @@ export function readAnswer(job, cfg, input, response) {
     const words = part ? clean(part.replace(/\\n/g, ' ').replace(/\\(.)/g, '$1'), 600).trim().split(/\s+/).slice(0, Math.min(Math.max(Number(input?.maxWords) || 25, 5), 120)).join(' ') : '';
     return words ? { ...base, summary: words, cut: true, escalate: false } : { ...base, escalate: true, why: 'the helper reply was not JSON' };
   }
-  if (!o || typeof o !== 'object') return { ...base, escalate: true, why: 'the helper reply was not JSON' };
+  if (!o || typeof o !== 'object') return { ...base, escalate: true, verdict: 'uncertain', why: 'the helper reply was not JSON' };
   if (job === 'summarize') {
     const summary = clean(o.summary, 600).trim();
     return summary ? { ...base, summary, escalate: false } : { ...base, escalate: true, why: 'the helper gave no summary' };
+  }
+  const thresholds = cfg.thresholds ?? DEFAULT_JEV_THRESHOLDS;
+  if (job === 'noul') {
+    const items = normalizePropositions(input);
+    if (Array.isArray(input?.propositions)) {
+      const rawList = Array.isArray(o.results) ? o.results : [];
+      const byId = new Map(rawList.filter((r) => isObj(r) && typeof r.id === 'string').map((r) => [r.id.trim(), r]));
+      const results = items.map((item, idx) => {
+        const hit = byId.get(item.id) ?? (isObj(rawList[idx]) && !rawList[idx].id ? rawList[idx] : null);
+        const p = conf(hit?.probability ?? hit?.confidence);
+        const cls = classifyProbability(p, thresholds);
+        const rationale = hit?.rationale ? clean(hit.rationale, 300).trim() : undefined;
+        return { id: item.id, proposition: item.proposition, probability: p, ...cls, ...(rationale ? { rationale } : {}) };
+      });
+      return {
+        ...base,
+        results,
+        probabilities: results.map((r) => r.probability),
+        escalate: results.some((r) => r.escalate),
+        verdict: results.some((r) => r.escalate) ? 'uncertain' : results.every((r) => r.verdict === 'pass') ? 'pass' : 'fail',
+      };
+    }
+    const p = conf(o.probability ?? o.confidence);
+    const cls = classifyProbability(p, thresholds);
+    const rationale = o.rationale ? clean(o.rationale, 300).trim() : undefined;
+    return { ...base, proposition: items[0].proposition, probability: p, probabilities: [p], ...cls, ...(rationale ? { rationale } : {}) };
+  }
+  if (job === 'choice') {
+    const choices = (input.choices ?? []).map((c) => clean(c, 200).trim());
+    const answer = typeof o.answer === 'string' ? choices.find((c) => c === o.answer.trim()) ?? choices.find((c) => c.toLowerCase() === o.answer.trim().toLowerCase()) : undefined;
+    if (answer === undefined) return { ...base, escalate: true, verdict: 'uncertain', probabilities: [], why: `the helper picked something not offered: ${clean(o.answer, 80)}` };
+    const p = conf(o.probability ?? o.confidence);
+    const minPass = Math.max(thresholds.passAbove, cfg.minConfidence ?? DEFAULT_MIN_CONFIDENCE);
+    const low = p === null || p <= minPass;
+    const rationale = o.rationale ? clean(o.rationale, 300).trim() : undefined;
+    return {
+      ...base,
+      answer,
+      probability: p,
+      probabilities: [p],
+      escalate: low,
+      verdict: low ? 'uncertain' : 'pass',
+      ...(rationale ? { rationale } : {}),
+      ...(low ? { why: `probability ${p ?? 'missing'} is not above ${minPass}` } : {}),
+    };
+  }
+  if (job === 'score') {
+    const min = Number.isFinite(input?.min) ? input.min : 0;
+    const max = Number.isFinite(input?.max) && input.max > min ? input.max : 1;
+    const rawScore = typeof o.score === 'number' && Number.isFinite(o.score) ? Math.min(Math.max(o.score, min), max) : null;
+    if (rawScore === null) return { ...base, escalate: true, verdict: 'uncertain', probabilities: [], why: 'the helper gave no numeric score' };
+    const normalized = (rawScore - min) / (max - min);
+    const p = conf(o.probability ?? o.confidence);
+    const minPass = Math.max(thresholds.passAbove, cfg.minConfidence ?? DEFAULT_MIN_CONFIDENCE);
+    const low = p === null || p <= minPass;
+    const rationale = o.rationale ? clean(o.rationale, 300).trim() : undefined;
+    return {
+      ...base,
+      score: rawScore,
+      normalizedScore: Math.round(normalized * 1000) / 1000,
+      probability: p,
+      probabilities: [p],
+      escalate: low,
+      verdict: low ? 'uncertain' : 'pass',
+      ...(rationale ? { rationale } : {}),
+      ...(low ? { why: `probability ${p ?? 'missing'} is not above ${minPass}` } : {}),
+    };
   }
   const confidence = conf(o.confidence);
   const low = confidence === null || confidence < cfg.minConfidence;
@@ -203,6 +409,50 @@ export function readAnswer(job, cfg, input, response) {
   // A clean look never passes a screen: the visual critic still judges it (references/helpers.md).
   return { ...base, problems, flagged: problems.length > 0 || low, confidence, escalate: low, ...(low ? { why: `confidence ${confidence ?? 'missing'} is below ${cfg.minConfidence}` } : {}) };
 }
+
+// Resilient System One adapter: validates input first, calls complete(), and on offline/network errors
+// falls back cleanly with escalate: true, fallback: true instead of crashing a run.
+export async function askHelper(job, cfg, input, { completeFn = complete, env, fetchImpl, timeoutMs } = {}) {
+  const started = Date.now();
+  if (!cfg?.on) {
+    return {
+      job,
+      model: null,
+      provider: cfg?.provider ?? null,
+      local: cfg?.local ?? null,
+      escalate: true,
+      fallback: true,
+      verdict: 'uncertain',
+      probabilities: [],
+      why: cfg?.why ?? 'helpers disabled',
+      latencyMs: 0,
+    };
+  }
+  const req = buildRequest(job, cfg, input);
+  try {
+    const res = await completeFn(cfg, req, { env, fetchImpl, timeoutMs });
+    const out = readAnswer(job, cfg, input, res);
+    return { ...out, fallback: false, latencyMs: Date.now() - started, ...(cfg.local ? {} : { sentTo: cfg.host }) };
+  } catch (e) {
+    return {
+      job,
+      model: resolveModel(cfg, job),
+      provider: cfg.provider,
+      local: cfg.local,
+      escalate: true,
+      fallback: true,
+      verdict: 'uncertain',
+      probabilities: [],
+      why: e?.message ?? 'helper call failed',
+      error: e?.message ?? 'helper call failed',
+      latencyMs: Date.now() - started,
+    };
+  }
+}
+
+export const askNoul = (cfg, input, io) => askHelper('noul', cfg, input, io);
+export const askChoice = (cfg, input, io) => askHelper('choice', cfg, input, io);
+export const askScore = (cfg, input, io) => askHelper('score', cfg, input, io);
 
 // Model ids a server lists at GET /models, and which configured ones are missing from it.
 export function missingModels(cfg, listing) {

@@ -70,6 +70,7 @@ export const KINDS = {
   'answer.used': { unit: 'optional', payload: changes },
   // state.json was changed outside run.mjs (by hand, or by an older version): the difference, kept.
   'state.edited': { unit: 'none', payload: changes },
+  'helper.call': { unit: 'optional', payload: changes },
 };
 
 const ISO = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$';

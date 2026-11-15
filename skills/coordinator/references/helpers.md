@@ -13,9 +13,10 @@ Helpers are **off by default**, and nothing depends on them. With no `helpers` s
 | Another PC (home network, Tailscale, a cloud GPU box in your private network) | `S/helper.mjs setup ollama --endpoint http://gpu-box:11434/v1` | Plain http only on private addresses, and doctor warns about it; https anywhere else |
 | A router: [OpenRouter](https://openrouter.ai) | `S/helper.mjs setup openrouter` then set `OPENROUTER_API_KEY` | Text and screenshots leave the machine |
 | OpenAI | `S/helper.mjs setup openai` then set `OPENAI_API_KEY` | Same |
+| Typesafe Jev System One (`jev-noul`, `jev-choice`, `jev-score`) | `S/helper.mjs setup jev` then set `JEV_API_KEY` (or use `openrouter`) | Fast calibrated System One checks; `--pass-above 0.85 --fail-below 0.20` |
 | Any other OpenAI-compatible server or router (LiteLLM, vLLM, llama.cpp server, a company gateway) | `S/helper.mjs setup custom --endpoint URL [--key-env NAME]` | |
 
-Change a model with `--decide M`, `--summarize M` or `--look M`, and the confidence floor with `--min-confidence 0.8`. `S/helper.mjs status` shows what is in use; `S/helper.mjs setup off` removes it. `/coordinator:init` asks once (`commands/init.md`).
+Change a model with `--decide M`, `--summarize M`, `--look M`, `--noul M`, `--choice-model M`, or `--score-model M`, the confidence floor with `--min-confidence 0.8`, and the Jev certainty band with `--pass-above 0.85 --fail-below 0.20`. `S/helper.mjs status` shows what is in use; `S/helper.mjs setup off` removes it. `/coordinator:init` asks once (`commands/init.md`).
 
 Defaults per provider are in `scripts/lib/helpers.mjs` (`PROVIDERS`). For Ollama: `gemma3:4b` decides, `gemma3:1b` summarizes, `qwen2.5vl:7b` looks. With 12 GB of GPU memory or more, `qwen3-vl:8b` looks better at dense screens. Pick models with thinking off, or a fast one: these jobs want a quick answer, not reasoning.
 
@@ -25,15 +26,20 @@ Defaults per provider are in `scripts/lib/helpers.mjs` (`PROVIDERS`). For Ollama
 
 ## The jobs
 
-Every call prints JSON. `escalate: true` means **do not use this answer**: the reply did not parse, picked something not offered, or its confidence is under `minConfidence` (0.8 by default). Do that step yourself, as if there were no helper. Text is masked for secrets before it leaves (`lib/secrets.mjs`).
+Every call prints JSON. `escalate: true` means **do not use this answer**: the reply did not parse, picked something not offered, its confidence is under `minConfidence` (0.8 by default), or a Jev probability fell inside the uncertain band (`[0.20, 0.85]` by default: `> 0.85` returns `verdict: "pass"`, `< 0.20` returns `verdict: "fail"`, and `[0.20, 0.85]` sets `escalate: true, verdict: "uncertain"`). Do that step yourself, as if there were no helper. Text is masked for secrets before it leaves (`lib/secrets.mjs`).
 
 | Job | Command | Use it for |
 |---|---|---|
 | `decide` | `S/helper.mjs decide --question Q --choice A --choice B … [--context-file F]` | A pick from a fixed list: a unit's task class for routing (`routing.md`), whether a builder's report has the parts its brief asked for, whether two follow-ups are the same gap |
 | `summarize` | `S/helper.mjs summarize --file <agent output> [--max-words 25]` | Tool summaries, below |
 | `look` | `S/helper.mjs look --image shot.png --context "screen, role, locale, width"` | The visual pre-screen, below |
+| `noul` | `S/helper.mjs noul --proposition P [--proposition P2 …] [--context-file F] [--run R [--unit U]]` | System One yes/no verification of atomic propositions in parallel (`> 0.85` pass, `< 0.20` fail, `[0.20, 0.85]` escalate) |
+| `choice` | `S/helper.mjs choice --question Q --choice A --choice B … [--context-file F] [--run R [--unit U]]` | System One classification across 2–20 choices with calibrated probability |
+| `score` | `S/helper.mjs score --criterion C [--min 0 --max 1] [--context-file F] [--run R [--unit U]]` | System One rubric scoring with calibrated probability |
 
-**Never a helper:** a verdict, a score, a behaviour mark, a pinned-class call (`routing.md`), or any gated action (`guardrails.md`). Helpers point; the strong model and the critics decide.
+When `--run <run>` (`[--unit <unit>]`) is passed to `noul`, `choice`, or `score`, `helper.mjs` records a `helper.call` event in `events.jsonl` (model, provider, latencyMs, usage, probabilities, verdict, escalate, fallback) and degrades cleanly (`escalate: true, fallback: true, verdict: "uncertain"`, exit 0) when helpers are off or unreachable.
+
+**Never a helper:** a final System Two verdict, a pinned-class call (`routing.md`), or any gated action (`guardrails.md`). Helpers triage or verify preconditions; the strong model and the critics decide.
 
 ## Tool summaries
 

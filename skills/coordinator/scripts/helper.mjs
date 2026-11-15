@@ -3,31 +3,51 @@
 // so the strong model is not paid for them. Off until `setup`; see references/helpers.md.
 //
 //   helper.mjs status                       the settings in use (no network)
-//   helper.mjs setup <ollama|lmstudio|openrouter|openai|custom> [--endpoint URL] [--key-env NAME]
-//                    [--decide M] [--summarize M] [--look M] [--min-confidence 0.8]
+//   helper.mjs setup <ollama|lmstudio|openrouter|openai|jev|custom> [--endpoint URL] [--key-env NAME]
+//                    [--decide M] [--summarize M] [--look M] [--noul M] [--choice-model M] [--score-model M]
+//                    [--min-confidence 0.8] [--pass-above 0.85] [--fail-below 0.20]
 //                                           writes "helpers" in .coordinator/coordinator.json
 //   helper.mjs setup off                    removes it
 //   helper.mjs ping                         asks the server which models it has; names the missing ones
 //   helper.mjs decide --question Q --choice A --choice B [...] [--context T | --context-file F]
 //   helper.mjs summarize (--text T | --file F) [--max-words 25]
 //   helper.mjs look --image shot.png [--question Q] [--context "screen, locale, width"]
+//   helper.mjs noul --proposition P [--proposition P2 ...] [--context T | --context-file F] [--run R [--unit U]]
+//   helper.mjs choice --question Q --choice A --choice B [...] [--context T | --context-file F] [--run R [--unit U]]
+//   helper.mjs score --criterion C [--min 0 --max 1] [--context T | --context-file F] [--run R [--unit U]]
 //   helper.mjs stats                        calls, escalations, time and tokens per job in this project,
 //                                           with advice when a job escalates too often to be worth it
 //
 // Every answer is JSON. escalate: true means "do not use this; ask the strong model": the reply did
-// not parse, or its confidence is under minConfidence. A look never passes a screen on its own.
+// not parse, picked something outside the range, or landed inside the uncertain band.
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname } from 'node:path';
+import { extname, join } from 'node:path';
 import { helpAndExit, parse } from './lib/args.mjs';
-import { buildRequest, helperConfig, missingModels, PROVIDERS, readAnswer, setupHelpers } from './lib/helpers.mjs';
+import { updateRun } from './lib/events.mjs';
+import { harnessOf, stamp } from './lib/harness.mjs';
+import {
+  askChoice,
+  askNoul,
+  askScore,
+  buildRequest,
+  checkAtomicProposition,
+  helperConfig,
+  missingModels,
+  PROVIDERS,
+  readAnswer,
+  setupHelpers,
+} from './lib/helpers.mjs';
 import { complete, listModels } from './lib/helpercall.mjs';
 import { readSettings, settingsFile, settingsTracked, TRACKED_FIX, trackedRefusal } from './lib/settings.mjs';
-import { join } from 'node:path';
-import { baseDir, readJson, update, withLock, writeAtomic } from './lib/store.mjs';
+import { baseDir, readJson, safeId, update, withLock, writeAtomic } from './lib/store.mjs';
 
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
 const MAX_IMAGE = 8 * 1024 * 1024;
-const FLAGS = ['endpoint', 'key-env', 'decide', 'summarize', 'look', 'min-confidence', 'question', 'choice', 'context', 'context-file', 'text', 'file', 'max-words', 'image'];
+const FLAGS = [
+  'endpoint', 'key-env', 'decide', 'summarize', 'look', 'noul', 'choice-model', 'score-model',
+  'min-confidence', 'pass-above', 'fail-below', 'question', 'choice', 'context', 'context-file',
+  'text', 'file', 'max-words', 'image', 'proposition', 'criterion', 'min', 'max', 'run', 'unit',
+];
 
 const readText = (f, what) => {
   if (typeof f !== 'string' || !existsSync(f) || !statSync(f).isFile()) throw new Error(`${what}: no file ${f}`);
@@ -45,10 +65,22 @@ function config() {
 }
 function needOn() {
   const cfg = config();
-  if (!cfg.on) throw new Error(cfg.tracked ? `helpers are off: ${cfg.why}` : `helpers are off: ${cfg.why}. Set them up with: helper.mjs setup ollama (or lmstudio, openrouter, openai, custom)`);
+  if (!cfg.on) throw new Error(cfg.tracked ? `helpers are off: ${cfg.why}` : `helpers are off: ${cfg.why}. Set them up with: helper.mjs setup ollama (or lmstudio, openrouter, openai, jev, custom)`);
   return cfg;
 }
-const shown = (cfg) => (cfg.on ? { on: true, provider: cfg.provider, endpoint: cfg.endpoint, local: cfg.local, keyEnv: cfg.keyEnv, keySet: cfg.keyEnv ? Boolean(process.env[cfg.keyEnv]) : null, models: cfg.models, minConfidence: cfg.minConfidence } : cfg);
+const shown = (cfg) => (cfg.on
+  ? {
+      on: true,
+      provider: cfg.provider,
+      endpoint: cfg.endpoint,
+      local: cfg.local,
+      keyEnv: cfg.keyEnv,
+      keySet: cfg.keyEnv ? Boolean(process.env[cfg.keyEnv]) : null,
+      models: cfg.models,
+      minConfidence: cfg.minConfidence,
+      thresholds: cfg.thresholds,
+    }
+  : cfg);
 
 function writeHelpers(value) {
   const base = baseDir('project'); const file = settingsFile(base);
@@ -69,8 +101,42 @@ function record(job, out) {
   update(usageFile(), {}, (all) => {
     const j = (all[job] ??= { calls: 0, escalated: 0, ms: 0, tokensIn: 0, tokensOut: 0 });
     j.calls++; if (out.escalate) j.escalated++;
-    j.ms += out.ms; j.tokensIn += out.usage?.tokensIn ?? 0; j.tokensOut += out.usage?.tokensOut ?? 0;
+    j.ms += out.ms ?? out.latencyMs ?? 0; j.tokensIn += out.usage?.tokensIn ?? 0; j.tokensOut += out.usage?.tokensOut ?? 0;
     j.lastAt = new Date().toISOString();
+  });
+}
+
+function recordRunTelemetry(o, out) {
+  if (o?.run === undefined) return;
+  const base = baseDir('project');
+  const runId = safeId(o.run, 'run');
+  const unitId = o.unit !== undefined ? safeId(o.unit, 'unit') : null;
+  const runDir = join(base, 'runs', runId);
+  if (!existsSync(join(runDir, 'events.jsonl')) && !existsSync(join(runDir, 'state.json'))) return;
+  const entry = {
+    at: new Date().toISOString(),
+    job: out.job,
+    model: out.model ?? null,
+    provider: out.provider ?? null,
+    latencyMs: out.latencyMs ?? out.ms ?? 0,
+    usage: out.usage ?? null,
+    probabilities: Array.isArray(out.probabilities) ? out.probabilities : (out.probability !== undefined ? [out.probability] : []),
+    verdict: out.verdict ?? null,
+    escalate: Boolean(out.escalate),
+    fallback: Boolean(out.fallback),
+    ...(unitId ? { unit: unitId } : {}),
+  };
+  updateRun(runDir, { kind: 'helper.call', unit: unitId, by: stamp(harnessOf(undefined)) }, (s) => {
+    if (!s) throw new Error(`no run ${runId}`);
+    s.helperCalls ??= [];
+    s.helperCalls.push(entry);
+    if (unitId) {
+      const u = s.units?.find((x) => x.id === unitId);
+      if (u) {
+        u.helperCalls ??= [];
+        u.helperCalls.push(entry);
+      }
+    }
   });
 }
 
@@ -81,6 +147,14 @@ async function ask(job, input) {
   const res = await complete(cfg, req);
   const out = { ...readAnswer(job, cfg, input, res), ms: Date.now() - started, ...(cfg.local ? {} : { sentTo: cfg.host }) };
   try { record(job, out); } catch { /* counting never fails a call */ }
+  return out;
+}
+
+async function askJev(fn, input, o) {
+  const cfg = config();
+  const out = await fn(cfg, input);
+  try { record(out.job, out); } catch { /* counting never fails a call */ }
+  try { recordRunTelemetry(o, out); } catch { /* telemetry never crashes System One check */ }
   return out;
 }
 
@@ -99,7 +173,20 @@ const commands = {
     if (provider === 'off') return { helpers: 'off', file: writeHelpers(undefined) };
     if (!provider) throw new Error(`setup needs a provider: ${Object.keys(PROVIDERS).join(', ')}, or off`);
     const minConfidence = o['min-confidence'] === undefined ? undefined : Number(o['min-confidence']);
-    const h = setupHelpers(provider, { endpoint: o.endpoint, keyEnv: o['key-env'], models: { decide: o.decide, summarize: o.summarize, look: o.look }, minConfidence });
+    const passAbove = o['pass-above'] === undefined ? undefined : Number(o['pass-above']);
+    const failBelow = o['fail-below'] === undefined ? undefined : Number(o['fail-below']);
+    const thresholds = (passAbove !== undefined || failBelow !== undefined)
+      ? { ...(passAbove !== undefined ? { passAbove } : {}), ...(failBelow !== undefined ? { failBelow } : {}) }
+      : undefined;
+    const models = {
+      ...(o.decide !== undefined ? { decide: o.decide } : {}),
+      ...(o.summarize !== undefined ? { summarize: o.summarize } : {}),
+      ...(o.look !== undefined ? { look: o.look } : {}),
+      ...(o.noul !== undefined ? { noul: o.noul } : {}),
+      ...(o['choice-model'] !== undefined ? { choice: o['choice-model'] } : {}),
+      ...(o['score-model'] !== undefined ? { score: o['score-model'] } : {}),
+    };
+    const h = setupHelpers(provider, { endpoint: o.endpoint, keyEnv: o['key-env'], models, minConfidence, thresholds });
     const file = writeHelpers(h);
     const cfg = helperConfig({ helpers: h });
     const next = cfg.keyEnv && !process.env[cfg.keyEnv] ? `set ${cfg.keyEnv} in your environment, then run helper.mjs ping` : 'run helper.mjs ping to check the server and models';
@@ -124,13 +211,39 @@ const commands = {
     if (statSync(f).size > MAX_IMAGE) throw new Error('--image is over 8 MB; crop or scale it first');
     return ask('look', { image: { mime, base64: readFileSync(f).toString('base64') }, question: o.question, context: o.context });
   },
+  noul(_, o) {
+    const props = (o.proposition ?? []).map((p) => checkAtomicProposition(p));
+    if (!props.length) throw new Error('missing --proposition');
+    const context = o['context-file'] !== undefined ? readText(o['context-file'], '--context-file') : o.context;
+    const input = props.length === 1 ? { proposition: props[0], context } : { propositions: props, context };
+    return askJev(askNoul, input, o);
+  },
+  choice(_, o) {
+    const question = str(o.question, 'question');
+    const choices = (o.choice ?? []).map((c) => String(c).trim()).filter(Boolean);
+    if (choices.length < 2 || choices.length > 20 || new Set(choices).size !== choices.length) {
+      throw new Error('choice needs 2-20 different choices');
+    }
+    const context = o['context-file'] !== undefined ? readText(o['context-file'], '--context-file') : o.context;
+    return askJev(askChoice, { question, choices, context }, o);
+  },
+  score(_, o) {
+    const criterion = str(o.criterion, 'criterion');
+    const min = o.min === undefined ? 0 : Number(o.min);
+    const max = o.max === undefined ? 1 : Number(o.max);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+      throw new Error('score needs finite --min < --max');
+    }
+    const context = o['context-file'] !== undefined ? readText(o['context-file'], '--context-file') : o.context;
+    return askJev(askScore, { criterion, min, max, context }, o);
+  },
 };
 
 helpAndExit(import.meta.url);
 try {
   const [cmd, ...argv] = process.argv.slice(2);
   if (!Object.hasOwn(commands, cmd ?? '')) throw new Error(`usage: helper.mjs ${Object.keys(commands).join('|')} …`);
-  const { pos, opt } = parse(argv, FLAGS, ['choice']);
+  const { pos, opt } = parse(argv, FLAGS, ['choice', 'proposition']);
   const out = await commands[cmd](pos, opt);
   console.log(JSON.stringify(out, null, 2));
 } catch (e) { console.error(`error: ${e.message}`); process.exitCode = 2; }
