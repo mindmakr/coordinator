@@ -35,7 +35,7 @@ Record them with `S/run.mjs add <run> <unit> --behaviour "…"` (repeat the flag
 
 ### Unbounded words are refused
 
-`add --behaviour`, `behave` and `freeze` refuse a behaviour with never, any, all, cannot, only, always or every, unless the line names its cases ("for these three: A, B and C", "(admin, owner, viewer)", "1) … 2) …", or a list it points to: "listed in", "the following") or the lead passes `--open "<why it can be met as written>"`, which is kept on the behaviour and logged as a bar note. When the same behaviour fails in a unit's two latest failing rounds, `next` asks the person (Change the bar, Simplify the design, Accept as is, One more round) after the second, not the third.
+`add --behaviour`, `behave` and `freeze` refuse a behaviour with never, any, all, cannot, only, always, every or nothing ("nothing reads X" names what it checked), unless the line names its cases ("for these three: A, B and C", "(admin, owner, viewer)", "1) … 2) …", or a list it points to: "listed in", "the following") or the lead passes `--open "<why it can be met as written>"`, which is kept on the behaviour and logged as a bar note. When the same behaviour fails in a unit's two latest failing rounds, `next` asks the person (Change the bar, Simplify the design, Accept as is, One more round) after the second, not the third.
 
 ## Severity: what fails a round
 

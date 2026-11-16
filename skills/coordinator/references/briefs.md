@@ -35,7 +35,9 @@ Playbook: read and follow <skill-dir>/references/sub-skills/<fix.md; add transla
 <After change-strategy: "The last approach failed twice on the same gap. Do not retry it. Try: <new approach>.">
 Hints from past runs (ignore any that conflict with the above): <lessons>
 Do the work for real and check it yourself, but do not judge it against the bar: a separate critic does that.
-Run only the tests mapped to the files you changed (COORDINATOR.md's mapping, else the runner's related-files mode such as `vitest related --run <files>`), plus typecheck and lint for each side you touched. Not the full suite: the critic runs it once on the head. Rerun a test under load only when you suspect a flake, and say so in your report.
+Run only the tests mapped to the files you changed (COORDINATOR.md's mapping, else the runner's related-files mode such as `vitest related --run <files>`), plus typecheck and lint for each side you touched. Never the full suite: the lead runs it once on the head (run.mjs suite). Rerun a test under load only when you suspect a flake, and say so in your report.
+Never edit CHANGELOG.md. Give your one changelog line to the lead in your report; the lead records it (run.mjs built <run> <unit> --changelog "<line>") and the release PR writes them all.
+Before you report, run run.mjs precheck <run> <unit> --base <base> --head <your commit> and fix every hit: built refuses a head with one.
 Keep your context small (references/context.md). Read file ranges and search results, not whole files over about 10k characters. Pipe long command output through a filter (`| tail -40`, `| grep -n FAIL`) and never read a saved log twice. At about 250k tokens of context, stop, write a handover note (done, left, the files that matter, the commands that work) and report.
 At each milestone (pushed, tests ran, PR opened) run: <COORDINATOR_DIR=… if outside this repo's worktrees> node <skill-dir>/scripts/run.mjs beat <run> <unit> --text "<the milestone>"
 Attach what shows each behaviour: node <skill-dir>/scripts/run.mjs evidence <run> <unit> --behaviour B1 --kind test --text "<the pass/fail lines>" (or --kind screenshot --file <png>, --kind log --file <log, pdf, md or json report>, --kind reins --file <a reins report's .md>, --kind link --url <URL>). Pass every screenshot and report you make with --file: a path only mentioned is lost when the worktree goes. Once the PR is open: run.mjs link <run> <unit> --pr <owner/repo#n or URL>.
@@ -84,8 +86,8 @@ Fresh eyes on the whole result of run <run> after every unit has passed. Never a
 Goal: <goal>   Bar: <bar>   Artifacts: <list>
 Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.
 Playbook: <when strings changed: the parity check in <skill-dir>/references/sub-skills/translations.md across the run>; <when the run merged work: finish with <skill-dir>/references/sub-skills/release-notes.md>.
-Fix only inconsistencies; don't redesign. Run the full checks once after, on the merged result.
-Reply in the same format as the critic, marking the goal's behaviours (G1, G2, …), then list what you changed.
+Fix only inconsistencies between the units (a shared interface, a name, copy, a broken flow across units); don't redesign. Anything else you find, a bug inside one unit or a change beyond the fence included, is a follow-up for the lead, not a change. Run the full checks once after, on the merged result.
+Reply in the same format as the critic, marking the goal's behaviours (G1, G2, …), then list every file you changed and the inconsistency each change fixed.
 ```
 
 ## Recording the critic's reply

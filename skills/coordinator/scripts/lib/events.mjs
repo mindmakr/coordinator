@@ -175,7 +175,10 @@ export function peekRun(dir) {
   try {
     const snapAt = statSync(file).mtimeMs;
     let logAt = -1; try { logAt = statSync(join(dir, EVENTS)).mtimeMs; } catch { /* a legacy run: no log */ }
-    if (logAt >= 0 && snapAt >= logAt) {
+    // Strictly newer: on a file system with coarse times both files of one write share a tick, and so would a log
+    // changed in that tick, so a tie reads in full. (A log copied in with its old time kept still looks older: the
+    // pages show the snapshot until the next write checks it in full.)
+    if (logAt >= 0 && snapAt > logAt) {
       const snap = JSON.parse(readFileSync(file, 'utf8'));
       if (isObj(snap) && validSnapshot(snap[META])) {
         const { [META]: _, ...body } = snap;

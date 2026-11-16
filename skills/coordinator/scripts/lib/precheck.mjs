@@ -32,8 +32,9 @@ export function precheckRules(setting) {
 }
 
 // Zero-width, invisible and text-direction characters (U+200B-U+200F, U+202A-U+202E, U+2060-U+2064, U+2066-U+2069,
-// U+FEFF, U+00AD, U+061C, U+180E): written as escapes they are fine, typed literally they hide what code says.
-const INVISIBLE_RANGES = [[0xad], [0x61c], [0x180e], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff]];
+// U+FEFF, U+00AD, U+061C, U+180E), and control characters other than tab and line ends (a NUL makes git call the
+// file binary): written as escapes they are fine, typed literally they hide what code says.
+const INVISIBLE_RANGES = [[0x0, 0x8], [0xb, 0xc], [0xe, 0x1f], [0x7f], [0xad], [0x61c], [0x180e], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff]];
 const INVISIBLE = new RegExp(`[${INVISIBLE_RANGES.map(([a, b]) => (b ? `${String.fromCodePoint(a)}-${String.fromCodePoint(b)}` : String.fromCodePoint(a))).join('')}]`, 'u'); // built from code points: no such character is typed here
 // A URL's pathname where a file path is wanted: new URL(…, import.meta.url).pathname, or .pathname on a line that
 // reads or names files. fileURLToPath() is the safe form.

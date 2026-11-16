@@ -179,8 +179,9 @@ export function buildBrief(run, o) {
       'Goal behaviours:', ...behaviourLines(run.goalBehaviours),
       ...playbook,
       'Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.',
-      'Fix only inconsistencies; don\'t redesign. Run the full checks once after, on the merged result.',
-      'Reply in the same format as the critic, marking the goal\'s behaviours (G1, G2, …), then list what you changed.',
+      // Only cross-unit fixes (coord-run-fixes: an integrator added an unrelated dashboard fix to the release PR).
+      'Fix only inconsistencies between the units (a shared interface, a name, copy, a broken flow across units); don\'t redesign. Anything else you find, a bug inside one unit or a change beyond the fence included, is a follow-up for the lead, not a change. Run the full checks once after, on the merged result.',
+      'Reply in the same format as the critic, marking the goal\'s behaviours (G1, G2, …), then list every file you changed and the inconsistency each change fixed.',
     ].join('\n');
   }
   throw new Error('--role must be builder, critic or integrator');

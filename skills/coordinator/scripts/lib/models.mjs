@@ -17,7 +17,7 @@ export const MECHANICAL = ['docs', 'copy', 'translations', 'renames', 'fixtures'
 // is one of PIN_WORDS or starts with one of PIN_STEMS, or it names personal data.
 export const PINNED = ['security', 'money', 'migrations', 'auth', 'payments', 'billing', 'invoicing', 'authentication', 'authorization', 'permissions', 'secrets', 'crypto', 'pii', 'personal-data'];
 const PIN_WORDS = new Set(['auth', 'authn', 'authz', 'money', 'pay', 'fee', 'fees', 'role', 'roles', 'pii', 'token', 'tokens', 'login', 'bill', 'bills', 'kyc']);
-export const PIN_STEMS = ['secur', 'migrat', 'oauth', 'payment', 'payout', 'payroll', 'salar', 'ledger', 'refund', 'wallet', 'disburs', 'kyc', 'session', 'csrf', 'rbac', 'role', 'permission', 'iban', 'schema', 'authent', 'authori', 'billing', 'invoic', 'secret', 'crypt', 'encrypt', 'password', 'credential', 'otp', 'mfa', '2fa', 'jwt', 'xss', 'inject', 'ssrf', 'acl', 'sanitiz', 'sanitis', 'cors', 'csp', 'tls', 'cookie', 'audit', 'gdpr', 'pdpl'];
+export const PIN_STEMS = ['secur', 'webhook', 'signatur', 'signing', 'hmac', 'migrat', 'oauth', 'payment', 'payout', 'payroll', 'salar', 'ledger', 'refund', 'wallet', 'disburs', 'kyc', 'session', 'csrf', 'rbac', 'role', 'permission', 'iban', 'schema', 'authent', 'authori', 'billing', 'invoic', 'secret', 'crypt', 'encrypt', 'password', 'credential', 'otp', 'mfa', '2fa', 'jwt', 'xss', 'inject', 'ssrf', 'acl', 'sanitiz', 'sanitis', 'cors', 'csp', 'tls', 'cookie', 'audit', 'gdpr', 'pdpl'];
 export function pinned(cls) {
   const c = String(cls).toLowerCase();
   if (/personal[^a-z0-9]*data|access[^a-z0-9]*control/.test(c)) return true;

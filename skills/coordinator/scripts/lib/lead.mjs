@@ -16,7 +16,8 @@ export const LEAD_STEPS = new Set(['init', 'add', 'add-specialist', 'start', 're
   'foldin', 'ship', 'integrate', 'close', 'ask', 'use-answer', 'pause', 'resume', 'push', 'pull', 'next']);
 // Steps that are lead steps in one form only: a note that sets how the run asks the person (note --asking) is the
 // lead's, every other note is a worker step. Such a step takes --lead and --takeover in that form only.
-export const LEAD_FORMS = { note: (o) => o.asking !== undefined };
+// A follow-up triaged batch can add the batch unit, so that form is the lead's too.
+export const LEAD_FORMS = { note: (o) => o.asking !== undefined, followup: (o) => typeof o.triage === 'string' && o.triage.toLowerCase() === 'batch' };
 // Whether `cmd` with options `o` is a lead step (run.mjs checks next separately, when it records a stop).
 export function isLeadStep(cmd, o = {}) {
   return LEAD_STEPS.has(cmd) || Boolean(LEAD_FORMS[cmd]?.(o));

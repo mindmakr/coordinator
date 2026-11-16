@@ -5,22 +5,27 @@ import { join } from 'node:path';
 import { readJson, update } from './store.mjs';
 
 export const lessonsFile = (base) => join(base, 'lessons.json');
-export const rank = (l) => l.seen * 2 + l.used;
+// A lesson ranks by how often it recurred (seen), then by how recently: never by how often briefs carried it, which
+// only rose because it ranked high (the same five lessons rode in every brief while 50 of 69 were never shown).
+export const rank = (l) => l.seen;
 export const byRank = (a, b) => rank(b) - rank(a) || String(b.lastAt).localeCompare(String(a.lastAt));
+const carried = (l) => (Array.isArray(l.usedIn) ? l.usedIn.length : 0);
+// For a brief: of the lessons that recurred as often, the ones carried in fewer runs first, so hints rotate.
+const byBrief = (a, b) => rank(b) - rank(a) || carried(a) - carried(b) || String(b.lastAt).localeCompare(String(a.lastAt));
 const valid = (l) => l !== null && typeof l === 'object' && typeof l.id === 'string' && typeof l.text === 'string';
 const read = (base) => { const all = readJson(lessonsFile(base), []); return Array.isArray(all) ? all.filter(valid) : []; };
 
-// The best lessons for `tag` (and the general ones) across the state folders, best first, each once.
-// Each carries `base`, the folder it came from.
+// The best lessons for `tag` (and the general ones) across the state folders, best first, each once. A lesson
+// marked --check is left out: the scripts enforce it, so a hint would only spend the brief. Each carries `base`.
 export function topLessons(bases, tag, top = 5) {
   const seen = new Set(); const all = [];
   for (const base of new Set(bases)) {
     for (const l of read(base)) {
-      if (seen.has(l.id) || (tag && l.tag !== tag && l.tag !== 'general')) continue;
+      if (seen.has(l.id) || l.check || (tag && l.tag !== tag && l.tag !== 'general')) continue;
       seen.add(l.id); all.push({ ...l, base });
     }
   }
-  return all.sort(byRank).slice(0, top);
+  return all.sort(byBrief).slice(0, top);
 }
 
 // Counts each lesson as used once per run: `used` rises the first time a brief of that run carries it,
@@ -48,8 +53,9 @@ export const SCRIPT_CHECKS = [
   'suite: one full suite per head, run by the lead under the machine-wide suite lock (run.mjs suite); critics cite it',
   'precheck: built refuses a head whose precheck has a hit (run.mjs precheck; rules in "precheck" of .coordinator/coordinator.json)',
   'changelog: units never edit CHANGELOG.md; built --changelog stores the line, run.mjs changelog prints them for the release PR',
-  'behaviours: add, behave and freeze refuse never/any/all/cannot/only/always/every unless the cases are listed or --open says why',
+  'behaviours: add, behave and freeze refuse never/any/all/cannot/only/always/every/nothing unless the cases are listed or --open says why',
   'same behaviour: next asks the person after the same behaviour fails twice',
+  'same files: next asks the person after two failing rounds in a row change the same files',
   'one critic: from round 2, a delta under 200 lines gets one critic (the specialist when the unit has one)',
   'paths: a unit whose --paths overlap a unit being built waits; separate paths build together',
   'batch: small follow-ups (followup --triage batch) build last as one unit',

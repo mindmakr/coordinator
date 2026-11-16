@@ -8,7 +8,7 @@ Facts for Coordinator runs in this repo (the Coordinator skill itself), each wit
 - No GitHub Actions workflow runs here; the checks are local. Do not add one without asking (owner's rule on Actions minutes).
 
 ## Checks
-- Tests: `npm test` (node --test over the list in package.json; a new test file is added to that list). No dependencies to install (owner, 2026-11-14; AGENTS.md).
+- Tests: `npm test` (node --test over the list in package.json; a new test file is added to that list). The skill has no dependencies to install (owner, 2026-11-14; AGENTS.md); the service does: run `cd service && npm ci` in each worktree before the full check, or its suite reports false failures (23 once; lesson b52bc78796, 2026-11-16).
 - Plugin: `claude plugin validate .` from the root (owner, 2026-11-14; AGENTS.md).
 - Mapped tests: each script's logic in `skills/coordinator/scripts/lib/<name>.mjs` has `skills/coordinator/scripts/test/<name>.test.mjs`; builders and critics run those files with `node --import ./skills/coordinator/scripts/test/home.setup.mjs --test <files>`.
 - Full suite, once per head: `npm test` and `claude plugin validate .`. The service has its own: `cd service && npm test` (only when `service/` changes).
@@ -18,6 +18,7 @@ Facts for Coordinator runs in this repo (the Coordinator skill itself), each wit
 - `SKILL.md` stays under 500 words; a rule lives in one file; skill wording stays generic, project facts go in a project's `COORDINATOR.md` (AGENTS.md).
 - Scripts: Node 18+, no dependencies, logic in `scripts/lib/` with tests, no shell strings, every write through `lib/store.mjs`, no network beyond what AGENTS.md lists, nothing stores secrets or personal data (AGENTS.md).
 - No new Lucid Coding wording without the owner seeing it (owner, 2026-11-14).
+- A unit that adds an event kind to every run log updates everything that counts events, the service's tests and its demo lead included, in the same unit (12 service test failures once; lesson fb5928e5be, 2026-11-16).
 
 ## Review
 - Coordinator's review playbook at full depth. Ready means: every behaviour passes with evidence and the full suite passes on the head.

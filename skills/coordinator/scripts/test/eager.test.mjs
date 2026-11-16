@@ -365,7 +365,7 @@ test('the reviewed head comes from built --head or verdict --head, not the lead\
   const built = commitFiles({ 'lib/r.js': '2\n' }, 'r built');
   setup('rh'); ok('start', 'rh', 'a');
   assert.match(cli('built', 'rh', 'a', '--head', 'nope').err, /--head takes the commit the builder reported/);
-  ok('built', 'rh', 'a', '--head', built);
+  ok('built', 'rh', 'a', '--head', built, '--skip-precheck', '--reason', 'not a precheck test');
   ok('verdict', 'rh', 'a', 'pass', '--score', '9', '--evidence', 'e', '--fold', 'rename r');
   assert.equal(unit('rh', 'a').rounds[0].reviewedHead, built);
   const fold = commitFiles({ 'lib/r.js': '3\n' }, 'r fold');
@@ -374,7 +374,7 @@ test('the reviewed head comes from built --head or verdict --head, not the lead\
   ok('foldin', 'rh', 'a', '--head', fold, '--evidence', 'r.js only');
   assert.equal(unit('rh', 'a').rounds[0].foldin.reviewed, built);
   // The critic's own --head wins over the builder's.
-  setup('rh2'); ok('start', 'rh2', 'a'); ok('built', 'rh2', 'a', '--head', base);
+  setup('rh2'); ok('start', 'rh2', 'a'); ok('built', 'rh2', 'a', '--head', base, '--skip-precheck', '--reason', 'not a precheck test');
   ok('verdict', 'rh2', 'a', 'pass', '--score', '9', '--evidence', 'e', '--head', built, '--fold', 'rename r');
   assert.equal(unit('rh2', 'a').rounds[0].reviewedHead, built);
 });

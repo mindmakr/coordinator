@@ -21,6 +21,15 @@ export function addFollowup(s, { text, triage, reason, unit = null, at }) {
     let b = s.units.find((u) => u.id === BATCH);
     if (b && !b.batch) throw new Error(`a unit named "${BATCH}" exists and is not the batch unit: triage this item P1-P3 or drop`);
     if (b && !['open'].includes(b.status)) throw new Error(`the batch unit is ${b.status}: triage this item P1-P3 (an issue) or drop it`);
+    if (!b) {
+      // Making the batch unit is adding a unit: the same caps as run.mjs add, and after freeze a scope note.
+      if (s.units.length >= (s.budget?.maxUnits ?? Infinity)) throw new Error(`unit cap reached (${s.budget.maxUnits}): no room for the batch unit; triage this item P1-P3 (an issue) or drop it`);
+      if (s.frozen) {
+        if ((s.addedAfterFreeze ?? 0) >= (s.budget?.maxAdded ?? Infinity)) throw new Error('scope cap reached: no room for the batch unit after freeze; triage this item P1-P3 (an issue) or drop it');
+        s.addedAfterFreeze = (s.addedAfterFreeze ?? 0) + 1;
+        s.notes.push({ kind: 'scope', text: `added ${BATCH}: ${reason}`, at });
+      }
+    }
     s.notes.push(note);
     if (!b) {
       b = { id: BATCH, batch: true, bar: '', title: 'Small items', link: null, after: null, status: 'open', rounds: [], strategyChanges: 0, strategyAt: -1, heartbeatAt: null, stopReason: null };

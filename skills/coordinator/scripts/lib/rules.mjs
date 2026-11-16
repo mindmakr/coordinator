@@ -286,20 +286,32 @@ const judgingInTime = (unit, run) => unit.status === 'judging' && typeof unit.ju
   && usedMinutes(run, Date.parse(unit.judgingAt)) <= run.budget.maxMinutes;
 
 // A paused run (run.mjs pause, lib/pause.mjs) starts no agent: those steps wait until it resumes.
-export const decideUnit = (unit, run, nowMs) => held(run, overlapHeld(unit, run, unitStep(unit, run, nowMs)));
+export const decideUnit = (unit, run, nowMs) => held(run, overlapHeld(unit, run, unitStep(unit, run, nowMs), nowMs));
 
 // Units run in parallel unless their files meet (the perf plan, cause H: disjoint units waited on each other for
 // hours). A unit added with --paths that would build waits while a unit whose --paths overlap is being built;
-// units with separate paths build together. Paths are folder or file prefixes ("src/api", "web/a.ts").
+// units with separate paths build together. Of two open units whose paths overlap, the one listed first builds first
+// and the other waits, so next never says build for both. Paths are folder or file prefixes ("src/api", "web/a.ts").
 const normPath = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
 export const pathsOverlap = (a = [], b = []) => a.some((x) => b.some((y) => {
   const p = normPath(x); const q = normPath(y);
   return p === q || p === '' || q === '' || p.startsWith(`${q}/`) || q.startsWith(`${p}/`);
 }));
-function overlapHeld(unit, run, d) {
+function overlapHeld(unit, run, d, nowMs) {
   if (d.action !== 'build' || !unit.paths?.length) return d;
   const busy = run.units.filter((x) => x.id !== unit.id && x.status === 'building' && pathsOverlap(unit.paths, x.paths)).map((x) => x.id);
-  return busy.length ? { action: 'wait', reason: `paths overlap ${busy.join(', ')}, being built` } : d;
+  if (busy.length) return { action: 'wait', reason: `paths overlap ${busy.join(', ')}, being built` };
+  // The units listed before this one that build now (each held the same way, in order).
+  const going = run.units.filter((x) => x.status === 'building' && x.paths?.length);
+  const first = [];
+  for (const x of run.units) {
+    if (x.id === unit.id) break;
+    if (x.status === 'building' || !x.paths?.length || going.some((g) => pathsOverlap(x.paths, g.paths))) continue;
+    if (held(run, unitStep(x, run, nowMs)).action !== 'build') continue;
+    going.push(x);
+    if (pathsOverlap(unit.paths, x.paths)) first.push(x.id);
+  }
+  return first.length ? { action: 'wait', reason: `paths overlap ${first.join(', ')}, which builds first` } : d;
 }
 
 function unitStep(unit, run, nowMs) {

@@ -31,8 +31,9 @@ export function summaryLines(output, max = 6) {
 
 // Runs the suite's command (argv, never a shell string) and returns { code, output, seconds }. On Windows a command
 // that is a .cmd or .bat (npm, npx) cannot start without cmd.exe: it is run through cmd.exe /d /c only when every
-// argument is a plain word (letters, digits and _ @ % + = : , . / \ -), so nothing in it can be read as shell syntax.
-const PLAIN = /^[A-Za-z0-9_@%+=:,./\\-]+$/;
+// argument is a plain word (letters, digits and _ @ + = : , . / \ -), so nothing in it can be read as shell syntax.
+// No %: cmd.exe expands %NAME% even inside an argument.
+const PLAIN = /^[A-Za-z0-9_@+=:,./\\-]+$/;
 export function runSuite(argv, { cwd, env = process.env, spawn = spawnSync, platform = process.platform, now = Date.now } = {}) {
   if (!Array.isArray(argv) || !argv.length || typeof argv[0] !== 'string' || !argv[0]) throw new Error('suite: give the command after --, e.g. run.mjs suite <run> <unit> --head <sha> -- npm test');
   const t0 = now();

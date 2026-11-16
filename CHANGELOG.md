@@ -1,7 +1,18 @@
 # Changelog
 
 ## Unreleased
+Fixes from the review of 1.9.0, the checks it added made stricter where they could be bypassed, and lessons that now reach the briefs that need them.
 
+- **`next` no longer fails on a stale snapshot.** After a `pull`, a hand edit or a damaged `state.json`, `next` (and `next --all`) failed with "render is not a function" until another command rewrote the pages; it now loads the page modules when the snapshot will be rebuilt.
+- **`suite` records only the commit it tested.** A run of the test command must be in a checkout at `--head` with no tracked change on top, and the full commit is recorded; a `--result` from elsewhere must name a commit the repository has. Words after `--`, `--harness` included, belong to the test command. On Windows, `%` no longer counts as a plain word for `cmd.exe`, which expands `%NAME%`.
+- **`built --head` no longer skips the precheck.** A head with no precheck is refused unless `--base` is given (built runs it) or `--skip-precheck --reason` is (logged); with every precheck rule off it is not needed. The precheck also flags control characters such as a NUL byte, which makes git treat a file as binary.
+- **A solo Prism critic still needs its gate report.** On a small-delta round judged by the Prism specialist alone, a pass needs a PASS gate report, as on any other round.
+- **Overlapping units never both build.** Of two open units whose `--paths` overlap, the one listed first builds and the other waits ("paths overlap a, which builds first"), so `next` no longer says build for both.
+- **The batch unit follows `add`'s rules.** Making it counts against the unit cap and, after freeze, the scope cap with a scope note; `followup --triage batch` is a lead step.
+- **Triaged follow-ups close as gaps.** A follow-up triaged `drop` is closed with its reason, and a batch item once the batch unit passes; neither stays an open gap or counts on the run page.
+- **The pages' quick snapshot read needs a strictly newer snapshot.** A snapshot and log that share a time (a coarse file system) are read in full.
+- **The integrator fixes only inconsistencies between units.** Anything else it finds, a bug inside one unit or a change beyond the fence, is a follow-up for the lead, and its reply lists every file it changed and why.
+- **Lessons reach the briefs that need them.** Lessons rank by how often they recurred, then how recent they are, never by how often briefs carried them (the same five rode in every brief while 50 of 69 were never shown); equals rotate, and a lesson marked `--check` is left out because the scripts enforce it. `nothing` joins the open-ended words a behaviour must give cases for; `webhook`, `signature`, `signing` and `hmac` are pinned to the strong critic; the same-files question is listed among the checks in force. The builder template in `references/briefs.md` and the fix playbook now say the lead runs the full suite, and that units never edit CHANGELOG.md.
 - **`coordinator.html` is written in the background.** A change no longer waits for the coordinator page, which reads every run of the folder: a background writer (`run.mjs self --html --queued`, one at a time) rewrites it, and a burst of changes costs one or two renders. A change to a run returns about a tenth of a second sooner on a 16-run folder, more on a bigger one. `COORDINATOR_SNAPSHOT=sync` keeps the old in-place write.
 
 ## 1.9.0 (2026-11-16)

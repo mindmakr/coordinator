@@ -166,7 +166,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
     }),
     followUps: pick('follow-up'),
     // The maps attach each follow-up to its unit (lib/maps.mjs).
-    followUpNotes: notes.filter((n) => n.kind === 'follow-up').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at })),
+    followUpNotes: notes.filter((n) => n.kind === 'follow-up' && n.triage !== 'drop').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at })),
     timeline,
   };
 }

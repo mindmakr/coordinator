@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // What past runs taught: short lessons, merged when they say the same thing,
-// ranked by how often they recur and are used, pruned so loading stays cheap.
+// ranked by how often they recur, then how recent, pruned so loading stays cheap.
 //
 //   lessons.mjs add --tag T --text "one sentence" [--from run] [--source URL …] [--scope global|project]
 //                   T is free: code, security, design, ux, stack, … --source is where it was learned (a study, a doc)

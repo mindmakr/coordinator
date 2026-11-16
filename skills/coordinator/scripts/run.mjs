@@ -224,10 +224,10 @@ import { pauseNote, pausedRefusal, pauseRun, resumeRun } from './lib/pause.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning, unboundedRefusal, unboundedWords as unboundedWordsOf } from './lib/openbar.mjs';
 import { holdLock, lockHeld } from './lib/store.mjs';
-import { recordSuite, runSuite, SHA, summaryLines } from './lib/suites.mjs';
+import { recordSuite, runSuite, sameHead, SHA, summaryLines } from './lib/suites.mjs';
 import { precheck, precheckRules, RULES as PRECHECK_RULES } from './lib/precheck.mjs';
 import { parseDiff } from './lib/gaming.mjs';
-import { addedFiles, changedLines, commitOf, diffText, fileAt, namedIn } from './lib/gitdiff.mjs';
+import { addedFiles, changedLines, changedTracked, checkedOut, commitOf, diffText, fileAt, namedIn } from './lib/gitdiff.mjs';
 import { addFollowup } from './lib/followups.mjs';
 import { leadBudget } from './lib/leadctx.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
@@ -826,6 +826,8 @@ function runPrecheck(baseRef, headRef) {
   const hits = precheck({ files: parseDiff(diffText(root, base, head)), added: addedFiles(root, base, head) }, rules, { lists, mentioned: (name) => namedIn(root, head, name, tests) });
   return { base, head, hits };
 }
+// Every precheck rule turned off ("precheck": false, or all of them in "off"): built needs no precheck then.
+const precheckOff = () => precheckRules(settings().precheck).off.length >= PRECHECK_RULES.length;
 
 // The delta a later round's critic reviews: lines changed since the last reviewed head (lib/rules.mjs oneCritic).
 function deltaOf(u, head) {
@@ -1081,6 +1083,11 @@ const commands = {
       const rec = u.precheck && head && (u.precheck.head.startsWith(head) || head.startsWith(u.precheck.head)) ? u.precheck : null;
       if (rec?.hits.length && !skipWhy) throw new Error(`built refused: the precheck of ${rec.head.slice(0, 12)} has ${rec.hits.length} hit(s): ${rec.hits.map((h) => `${h.rule} ${h.file}`).join(', ')}. Fix them, or keep them with --skip-precheck --reason "…" (logged)`);
       if (rec?.hits.length) s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: precheck hits kept on ${rec.head.slice(0, 12)} (${rec.hits.map((h) => h.rule).join(', ')}): ${skipWhy}`, at: now() });
+      // A head with no precheck is not let through unchecked (unless every rule is off in coordinator.json).
+      if (head && !rec && !precheckOff()) {
+        if (!skipWhy) throw new Error(`built refused: no precheck of ${head.slice(0, 12)}: pass --base <the commit the unit branched from> and built runs it, or run run.mjs precheck ${s.id} ${u.id} --base <sha> --head ${head.slice(0, 12)} first; --skip-precheck --reason "…" goes without (logged)`);
+        s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: built without a precheck on ${head.slice(0, 12)}: ${skipWhy}`, at: now() });
+      }
       if (o.changelog !== undefined) u.changelog = text(o.changelog === true ? undefined : o.changelog, 'changelog', 300);
       if (delta) u.delta = delta; else delete u.delta;
       // The commit the builder reported: the reviewed head a fold-in must build on, unless the critic or detect names one.
@@ -1259,7 +1266,8 @@ const commands = {
       // A general pass on a build a specialist failed (#126): recorded as given, the round closes as failed by that specialist.
       const byS = verdict === 'pass' ? specialistFailure(u.specialistMarks) : null;
       const passes = verdict === 'pass' && !byS;
-      const gate = passes ? prismRefusal(u) : null;
+      // A solo specialist judges with its own rules: the prism specialist passes only on a PASS gate report.
+      const gate = passes ? prismRefusal(u, solo && solo.critic !== 'general' ? solo.critic : null) : null;
       if (gate) throw new Error(gate);
       const round = u.rounds.length + 1;
       if (passes && s.paths?.length && !(u.detect?.round === round && u.detect.clean)) {
@@ -1715,13 +1723,16 @@ const commands = {
       for (const id of mine) runs.push({ run: id, ...(await commands.next([id], { ...o, all: undefined })) });
       return { lead: me, runs, ...(runs.length ? {} : { note: 'this window leads no open run here' }) };
     }
-    let stopped; let s = load(run);
+    if (!exists(run)) throw new Error(`no run: ${run}`);
+    const cur = readRun(runDir(run));
+    let stopped; let s = cur.state;
     const expired = !s.closed && spent(s, Date.now());
     // Expired: applyStops changes the loaded state in memory only; it is never saved.
     if (expired) stopped = applyStops(s);
     else {
-      // A stop to record rewrites the pages: load their modules first (main() skips them for next).
-      if (!s.closed && applyStops(structuredClone(s)).size > 0) await loadPages();
+      // A write rewrites the pages: load their modules first (main() skips them for next). next writes when it
+      // records a stop, and when the snapshot is rebuilt (behind the log after a pull, or edited by hand).
+      if (cur.rebuilt || cur.edited || (!s.closed && applyStops(structuredClone(s)).size > 0)) await loadPages();
       // Recording a stop is a lead step (lib/lead.mjs); reading what to do next is not. Whether it records
       // one is decided on the locked state, with the lead check, in the same write as the stop.
       s = change(run, 'run.stop', (st) => { stopped = applyStops(st); }, { leadWhen: { o, when: (st) => applyStops(structuredClone(st)).size > 0 } });
@@ -1771,8 +1782,17 @@ const commands = {
     if (given.length && SUITE_ARGV.length) throw new Error('--result or a command after --, not both');
     if (!given.length && !SUITE_ARGV.length) throw new Error('usage: run.mjs suite <run> <unit> --head <sha> -- <test command …> | --result "<pass line>" [--fail]');
     let ok = o.fail === undefined; let results = given; let code = null; let seconds = null;
-    if (!given.length) {
+    // The record says which commit was tested: a run made here must be on that commit with no tracked change on
+    // top; a result given from elsewhere must name a commit this repository has.
+    let head;
+    if (given.length) head = commitOf(projectDir(), o.head, 'head');
+    else {
       if (o.fail !== undefined) throw new Error('--fail goes with --result: a command\'s exit code says whether it passed');
+      let here; try { here = checkedOut(process.cwd()); } catch { throw new Error(`suite runs in the unit's checkout: ${process.cwd()} is not a git checkout`); }
+      if (!sameHead(o.head, here)) throw new Error(`suite refused: this checkout is at ${here.slice(0, 12)}, not --head ${o.head}: run it in the unit's worktree at that commit`);
+      const dirty = changedTracked(process.cwd());
+      if (dirty.length) throw new Error(`suite refused: ${dirty.length} tracked file(s) changed on top of ${here.slice(0, 12)} (${dirty.slice(0, 3).join(', ')}${dirty.length > 3 ? ', …' : ''}): commit them, then run the suite on that commit`);
+      head = here;
       const release = holdLock(join(registryHome(), 'suite.lock'), { run, unit, head: o.head }, { onWait: (h) => console.error(`waiting: a full suite is running on this machine (run ${h.run ?? '?'}, unit ${h.unit ?? '?'}, since ${h.at})`) });
       let r; try { r = runSuite(SUITE_ARGV, { cwd: process.cwd() }); } finally { release(); }
       ({ code, seconds } = r); ok = code === 0;
@@ -1783,7 +1803,7 @@ const commands = {
     let rec;
     change(run, 'evidence', (s) => {
       const u = unitOf(s, unit);
-      rec = recordSuite(u, { head: o.head, ok, results, at: now(), code, seconds });
+      rec = recordSuite(u, { head, ok, results, at: now(), code, seconds });
       log(u, 'suite', `full suite ${ok ? 'passed' : 'FAILED'} on ${rec.head.slice(0, 12)}: ${results.at(-1)}`);
     }, { unit });
     return { run, unit, suite: rec };
@@ -2157,8 +2177,13 @@ function startDashboard(port, o) {
 let BY = null;
 export async function main(args = process.argv.slice(2)) {
   helpAndExit(import.meta.url, args);
-  const [cmd, ...argv] = args;
+  const [cmd, ...all] = args;
   LEAD = null; CLAIMED = null; BY = null; SUITE_ARGV = [];
+  // suite runs the command after --, as given: cut there first, so none of its words (--harness included) is
+  // read as a run.mjs option.
+  const cut = cmd === 'suite' ? all.indexOf('--') : -1;
+  const argv = cut >= 0 ? all.slice(0, cut) : all;
+  if (cut >= 0) SUITE_ARGV = all.slice(cut + 1);
   const rest = []; let harnessFlag;
   for (let i = 0; i < argv.length; i++) {
     const m = /^--harness(?:=([\s\S]*))?$/.exec(argv[i]);
@@ -2169,9 +2194,6 @@ export async function main(args = process.argv.slice(2)) {
   if (!commands[cmd]) { console.error('usage: run.mjs init|lead|status-line|dashboard|models|add|add-specialist|behave|behaviours|evidence|link|freeze|pause|resume|start|beat|built|reset|extend|ship|sync|verdict|foldin|strategy|integrate|note|study|self|ask|answer|use-answer|questions|serve|watch|next|show|hud|map|touches|calls|brief|close|gaps|gap|push|pull|adopt|report|quality|list|waiting|stats|where|bench|suite|precheck|changelog|followup … (see the header of run.mjs)'); process.exit(2); }
   if (cmd === 'bench' && rest.some((a) => a === '--help' || a === '-h')) { console.log(benchHelp()); process.exit(0); }
   try {
-    // suite runs the command after --, as given (its own options are never read as run.mjs options).
-    const cut = cmd === 'suite' ? rest.indexOf('--') : -1;
-    if (cut >= 0) { SUITE_ARGV = rest.slice(cut + 1); rest.length = cut; }
     const { pos, opt } = parse(rest, FLAGS[cmd] ?? [], REPEAT[cmd]);
     await Promise.all([NO_PAGES.has(cmd) ? null : loadPages(), EXTRA_COMMANDS.has(cmd) ? loadExtras() : null]);
     // One lead per run (lib/lead.mjs): a lead step from another window is refused before it changes anything; a
