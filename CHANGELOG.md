@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.1 (2026-11-16)
 Fixes from the review of 1.9.0, the checks it added made stricter where they could be bypassed, and lessons that now reach the briefs that need them.
 
 - **`next` no longer fails on a stale snapshot.** After a `pull`, a hand edit or a damaged `state.json`, or on a legacy run with no log, `next` (and `next --all`) failed with "render is not a function" until another command rewrote the pages. A command that writes without the page modules loaded now rewrites the pages once it is done.
