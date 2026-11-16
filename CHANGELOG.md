@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Doctor finds reins under its published name.** The reins check looked for a dependency named `reins`, but the package is `@mindmakr/reins`, so doctor said reins was not installed in projects that use it. It now accepts both, as a dev or a regular dependency (`lib/doctor.mjs`).
+
 ## 1.9.1 (2026-11-16)
 Fixes from the review of 1.9.0, the checks it added made stricter where they could be bypassed, and lessons that now reach the briefs that need them.
 

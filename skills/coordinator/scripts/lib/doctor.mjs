@@ -253,12 +253,13 @@ export function codexCheck(ctx) {
 }
 
 // reins (github.com/mindmakr/reins) is optional: it gives builders and critics measured evidence from the
-// running app. Installed means a package.json at the root or one folder down depends on it.
+// running app. Installed means a package.json at the root or one folder down depends on it: the package is
+// @mindmakr/reins ("reins" was its name before it was published under the scope).
 export function reinsCheck(ctx) {
   const json = (f) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return null; } };
   let folders = [];
   try { folders = readdirSync(ctx.project, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules').slice(0, 40).map((d) => join(ctx.project, d.name)); } catch { /* unreadable: the root only */ }
-  const uses = [ctx.project, ...folders].some((dir) => { const p = json(join(dir, 'package.json')); return Boolean(p?.dependencies?.reins || p?.devDependencies?.reins); });
+  const uses = [ctx.project, ...folders].some((dir) => { const p = json(join(dir, 'package.json')); return ['@mindmakr/reins', 'reins'].some((n) => Boolean(p?.dependencies?.[n] || p?.devDependencies?.[n])); });
   if (!uses) return out('reins', 'skip', 'reins is not installed here (optional: measured evidence from the running app, github.com/mindmakr/reins)');
   const servers = Object.values(json(join(ctx.project, '.mcp.json'))?.mcpServers ?? {});
   const bridge = servers.some((s) => { const words = [s?.command, ...(Array.isArray(s?.args) ? s.args : [])].join(' '); return /\breins\b/.test(words) && /\bbridge\b/.test(words); });
