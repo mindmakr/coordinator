@@ -63,7 +63,9 @@ function mainCheckout() {
 }
 
 // The project's folder (the main checkout), where COORDINATOR.md and the git remote live.
-export const projectDir = () => mainCheckout();
+// COORDINATOR_PROJECT_DIR names the project for a process started outside it (run.mjs's background page writer, which
+// must not hold the project folder as its working folder: Windows would refuse to delete it while it runs).
+export const projectDir = () => (process.env.COORDINATOR_PROJECT_DIR ? resolve(process.env.COORDINATOR_PROJECT_DIR) : mainCheckout());
 
 export function baseDir(scope = 'project') {
   if (process.env.COORDINATOR_DIR) return resolve(process.env.COORDINATOR_DIR);
@@ -87,7 +89,7 @@ export function withLock(file, fn) {
         const seen = readFileSync(lock, 'utf8');
         if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS && readFileSync(lock, 'utf8') === seen) unlinkSync(lock);
       } catch { /* released or taken meanwhile */ }
-      if (Date.now() > deadline) throw new Error(`lock busy: ${lock}`);
+      if (Date.now() >= deadline) throw new Error(`lock busy: ${lock}`);
       pause(wait);
     }
   }
@@ -120,6 +122,11 @@ export function holdLock(file, info = {}, { waitMs = 60 * 60_000, onWait = null,
     }
   }
   return () => { try { if (readFileSync(file, 'utf8') === stamp) unlinkSync(file); } catch { /* already gone */ } };
+}
+
+// Whether a holdLock file is held by a live process (a dead holder's file does not count), without taking it.
+export function lockHeld(file, { alive = pidAlive } = {}) {
+  try { const h = JSON.parse(readFileSync(file, 'utf8')); return Number.isInteger(h.pid) && alive(h.pid); } catch { return false; }
 }
 
 export function readJson(file, fallback) {

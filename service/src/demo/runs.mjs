@@ -103,7 +103,7 @@ export const DEMO_LEAD = 'coordinator-demo-lead';
 // The environment of the demo lead's run.mjs: the copy's state folder, the demo lead's id, and never the
 // person's run register (lib/registry.mjs): the copies are throwaway. A COORDINATOR_HOME already set (the tests') is kept.
 export const leadEnv = (base, env = process.env) => ({
-  PATH: env.PATH ?? '', SystemRoot: env.SystemRoot ?? '', COORDINATOR_DIR: base, COORDINATOR_REGISTRY: 'off', COORDINATOR_LEAD: DEMO_LEAD,
+  PATH: env.PATH ?? '', SystemRoot: env.SystemRoot ?? '', COORDINATOR_DIR: base, COORDINATOR_REGISTRY: 'off', COORDINATOR_LEAD: DEMO_LEAD, COORDINATOR_SNAPSHOT: 'sync', // a throwaway copy: no background page writer to outlive it
   ...(env.COORDINATOR_HOME ? { COORDINATOR_HOME: env.COORDINATOR_HOME } : {}),
 });
 const lead = (p, args) => spawnSync(process.execPath, [RUN_MJS, ...args], { cwd: p.root, env: leadEnv(p.base), encoding: 'utf8' });
