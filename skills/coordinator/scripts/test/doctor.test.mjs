@@ -250,7 +250,7 @@ test('reins: skipped when absent, warns without the bridge in .mcp.json, ok when
   const c = ctx({ project: p });
   assert.equal(reinsCheck(c).status, 'skip');
   mkdirSync(join(p, 'frontend'));
-  writeFileSync(join(p, 'frontend', 'package.json'), JSON.stringify({ devDependencies: { reins: '^0.1.0' } }));
+  writeFileSync(join(p, 'frontend', 'package.json'), JSON.stringify({ devDependencies: { '@mindmakr/reins': '^0.2.0' } }));
   const warn = reinsCheck(c);
   assert.equal(warn.status, 'warn');
   assert.match(warn.fix, /mcpServers/);
@@ -260,6 +260,11 @@ test('reins: skipped when absent, warns without the bridge in .mcp.json, ok when
   const ok = reinsCheck(c);
   assert.equal(ok.status, 'ok');
   assert.match(ok.text, /--kind reins/);
+  // A flight server has it as a regular dependency; the old unscoped name still counts.
+  writeFileSync(join(p, 'frontend', 'package.json'), JSON.stringify({ dependencies: { '@mindmakr/reins': '^0.2.0' } }));
+  assert.equal(reinsCheck(c).status, 'ok');
+  writeFileSync(join(p, 'frontend', 'package.json'), JSON.stringify({ devDependencies: { reins: '^0.1.0' } }));
+  assert.equal(reinsCheck(c).status, 'ok');
   writeFileSync(join(p, '.mcp.json'), '{ broken');
   assert.equal(reinsCheck(c).status, 'warn', 'an unreadable .mcp.json is not a crash');
 });
