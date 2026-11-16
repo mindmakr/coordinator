@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`coordinator.html` is written in the background.** A change no longer waits for the coordinator page, which reads every run of the folder: a background writer (`run.mjs self --html --queued`, one at a time) rewrites it, and a burst of changes costs one or two renders. A change to a run returns about a tenth of a second sooner on a 16-run folder, more on a bigger one. `COORDINATOR_SNAPSHOT=sync` keeps the old in-place write.
+
 ## 1.9.0 (2026-11-16)
 Runs spend their time on the work, not on waiting: a faster test suite, no load flakes, one full suite per head, and checks the scripts enforce instead of lessons the lead must remember.
 

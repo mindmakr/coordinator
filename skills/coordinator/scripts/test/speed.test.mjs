@@ -2,11 +2,12 @@
 // for behaviours, follow-up triage and the batch unit, the lead's context budget, the fast run read for pages, and
 // the git folder found without starting git.
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { runSync } from './inproc.mjs';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 import { loadRun, peekRun, updateRun } from '../lib/events.mjs';
 import { addFollowup, batchItems, batchWait } from '../lib/followups.mjs';
@@ -14,10 +15,11 @@ import { budgetCheck, MAX, usages, WARN } from '../lib/leadctx.mjs';
 import { unboundedRefusal, unboundedWords } from '../lib/openbar.mjs';
 import { precheck, precheckRules } from '../lib/precheck.mjs';
 import { parseDiff } from '../lib/gaming.mjs';
-import { gitCommonDir, holdLock } from '../lib/store.mjs';
+import { gitCommonDir, holdLock, lockHeld } from '../lib/store.mjs';
 import { addedFiles, changedLines, commitOf, diffText, fileAt, namedIn } from '../lib/gitdiff.mjs';
 import { recordSuite, runSuite, sameHead, suiteFor, summaryLines } from '../lib/suites.mjs';
 
+const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = mkdtempSync(join(tmpdir(), 'coord-speed-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
@@ -339,4 +341,35 @@ test('gitdiff.mjs: commits, the diff and its added files, changed lines, a file 
   assert.equal(fileAt(p.root, b, 'missing.txt'), null);
   assert.equal(namedIn(p.root, b, 'x.mjs', /\.test\.mjs$/), true);
   assert.equal(namedIn(p.root, b, 'new.mjs', /\.test\.mjs$/), false);
+});
+
+test('coordinator.html is written by a background writer: the change returns first, a burst ends with the last change in it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'coord-speed-snap-'));
+  const env = { ...process.env, COORDINATOR_DIR: dir, COORDINATOR_SNAPSHOT: 'background', COORDINATOR_REGISTRY: 'off', COORDINATOR_LEAD: 'snap-lead' };
+  for (const k of ['NODE_TEST_CONTEXT', 'CLAUDE_CODE_SESSION_ID', 'COORDINATOR_TRANSCRIPT']) delete env[k];
+  const node = (...a) => execFileSync(process.execPath, [join(scriptsDir, 'run.mjs'), ...a], { env, encoding: 'utf8' });
+  const page = join(dir, 'coordinator.html');
+  const read = (f) => { try { return readFileSync(f, 'utf8'); } catch { return ''; } };
+  // Settled: the last stamp is covered and no writer holds the lock (the writer's own signal, not a pause).
+  const settled = async (what) => {
+    for (const end = Date.now() + 60_000; ; await new Promise((r) => setTimeout(r, 25))) {
+      if (read(`${page}.want`) && read(`${page}.want`) === read(`${page}.done`) && !lockHeld(`${page}.writer`)) return;
+      if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    }
+  };
+  try {
+    node('init', 'bg', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+    await settled('the first page');
+    assert.match(read(page), /Snapshot written/);
+    // A writer that died holding the lock does not block the next one.
+    writeFileSync(`${page}.writer`, JSON.stringify({ pid: 999999, at: 'x' }));
+    for (let i = 0; i < 5; i++) node('add', 'bg', `burst-${i}`, '--bar', 'b');
+    await settled('the burst');
+    assert.match(read(page), /burst-4/, 'the page holds the last change of the burst');
+    // A writer with nothing new to cover renders nothing.
+    const before = statSync(page).mtimeMs;
+    node('self', '--html', '--queued');
+    assert.equal(statSync(page).mtimeMs, before);
+    assert.match(spawnSync(process.execPath, [join(scriptsDir, 'run.mjs'), 'self', '--queued'], { env, encoding: 'utf8' }).stderr, /--queued goes with --html/);
+  } finally { await settled('the last writer').catch(() => {}); rmSync(dir, { recursive: true, force: true }); }
 });

@@ -125,6 +125,8 @@
 //                  one side study while the run waits (capped per run by --study-budget); lessons it added go in with lessons.mjs add --source
 //   run.mjs self [--json] [--html]  the coordinator's own view across every run here (age, learning, memory, stats,
 //                  history, plans, proposals, side study); --html writes coordinator.html in the state folder
+//                  (every change rewrites it in the background: --html --queued is that writer; COORDINATOR_SNAPSHOT=sync
+//                  writes it in place)
 //   run.mjs gaps [--json] [--all]   open gaps across every run here (stopped and unfinished units, runs closed early,
 //                  follow-ups, out-of-fence items, open questions, upstream proposals, escapes); --all adds resolved ones
 //   run.mjs gaps --check [--run R] [--dry-run]   asks GitHub through gh (opt-in; the gaps view's only network call)
@@ -213,7 +215,7 @@ import { findFeatureMap, validateBehavioursAgainstFeatureMap } from './lib/featu
 import { applyPacketTransitionVerdict, attachUnitStatechart, behaviourSignature, checkBarFeasibility, readBoundedJsonFile, resolveAllowedRoots, resolveWorktreeRoot, syncStatechartStatuses } from './lib/statechart.mjs';
 import { addEvidence, artifact, openStored, storedPath } from './lib/evidence.mjs';
 import { prismRefusal } from './lib/prismreport.mjs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { briefPrompt, buildBrief } from './lib/briefs.mjs';
 import { checksInForce, markUsed, topLessons } from './lib/lessonstore.mjs';
 import { afterFixIntegration, allows, decide, decideUnit, earlySummary, oneCritic, spent, FAILING, FINISH, finishQuestion, openFindings, requiredOn, roundCap, SAME_FILES, SEVERITIES, specialistFailure, stats } from './lib/rules.mjs';
@@ -221,7 +223,7 @@ import { usedMinutes } from './lib/clock.mjs';
 import { pauseNote, pausedRefusal, pauseRun, resumeRun } from './lib/pause.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning, unboundedRefusal, unboundedWords as unboundedWordsOf } from './lib/openbar.mjs';
-import { holdLock } from './lib/store.mjs';
+import { holdLock, lockHeld } from './lib/store.mjs';
 import { recordSuite, runSuite, SHA, summaryLines } from './lib/suites.mjs';
 import { precheck, precheckRules, RULES as PRECHECK_RULES } from './lib/precheck.mjs';
 import { parseDiff } from './lib/gaming.mjs';
@@ -292,7 +294,7 @@ const FLAGS = {
   init: ['alias', 'goal', 'bar', 'fence', 'paths', 'tag', 'max-rounds', 'max-minutes', 'max-units', 'max-added', 'stale-minutes', 'max-launch-minutes', 'max-launch-cost', 'repo', 'theme', 'study-budget', 'models', 'continues', 'accept-open', 'fold-max-files', 'fold-max-lines'],
   extend: ['rounds', 'minutes', 'reason', 'answer'], 'add-specialist': ['reason'],
   start: ['model', 'why', 'force-model', 'force-start', 'reason', 'skip-feasibility', ...COST_FLAGS], models: ['role', 'class'], foldin: ['head', 'reviewed', 'evidence', ...COST_FLAGS],
-  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
+  study: ['topic', 'area', 'text', 'source', 'lesson', 'by'], self: ['json', 'html', 'queued'], gaps: ['json', 'all', 'check', 'run', 'dry-run'], gap: ['reason', 'by', 'confirm'],
   add: ['bar', 'after', 'reason', 'title', 'link', 'issue', 'pr', 'behaviour', 'specialist', 'continues', 'accept-open', 'open', 'paths', 'feature-map', 'new-surface', 'statechart'], verdict: ['evidence', 'gap', 'cause', 'score', 'behaviour', 'critic', 'specialist', 'model', 'class', 'severity', 'finding', 'fold', 'full-suite', 'head', 'early', 'reins-packet', ...COST_FLAGS], strategy: ['text'], ship: ['merge', 'reason', 'answer', 'confirm'],
   integrate: ['evidence', 'gap', 'cause', 'behaviour', 'model'], beat: ['text'], built: ['report', 'head', 'base', 'changelog', 'skip-precheck', 'reason', ...COST_FLAGS],
   behave: ['goal', 'id', 'text', 'remove', 'reason', 'accept-open', 'open', 'feature-map', 'new-surface', 'statechart'], evidence: ['goal', 'behaviour', 'text', 'file', 'url', 'kind', 'label'],
@@ -418,11 +420,12 @@ function derived(s) {
   for (const u of s.units) writeAtomic(join(runDir(s.id), 'units', `${u.id}.html`), unitPage(v, u.id, Date.now(), { ...staticCtx(runDir(s.id), 1, theme), calls }));
   for (const [name, html] of reportPages(s, v, runDir(s.id), staticCtx(runDir(s.id), 0, theme))) writeAtomic(join(runDir(s.id), name), html);
   registerRun(s);
-  writeSnapshot();
+  queueSnapshot();
 }
 
 // coordinator.html in the state folder: the coordinator page as a file, rewritten after every change to a
-// run, so it is never older than the last change (about half a second on a 39 MB folder). It reads every
+// run (about a third of a second on a 56 MB folder), by a background process (queueSnapshot) so the command
+// that made the change does not wait for it. It reads every
 // run of this folder under the snapshot's own lock, so of two writers at once the later one, which read
 // the later state, writes last. The PC's runs come from the register alone. The live page is run.mjs dashboard.
 const snapshotFile = () => join(baseDir('project'), 'coordinator.html');
@@ -438,6 +441,51 @@ function writeSnapshot() {
     });
     return file;
   } catch (e) { console.error(`warning: ${file} was not rewritten: ${e.message}`); return null; }
+}
+
+// After a change: stamp coordinator.html.want and, unless a writer is already running, start one in the background
+// (run.mjs self --html --queued). The writer renders until the stamp stops changing, so a burst of changes costs one
+// or two renders and the page is never older than the last change once the writer exits. COORDINATOR_SNAPSHOT=sync
+// writes it in place instead (the default under node:test, whose temporary folders a background writer would outlive).
+const snapshotWant = () => `${snapshotFile()}.want`;
+const snapshotWriter = () => `${snapshotFile()}.writer`;
+const snapshotDone = () => `${snapshotFile()}.done`; // the stamp the last render covered
+const snapshotSync = () => (process.env.COORDINATOR_SNAPSHOT ?? (process.env.NODE_TEST_CONTEXT ? 'sync' : 'background')) === 'sync';
+const readStamp = (file) => { try { return readFileSync(file, 'utf8'); } catch { return ''; } };
+const readWant = () => readStamp(snapshotWant());
+const readDone = () => readStamp(snapshotDone());
+function queueSnapshot() {
+  if (snapshotSync()) return writeSnapshot();
+  try {
+    writeAtomic(snapshotWant(), `${process.pid} ${Date.now()} ${Math.random()}
+`);
+    if (lockHeld(snapshotWriter())) return null; // the running writer reads the new stamp before it exits
+    // Started outside the project (its folder named in the environment), so it never holds that folder open.
+    const env = { ...process.env, COORDINATOR_DIR: baseDir('project'), COORDINATOR_PROJECT_DIR: projectDir() };
+    spawnProcess(process.execPath, [RUN_MJS, 'self', '--html', '--queued'], { cwd: tmpdir(), env, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    return null;
+  } catch (e) {
+    console.error(`warning: coordinator.html is written in place (no background writer: ${e.message})`);
+    return writeSnapshot();
+  }
+}
+// The background writer: one at a time (coordinator.html.writer); it renders again while the stamp moved during a
+// render, and checks once more after letting go, so a change stamped while it was finishing is never left unwritten.
+function drainSnapshots() {
+  for (;;) {
+    let release;
+    try { release = holdLock(snapshotWriter(), { job: 'coordinator.html' }, { waitMs: 0 }); } catch { return null; } // another writer has it
+    try {
+      for (;;) {
+        const want = readWant();
+        if (want === readDone()) break; // a writer before this one already covered it
+        writeSnapshot();
+        writeAtomic(snapshotDone(), want);
+        if (readWant() === want) break;
+      }
+    } finally { release(); }
+    if (readWant() === readDone()) return snapshotFile();
+  }
 }
 
 // The runs of this folder the register does not know yet (from before it): registered once, from their state as it is.
@@ -1444,7 +1492,8 @@ const commands = {
     if (o.json !== undefined && o.html !== undefined) throw new Error('--json or --html, not both');
     const m = selfModel({ ...loadSelf(), current: null });
     if (o.json) return m;
-    if (o.html) return { file: writeSnapshot() };
+    if (o.queued !== undefined && !o.html) throw new Error('--queued goes with --html');
+    if (o.html) return { file: o.queued ? drainSnapshots() : writeSnapshot() };
     process.stdout.write(selfText(m));
     return null;
   },
