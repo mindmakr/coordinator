@@ -4,6 +4,7 @@
 // the lead reads and writes the same files through `push --to` / `pull --from` a folder.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { runSync } from '../../skills/coordinator/scripts/test/inproc.mjs';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -17,7 +18,7 @@ const RUN_MJS = fileURLToPath(new URL('../../skills/coordinator/scripts/run.mjs'
 
 function lead(dir) {
   return (...a) => {
-    const r = spawnSync(process.execPath, [RUN_MJS, ...a], { cwd: dir, env: { ...process.env, COORDINATOR_DIR: join(dir, '.coordinator') }, encoding: 'utf8' });
+    const r = runSync(a, { cwd: dir, env: { ...process.env, COORDINATOR_DIR: join(dir, '.coordinator') } });
     if (r.status !== 0) throw new Error(`run.mjs ${a.join(' ')}: ${r.stderr}`);
     return r.stdout;
   };

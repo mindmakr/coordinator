@@ -3,7 +3,7 @@
 // COORDINATOR.md. Read-only; a file that does not parse is skipped, never fatal.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { EVENTS, loadRun } from './events.mjs';
+import { EVENTS, peekRun } from './events.mjs';
 import { baseDir, isSafeId, projectDir, readJson } from './store.mjs';
 
 export const runsDir = () => join(baseDir('project'), 'runs');
@@ -23,14 +23,14 @@ export function loadRunsIn(stateDir) {
   const dir = join(stateDir, 'runs'); const out = [];
   let ids = [];
   try { ids = readdirSync(dir).filter(isSafeId); } catch { return out; }
-  for (const id of ids) { try { const s = loadRun(join(dir, id)); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ } }
+  for (const id of ids) { try { const s = peekRun(join(dir, id)); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ } }
   return out;
 }
 
 export function loadRuns() {
   const out = [];
   for (const id of runIds()) {
-    try { const s = loadRun(join(runsDir(), id)); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ }
+    try { const s = peekRun(join(runsDir(), id)); if (s && Array.isArray(s.units)) out.push(s); } catch { /* unreadable: left out */ }
   }
   return out;
 }

@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, relative } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { createHash } from 'node:crypto';
 import { parseLog, readRun, replay } from '../lib/events.mjs';
 
@@ -19,7 +20,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'coordinator-migration-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const json = (s) => { try { return JSON.parse(s); } catch { return s; } };
-const cli = (dir, ...a) => { const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' }); return { code: r.status, out: json(r.stdout), raw: r.stdout, err: r.stderr }; };
+const cli = (dir, ...a) => { const r = runSync(a, { env: { ...process.env, COORDINATOR_DIR: dir } }); return { code: r.status, out: json(r.stdout), raw: r.stdout, err: r.stderr }; };
 const files = (d) => readdirSync(d, { recursive: true }).map((f) => join(d, String(f))).filter((f) => statSync(f).isFile()).sort();
 const digest = (d) => Object.fromEntries(files(d).map((f) => [relative(d, f), createHash('sha256').update(readFileSync(f)).digest('hex')]));
 

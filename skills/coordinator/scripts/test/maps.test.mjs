@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { behaviourGrid, heat, MAX_COLS, waits } from '../lib/heat.mjs';
 import { staticCtx } from '../lib/hud.mjs';
 import { criticalPath, flowGraph, ghRef, mindGraph, refsIn, relevance } from '../lib/maps.mjs';
@@ -164,7 +165,7 @@ after(async () => {
   await Promise.all(children.map((c) => new Promise((ok) => { if (c.exitCode !== null) return ok(); c.once('exit', ok); c.kill(); })));
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
-const run = (...a) => spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8', cwd: dir });
+const run = (...a) => runSync(a, { env, cwd: dir });
 
 test('snapshot writes maps.html; serve shows /maps and /run/<other>/maps behind the token', async () => {
   run('init', 'm1', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--repo', 'acme/web');

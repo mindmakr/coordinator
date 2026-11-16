@@ -29,6 +29,10 @@ A lesson that was added before only has its count raised, never duplicated. Less
 - At framing, the lead may still read `lessons.mjs list --tag <domain> --top 8` to shape the units, and run `lessons.mjs use <id>` for a lesson that changed the plan.
 - `lessons.mjs prune --keep 60` runs during the retro and drops the least-seen, least-used lessons. The file stays small and the loading stays cheap.
 
+## Lessons become checks
+
+A lesson that names a rule is either enforced or marked as a hint: `lessons.mjs mark <id> --check "<the script check that enforces it>"`, or `lessons.mjs mark <id> --advisory`. `run.mjs init` prints the checks in force for the run: the ones the scripts enforce (the suite lock, pre-checks, CHANGELOG lines, closed behaviours, one critic on a small delta, overlapping paths, the batch unit, the lead's context budget) and every lesson marked `--check`.
+
 ## Promoting a lesson
 
 When `lessons.mjs list` shows a lesson that has been seen 3 or more times, propose moving it into the relevant reference file (`bar.md`, `briefs.md`, a domain file or a sub-skill) as a change for a person to review. Once it's merged, `lessons.mjs drop <id>`. That keeps the skill itself short and the lesson store for new things.

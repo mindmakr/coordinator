@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+Runs spend their time on the work, not on waiting: a faster test suite, no load flakes, one full suite per head, and checks the scripts enforce instead of lessons the lead must remember.
+
+- **`run.mjs` is about twice as fast per call, and the test suites are 3-4 times faster.** Pages and command-only modules load only for the commands that use them; the pages are rewritten only after a real write (most `next` calls change nothing); the coordinator page reads each run's snapshot without re-hashing its log when the snapshot is newer, and reads the run register once instead of once per row; the main checkout and the repo's remote are found without starting git on every call. The tests call `run.mjs` in process (`test/inproc.mjs`, a worker thread that keeps calls synchronous) instead of starting node hundreds of times. `npm test` went from 244 s to about 66 s and the service suite from 128 s to about 33 s on the same machine.
+- **No flakes when suites run side by side.** The PC dashboard, watch and serve tests wait for the event (a line, a lock taken, a process gone) with a long guard instead of a fixed time, and their HTTP calls use one connection per request (a kept-alive socket closed by the server between two slow requests gave ECONNRESET). Both suites passed three rounds run together.
+- **One full suite per head, one per machine (`run.mjs suite`).** The lead runs the full suite on a unit's head under a lock in `~/.coordinator`, or records a run made elsewhere; the critic brief for that head quotes the result and tells the critic not to run it again. Builder briefs say mapped tests only.
+- **Units never edit CHANGELOG.md.** `built --changelog "<line>"` stores the unit's line and `run.mjs changelog <run>` prints all of them for the release PR.
+- **Pre-checks before the critic (`run.mjs precheck`, `references/precheck.md`).** A CHANGELOG edit, a literal zero-width or text-direction character, a URL's `.pathname` used as a file path, a new test file the test command does not run, and a new module no test names. `built --head` refuses a head with a hit unless `--skip-precheck --reason`. The project's test lists and module folders go in `"precheck"` in `.coordinator/coordinator.json`.
+- **Behaviours name their cases.** `add --behaviour`, `behave` and `freeze` refuse never, any, all, cannot, only, always and every unless the line lists its cases or `--open "<why>"` is given (logged). When the same behaviour fails twice, `next` asks the person.
+- **One critic on a small delta.** From round 2, a build whose delta since the last reviewed head is under 200 lines gets one critic, the unit's specialist when it has one, with the general checks in its brief; its verdict closes the round and a second one is refused.
+- **Parallel by default.** Units added with `--paths` wait only while a unit with overlapping paths is being built; `next --all` gives the actions for every open run this window leads.
+- **Lessons become checks, and the lead's context is checked.** `lessons.mjs mark <id> --check "…" | --advisory`; `init` prints the checks in force. `next` reads the lead's transcript for usage numbers only, warns at 250k tokens, and lead steps stop over 300k until a compaction or a handover note. `run.mjs followup --triage batch|P1|P2|P3|drop` triages each follow-up; batch items build last as one unit.
+
 ## 1.8.0 (2026-11-16)
 One shell and one component set for every page, so the dashboard, the snapshot and the hosted service look and behave alike.
 

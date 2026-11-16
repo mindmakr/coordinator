@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { chainLine, chainOf, chainUnits, linkedRuns, parseContinues } from '../lib/chain.mjs';
 import { answerRefusal, grantQuestion, grantRefusal, namedRounds, noteApproves, noteRefusal } from '../lib/approval.mjs';
 import { text as argText } from '../lib/args.mjs';
@@ -20,7 +21,7 @@ const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'coordinator-chain-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 const run = (...args) => {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+  const r = runSync(args, { env: { ...process.env, COORDINATOR_DIR: dir } });
   return { code: r.status, out: r.stdout && r.stdout.trim().startsWith('{') ? JSON.parse(r.stdout) : r.stdout, err: r.stderr };
 };
 const state = (id) => JSON.parse(readFileSync(join(dir, 'runs', id, 'state.json'), 'utf8'));

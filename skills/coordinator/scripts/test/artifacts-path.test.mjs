@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { openStored, readStored, storedPath } from '../lib/evidence.mjs';
 import { validRun, validateEvent } from '../lib/eventschema.mjs';
 import { hud, staticCtx } from '../lib/hud.mjs';
@@ -24,7 +25,7 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 });
 const env = { ...process.env, COORDINATOR_DIR: join(dir, 'state') };
-const run = (...a) => spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env, encoding: 'utf8', cwd: dir });
+const run = (...a) => runSync(a, { env, cwd: dir });
 const runDir = (r) => join(dir, 'state', 'runs', r);
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 1)]);
 const SECRET = 'TOP-SECRET-1d9f';

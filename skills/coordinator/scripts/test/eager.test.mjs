@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { costEntry, costLine, runCost } from '../lib/cost.mjs';
 import { openWords } from '../lib/openbar.mjs';
 import { bySetup, decideUnit, escapes, openFindings } from '../lib/rules.mjs';
@@ -28,7 +29,7 @@ function commitFiles(files, msg) {
   return git('rev-parse', 'HEAD');
 }
 function cli(...args) {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd: repo, env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+  const r = runSync(args, { cwd: repo, env: { ...process.env, COORDINATOR_DIR: dir } });
   let out = null; try { out = JSON.parse(r.stdout || 'null'); } catch { out = r.stdout; }
   return { code: r.status, out, err: r.stderr };
 }
@@ -257,11 +258,16 @@ test('init, add and behave note an open-ended line; --accept-open silences it an
   assert.match(w.warning, /check this line, it may be open-ended: the bar \(catch every\).*--accept-open/);
   assert.equal(ok('init', 'open2', '--goal', 'g', '--bar', 'catch every leaked secret', '--fence', 'f', '--accept-open').warning, undefined);
   assert.ok(state('open2').notes.some((n) => n.kind === 'bar' && /kept an open-ended line on purpose/.test(n.text)));
-  assert.match(ok('add', 'open', 'a', '--bar', 'b', '--behaviour', 'every message that names the employer is masked').warning, /a B1 \(a class named by its wording\)/);
+  // A behaviour with an unbounded word is refused unless it lists its cases or carries --open (lib/openbar.mjs).
+  assert.match(cli('add', 'open', 'a', '--bar', 'b', '--behaviour', 'every message that names the employer is masked').err, /a behaviour 1 reads open-ended \(every\).*--open/);
+  assert.match(ok('add', 'open', 'a', '--bar', 'b', '--behaviour', 'every message that names the employer is masked', '--open', 'the messages are the three templates').warning, /a B1 \(a class named by its wording\)/);
   assert.equal(ok('add', 'open', 'b', '--bar', 'every route listed in routes.md returns 403').warning, undefined);
-  assert.match(ok('behave', 'open', 'b', '--text', 'It should never log a token anywhere').warning, /never … anywhere/);
-  ok('behave', 'open', 'b', '--text', 'It should catch every secret', '--accept-open');
-  assert.equal(state('open').notes.filter((n) => n.kind === 'bar').length, 1);
+  assert.match(ok('behave', 'open', 'b', '--text', 'It should never log a token anywhere', '--open', 'tokens reach logs through one logger').warning, /never … anywhere/);
+  ok('behave', 'open', 'b', '--text', 'It should catch every secret', '--accept-open', '--open', 'secrets are the patterns lib/secrets.mjs names');
+  // One note for --accept-open, and one per behaviour kept open with --open (its reason, logged).
+  const bars = state('open').notes.filter((n) => n.kind === 'bar');
+  assert.equal(bars.filter((n) => /kept an open-ended line on purpose/.test(n.text)).length, 1);
+  assert.deepEqual(bars.filter((n) => /kept open-ended/.test(n.text)).map((n) => n.text.split(':')[0]), ['a B1 kept open-ended (every)', 'b B1 kept open-ended (never)', 'b B2 kept open-ended (every)']);
 });
 
 test('cost: start, built and verdict record what the harness reported; show, stats and the HUD sum it', () => {
@@ -297,7 +303,7 @@ test('cost: start, built and verdict record what the harness reported; show, sta
 test('the briefs carry the test-run budget and the severity format', () => {
   setup('brief'); const s = state('brief');
   const b = buildBrief(s, { role: 'builder', unit: 'a' });
-  assert.match(b, /Run only the tests mapped to the files you changed.*Not the full suite: the critic runs it once on the head/s);
+  assert.match(b, /Run only the tests mapped to the files you changed.*Never the full suite: the lead runs it once on the head/s);
   const c = buildBrief(s, { role: 'critic', unit: 'a' });
   assert.match(c, /run the full suite once on the head/); assert.match(c, /only when you suspect a flake, and say so/);
   assert.match(c, /FINDINGS: one line each, <high\|medium\|low\|nit> <file:line> <what>/);

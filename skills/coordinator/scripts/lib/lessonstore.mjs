@@ -41,3 +41,22 @@ export function markUsed(lessons, run, now = new Date().toISOString()) {
   }
   return counted;
 }
+
+// The checks in force for a run (run.mjs init prints them): what the scripts enforce, then each lesson made a check
+// (lessons.mjs mark <id> --check …). A lesson marked advisory, or not marked, stays a hint in the briefs.
+export const SCRIPT_CHECKS = [
+  'suite: one full suite per head, run by the lead under the machine-wide suite lock (run.mjs suite); critics cite it',
+  'precheck: built refuses a head whose precheck has a hit (run.mjs precheck; rules in "precheck" of .coordinator/coordinator.json)',
+  'changelog: units never edit CHANGELOG.md; built --changelog stores the line, run.mjs changelog prints them for the release PR',
+  'behaviours: add, behave and freeze refuse never/any/all/cannot/only/always/every unless the cases are listed or --open says why',
+  'same behaviour: next asks the person after the same behaviour fails twice',
+  'one critic: from round 2, a delta under 200 lines gets one critic (the specialist when the unit has one)',
+  'paths: a unit whose --paths overlap a unit being built waits; separate paths build together',
+  'batch: small follow-ups (followup --triage batch) build last as one unit',
+  'lead context: next warns at 250k tokens and lead steps stop over 300k until a compaction or a handover note',
+];
+export function checksInForce(bases, { off = [] } = {}) {
+  const seen = new Set(); const lessons = [];
+  for (const base of new Set(bases)) for (const l of read(base)) if (l.check && !seen.has(l.id)) { seen.add(l.id); lessons.push(`lesson ${l.id}: ${l.check}`); }
+  return [...SCRIPT_CHECKS.filter((c) => !off.some((o) => c.startsWith(`${o}:`))), ...lessons];
+}

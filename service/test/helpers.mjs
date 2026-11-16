@@ -2,7 +2,7 @@
 // serves a coordinator-state branch and answers permission questions, and an
 // app wired to the in-memory database.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runSync } from '../../skills/coordinator/scripts/test/inproc.mjs';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,7 +33,7 @@ export function scripts(html, header) {
 export function makeRun(id = 'r1', { goal = `Totals match ${XSS}`, closed = false, issues = [], prs = [], file = false, mapOut = null, alias = null, askUnit = false, touches = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'coord-svc-'));
   const cli = (...a) => {
-    const r = spawnSync(process.execPath, [RUN_MJS, ...a], { cwd: dir, env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+    const r = runSync(a, { cwd: dir, env: { ...process.env, COORDINATOR_DIR: dir } }); // in process: test/inproc.mjs
     if (r.status !== 0) throw new Error(`run.mjs ${a.join(' ')}: ${r.stderr}`);
     return r.stdout;
   };

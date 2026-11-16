@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { projectPage } from '../lib/dashboard.mjs';
 import { projectName, questionLabel, questions, runName } from '../lib/questions.mjs';
 import { readRegistry } from '../lib/registry.mjs';
@@ -26,7 +27,7 @@ after(async () => {
 });
 
 const run = (...a) => {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { cwd: tmp, env, encoding: 'utf8' });
+  const r = runSync(a, { cwd: tmp, env });
   let out = r.stdout; try { out = JSON.parse(r.stdout); } catch { /* text */ }
   return { code: r.status, out, err: r.stderr };
 };

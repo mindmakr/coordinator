@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 
 // The project map rides the run's pit stop to the coordinator-state branch:
 // two machines (clones a and b) share a bare repo, each with its own state folder.
@@ -31,7 +32,7 @@ writeFileSync(join(code, 'messages', 'en.json'), JSON.stringify({ employer: { ti
 const stateDir = (m) => join(root, `${m === A ? 'a' : 'b'}-state`);
 for (const m of [A, B]) { mkdirSync(stateDir(m), { recursive: true }); writeFileSync(join(stateDir(m), 'coordinator.json'), JSON.stringify({ visibility: 'private' })); }
 const json = (s) => { try { return JSON.parse(s); } catch { return s; } };
-const cli = (m, ...a) => { const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { cwd: m, env: { ...process.env, COORDINATOR_DIR: stateDir(m) }, encoding: 'utf8' }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
+const cli = (m, ...a) => { const r = runSync(a, { cwd: m, env: { ...process.env, COORDINATOR_DIR: stateDir(m) } }); return { code: r.status, out: json(r.stdout), err: r.stderr }; };
 const show = (path) => git(origin, 'show', `coordinator-state:${path}`);
 
 test('push carries the staged map with the run, masked; nothing before a pit stop', () => {

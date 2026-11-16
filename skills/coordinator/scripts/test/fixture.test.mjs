@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const root = mkdtempSync(join(tmpdir(), 'coordinator-fixture-'));
@@ -16,7 +17,7 @@ const state = join(root, 'state');
 after(() => rmSync(root, { recursive: true, force: true }));
 
 function cli(...args) {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { env: { ...process.env, COORDINATOR_DIR: state }, encoding: 'utf8' });
+  const r = runSync(args, { env: { ...process.env, COORDINATOR_DIR: state } });
   let out = null; try { out = JSON.parse(r.stdout || 'null'); } catch { out = r.stdout; }
   return { code: r.status, out, err: r.stderr };
 }

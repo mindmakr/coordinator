@@ -5,13 +5,15 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'coordinator-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 function cli(script, ...args) {
-  const r = spawnSync(process.execPath, [join(scripts, script), ...args], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+  const env = { ...process.env, COORDINATOR_DIR: dir };
+  const r = script === 'run.mjs' ? runSync(args, { env }) : spawnSync(process.execPath, [join(scripts, script), ...args], { env, encoding: 'utf8' });
   return { code: r.status, out: r.stdout ? JSON.parse(r.stdout || 'null') : null, err: r.stderr };
 }
 const run = (...a) => cli('run.mjs', ...a);

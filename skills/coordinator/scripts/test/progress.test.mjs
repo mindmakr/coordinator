@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { decide } from '../lib/rules.mjs';
 import { hud } from '../lib/hud.mjs';
 import { selfModel, selfText } from '../lib/self.mjs';
@@ -184,7 +185,7 @@ test('show, the HUD, the coordinator page and its text agree with runStatus', ()
   assert.match(page, /1 run active/);
 });
 
-const cli = (dir, ...a) => spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...a], { env: { ...process.env, COORDINATOR_DIR: dir }, encoding: 'utf8' });
+const cli = (dir, ...a) => runSync(a, { env: { ...process.env, COORDINATOR_DIR: dir } });
 
 test('the CLI: list, status-line (one run and all), show and self print the same line', () => {
   const dir = join(tmp, 'cli');

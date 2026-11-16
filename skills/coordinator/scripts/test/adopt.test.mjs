@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { adopt, allowedRoots, pathsIn, refusal } from '../lib/adopt.mjs';
 import { artifactsCheck } from '../lib/doctor.mjs';
 
@@ -24,7 +25,7 @@ writeFileSync(join(wt, 'out.pdf'), '%PDF-1.4\n%fake\n');
 writeFileSync(join(wt, 'credentials.json'), '{"api_key":"Sup3rS3cretValue99"}\n');
 writeFileSync(join(wt, 'node_modules', 'x', 'log.txt'), 'dep log');
 
-const cli = (...args) => spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd: project, env: { ...process.env, COORDINATOR_DIR: state }, encoding: 'utf8' });
+const cli = (...args) => runSync(args, { cwd: project, env: { ...process.env, COORDINATOR_DIR: state } });
 const run = (...a) => { const r = cli(...a); assert.equal(r.status, 0, `${a.join(' ')}: ${r.stderr}`); return r.stdout; };
 const runDir = join(state, 'runs', 'r1');
 // A home folder that holds none of the scratch folders (the real one holds the OS temp folder).

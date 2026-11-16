@@ -43,11 +43,21 @@ import { answer } from ${JSON.stringify(new URL('../lib/questions.mjs', import.m
 const [dir, q, go, skill] = process.argv.slice(1);
 const nap = new Int32Array(new SharedArrayBuffer(4));
 updateRun(dir, { kind: 'answer', by: { harness: 'test', skill } }, (s) => {
-  for (let i = 0; i < 1200 && !existsSync(go); i++) Atomics.wait(nap, 0, 0, 25);
+  process.stdout.write('held\\n'); // the lock is ours: the test posts now
+  for (let i = 0; i < 4800 && !existsSync(go); i++) Atomics.wait(nap, 0, 0, 25);
   if (!existsSync(go)) throw new Error('no go file');
   answer(s, q, { choices: ['No'], by: 'lead', via: 'cli' });
 });
 `;
+// Waits for cond() to hold, checking as things happen; the long limit only stops a broken build from hanging (never
+// a timing the test depends on: on a loaded machine the events come late, not wrong).
+async function until(cond, what, ms = 120_000) {
+  const end = Date.now() + ms;
+  while (!(await cond())) { if (Date.now() > end) throw new Error(`gave up waiting: ${what}`); await new Promise((r) => setTimeout(r, 25)); }
+}
+// One connection per request: a kept-alive socket the server closed between two requests (seconds apart on a
+// loaded machine) fails the next request with ECONNRESET.
+const fetchClose = (u, o = {}) => fetch(u, { ...o, headers: { ...(o.headers ?? {}), Connection: 'close' } });
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 test.after(() => {
   // Never leave a dashboard behind: stop the one this file started, if it is still up.
@@ -155,7 +165,7 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     assert.ok(alive(pid));
     writeFileSync(join(home, 'dashboard.json'), JSON.stringify(rec));
 
-    const page = await (await fetch(url)).text();
+    const page = await (await fetchClose(url)).text();
     assert.match(page, /<div class="main"><details class="panel ask" data-d="pc-questions"[^>]* open><summary>.*?<h2>Questions<\/h2><span class="count">\d+<\/span>.*?<section data-k="pc-needs"[^>]* id="pc-needs"/s, 'the open questions are the first panel, with their count');
     assert.match(page, /gamma · gamma work \(rg\) › Task u1: Mobile card/);
     assert.match(page, /delta · delta work \(rd\) › Task u1: Mobile card/);
@@ -165,7 +175,7 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     const origin = `http://127.0.0.1:${port}`;
     const post = (fields, { headers = {}, t = token } = {}) => {
       const body = new URLSearchParams(t === null ? fields : { t, ...fields });
-      return fetch(new URL('/answer', url), { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin, ...headers } });
+      return fetchClose(new URL('/answer', url), { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin, ...headers } });
     };
 
     // The lead's watch on delta hears the answer given on the PC page.
@@ -203,9 +213,9 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
       // Answered now, so no longer open: a second answer from the PC page is refused.
       assert.equal((await post({ key: key('rg'), run: 'rg', q: qg, choice: 'No' })).status, 400);
       assert.deepEqual(qOf('gamma', 'rg', qg).history.length, 1);
-      for (let i = 0; i < 50 && !/answer q\d+ \(u1\) by person: "after the demo"/.test(heard); i++) await new Promise((r) => setTimeout(r, 100));
+      await until(() => /answer q\d+ \(u1\) by person: "after the demo"/.test(heard), 'the watch hears the answer');
       assert.match(heard, /answer q\d+ \(u1\) by person: "after the demo"/, 'the run\'s watch hears it');
-      const after = await (await fetch(url)).text();
+      const after = await (await fetchClose(url)).text();
       assert.doesNotMatch(after, /Ship gamma\?|Ship delta\?/, 'answered questions leave Needs you');
     } finally {
       // Wait for the watch to end before the after-hook removes its folder (Windows holds a running process's folder).
@@ -222,15 +232,17 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     const reDir = join(state('gamma'), 'runs', 're');
     const lock = join(reDir, 'state.json.lock');
     const go = join(tmp, 're.go');
-    const holder = spawn(process.execPath, ['--input-type=module', '-e', HOLD_AND_ANSWER, reDir, qe, go, VERSION], { env: env('gamma'), stdio: ['ignore', 'ignore', 'pipe'] });
+    const holder = spawn(process.execPath, ['--input-type=module', '-e', HOLD_AND_ANSWER, reDir, qe, go, VERSION], { env: env('gamma'), stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       let holderErr = ''; holder.stderr.on('data', (d) => { holderErr += d; });
+      let holderOut = ''; holder.stdout.on('data', (d) => { holderOut += d; });
       const held = new Promise((r) => holder.once('exit', r));
-      for (let i = 0; i < 400 && !existsSync(lock) && holder.exitCode === null; i++) await new Promise((r) => setTimeout(r, 50));
+      await until(() => /held/.test(holderOut) || holder.exitCode !== null, 'the other writer takes the lock');
       assert.ok(existsSync(lock), `the other writer holds the lock ${holderErr}`);
       const pending = post({ key: readRegistry({ home }).find((x) => x.run === 're').key, run: 're', q: qe, choice: 'Yes' });
+      // Gives the post time to reach the lock; the check below holds whether or not it has (never a flake).
       await new Promise((r) => setTimeout(r, 600));
-      assert.equal((await fetch(url)).status, 200, 'the page answers while an answer waits on a lock');
+      assert.equal((await fetchClose(url)).status, 200, 'the page answers while an answer waits on a lock');
       writeFileSync(go, '');
       assert.equal(await held, 0, holderErr);
       const raced = await pending;
@@ -249,7 +261,7 @@ test('B1-B3: run.mjs dashboard runs detached, takes answers for two projects, re
     const stop = cli('gamma', ['dashboard', 'stop']);
     assert.equal(stop.out.stopped, true, stop.raw + stop.err);
   }
-  for (let i = 0; i < 50 && alive(pid); i++) await new Promise((r) => setTimeout(r, 100));
+  await until(() => !alive(pid), 'the dashboard stops');
   assert.equal(alive(pid), false, 'stop stops it');
   assert.ok(!existsSync(join(home, 'dashboard.json')));
 });

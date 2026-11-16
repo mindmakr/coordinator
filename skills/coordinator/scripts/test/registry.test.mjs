@@ -7,6 +7,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, parse, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { detect, harnessOf, origin, versionWarning } from '../lib/harness.mjs';
 import { entryFor, inTemp, readRegistry, register, registryFile, skipRoots, tempRoots } from '../lib/registry.mjs';
 import { loadRun, updateRun, parseLog } from '../lib/events.mjs';
@@ -24,7 +25,7 @@ const state = (name) => join(tmp, name, '.coordinator');
 // Every run.mjs here writes to this test's own home, never the person's ~/.coordinator.
 const env = (name, extra = {}) => ({ ...process.env, COORDINATOR_DIR: state(name), COORDINATOR_HOME: home, COORDINATOR_HARNESS: '', CLAUDECODE: '', CLAUDE_CODE_ENTRYPOINT: '', ...extra });
 const cli = (name, args, extra) => {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd: tmp, env: env(name, extra), encoding: 'utf8' });
+  const r = runSync(args, { cwd: tmp, env: env(name, extra) });
   let out = null; try { out = JSON.parse(r.stdout); } catch { /* text */ }
   return { code: r.status, out, raw: r.stdout, err: r.stderr };
 };

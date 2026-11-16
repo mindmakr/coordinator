@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { buildMap } from '../lib/map/build.mjs';
 import { lex } from '../lib/map/lex.mjs';
 import { analyse } from '../lib/map/js.mjs';
@@ -242,7 +243,7 @@ test('the map page: "Touched by this run" lists each unit\'s files, linked to th
 // ---- CLI ----
 const state = join(dir, 'state');
 function cli(...args) {
-  const r = spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { env: { ...process.env, COORDINATOR_DIR: state }, encoding: 'utf8' });
+  const r = runSync(args, { env: { ...process.env, COORDINATOR_DIR: state } });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 

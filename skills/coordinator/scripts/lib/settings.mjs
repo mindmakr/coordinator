@@ -13,14 +13,16 @@
 //               builder, researcher, mechanical, or a task class: model name }
 //   helpers     small models for small jobs (lib/helpers.mjs, references/helpers.md)
 //   asking      dialog | dashboard: how the lead asks the person (lib/questions.mjs askingMode; dialog when unset)
+//   precheck    false, or { changelog, testList, modules, tests, off }: the pre-checks built enforces (lib/precheck.mjs)
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { launchCostProblem } from './cost.mjs';
 import { checkHelpers, helperConfig } from './helpers.mjs';
 import { ASKING } from './questions.mjs';
+import { precheckRules } from './precheck.mjs';
 
-export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'service', 'theme', 'budgets', 'merge', 'models', 'helpers', 'asking'];
+export const KEYS = ['visibility', 'state', 'stateRepo', 'remote', 'branch', 'service', 'theme', 'budgets', 'merge', 'models', 'helpers', 'asking', 'precheck'];
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 const name = (v) => typeof v === 'string' && v.trim() !== '' && !v.startsWith('-');
 const BRANCH = /^[A-Za-z0-9._/-]{1,100}$/;
@@ -96,6 +98,7 @@ export function checkSettings(s, project) {
     }
   }
   if (s.helpers !== undefined) for (const p of checkHelpers(s.helpers)) bad('helpers', p.text, p.level);
+  if (s.precheck !== undefined) { try { precheckRules(s.precheck); } catch (e) { bad('precheck', e.message); } }
   if (s.merge !== undefined) {
     if (!Array.isArray(s.merge) || !s.merge.every((b) => typeof b === 'string' && BRANCH.test(b) && !b.startsWith('-'))) bad('merge', 'merge must be a list of branch names ([] = open the PR only)');
     else for (const b of s.merge) if (['main', 'master', 'production', 'prod'].includes(b)) bad('merge', `merge allows "${b}": a release branch usually needs a person`, 'warn');

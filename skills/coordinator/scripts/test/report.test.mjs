@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runSync } from './inproc.mjs';
 import { copyNote, draft, draftMarkdown, gitRunner } from '../lib/report/draft.mjs';
 import { markdown } from '../lib/report/md.mjs';
 import { liveCtx, staticCtx } from '../lib/hud.mjs';
@@ -20,7 +21,7 @@ const project = join(root, 'proj'); const state = join(root, 'state');
 mkdirSync(project);
 const git = (...a) => { const r = spawnSync('git', a, { cwd: project, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
 const put = (p, t) => { mkdirSync(dirname(join(project, p)), { recursive: true }); writeFileSync(join(project, p), t); };
-const cli = (...args) => spawnSync(process.execPath, [join(scripts, 'run.mjs'), ...args], { cwd: project, env: { ...process.env, COORDINATOR_DIR: state }, encoding: 'utf8' });
+const cli = (...args) => runSync(args, { cwd: project, env: { ...process.env, COORDINATOR_DIR: state } });
 const run = (...a) => { const r = cli(...a); assert.equal(r.status, 0, `${a.join(' ')}: ${r.stderr}`); return r.stdout; };
 const runDir = (id) => join(state, 'runs', id);
 
