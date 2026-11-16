@@ -11,10 +11,10 @@ export const sameHead = (a, b) => typeof a === 'string' && typeof b === 'string'
   && (a.toLowerCase().startsWith(b.toLowerCase()) || b.toLowerCase().startsWith(a.toLowerCase()));
 
 // Records one full run on the unit: { head, ok, results (the summary lines), at, by, code?, seconds? }.
-export function recordSuite(unit, { head, ok, results, at, by = 'lead', code = null, seconds = null }) {
+export function recordSuite(unit, { head, ok, results, at, by = 'lead', code = null, seconds = null, untracked = [] }) {
   if (!SHA.test(head ?? '')) throw new Error('--head takes the commit the suite ran on (7-64 hex characters)');
   if (!Array.isArray(results) || !results.length) throw new Error('a suite record needs its result line (--result "<the pass line>")');
-  const rec = { head: head.toLowerCase(), ok: ok === true, results, at, by, ...(code !== null ? { code } : {}), ...(seconds !== null ? { seconds } : {}) };
+  const rec = { head: head.toLowerCase(), ok: ok === true, results, at, by, ...(code !== null ? { code } : {}), ...(seconds !== null ? { seconds } : {}), ...(untracked.length ? { untracked: untracked.slice(0, 20) } : {}) };
   unit.suites = [...(unit.suites ?? []), rec].slice(-KEEP);
   return rec;
 }
@@ -31,8 +31,9 @@ export function summaryLines(output, max = 6) {
 
 // Runs the suite's command (argv, never a shell string) and returns { code, output, seconds }. On Windows a command
 // that is a .cmd or .bat (npm, npx) cannot start without cmd.exe: it is run through cmd.exe /d /c only when every
-// argument is a plain word (letters, digits and _ @ % + = : , . / \ -), so nothing in it can be read as shell syntax.
-const PLAIN = /^[A-Za-z0-9_@%+=:,./\\-]+$/;
+// argument is a plain word (letters, digits and _ @ + = : , . / \ -), so nothing in it can be read as shell syntax.
+// No %: cmd.exe expands %NAME% even inside an argument.
+const PLAIN = /^[A-Za-z0-9_@+=:,./\\-]+$/;
 export function runSuite(argv, { cwd, env = process.env, spawn = spawnSync, platform = process.platform, now = Date.now } = {}) {
   if (!Array.isArray(argv) || !argv.length || typeof argv[0] !== 'string' || !argv[0]) throw new Error('suite: give the command after --, e.g. run.mjs suite <run> <unit> --head <sha> -- npm test');
   const t0 = now();

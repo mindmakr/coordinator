@@ -69,7 +69,7 @@ test('change-strategy carries the shared-writer hint for a repeated concurrency 
 
 test('a failed round keeps the head it judged, and the next critic brief reviews the delta from it', () => {
   ok('init', 'd1', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'd1', 'a', '--bar', 'b'); ok('freeze', 'd1');
-  ok('start', 'd1', 'a'); ok('built', 'd1', 'a', '--head', 'abc1234');
+  ok('start', 'd1', 'a'); ok('built', 'd1', 'a', '--head', 'abc1234', '--skip-precheck', '--reason', 'not a precheck test');
   const first = buildBrief(state('d1'), { role: 'critic', unit: 'a' });
   assert.doesNotMatch(first, /git diff/, 'round 1 reviews the whole unit');
   ok('verdict', 'd1', 'a', 'fail', '--score', '5', '--gap', 'g', '--evidence', 'e', '--severity', 'high', '--head', 'def5678');

@@ -23,7 +23,7 @@ export const DASHBOARD_HARNESS = 'dashboard';
 // The only variables the detached dashboard and its answer children get from the session that started it:
 // enough to find node, the user's folders and temp, and the register. No tokens, no session ids.
 const KEEP = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
-  'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'COORDINATOR_HOME', 'COORDINATOR_REGISTRY']);
+  'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'COORDINATOR_HOME', 'COORDINATOR_REGISTRY', 'COORDINATOR_SNAPSHOT', 'NODE_TEST_CONTEXT']);
 export function childEnv(env, extra = {}) {
   const out = {};
   for (const [k, v] of Object.entries(env)) if (KEEP.has(k.toUpperCase()) && typeof v === 'string') out[k] = v;

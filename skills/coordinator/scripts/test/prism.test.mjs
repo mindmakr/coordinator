@@ -103,7 +103,7 @@ test('evidence --kind prism checks the report against its tokens and the commit 
   run('start', 'p1', 'ui');
   const building = run('evidence', 'p1', 'ui', '--kind', 'prism', '--file', worktree(report({ head: HEAD2 })), '--label', 'builder self-check');
   assert.equal(building.code, 0, building.err);
-  assert.equal(run('built', 'p1', 'ui', '--head', 'aaaaaaaa').code, 0);
+  assert.equal(run('built', 'p1', 'ui', '--head', 'aaaaaaaa', '--skip-precheck', '--reason', 'not a precheck test').code, 0);
 
   const refused = [
     [worktree(report({ head: HEAD2 })), /the report is for commit bbbbbbbbbbbb, but the build being judged is aaaaaaaa/],
@@ -123,7 +123,7 @@ test('evidence --kind prism checks the report against its tokens and the commit 
 
   // Round 2: a new build at a new commit, and the critic's gate passes.
   run('start', 'p1', 'ui');
-  run('built', 'p1', 'ui', '--head', HEAD2);
+  run('built', 'p1', 'ui', '--head', HEAD2, '--skip-precheck', '--reason', 'not a precheck test');
   assert.equal(run('evidence', 'p1', 'ui', '--kind', 'prism', '--file', worktree(report({ head: HEAD2 }))).code, 0);
   const passed = run('verdict', 'p1', 'ui', 'pass', '--evidence', 'E3: the gate passed at bbbbbbb', '--score', '9');
   assert.equal(passed.code, 0, passed.err);
@@ -147,7 +147,7 @@ test('the prism specialist passes only on a PASS report attached while the unit 
   run('freeze', 'p2');
   run('start', 'p2', 'title');
   run('evidence', 'p2', 'title', '--kind', 'prism', '--file', worktree(report()));
-  run('built', 'p2', 'title', '--head', HEAD1);
+  run('built', 'p2', 'title', '--head', HEAD1, '--skip-precheck', '--reason', 'not a precheck test');
   const early = run('verdict', 'p2', 'title', 'pass', '--specialist', 'prism', '--evidence', 'the builder said it passed', '--score', '9');
   assert.equal(early.code, 1);
   assert.match(early.err, /the prism specialist passes only on a Prism gate report for this build that says PASS/);

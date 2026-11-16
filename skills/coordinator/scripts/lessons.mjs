@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // What past runs taught: short lessons, merged when they say the same thing,
-// ranked by how often they recur and are used, pruned so loading stays cheap.
+// ranked by how often they recur, then how recent, pruned so loading stays cheap.
 //
 //   lessons.mjs add --tag T --text "one sentence" [--from run] [--source URL …] [--scope global|project]
 //                   T is free: code, security, design, ux, stack, … --source is where it was learned (a study, a doc)
@@ -47,7 +47,8 @@ function main(cmd, pos, opt) {
   const touch = (id, field) => update(file, [], (all) => {
     const l = all.find((x) => x.id === id);
     if (!l) throw new Error(`no lesson ${id}`);
-    l[field]++; l.lastAt = now;
+    l[field]++;
+    if (field === 'seen') l.lastAt = now; else l.lastUsedAt = now; // lastAt: when it was last learned (the ranking's recency)
   });
   switch (cmd) {
     case 'add': {
@@ -94,7 +95,7 @@ function main(cmd, pos, opt) {
         const l = all.find((x) => x.id === id);
         if (!l) throw new Error(`no lesson ${id}`);
         if (check) { l.check = check; delete l.advisory; } else { l.advisory = true; delete l.check; }
-        l.lastAt = now;
+        l.markedAt = now; // lastAt stays when it was last learned: the ranking reads it
       });
       return { id, ...(check ? { check } : { advisory: true }) };
     }

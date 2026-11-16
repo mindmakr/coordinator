@@ -15,8 +15,10 @@ import { budgetCheck, MAX, usages, WARN } from '../lib/leadctx.mjs';
 import { unboundedRefusal, unboundedWords } from '../lib/openbar.mjs';
 import { precheck, precheckRules } from '../lib/precheck.mjs';
 import { parseDiff } from '../lib/gaming.mjs';
-import { gitCommonDir, holdLock, lockHeld } from '../lib/store.mjs';
-import { addedFiles, changedLines, commitOf, diffText, fileAt, namedIn } from '../lib/gitdiff.mjs';
+import { gitCommonDir, holdLock } from '../lib/store.mjs';
+import { drain, live, queue } from '../lib/bgjob.mjs';
+import { markUsed, topLessons } from '../lib/lessonstore.mjs';
+import { addedFiles, changedLines, commitOf, diffText, fileAt, namedIn, uncommitted } from '../lib/gitdiff.mjs';
 import { recordSuite, runSuite, sameHead, suiteFor, summaryLines } from '../lib/suites.mjs';
 
 const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -164,21 +166,40 @@ const ok = (...a) => { const r = cli(a); assert.equal(r.code, 0, `${a.join(' ')}
 const unitOfRun = (run, u) => loadRun(join(state, 'runs', run)).units.find((x) => x.id === u);
 
 test('suite: runs the command after -- under the machine lock and records it; critics of that head cite it', () => {
-  ok('init', 's1', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 's1', 'u', '--bar', 'b'); ok('freeze', 's1'); ok('start', 's1', 'u');
-  ok('built', 's1', 'u', '--head', 'abcdef1234');
-  const r = ok('suite', 's1', 'u', '--head', 'abcdef1234', '--', process.execPath, '-e', 'console.log("# tests 3"); console.log("# pass 3")');
-  assert.deepEqual([r.suite.ok, r.suite.results], [true, ['# tests 3', '# pass 3']]);
-  const brief = cli(['brief', 's1', 'u', '--role', 'critic', '--lessons', '0']).raw;
-  assert.match(brief, /The lead ran the full suite on this head \(abcdef1234, passed\): # tests 3 \| # pass 3\. Do not run the full suite/);
+  const p = project('suite-p');
+  const head = p.commit({ 'a.txt': 'a\n' });
+  const h12 = head.slice(0, 12);
+  const run = (...a) => cli(a, {}, p.root);
+  const okr = (...a) => { const r = run(...a); assert.equal(r.code, 0, `${a.join(' ')}: ${r.err}`); return r.out; };
+  okr('init', 's1', '--goal', 'g', '--bar', 'b', '--fence', 'f'); okr('add', 's1', 'u', '--bar', 'b'); okr('freeze', 's1'); okr('start', 's1', 'u');
+  okr('built', 's1', 'u', '--head', head, '--skip-precheck', '--reason', 'not a precheck test');
+  const r = okr('suite', 's1', 'u', '--head', h12, '--', process.execPath, '-e', 'console.log("# tests 3"); console.log("# pass 3")');
+  assert.deepEqual([r.suite.ok, r.suite.results, r.suite.head], [true, ['# tests 3', '# pass 3'], head], 'the full commit is recorded');
+  const brief = run('brief', 's1', 'u', '--role', 'critic', '--lessons', '0').raw;
+  assert.match(brief, new RegExp(`The lead ran the full suite on this head \\(${h12}, passed\\): # tests 3 \\| # pass 3\\. Do not run the full suite`));
   assert.doesNotMatch(brief, /run the full suite once on the head/);
-  const failed = ok('suite', 's1', 'u', '--head', 'abcdef1234', '--', process.execPath, '-e', 'console.log("# fail 1"); process.exit(1)');
+  const failed = okr('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', 'console.log("# fail 1"); process.exit(1)');
   assert.equal(failed.suite.ok, false);
-  assert.match(cli(['brief', 's1', 'u', '--role', 'critic', '--lessons', '0']).raw, /abcdef1234, FAILED/);
-  assert.equal(ok('suite', 's1', 'u', '--head', 'abcdef1234', '--result', '# pass 9').suite.results[0], '# pass 9');
-  assert.match(cli(['suite', 's1', 'u', '--head', 'abcdef1234']).err, /usage: run.mjs suite/);
-  assert.match(cli(['suite', 's1', 'u', '--head', 'xyz', '--result', 'r']).err, /--head takes the commit/);
+  assert.match(run('brief', 's1', 'u', '--role', 'critic', '--lessons', '0').raw, new RegExp(`${h12}, FAILED`));
+  assert.equal(okr('suite', 's1', 'u', '--head', h12, '--result', '# pass 9').suite.results[0], '# pass 9');
+  assert.match(run('suite', 's1', 'u', '--head', h12).err, /usage: run.mjs suite/);
+  assert.match(run('suite', 's1', 'u', '--head', 'xyz', '--result', 'r').err, /--head takes the commit/);
+  // The checkout must be the commit named, with no tracked change on top; a result from elsewhere must name a commit here.
+  assert.match(run('suite', 's1', 'u', '--head', 'abcdef1234', '--', process.execPath, '-e', '0').err, new RegExp(`this checkout is at ${h12}, not --head abcdef1234`));
+  assert.equal(okr('suite', 's1', 'u', '--head', 'abcdef1234', '--result', '# pass 1').suite.head, 'abcdef1234', 'a result for a commit from elsewhere is recorded as given');
+  writeFileSync(join(p.root, 'a.txt'), 'changed\n');
+  assert.match(run('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', '0').err, /1 tracked file\(s\) changed on top of .*\(a\.txt\)/);
+  writeFileSync(join(p.root, 'a.txt'), 'a\n');
+  writeFileSync(join(p.root, 'new.txt'), 'n\n');
+  const withNew = okr('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', 'console.log("# pass 1")');
+  assert.deepEqual(withNew.suite.untracked, ['new.txt'], 'an untracked file does not stop the run; it is recorded');
+  assert.match(run('brief', 's1', 'u', '--role', 'critic', '--lessons', '0').raw, /Untracked files were in the checkout \(new\.txt\): if the code needs one, the commit is incomplete/);
+  rmSync(join(p.root, 'new.txt'));
+  // Words after -- are the command's own, --harness included.
+  const echo = okr('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', 'console.log("# pass " + process.argv.slice(1).join(" "))', '--', '--harness', 'ci');
+  assert.deepEqual(echo.suite.results, ['# pass --harness ci']);
   // A builder brief says mapped tests only, no CHANGELOG edits, and to run the precheck.
-  const b = cli(['brief', 's1', 'u', '--role', 'builder', '--lessons', '0']).raw;
+  const b = run('brief', 's1', 'u', '--role', 'builder', '--lessons', '0').raw;
   assert.match(b, /Never the full suite: the lead runs it once on the head/);
   assert.match(b, /Never edit CHANGELOG\.md.*built s1 u --changelog/);
   assert.match(b, /run\.mjs precheck s1 u --base <base> --head <your commit>/);
@@ -187,11 +208,13 @@ test('suite: runs the command after -- under the machine lock and records it; cr
 test('suite: a second full suite on this machine waits for the lock', async () => {
   const lock = join(process.env.COORDINATOR_HOME, 'suite.lock');
   const store = new URL('../lib/store.mjs', import.meta.url).href;
+  const root = join(state, 'suite-p');
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   // Another process holds the suite lock for 1.5 s.
   const holder = spawn(process.execPath, ['--input-type=module', '-e', `import { holdLock } from ${JSON.stringify(store)}; const r = holdLock(process.argv[1], { run: 'other', unit: 'x' }); console.log('held'); setTimeout(r, 1500);`, lock], { stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise((r) => holder.stdout.once('data', r));
   const t0 = Date.now();
-  const r = cli(['suite', 's1', 'u', '--head', 'abcdef1234', '--', process.execPath, '-e', 'console.log("# pass 1")']);
+  const r = cli(['suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', 'console.log("# pass 1")'], {}, root);
   assert.equal(r.code, 0, r.err);
   assert.ok(Date.now() - t0 >= 1000, 'it waited for the other suite');
   assert.match(r.err, /waiting: a full suite is running on this machine \(run other, unit x/);
@@ -267,12 +290,12 @@ test('one critic on a small delta from round 2: the specialist judges alone and 
   const run = (...a) => cli(a, {}, p.root);
   const okp = (...a) => { const r = run(...a); assert.equal(r.code, 0, `${a.join(' ')}: ${r.err}`); return r.out; };
   okp('init', 'c1', '--goal', 'g', '--bar', 'b', '--fence', 'f'); okp('add', 'c1', 'u', '--bar', 'b', '--specialist', 'security'); okp('freeze', 'c1');
-  okp('start', 'c1', 'u'); okp('built', 'c1', 'u', '--head', h1);
+  okp('start', 'c1', 'u'); okp('built', 'c1', 'u', '--head', h1, '--skip-precheck', '--reason', 'not a precheck test');
   // Round 1: both critics, as before.
   okp('verdict', 'c1', 'u', 'fail', '--specialist', 'security', '--severity', 'high', '--gap', 'g', '--evidence', 'e', '--score', '4');
   okp('verdict', 'c1', 'u', 'fail', '--severity', 'high', '--gap', 'g', '--evidence', 'e', '--score', '4', '--head', h1);
   const h2 = p.commit({ 'a.js': 'export const a = 2;\n' });
-  okp('start', 'c1', 'u'); okp('built', 'c1', 'u', '--head', h2);
+  okp('start', 'c1', 'u'); okp('built', 'c1', 'u', '--head', h2, '--skip-precheck', '--reason', 'not a precheck test');
   assert.equal(unitOfRun('c1', 'u').delta.lines, 2);
   const judge = okp('next', 'c1').units[0];
   assert.deepEqual([judge.action, judge.critics, judge.critic, judge.deltaLines], ['judge', 1, 'security', 2]);
@@ -353,7 +376,7 @@ test('coordinator.html is written by a background writer: the change returns fir
   // Settled: the last stamp is covered and no writer holds the lock (the writer's own signal, not a pause).
   const settled = async (what) => {
     for (const end = Date.now() + 60_000; ; await new Promise((r) => setTimeout(r, 25))) {
-      if (read(`${page}.want`) && read(`${page}.want`) === read(`${page}.done`) && !lockHeld(`${page}.writer`)) return;
+      if (read(`${page}.want`) && read(`${page}.want`) === read(`${page}.done`) && !live(`${page}.writer`)) return;
       if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
     }
   };
@@ -372,4 +395,193 @@ test('coordinator.html is written by a background writer: the change returns fir
     assert.equal(statSync(page).mtimeMs, before);
     assert.match(spawnSync(process.execPath, [join(scriptsDir, 'run.mjs'), 'self', '--queued'], { env, encoding: 'utf8' }).stderr, /--queued goes with --html/);
   } finally { await settled('the last writer').catch(() => {}); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- 1.9.1: the review of PR #182 ----
+test('next rebuilds a stale snapshot without crashing (the page modules load for that write)', () => {
+  ok('init', 'st1', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'st1', 'u', '--bar', 'b');
+  writeFileSync(join(state, 'runs', 'st1', 'state.json'), '{}');
+  const r = cli(['next', 'st1']);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out.units[0].id, 'u');
+  assert.match(readFileSync(join(state, 'runs', 'st1', 'hud.html'), 'utf8'), /st1/);
+});
+
+test('a solo prism critic on a small delta still needs a PASS gate report', () => {
+  const p = project('solo-prism');
+  const h1 = p.commit({ 'a.css': '.a{}\n' });
+  const run = (...a) => cli(a, {}, p.root);
+  const okp = (...a) => { const r = run(...a); assert.equal(r.code, 0, `${a.join(' ')}: ${r.err}`); return r.out; };
+  okp('init', 'sp', '--goal', 'g', '--bar', 'b', '--fence', 'f'); okp('add', 'sp', 'u', '--bar', 'b', '--specialist', 'prism'); okp('freeze', 'sp');
+  okp('start', 'sp', 'u'); okp('built', 'sp', 'u', '--head', h1, '--skip-precheck', '--reason', 'not a precheck test');
+  okp('verdict', 'sp', 'u', 'fail', '--specialist', 'prism', '--severity', 'high', '--gap', 'g', '--evidence', 'e', '--score', '4');
+  okp('verdict', 'sp', 'u', 'fail', '--severity', 'high', '--gap', 'g', '--evidence', 'e', '--score', '4', '--head', h1);
+  const h2 = p.commit({ 'a.css': '.a{color:red}\n' });
+  okp('start', 'sp', 'u'); okp('built', 'sp', 'u', '--head', h2, '--skip-precheck', '--reason', 'not a precheck test');
+  assert.equal(okp('next', 'sp').units[0].critic, 'prism');
+  assert.match(run('verdict', 'sp', 'u', 'pass', '--specialist', 'prism', '--evidence', 'e', '--score', '9').err, /the prism specialist passes only on a Prism gate report/);
+});
+
+test('the batch unit counts against the unit and scope caps, and only the lead adds it', () => {
+  ok('init', 'bc', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-units', '1'); ok('add', 'bc', 'a', '--bar', 'b'); ok('freeze', 'bc');
+  assert.match(cli(['followup', 'bc', '--text', 'x', '--triage', 'batch', '--reason', 'r']).err, /unit cap reached \(1\): no room for the batch unit/);
+  ok('init', 'bd', '--goal', 'g', '--bar', 'b', '--fence', 'f', '--max-added', '0'); ok('add', 'bd', 'a', '--bar', 'b'); ok('freeze', 'bd');
+  assert.match(cli(['followup', 'bd', '--text', 'x', '--triage', 'batch', '--reason', 'r']).err, /scope cap reached/);
+  ok('init', 'be', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'be', 'a', '--bar', 'b'); ok('freeze', 'be');
+  assert.match(cli(['followup', 'be', '--text', 'x', '--triage', 'batch', '--reason', 'r'], { COORDINATOR_LEAD: 'not-the-lead' }).err, /led by another window/);
+  assert.equal(cli(['followup', 'be', '--text', 'y', '--triage', 'P3', '--reason', 'r'], { COORDINATOR_LEAD: 'not-the-lead' }).code, 0, 'other triage is not a lead step');
+  ok('followup', 'be', '--text', 'x', '--triage', 'batch', '--reason', 'small');
+  assert.ok(loadRun(join(state, 'runs', 'be')).notes.some((n) => n.kind === 'scope' && /added batch: small/.test(n.text)));
+});
+
+test('of two open units whose paths overlap, the first builds and the second waits', () => {
+  ok('init', 'ov', '--goal', 'g', '--bar', 'b', '--fence', 'f');
+  ok('add', 'ov', 'a', '--bar', 'b', '--paths', 'src/api');
+  ok('add', 'ov', 'b', '--bar', 'b', '--paths', 'src/api/x.ts');
+  ok('add', 'ov', 'c', '--bar', 'b', '--paths', 'src/api/y.ts');
+  ok('add', 'ov', 'd', '--bar', 'b', '--paths', 'web');
+  ok('freeze', 'ov');
+  const units = ok('next', 'ov').units.map((u) => [u.id, u.action, u.reason ?? '']);
+  assert.deepEqual(units.map((u) => u.slice(0, 2)), [['a', 'build'], ['b', 'wait'], ['c', 'wait'], ['d', 'build']]);
+  assert.match(units[1][2], /paths overlap a, which builds first/);
+  // The order is soft: the lead may start b instead, and a then waits for it.
+  ok('start', 'ov', 'b');
+  const after = ok('next', 'ov').units;
+  assert.deepEqual([after[0].action, after[2].action], ['wait', 'build'], 'c (src/api/y.ts) does not overlap b, and a, which it overlaps, is waiting');
+  assert.match(after[0].reason, /paths overlap b, being built/);
+  assert.equal(cli(['start', 'ov', 'a']).code, 1, 'a unit whose paths are being built cannot start');
+});
+
+test('built --head with no precheck for that head is refused unless --base or --skip-precheck --reason', () => {
+  const p = project('nopre');
+  const base = p.commit({ 'a.mjs': 'export const a = 1;\n' });
+  const head = p.commit({ 'a.mjs': 'export const a = 2;\n' });
+  const run = (...a) => cli(a, {}, p.root);
+  for (const a of [['init', 'np', '--goal', 'g', '--bar', 'b', '--fence', 'f'], ['add', 'np', 'u', '--bar', 'b'], ['freeze', 'np'], ['start', 'np', 'u']]) assert.equal(run(...a).code, 0);
+  assert.match(run('built', 'np', 'u', '--head', head).err, /built refused: no precheck of .*pass --base/);
+  assert.equal(run('built', 'np', 'u', '--head', head, '--base', base).code, 0);
+  assert.equal(unitOfRun('np', 'u').precheck.hits.length, 0);
+  // With every rule off in coordinator.json, no precheck is needed.
+  writeFileSync(join(state, 'coordinator.json'), JSON.stringify({ precheck: false }));
+  try {
+    for (const a of [['init', 'np2', '--goal', 'g', '--bar', 'b', '--fence', 'f'], ['add', 'np2', 'u', '--bar', 'b'], ['freeze', 'np2'], ['start', 'np2', 'u']]) assert.equal(run(...a).code, 0);
+    assert.equal(run('built', 'np2', 'u', '--head', head).code, 0);
+  } finally { rmSync(join(state, 'coordinator.json')); }
+});
+
+test('gaps: a dropped follow-up is closed with its reason; a batch item closes when the batch unit passes', () => {
+  ok('init', 'gp', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'gp', 'a', '--bar', 'b'); ok('freeze', 'gp');
+  ok('followup', 'gp', '--text', 'not worth it', '--triage', 'drop', '--reason', 'cosmetic');
+  ok('followup', 'gp', '--text', 'fix the typo', '--triage', 'batch', '--reason', 'small');
+  const open = () => { const g = ok('gaps', '--json'); return (Array.isArray(g) ? g : g.gaps).filter((x) => x.run === 'gp' && x.kind === 'follow-up').map((x) => x.text); };
+  assert.deepEqual(open(), ['fix the typo']);
+  ok('start', 'gp', 'a'); ok('built', 'gp', 'a'); ok('verdict', 'gp', 'a', 'pass', '--evidence', 'e', '--score', '9');
+  ok('start', 'gp', 'batch'); ok('built', 'gp', 'batch'); ok('verdict', 'gp', 'batch', 'pass', '--evidence', 'e', '--score', '9');
+  assert.deepEqual(open(), []);
+});
+
+test('cmd.exe never gets a % (it expands %NAME%); a backslash is still a plain word', () => {
+  const fake = (cmd) => (cmd === 'npm' ? { error: Object.assign(new Error('x'), { code: 'EINVAL' }) } : { status: 0, stdout: '', stderr: '' });
+  assert.throws(() => runSuite(['npm', 'test', '--', '--grep=%USERPROFILE%'], { spawn: fake, platform: 'win32' }), /not a plain word/);
+  assert.equal(runSuite(['npm', 'test', 'test\\a.test.mjs'], { spawn: fake, platform: 'win32' }).code, 0);
+});
+
+test('next on a legacy run (a state.json and no log) imports it and writes its pages', () => {
+  ok('init', 'lg', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'lg', 'u', '--bar', 'b');
+  const dir = join(state, 'runs', 'lg');
+  const snap = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
+  delete snap.snapshot;
+  writeFileSync(join(dir, 'state.json'), JSON.stringify(snap));
+  rmSync(join(dir, 'events.jsonl')); rmSync(join(dir, 'hud.html'), { force: true });
+  const r = cli(['next', 'lg']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(readFileSync(join(dir, 'events.jsonl'), 'utf8').includes('run.imported'));
+  assert.match(readFileSync(join(dir, 'hud.html'), 'utf8'), /lg/);
+});
+
+test('bgjob: one writer for a burst, a handed-over lock, a failed job retried, a too old or dead holder taken over', () => {
+  const dir = join(tmp, 'bgjob'); mkdirSync(dir, { recursive: true });
+  const files = { want: join(dir, 'w'), done: join(dir, 'd'), lock: join(dir, 'l'), error: join(dir, 'e') };
+  const CHILD = 424242; // a pid the fake start hands the lock to, alive as far as these tests say
+  const alive = (pid) => pid === process.pid || pid === CHILD;
+  let starts = 0;
+  let handover = null;
+  const start = (h) => { starts++; handover = h; return CHILD; };
+  assert.equal(queue(files, start, { alive }), 'started');
+  for (let i = 0; i < 4; i++) assert.equal(queue(files, start, { alive }), 'running', 'a burst starts one writer');
+  assert.equal(starts, 1);
+  assert.equal(JSON.parse(readFileSync(files.lock, 'utf8')).pid, CHILD, 'the lock is handed to the writer');
+  // Without its hand-over id a writer finds the lock busy; with it, it adopts the lock, renders once for the
+  // burst, and lets go.
+  assert.equal(drain(files, () => {}, { alive }), 'busy');
+  let runs = 0;
+  assert.equal(drain(files, () => { runs++; }, { handover, alive }), 'done');
+  assert.equal(runs, 1);
+  assert.equal(live(files.lock, { alive }), false);
+  // A failed job: no done stamp, the error kept; the next change starts a writer again.
+  queue(files, start, { alive });
+  assert.equal(drain(files, () => { throw new Error('a run would not read'); }, { handover, alive }), 'failed');
+  assert.match(readFileSync(files.error, 'utf8'), /a run would not read/);
+  assert.notEqual(readFileSync(files.want, 'utf8'), readFileSync(files.done, 'utf8'));
+  assert.equal(queue(files, start, { alive }), 'started');
+  assert.equal(drain(files, () => {}, { handover, alive }), 'done');
+  assert.throws(() => readFileSync(files.error), /ENOENT/, 'a good run clears the error');
+  // A holder that is gone, or whose stamp is too old (a reused pid), is no writer.
+  writeFileSync(files.lock, JSON.stringify({ pid: 999999, at: new Date().toISOString() }));
+  assert.equal(queue(files, start, { alive }), 'started');
+  writeFileSync(files.lock, JSON.stringify({ pid: CHILD, at: new Date(Date.now() - 10 * 60_000).toISOString() }));
+  assert.equal(live(files.lock, { alive }), false);
+  assert.equal(queue(files, start, { alive }), 'started');
+  // A start that fails leaves no lock behind.
+  rmSync(files.lock, { force: true });
+  assert.throws(() => queue(files, () => { throw new Error('EAGAIN'); }, { alive }), /EAGAIN/);
+  assert.equal(live(files.lock, { alive }), false);
+});
+
+test('built without --head says no precheck ran; a full batch takes no more items; carrying a lesson keeps its recency', () => {
+  ok('init', 'nh', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'nh', 'u', '--bar', 'b'); ok('freeze', 'nh'); ok('start', 'nh', 'u');
+  assert.match(ok('built', 'nh', 'u').warning, /no --head: no precheck ran/);
+  ok('init', 'bf', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'bf', 'a', '--bar', 'b'); ok('freeze', 'bf');
+  for (let i = 0; i < 4; i++) ok('followup', 'bf', '--text', `${'x'.repeat(440)} ${i}`, '--triage', 'batch', '--reason', 'r');
+  assert.match(cli(['followup', 'bf', '--text', 'y'.repeat(440), '--triage', 'batch', '--reason', 'r']).err, /the batch is full/);
+  const base = join(tmp, 'lessons-recency'); mkdirSync(base, { recursive: true });
+  writeFileSync(join(base, 'lessons.json'), JSON.stringify([{ id: 'l1', tag: 'code', text: 't', seen: 1, used: 0, firstAt: '2026-01-01', lastAt: '2026-01-01', from: [] }]));
+  markUsed(topLessons([base], 'code', 1), 'run-x');
+  const l = JSON.parse(readFileSync(join(base, 'lessons.json'), 'utf8'))[0];
+  assert.deepEqual([l.used, l.lastAt, typeof l.lastUsedAt], [1, '2026-01-01', 'string']);
+});
+
+test('lessons: briefs rotate equal lessons, skip those marked --check, and never rank by how often briefs carried them', () => {
+  const base = join(tmp, 'lessons-rank'); mkdirSync(base, { recursive: true });
+  const L = (id, seen, usedIn, lastAt, extra = {}) => ({ id, tag: 'code', text: id, seen, used: usedIn.length, usedIn, firstAt: lastAt, lastAt, from: [], ...extra });
+  writeFileSync(join(base, 'lessons.json'), JSON.stringify([
+    L('old-carried', 1, ['r1', 'r2', 'r3', 'r4', 'r5', 'r6'], '2026-01-01'), L('fresh', 1, [], '2026-02-01'), L('recurring', 3, [], '2025-12-01'),
+    L('enforced', 5, [], '2026-03-01', { check: 'suite' }), L('other-tag', 9, [], '2026-03-01', { tag: 'ui' }), L('everywhere', 1, [], '2025-01-01', { tag: 'general' }),
+  ]));
+  assert.deepEqual(topLessons([base], 'code', 4).map((l) => l.id), ['recurring', 'fresh', 'everywhere', 'old-carried']);
+});
+
+test('behaviours refuse "nothing" without its cases; precheck flags a NUL byte', () => {
+  assert.deepEqual(unboundedWords('nothing reads the old table'), ['nothing']);
+  const hits = precheck({ files: [{ path: 'a.mjs', added: [`x.split('${String.fromCharCode(0)}')`] }], added: [] }, precheckRules(undefined));
+  assert.match(hits[0].detail, /U\+0000/);
+});
+
+test('a commit from another repository is built with a warning; duplicate "off" names do not turn the precheck off; a rename is one uncommitted entry', () => {
+  const p = project('foreign');
+  p.commit({ 'a.mjs': 'export const a = 1;\n' });
+  const run = (...a) => cli(a, {}, p.root);
+  for (const a of [['init', 'fr', '--goal', 'g', '--bar', 'b', '--fence', 'f'], ['add', 'fr', 'u', '--bar', 'b'], ['freeze', 'fr'], ['start', 'fr', 'u']]) assert.equal(run(...a).code, 0);
+  const r = run('built', 'fr', 'u', '--head', 'abcdef1234567');
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out.warning, /abcdef123456 is not a commit in this repository: no precheck ran/);
+  writeFileSync(join(state, 'coordinator.json'), JSON.stringify({ precheck: { off: ['changelog', 'changelog', 'invisible', 'pathname', 'test-list'] } }));
+  try {
+    for (const a of [['init', 'fr2', '--goal', 'g', '--bar', 'b', '--fence', 'f'], ['add', 'fr2', 'u', '--bar', 'b'], ['freeze', 'fr2'], ['start', 'fr2', 'u']]) assert.equal(run(...a).code, 0);
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: p.root, encoding: 'utf8' }).trim();
+    assert.match(run('built', 'fr2', 'u', '--head', head).err, /no precheck of/, 'untested is still on');
+  } finally { rmSync(join(state, 'coordinator.json')); }
+  execFileSync('git', ['mv', 'a.mjs', 'b.mjs'], { cwd: p.root });
+  writeFileSync(join(p.root, 'u.txt'), 'u');
+  assert.deepEqual(uncommitted(p.root), { changed: ['b.mjs'], untracked: ['u.txt'] });
 });

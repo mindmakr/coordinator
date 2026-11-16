@@ -25,13 +25,13 @@ A lesson that was added before only has its count raised, never duplicated. Less
 
 ## Using lessons
 
-- `run.mjs brief` puts the top lessons for the run's tag (and the general ones) into every builder and critic brief as fenced hints: five by default, `--lessons N` for more or fewer, `--lessons 0` for none. A lesson counts as used once per run, so the ranking learns which lessons keep mattering.
+- `run.mjs brief` puts the top lessons for the run's tag (and the general ones) into every builder and critic brief as fenced hints: five by default, `--lessons N` for more or fewer, `--lessons 0` for none. They rank by how often the lesson recurred, then by how recent it is; of equals, the ones carried in fewer runs come first, so the hints rotate. A lesson marked `--check` is not carried: the scripts enforce it. A lesson counts as used once per run (shown by `lessons.mjs list`), and that count never raises its rank.
 - At framing, the lead may still read `lessons.mjs list --tag <domain> --top 8` to shape the units, and run `lessons.mjs use <id>` for a lesson that changed the plan.
-- `lessons.mjs prune --keep 60` runs during the retro and drops the least-seen, least-used lessons. The file stays small and the loading stays cheap.
+- `lessons.mjs prune --keep 60` runs during the retro and drops the least-seen lessons, oldest first. The file stays small and the loading stays cheap.
 
 ## Lessons become checks
 
-A lesson that names a rule is either enforced or marked as a hint: `lessons.mjs mark <id> --check "<the script check that enforces it>"`, or `lessons.mjs mark <id> --advisory`. `run.mjs init` prints the checks in force for the run: the ones the scripts enforce (the suite lock, pre-checks, CHANGELOG lines, closed behaviours, one critic on a small delta, overlapping paths, the batch unit, the lead's context budget) and every lesson marked `--check`.
+A lesson that names a rule is either enforced or marked as a hint: `lessons.mjs mark <id> --check "<the script check that enforces it>"`, or `lessons.mjs mark <id> --advisory`. `run.mjs init` prints the checks in force for the run: the ones the scripts enforce (the suite lock, pre-checks, CHANGELOG lines, closed behaviours, the same behaviour or the same files failing twice, one critic on a small delta, overlapping paths, the batch unit, the lead's context budget) and every lesson marked `--check`.
 
 ## Promoting a lesson
 

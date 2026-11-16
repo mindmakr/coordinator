@@ -171,7 +171,12 @@ function noteGaps(run, list, repo, out) {
       return out.push({ ...base, kind: 'upstream', from: `${n.kind} note`, auto: auto ?? tracked() });
     }
     if (n.kind !== 'follow-up') return; // a retro note that is not an upstream proposal is a lesson, not a gap
-    out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'follow-up', from: n.noVerdict === true ? 'shipped without a final verdict' : typeof n.shipped === 'string' ? `shipped with follow-ups (${n.shipped})` : 'follow-up note', auto: folded(n.text, run, list) ?? tracked() });
+    // Triaged (run.mjs followup, lib/followups.mjs): a dropped item is closed with its reason, a batch item once the
+    // batch unit has passed; P1-P3 stay open until filed.
+    const batch = n.triage === 'batch' ? (run.units ?? []).find((u) => u.batch === true) : null;
+    const triaged = n.triage === 'drop' ? { reason: `dropped at triage: ${n.reason ?? 'no reason given'}`, by: 'state', derived: true, at: n.at ?? null }
+      : batch?.status === 'pass' && String(batch.bar ?? '').includes(n.text) ? { reason: `built in the batch unit (${batch.id})`, by: 'state', derived: true } : null;
+    out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'follow-up', from: n.noVerdict === true ? 'shipped without a final verdict' : typeof n.shipped === 'string' ? `shipped with follow-ups (${n.shipped})` : n.triage ? `follow-up triaged ${n.triage}` : 'follow-up note', auto: triaged ?? folded(n.text, run, list) ?? tracked() });
   });
 }
 

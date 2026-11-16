@@ -46,7 +46,7 @@ export const FIX_ROUND_LINE = 'This is a fix round and you are a new agent. Fix 
 export const findingsLine = (path, role) => `Read ${path} in full first: it lists every finding to ${role === 'builder' ? 'fix' : 'check'}.`;
 export const SUITE_CITE_LINE = 'When this brief quotes a full-suite run on this head, cite it and do not run the suite again.';
 // The lead's recorded full-suite run on the head being judged (run.mjs suite, lib/suites.mjs): the critic cites it.
-export const suiteDoneLine = (rec) => `The lead ran the full suite on this head (${rec.head.slice(0, 12)}, ${rec.ok ? 'passed' : 'FAILED'}): ${rec.results.join(' | ')}. Do not run the full suite: run the tests mapped to the changed files, the red test and your own probes, and cite this run in EVIDENCE.`;
+export const suiteDoneLine = (rec) => `The lead ran the full suite on this head (${rec.head.slice(0, 12)}, ${rec.ok ? 'passed' : 'FAILED'}): ${rec.results.join(' | ')}.${rec.untracked?.length ? ` Untracked files were in the checkout (${rec.untracked.join(', ')}): if the code needs one, the commit is incomplete, so fail it.` : ''} Do not run the full suite: run the tests mapped to the changed files, the red test and your own probes, and cite this run in EVIDENCE.`;
 // One critic on a small delta (lib/rules.mjs oneCritic): a specialist judges the general bar too.
 export const soloLine = (solo) => (solo.critic === 'general'
   ? `You are the only critic of this round (a ${solo.lines}-line delta): no specialist judges it.`
@@ -179,8 +179,9 @@ export function buildBrief(run, o) {
       'Goal behaviours:', ...behaviourLines(run.goalBehaviours),
       ...playbook,
       'Look for conflicts between the parts: shared interfaces, duplicated logic, inconsistent naming or copy, and broken flows across units.',
-      'Fix only inconsistencies; don\'t redesign. Run the full checks once after, on the merged result.',
-      'Reply in the same format as the critic, marking the goal\'s behaviours (G1, G2, …), then list what you changed.',
+      // Only cross-unit fixes (coord-run-fixes: an integrator added an unrelated dashboard fix to the release PR).
+      'Fix only inconsistencies between the units (a shared interface, a name, copy, a broken flow across units); don\'t redesign. Anything else you find, a bug inside one unit or a change beyond the fence included, is a follow-up for the lead, not a change. Run the full checks once after, on the merged result.',
+      'Reply in the same format as the critic, marking the goal\'s behaviours (G1, G2, …), then list every file you changed and the inconsistency each change fixed.',
     ].join('\n');
   }
   throw new Error('--role must be builder, critic or integrator');

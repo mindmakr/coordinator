@@ -54,8 +54,8 @@ export function openWarning(lines) {
 // A behaviour is checked against a strict list (the perf plan, cause D: "never grants more than approved" failed
 // five critic rounds, each a new loophole). Unlike the gentle note above, these words are refused in a behaviour
 // (add --behaviour, behave, freeze) unless the line names its cases, or the lead passes --open "<why it can be
-// met>", which is logged: never, any, all, cannot, only, always, every.
-export const UNBOUNDED = ['never', 'any', 'all', 'cannot', 'only', 'always', 'every'];
+// met>", which is logged: never, any, all, cannot, only, always, every, nothing.
+export const UNBOUNDED = ['never', 'any', 'all', 'cannot', 'only', 'always', 'every', 'nothing'];
 const UNBOUNDED_RE = new RegExp(`(?<![\\p{L}\\p{N}_'-])(?:${UNBOUNDED.join('|')})(?![\\p{L}\\p{N}_'-])`, 'giu');
 // Cases named: a closed-list word (listed, these, the following, …), a list after a colon ("in: A, B and C"), a
 // bracketed list "(A, B, C)", or numbered items "1) … 2) …".
