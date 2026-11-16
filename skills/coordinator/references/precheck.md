@@ -1,6 +1,6 @@
 # Pre-checks
 
-`run.mjs precheck <run> <unit> --base <base> --head <sha>` checks a unit's diff for classes of findings critics kept making, before any critic sees it, and records the result on the unit for that head. `built <run> <unit> --head <sha>` refuses a head whose precheck has a hit (with `--base` it runs the precheck itself); `--skip-precheck --reason "…"` keeps the hits and logs the reason as a decision. Builders run it before they report (their brief says so).
+`run.mjs precheck <run> <unit> --base <base> --head <sha>` checks a unit's diff for classes of findings critics kept making, before any critic sees it, and records the result on the unit for that head. `built <run> <unit> --head <sha>` refuses a head whose precheck has a hit, and a head with no precheck at all (with `--base` it runs the precheck itself); `--skip-precheck --reason "…"` keeps the hits, or goes without one, and logs the reason as a decision. `built` without `--head` (a unit with no code), or with a commit this repository does not have, says that no precheck ran; with every rule off, nothing is needed. Builders run it before they report (their brief says so).
 
 | Rule | A hit |
 |---|---|

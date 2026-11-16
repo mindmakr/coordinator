@@ -11,10 +11,22 @@ export function commitOf(root, ref, name = 'ref') {
   try { return git(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`]).trim(); } catch { throw new Error(`--${name} ${ref} is not a commit here`); }
 }
 
-// The commit checked out in a folder, and the files not in that commit: changed, added or untracked (what a suite run
-// there would test besides the commit). Ignored files (build output, logs) are left out, as git status leaves them.
+// The commit checked out in a folder, and what is not in that commit (what a suite run there would test besides it):
+// { changed: tracked files changed, added, deleted or renamed; untracked: files git does not track }. Ignored files
+// (build output, logs) are left out, as git status leaves them. A rename or copy is one entry, its new path.
 export const checkedOut = (dir) => git(dir, ['rev-parse', '--verify', 'HEAD']).trim();
-export const uncommitted = (dir) => git(dir, ['status', '--porcelain', '-z']).split('\0').filter(Boolean).map((l) => l.slice(3));
+export function uncommitted(dir) {
+  const parts = git(dir, ['status', '--porcelain', '-z']).split('\0');
+  const changed = []; const untracked = [];
+  for (let i = 0; i < parts.length; i++) {
+    const e = parts[i];
+    if (e.length < 4) continue;
+    const [code, path] = [e.slice(0, 2), e.slice(3)];
+    if (code === '??') untracked.push(path); else changed.push(path);
+    if (/[RC]/.test(code)) i++; // the next entry is the old path, with no status
+  }
+  return { changed, untracked };
+}
 
 // The diff base..head as text (no context lines), and the paths it adds.
 export const diffText = (root, base, head) => git(root, ['diff', '--no-color', '--no-ext-diff', '-U0', base, head, '--']);

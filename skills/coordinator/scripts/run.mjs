@@ -287,7 +287,7 @@ const loadExtras = () => (extrasLoaded ??= Promise.all([
     import('./lib/adopt.mjs').then((x) => ({ adopt, table } = x)),
     import('node:http').then((x) => ({ get: httpGet } = x)),
 ]));
-// Commands that never write a run (or, for next, write only a stop: it loads the pages itself when it records one).
+// Commands that never write a run, or whose rare write (next: a stop, a rebuilt snapshot) has its pages rewritten after it (PAGES_DUE).
 const NO_PAGES = new Set(['behaviours', 'questions', 'show', 'status-line', 'where', 'stats', 'models', 'brief', 'next', 'bench', 'changelog']);
 const EXTRA_COMMANDS = new Set(['init', 'close', 'adopt', 'serve', 'dashboard', 'watch', 'push', 'pull', 'gaps', 'gap', 'study', 'lead']);
 
@@ -461,11 +461,12 @@ function queueSnapshot() {
   if (snapshotSync()) return writeSnapshot();
   const job = snapshotJob();
   try {
-    queueJob(job, () => {
-      const env = { ...process.env, COORDINATOR_PROJECT_DIR: projectDir() };
+    queueJob(job, (handover) => {
+      const env = { ...process.env, COORDINATOR_PROJECT_DIR: projectDir(), COORDINATOR_JOB_HANDOVER: handover };
       const child = spawnProcess(process.execPath, [RUN_MJS, 'self', '--html', '--queued'], { cwd: tmpdir(), env, detached: true, stdio: 'ignore', windowsHide: true });
-      // A start that fails after spawn() returned: let go of the writer's lock and write the page here.
-      child.once('error', () => { try { if (JSON.parse(readFileSync(job.lock, 'utf8')).pid === child.pid) rmSync(job.lock, { force: true }); } catch { /* gone */ } writeSnapshot(); });
+      // A writer that started and then failed: its lock names a dead pid (the next change takes it over), and the
+      // page is written here. One that never started has no pid: queue throws and the catch below writes it.
+      child.once('error', () => { if (child.pid !== undefined) writeSnapshot(); });
       child.unref();
       return child.pid;
     });
@@ -815,7 +816,7 @@ function runPrecheck(baseRef, headRef) {
   return { base, head, hits };
 }
 // Every precheck rule turned off ("precheck": false, or all of them in "off"): built needs no precheck then.
-const precheckOff = () => precheckRules(settings().precheck).off.length >= PRECHECK_RULES.length;
+const precheckOff = () => new Set(precheckRules(settings().precheck).off).size >= PRECHECK_RULES.length;
 
 // The delta a later round's critic reviews: lines changed since the last reviewed head (lib/rules.mjs oneCritic).
 function deltaOf(u, head) {
@@ -1066,7 +1067,11 @@ const commands = {
     const pu = pre.units.find((x) => x.id === unit);
     const delta = pu && o.head ? deltaOf(pu, o.head.toLowerCase()) : null;
     // Without --head there is no commit to check (a unit with no code, or a lead who left it out): said, not refused.
-    const warning = !head && !precheckOff() ? 'no --head: no precheck ran on this build (built --head <sha> --base <sha> runs it)' : null;
+    // A commit this repository does not have (a unit in another repository) cannot be prechecked here: said, not refused.
+    const foreign = head && !fresh && !(() => { try { return commitOf(projectDir(), head, 'head'); } catch { return null; } })();
+    const warning = precheckOff() ? null
+      : !head ? 'no --head: no precheck ran on this build (built --head <sha> --base <sha> runs it)'
+        : foreign ? `${head.slice(0, 12)} is not a commit in this repository: no precheck ran on it` : null;
     const out = change(run, 'unit.built', (s) => {
       const u = unitOf(s, unit); if (u.status !== 'building') throw new Error(`unit ${unit} is ${u.status}, not building`); expect(s, u, 'built');
       if (fresh) u.precheck = { base: fresh.base, head: fresh.head, hits: fresh.hits, at: now() };
@@ -1074,7 +1079,7 @@ const commands = {
       if (rec?.hits.length && !skipWhy) throw new Error(`built refused: the precheck of ${rec.head.slice(0, 12)} has ${rec.hits.length} hit(s): ${rec.hits.map((h) => `${h.rule} ${h.file}`).join(', ')}. Fix them, or keep them with --skip-precheck --reason "…" (logged)`);
       if (rec?.hits.length) s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: precheck hits kept on ${rec.head.slice(0, 12)} (${rec.hits.map((h) => h.rule).join(', ')}): ${skipWhy}`, at: now() });
       // A head with no precheck is not let through unchecked (unless every rule is off in coordinator.json).
-      if (head && !rec && !precheckOff()) {
+      if (head && !rec && !foreign && !precheckOff()) {
         if (!skipWhy) throw new Error(`built refused: no precheck of ${head.slice(0, 12)}: pass --base <the commit the unit branched from> and built runs it, or run run.mjs precheck ${s.id} ${u.id} --base <sha> --head ${head.slice(0, 12)} first; --skip-precheck --reason "…" goes without (logged)`);
         s.notes.push({ kind: 'decision', unit: u.id, text: `${u.id}: built without a precheck on ${head.slice(0, 12)}: ${skipWhy}`, at: now() });
       }
@@ -1490,7 +1495,7 @@ const commands = {
   self(_, o) {
     if (o.json !== undefined && o.html !== undefined) throw new Error('--json or --html, not both');
     if (o.queued !== undefined && !o.html) throw new Error('--queued goes with --html');
-    if (o.html && o.queued) return { file: snapshotFile(), job: drainJob(snapshotJob(), renderSnapshot) };
+    if (o.html && o.queued) return { file: snapshotFile(), job: drainJob(snapshotJob(), renderSnapshot, { handover: process.env.COORDINATOR_JOB_HANDOVER || null }) };
     if (o.html) return { file: writeSnapshot() };
     const m = selfModel({ ...loadSelf(), current: null });
     if (o.json) return m;
@@ -1771,7 +1776,7 @@ const commands = {
     let ok = o.fail === undefined; let results = given; let code = null; let seconds = null;
     // The record says which commit was tested: a run made here must be on that commit with no tracked change on
     // top; a result given from elsewhere must name a commit this repository has.
-    let head;
+    let head; let loose = []; // untracked files in the checkout, recorded with the run
     // A result from elsewhere (CI, another repository's checkout) is recorded for the commit as given, in full when
     // this repository has it.
     if (given.length) { try { head = commitOf(projectDir(), o.head, 'head'); } catch { head = o.head.toLowerCase(); } }
@@ -1782,8 +1787,11 @@ const commands = {
       const atHead = () => {
         let here; try { here = checkedOut(process.cwd()); } catch { throw new Error(`suite runs in the unit's checkout: ${process.cwd()} is not a git checkout`); }
         if (!sameHead(o.head, here)) throw new Error(`suite refused: this checkout is at ${here.slice(0, 12)}, not --head ${o.head}: run it in the unit's worktree at that commit`);
-        const loose = uncommitted(process.cwd());
-        if (loose.length) throw new Error(`suite refused: ${loose.length} file(s) not in ${here.slice(0, 12)} (changed or untracked: ${loose.slice(0, 3).join(', ')}${loose.length > 3 ? ', …' : ''}): commit them, then run the suite on that commit`);
+        const { changed, untracked } = uncommitted(process.cwd());
+        if (changed.length) throw new Error(`suite refused: ${changed.length} tracked file(s) changed on top of ${here.slice(0, 12)} (${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ', …' : ''}): commit them, then run the suite on that commit`);
+        // Untracked files (a report, a tool's folder, or a new file the commit forgot) do not stop the run: they are
+        // recorded with it, and the critic's brief names them.
+        loose = untracked;
         return here;
       };
       head = atHead();
@@ -1797,7 +1805,7 @@ const commands = {
     let rec;
     change(run, 'evidence', (s) => {
       const u = unitOf(s, unit);
-      rec = recordSuite(u, { head, ok, results, at: now(), code, seconds });
+      rec = recordSuite(u, { head, ok, results, at: now(), code, seconds, untracked: loose });
       log(u, 'suite', `full suite ${ok ? 'passed' : 'FAILED'} on ${rec.head.slice(0, 12)}: ${results.at(-1)}`);
     }, { unit });
     return { run, unit, suite: rec };

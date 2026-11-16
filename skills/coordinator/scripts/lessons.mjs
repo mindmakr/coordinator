@@ -95,7 +95,7 @@ function main(cmd, pos, opt) {
         const l = all.find((x) => x.id === id);
         if (!l) throw new Error(`no lesson ${id}`);
         if (check) { l.check = check; delete l.advisory; } else { l.advisory = true; delete l.check; }
-        l.lastAt = now;
+        l.markedAt = now; // lastAt stays when it was last learned: the ranking reads it
       });
       return { id, ...(check ? { check } : { advisory: true }) };
     }

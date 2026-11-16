@@ -99,21 +99,34 @@ export function withLock(file, fn) {
 }
 
 // A lock held for as long as a long job runs (a full test suite), not seconds like withLock: it records who holds
-// it (info, with this process's pid) and is taken over only when that process is gone, never for its age. Waits
-// up to waitMs (onWait(holder) is told once), then throws. Returns the function that releases it.
+// it (info, with this process's pid and a nonce) and is taken over only when that process is gone, or, with
+// maxAgeMs, when its stamp is older than that (a reused pid). adopt(holder) true takes a lock handed to this process
+// (lib/bgjob.mjs). Waits up to waitMs (onWait(holder) is told once), then throws "lock busy". Returns the function
+// that releases it (only while the lock still carries this holder's nonce); release.nonce is that nonce.
 export const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-export function holdLock(file, info = {}, { waitMs = 60 * 60_000, onWait = null, alive = pidAlive } = {}) {
+const readRaw = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
+const parseHolder = (raw) => { try { const h = JSON.parse(raw); return h && typeof h === 'object' ? h : null; } catch { return null; } };
+export function lockGone(holder, { alive = pidAlive, maxAgeMs = Infinity, now = Date.now } = {}) {
+  if (!Number.isInteger(holder?.pid) || !alive(holder.pid)) return true;
+  if (maxAgeMs === Infinity) return false;
+  const at = Date.parse(holder.at);
+  return !Number.isFinite(at) || now() - at >= maxAgeMs;
+}
+export function holdLock(file, info = {}, { waitMs = 60 * 60_000, onWait = null, alive = pidAlive, maxAgeMs = Infinity, adopt = null, now = Date.now } = {}) {
   mkdirSync(dirname(file), { recursive: true });
-  const stamp = JSON.stringify({ ...info, pid: process.pid, at: new Date().toISOString(), nonce: Math.random() });
+  const nonce = Math.random();
+  const stamp = JSON.stringify({ ...info, pid: process.pid, at: new Date(now()).toISOString(), nonce });
   const deadline = Date.now() + waitMs;
   let told = false;
   for (let wait = 50; ; wait = Math.min(wait * 2, 1000)) {
     try { const fd = openSync(file, 'wx'); writeSync(fd, stamp); closeSync(fd); break; } catch (e) {
       if (!['EEXIST', 'EPERM', 'EACCES'].includes(e.code)) throw e;
-      let holder = null;
-      try { holder = JSON.parse(readFileSync(file, 'utf8')); } catch { /* being written or removed */ }
-      if (holder && Number.isInteger(holder.pid) && !alive(holder.pid)) {
-        try { if (readFileSync(file, 'utf8') === JSON.stringify(holder)) unlinkSync(file); } catch { /* taken meanwhile */ }
+      // Decide on one reading of the lock, and remove only that same content: a lock made since is left alone.
+      const raw = readRaw(file);
+      const holder = parseHolder(raw);
+      if (holder && adopt?.(holder)) { writeAtomic(file, stamp); break; }
+      if (holder && lockGone(holder, { alive, maxAgeMs, now })) {
+        try { if (readRaw(file) === raw) unlinkSync(file); } catch { /* taken meanwhile */ }
         continue;
       }
       if (holder && !told) { told = true; onWait?.(holder); }
@@ -121,8 +134,25 @@ export function holdLock(file, info = {}, { waitMs = 60 * 60_000, onWait = null,
       pause(wait);
     }
   }
-  return () => { try { if (readFileSync(file, 'utf8') === stamp) unlinkSync(file); } catch { /* already gone */ } };
+  const release = () => { try { if (parseHolder(readRaw(file))?.nonce === nonce) unlinkSync(file); } catch { /* already gone */ } };
+  release.nonce = nonce;
+  return release;
 }
+// Changes fields of a holdLock lock while it still carries `nonce` (a hand-over to another pid, a fresh stamp).
+export function relabelLock(file, nonce, fields) {
+  const h = parseHolder(readRaw(file));
+  if (h?.nonce !== nonce) return false;
+  writeAtomic(file, JSON.stringify({ ...h, ...fields }));
+  return true;
+}
+// The lock's holder, when one holds it and is not gone.
+export function lockHolder(file, opts = {}) {
+  const h = parseHolder(readRaw(file));
+  return h && !lockGone(h, opts) ? h : null;
+}
+
+// Removes a file if it is there.
+export function removeFile(file) { try { unlinkSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; } }
 
 export function readJson(file, fallback) {
   if (!existsSync(file)) return structuredClone(fallback);

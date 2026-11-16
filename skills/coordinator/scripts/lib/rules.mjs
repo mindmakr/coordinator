@@ -291,7 +291,7 @@ export const decideUnit = (unit, run, nowMs) => held(run, overlapHeld(unit, run,
 // Units run in parallel unless their files meet (the perf plan, cause H: disjoint units waited on each other for
 // hours). A unit added with --paths that would build waits while a unit whose --paths overlap is being built;
 // units with separate paths build together. Of two open units whose paths overlap, the one listed first builds first
-// and the other waits, so next never says build for both. Paths are folder or file prefixes ("src/api", "web/a.ts").
+// and the other waits, so next never says build for both; the lead may start the second instead, and the first then waits. Paths are folder or file prefixes ("src/api", "web/a.ts").
 const normPath = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
 export const pathsOverlap = (a = [], b = []) => a.some((x) => b.some((y) => {
   const p = normPath(x); const q = normPath(y);
@@ -311,7 +311,8 @@ function overlapHeld(unit, run, d, nowMs) {
     going.push(x);
     if (pathsOverlap(unit.paths, x.paths)) first.push(x.id);
   }
-  return first.length ? { action: 'wait', reason: `paths overlap ${first.join(', ')}, which builds first` } : d;
+  // A soft wait (order): the lead may start this unit instead, and then the other waits for it (allows below).
+  return first.length ? { action: 'wait', order: true, reason: `paths overlap ${first.join(', ')}, which builds first (or start this one instead)` } : d;
 }
 
 function unitStep(unit, run, nowMs) {
@@ -420,7 +421,7 @@ export function afterFixIntegration(run, nowMs = Date.now()) {
 // Which step each command needs; the CLI refuses a step the loop did not ask for.
 // A stale builder is restarted (start); a stale critic is re-sent (beat, unit stays judging).
 export function allows(cmd, d) {
-  if (cmd === 'start') return d.action === 'build' || (d.action === 'check-stale' && d.phase === 'building');
+  if (cmd === 'start') return d.action === 'build' || d.order === true || (d.action === 'check-stale' && d.phase === 'building');
   if (cmd === 'foldin') return d.action === 'fold-in';
   if (cmd === 'strategy') return d.action === 'change-strategy';
   return d.action !== 'stop'; // built, verdict, beat: anything except a unit the rules have stopped

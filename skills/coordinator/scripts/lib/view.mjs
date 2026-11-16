@@ -164,7 +164,7 @@ export function view(run, plan, nowMs = Date.now(), { repo = null, linked = null
         decision: d && (!q.answer || d.text !== answerText(q.answer)) ? d.text : null,
       };
     }),
-    followUps: pick('follow-up'),
+    followUps: notes.filter((n) => n.kind === 'follow-up' && n.triage !== 'drop').map((n) => n.text), // a dropped item is closed
     // The maps attach each follow-up to its unit (lib/maps.mjs).
     followUpNotes: notes.filter((n) => n.kind === 'follow-up' && n.triage !== 'drop').map((n) => ({ text: n.text, unit: n.unit ?? null, at: n.at })),
     timeline,

@@ -11,10 +11,10 @@ export const sameHead = (a, b) => typeof a === 'string' && typeof b === 'string'
   && (a.toLowerCase().startsWith(b.toLowerCase()) || b.toLowerCase().startsWith(a.toLowerCase()));
 
 // Records one full run on the unit: { head, ok, results (the summary lines), at, by, code?, seconds? }.
-export function recordSuite(unit, { head, ok, results, at, by = 'lead', code = null, seconds = null }) {
+export function recordSuite(unit, { head, ok, results, at, by = 'lead', code = null, seconds = null, untracked = [] }) {
   if (!SHA.test(head ?? '')) throw new Error('--head takes the commit the suite ran on (7-64 hex characters)');
   if (!Array.isArray(results) || !results.length) throw new Error('a suite record needs its result line (--result "<the pass line>")');
-  const rec = { head: head.toLowerCase(), ok: ok === true, results, at, by, ...(code !== null ? { code } : {}), ...(seconds !== null ? { seconds } : {}) };
+  const rec = { head: head.toLowerCase(), ok: ok === true, results, at, by, ...(code !== null ? { code } : {}), ...(seconds !== null ? { seconds } : {}), ...(untracked.length ? { untracked: untracked.slice(0, 20) } : {}) };
   unit.suites = [...(unit.suites ?? []), rec].slice(-KEEP);
   return rec;
 }
