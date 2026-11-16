@@ -175,7 +175,7 @@ function noteGaps(run, list, repo, out) {
     // batch unit has passed; P1-P3 stay open until filed.
     const batch = n.triage === 'batch' ? (run.units ?? []).find((u) => u.batch === true) : null;
     const triaged = n.triage === 'drop' ? { reason: `dropped at triage: ${n.reason ?? 'no reason given'}`, by: 'state', derived: true, at: n.at ?? null }
-      : batch?.status === 'pass' ? { reason: `built in the batch unit (${batch.id})`, by: 'state', derived: true } : null;
+      : batch?.status === 'pass' && String(batch.bar ?? '').includes(n.text) ? { reason: `built in the batch unit (${batch.id})`, by: 'state', derived: true } : null;
     out.push({ ...base, kind: FENCE.test(n.text) ? 'out-of-fence' : 'follow-up', from: n.noVerdict === true ? 'shipped without a final verdict' : typeof n.shipped === 'string' ? `shipped with follow-ups (${n.shipped})` : n.triage ? `follow-up triaged ${n.triage}` : 'follow-up note', auto: triaged ?? folded(n.text, run, list) ?? tracked() });
   });
 }

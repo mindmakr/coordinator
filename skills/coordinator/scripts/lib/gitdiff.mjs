@@ -11,10 +11,10 @@ export function commitOf(root, ref, name = 'ref') {
   try { return git(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`]).trim(); } catch { throw new Error(`--${name} ${ref} is not a commit here`); }
 }
 
-// The commit checked out in a folder, and its changed tracked files (what a suite run there would test besides the
-// commit). Untracked files are left out: build output and logs would make every checkout look changed.
+// The commit checked out in a folder, and the files not in that commit: changed, added or untracked (what a suite run
+// there would test besides the commit). Ignored files (build output, logs) are left out, as git status leaves them.
 export const checkedOut = (dir) => git(dir, ['rev-parse', '--verify', 'HEAD']).trim();
-export const changedTracked = (dir) => git(dir, ['status', '--porcelain', '--untracked-files=no', '-z']).split('\0').filter(Boolean).map((l) => l.slice(3));
+export const uncommitted = (dir) => git(dir, ['status', '--porcelain', '-z']).split('\0').filter(Boolean).map((l) => l.slice(3));
 
 // The diff base..head as text (no context lines), and the paths it adds.
 export const diffText = (root, base, head) => git(root, ['diff', '--no-color', '--no-ext-diff', '-U0', base, head, '--']);

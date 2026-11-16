@@ -175,10 +175,11 @@ export function peekRun(dir) {
   try {
     const snapAt = statSync(file).mtimeMs;
     let logAt = -1; try { logAt = statSync(join(dir, EVENTS)).mtimeMs; } catch { /* a legacy run: no log */ }
-    // Strictly newer: on a file system with coarse times both files of one write share a tick, and so would a log
-    // changed in that tick, so a tie reads in full. (A log copied in with its old time kept still looks older: the
-    // pages show the snapshot until the next write checks it in full.)
-    if (logAt >= 0 && snapAt > logAt) {
+    // A tie counts as newer: both files of one write usually share a clock tick (NTFS, coarse Linux times), and
+    // reading them in full then would undo this shortcut. What it cannot see: a log changed in that same tick by
+    // something other than run.mjs, or copied in with an older time kept; the pages show the snapshot until the next
+    // write, which always reads the log in full (updateRun).
+    if (logAt >= 0 && snapAt >= logAt) {
       const snap = JSON.parse(readFileSync(file, 'utf8'));
       if (isObj(snap) && validSnapshot(snap[META])) {
         const { [META]: _, ...body } = snap;

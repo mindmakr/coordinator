@@ -15,8 +15,9 @@ import { budgetCheck, MAX, usages, WARN } from '../lib/leadctx.mjs';
 import { unboundedRefusal, unboundedWords } from '../lib/openbar.mjs';
 import { precheck, precheckRules } from '../lib/precheck.mjs';
 import { parseDiff } from '../lib/gaming.mjs';
-import { gitCommonDir, holdLock, lockHeld } from '../lib/store.mjs';
-import { topLessons } from '../lib/lessonstore.mjs';
+import { gitCommonDir, holdLock } from '../lib/store.mjs';
+import { drain, live, queue } from '../lib/bgjob.mjs';
+import { markUsed, topLessons } from '../lib/lessonstore.mjs';
 import { addedFiles, changedLines, commitOf, diffText, fileAt, namedIn } from '../lib/gitdiff.mjs';
 import { recordSuite, runSuite, sameHead, suiteFor, summaryLines } from '../lib/suites.mjs';
 
@@ -185,10 +186,13 @@ test('suite: runs the command after -- under the machine lock and records it; cr
   assert.match(run('suite', 's1', 'u', '--head', 'xyz', '--result', 'r').err, /--head takes the commit/);
   // The checkout must be the commit named, with no tracked change on top; a result from elsewhere must name a commit here.
   assert.match(run('suite', 's1', 'u', '--head', 'abcdef1234', '--', process.execPath, '-e', '0').err, new RegExp(`this checkout is at ${h12}, not --head abcdef1234`));
-  assert.match(run('suite', 's1', 'u', '--head', 'abcdef1234', '--result', '# pass 1').err, /--head abcdef1234 is not a commit here/);
+  assert.equal(okr('suite', 's1', 'u', '--head', 'abcdef1234', '--result', '# pass 1').suite.head, 'abcdef1234', 'a result for a commit from elsewhere is recorded as given');
   writeFileSync(join(p.root, 'a.txt'), 'changed\n');
-  assert.match(run('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', '0').err, /1 tracked file\(s\) changed on top of .*a\.txt/);
+  assert.match(run('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', '0').err, /1 file\(s\) not in .*changed or untracked: a\.txt/);
   writeFileSync(join(p.root, 'a.txt'), 'a\n');
+  writeFileSync(join(p.root, 'new.txt'), 'n\n');
+  assert.match(run('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', '0').err, /1 file\(s\) not in .*new\.txt/, 'an untracked file is not in the commit either');
+  rmSync(join(p.root, 'new.txt'));
   // Words after -- are the command's own, --harness included.
   const echo = okr('suite', 's1', 'u', '--head', head, '--', process.execPath, '-e', 'console.log("# pass " + process.argv.slice(1).join(" "))', '--', '--harness', 'ci');
   assert.deepEqual(echo.suite.results, ['# pass --harness ci']);
@@ -370,7 +374,7 @@ test('coordinator.html is written by a background writer: the change returns fir
   // Settled: the last stamp is covered and no writer holds the lock (the writer's own signal, not a pause).
   const settled = async (what) => {
     for (const end = Date.now() + 60_000; ; await new Promise((r) => setTimeout(r, 25))) {
-      if (read(`${page}.want`) && read(`${page}.want`) === read(`${page}.done`) && !lockHeld(`${page}.writer`)) return;
+      if (read(`${page}.want`) && read(`${page}.want`) === read(`${page}.done`) && !live(`${page}.writer`)) return;
       if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
     }
   };
@@ -477,17 +481,66 @@ test('cmd.exe never gets a % (it expands %NAME%); a backslash is still a plain w
   assert.equal(runSuite(['npm', 'test', 'test\\a.test.mjs'], { spawn: fake, platform: 'win32' }).code, 0);
 });
 
-test('peekRun reads the log in full when the snapshot and the log share a time', () => {
-  const dir = join(tmp, 'peek-tie'); mkdirSync(dir, { recursive: true });
-  ok('init', 'pt', '--goal', 'g', '--bar', 'b', '--fence', 'f');
-  const src = join(state, 'runs', 'pt');
-  writeFileSync(join(dir, 'events.jsonl'), readFileSync(join(src, 'events.jsonl')));
-  const snap = JSON.parse(readFileSync(join(src, 'state.json'), 'utf8'));
-  // A snapshot of another log (its hash does not match this one): the full read replays the log.
-  writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...snap, goal: 'stale', snapshot: { ...snap.snapshot, sha256: '0'.repeat(64) } }));
-  const t = new Date('2026-01-01T00:00:00Z');
-  utimesSync(join(dir, 'state.json'), t, t); utimesSync(join(dir, 'events.jsonl'), t, t);
-  assert.equal(peekRun(dir).goal, 'g');
+test('next on a legacy run (a state.json and no log) imports it and writes its pages', () => {
+  ok('init', 'lg', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'lg', 'u', '--bar', 'b');
+  const dir = join(state, 'runs', 'lg');
+  const snap = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'));
+  delete snap.snapshot;
+  writeFileSync(join(dir, 'state.json'), JSON.stringify(snap));
+  rmSync(join(dir, 'events.jsonl')); rmSync(join(dir, 'hud.html'), { force: true });
+  const r = cli(['next', 'lg']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(readFileSync(join(dir, 'events.jsonl'), 'utf8').includes('run.imported'));
+  assert.match(readFileSync(join(dir, 'hud.html'), 'utf8'), /lg/);
+});
+
+test('bgjob: one writer for a burst, a handed-over lock, a failed job retried, a too old or dead holder taken over', () => {
+  const dir = join(tmp, 'bgjob'); mkdirSync(dir, { recursive: true });
+  const files = { want: join(dir, 'w'), done: join(dir, 'd'), lock: join(dir, 'l'), error: join(dir, 'e') };
+  const CHILD = 424242; // a pid the fake start hands the lock to, alive as far as these tests say
+  const alive = (pid) => pid === process.pid || pid === CHILD;
+  let starts = 0;
+  const start = () => { starts++; return CHILD; };
+  assert.equal(queue(files, start, { alive }), 'started');
+  for (let i = 0; i < 4; i++) assert.equal(queue(files, start, { alive }), 'running', 'a burst starts one writer');
+  assert.equal(starts, 1);
+  assert.equal(JSON.parse(readFileSync(files.lock, 'utf8')).pid, CHILD, 'the lock is handed to the writer');
+  // The writer adopts the lock naming its pid, renders once for the burst, and lets go.
+  let runs = 0;
+  assert.equal(drain(files, () => { runs++; }, { pid: CHILD, alive }), 'done');
+  assert.equal(runs, 1);
+  assert.equal(live(files.lock, { alive }), false);
+  // A failed job: no done stamp, the error kept; the next change starts a writer again.
+  queue(files, start, { alive });
+  assert.equal(drain(files, () => { throw new Error('a run would not read'); }, { pid: CHILD, alive }), 'failed');
+  assert.match(readFileSync(files.error, 'utf8'), /a run would not read/);
+  assert.notEqual(readFileSync(files.want, 'utf8'), readFileSync(files.done, 'utf8'));
+  assert.equal(queue(files, start, { alive }), 'started');
+  assert.equal(drain(files, () => {}, { pid: CHILD, alive }), 'done');
+  assert.throws(() => readFileSync(files.error), /ENOENT/, 'a good run clears the error');
+  // A holder that is gone, or whose stamp is too old (a reused pid), is no writer.
+  writeFileSync(files.lock, JSON.stringify({ pid: 999999, at: new Date().toISOString() }));
+  assert.equal(queue(files, start, { alive }), 'started');
+  writeFileSync(files.lock, JSON.stringify({ pid: CHILD, at: new Date(Date.now() - 10 * 60_000).toISOString() }));
+  assert.equal(live(files.lock, { alive }), false);
+  assert.equal(queue(files, start, { alive }), 'started');
+  // A start that fails leaves no lock behind.
+  rmSync(files.lock, { force: true });
+  assert.throws(() => queue(files, () => { throw new Error('EAGAIN'); }, { alive }), /EAGAIN/);
+  assert.equal(live(files.lock, { alive }), false);
+});
+
+test('built without --head says no precheck ran; a full batch takes no more items; carrying a lesson keeps its recency', () => {
+  ok('init', 'nh', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'nh', 'u', '--bar', 'b'); ok('freeze', 'nh'); ok('start', 'nh', 'u');
+  assert.match(ok('built', 'nh', 'u').warning, /no --head: no precheck ran/);
+  ok('init', 'bf', '--goal', 'g', '--bar', 'b', '--fence', 'f'); ok('add', 'bf', 'a', '--bar', 'b'); ok('freeze', 'bf');
+  for (let i = 0; i < 4; i++) ok('followup', 'bf', '--text', `${'x'.repeat(440)} ${i}`, '--triage', 'batch', '--reason', 'r');
+  assert.match(cli(['followup', 'bf', '--text', 'y'.repeat(440), '--triage', 'batch', '--reason', 'r']).err, /the batch is full/);
+  const base = join(tmp, 'lessons-recency'); mkdirSync(base, { recursive: true });
+  writeFileSync(join(base, 'lessons.json'), JSON.stringify([{ id: 'l1', tag: 'code', text: 't', seen: 1, used: 0, firstAt: '2026-01-01', lastAt: '2026-01-01', from: [] }]));
+  markUsed(topLessons([base], 'code', 1), 'run-x');
+  const l = JSON.parse(readFileSync(join(base, 'lessons.json'), 'utf8'))[0];
+  assert.deepEqual([l.used, l.lastAt, typeof l.lastUsedAt], [1, '2026-01-01', 'string']);
 });
 
 test('lessons: briefs rotate equal lessons, skip those marked --check, and never rank by how often briefs carried them', () => {

@@ -10,7 +10,8 @@ export const BATCH = 'batch'; // the batch unit's id
 export const batchItems = (s) => (s.notes ?? []).filter((n) => n.kind === 'follow-up' && n.triage === 'batch');
 
 // The batch unit's bar: its items as a closed list.
-export const batchBar = (items) => `every batch item is done, with one test run: ${items.map((n, i) => `(${i + 1}) ${n.text}`).join('; ')}`.slice(0, 2000);
+export const BAR_MAX = 2000;
+export const batchBar = (items) => `every batch item is done, with one test run: ${items.map((n, i) => `(${i + 1}) ${n.text}`).join('; ')}`;
 
 // Records one follow-up (a note) and, for a batch item, makes or extends the batch unit. Returns
 // { note, unit?, file? }: unit is the batch unit's id when one was made or extended; file says to file it (P1, P2).
@@ -21,6 +22,8 @@ export function addFollowup(s, { text, triage, reason, unit = null, at }) {
     let b = s.units.find((u) => u.id === BATCH);
     if (b && !b.batch) throw new Error(`a unit named "${BATCH}" exists and is not the batch unit: triage this item P1-P3 or drop`);
     if (b && !['open'].includes(b.status)) throw new Error(`the batch unit is ${b.status}: triage this item P1-P3 (an issue) or drop it`);
+    // Every item is in the bar the critic judges: a batch the bar cannot hold takes no more.
+    if (batchBar([...batchItems(s), note]).length > BAR_MAX) throw new Error(`the batch is full (its bar would pass ${BAR_MAX} characters): triage this item P1-P3 (an issue) or drop it`);
     if (!b) {
       // Making the batch unit is adding a unit: the same caps as run.mjs add, and after freeze a scope note.
       if (s.units.length >= (s.budget?.maxUnits ?? Infinity)) throw new Error(`unit cap reached (${s.budget.maxUnits}): no room for the batch unit; triage this item P1-P3 (an issue) or drop it`);

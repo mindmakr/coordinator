@@ -223,11 +223,12 @@ import { usedMinutes } from './lib/clock.mjs';
 import { pauseNote, pausedRefusal, pauseRun, resumeRun } from './lib/pause.mjs';
 import { COST_FLAGS, costEntry, costStats, launchCost, overLaunch } from './lib/cost.mjs';
 import { openWarning, unboundedRefusal, unboundedWords as unboundedWordsOf } from './lib/openbar.mjs';
-import { holdLock, lockHeld } from './lib/store.mjs';
+import { holdLock } from './lib/store.mjs';
+import { drain as drainJob, queue as queueJob } from './lib/bgjob.mjs';
 import { recordSuite, runSuite, sameHead, SHA, summaryLines } from './lib/suites.mjs';
 import { precheck, precheckRules, RULES as PRECHECK_RULES } from './lib/precheck.mjs';
 import { parseDiff } from './lib/gaming.mjs';
-import { addedFiles, changedLines, changedTracked, checkedOut, commitOf, diffText, fileAt, namedIn } from './lib/gitdiff.mjs';
+import { addedFiles, changedLines, checkedOut, commitOf, diffText, fileAt, namedIn, uncommitted } from './lib/gitdiff.mjs';
 import { addFollowup } from './lib/followups.mjs';
 import { leadBudget } from './lib/leadctx.mjs';
 import { checkFold, FOLD_DEFAULTS, foldDiff, parseFinding } from './lib/findings.mjs';
@@ -409,7 +410,11 @@ const themeFor = (s) => { const t = settings().theme; return loadTheme(themeFile
 
 // The files people read: rewritten inside the state's lock after every change.
 // hud.html and units/<unit>.html are static snapshots: no script, no network.
+// A write by a command that runs without the page modules (NO_PAGES: next rebuilding a stale snapshot, importing a
+// legacy run, recording a stop) leaves the run in PAGES_DUE; main() loads the modules after the command and rewrites them.
+const PAGES_DUE = new Set();
 function derived(s) {
+  if (typeof render !== 'function') { PAGES_DUE.add(s.id); return; }
   const plan = decide(s);
   writeAtomic(join(runsDir(), s.id, 'workbench.md'), render(s, plan));
   const v = view(s, plan, Date.now(), { repo: repoFor(s), linked: linkedOf(s), project: project() });
@@ -424,67 +429,50 @@ function derived(s) {
 }
 
 // coordinator.html in the state folder: the coordinator page as a file, rewritten after every change to a
-// run (about a third of a second on a 56 MB folder), by a background process (queueSnapshot) so the command
-// that made the change does not wait for it. It reads every
-// run of this folder under the snapshot's own lock, so of two writers at once the later one, which read
-// the later state, writes last. The PC's runs come from the register alone. The live page is run.mjs dashboard.
+// run (about a third of a second on a 56 MB folder), by a background writer (queueSnapshot) so the command that
+// made the change does not wait for it. It reads every run of this folder under the snapshot's own lock, so of two
+// writers at once the later one, which read the later state, writes last. The PC's runs come from the register
+// alone. The live page is run.mjs dashboard. Throws when it could not write the page.
 const snapshotFile = () => join(baseDir('project'), 'coordinator.html');
-function writeSnapshot() {
+function renderSnapshot() {
   const file = snapshotFile();
-  try {
-    withLock(file, () => {
-      const t = Date.now();
-      const reg = readRegistry(); // once per snapshot: each read checks every entry's folder on disk
-      const m = { ...selfModel({ ...loadSelf(), current: null }), pc: pcModel(reg, { here: baseDir('project'), read: false }) };
-      const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html`, pcHref: staticPcHref(reg) };
-      writeAtomic(file, selfPage(m, t, ctx));
-    });
-    return file;
-  } catch (e) { console.error(`warning: ${file} was not rewritten: ${e.message}`); return null; }
+  withLock(file, () => {
+    const t = Date.now();
+    const reg = readRegistry(); // once per snapshot: each read checks every entry's folder on disk
+    const m = { ...selfModel({ ...loadSelf(), current: null }), pc: pcModel(reg, { here: baseDir('project'), read: false }) };
+    const ctx = { ...staticCtx(null, 0, loadTheme(themeFile({}, projectDir()))), runHref: (id) => `runs/${encodeURIComponent(id)}/hud.html`, pcHref: staticPcHref(reg) };
+    writeAtomic(file, selfPage(m, t, ctx));
+  });
+  return file;
+}
+function writeSnapshot() {
+  try { return renderSnapshot(); } catch (e) { console.error(`warning: ${snapshotFile()} was not rewritten: ${e.message}`); return null; }
 }
 
-// After a change: stamp coordinator.html.want and, unless a writer is already running, start one in the background
-// (run.mjs self --html --queued). The writer renders until the stamp stops changing, so a burst of changes costs one
-// or two renders and the page is never older than the last change once the writer exits. COORDINATOR_SNAPSHOT=sync
-// writes it in place instead (the default under node:test, whose temporary folders a background writer would outlive).
-const snapshotWant = () => `${snapshotFile()}.want`;
-const snapshotWriter = () => `${snapshotFile()}.writer`;
-const snapshotDone = () => `${snapshotFile()}.done`; // the stamp the last render covered
+// After a change: the background writer (lib/bgjob.mjs; run.mjs self --html --queued) rewrites coordinator.html, one
+// at a time, until the last change's stamp is covered; a burst of changes costs one or two renders. It starts in
+// the temp folder, so it never holds the project folder open (Windows refuses to delete a live process's working
+// folder), with the project named in COORDINATOR_PROJECT_DIR. A render that fails leaves its error in
+// coordinator.html.error and the stamp uncovered, so the next change tries again. COORDINATOR_SNAPSHOT=sync writes it
+// in place instead (the default under node:test, whose temporary folders a background writer would outlive).
+const snapshotJob = () => { const f = snapshotFile(); return { want: `${f}.want`, done: `${f}.done`, lock: `${f}.writer`, error: `${f}.error` }; };
 const snapshotSync = () => (process.env.COORDINATOR_SNAPSHOT ?? (process.env.NODE_TEST_CONTEXT ? 'sync' : 'background')) === 'sync';
-const readStamp = (file) => { try { return readFileSync(file, 'utf8'); } catch { return ''; } };
-const readWant = () => readStamp(snapshotWant());
-const readDone = () => readStamp(snapshotDone());
 function queueSnapshot() {
   if (snapshotSync()) return writeSnapshot();
+  const job = snapshotJob();
   try {
-    writeAtomic(snapshotWant(), `${process.pid} ${Date.now()} ${Math.random()}
-`);
-    if (lockHeld(snapshotWriter())) return null; // the running writer reads the new stamp before it exits
-    // Started outside the project (its folder named in the environment), so it never holds that folder open.
-    const env = { ...process.env, COORDINATOR_DIR: baseDir('project'), COORDINATOR_PROJECT_DIR: projectDir() };
-    spawnProcess(process.execPath, [RUN_MJS, 'self', '--html', '--queued'], { cwd: tmpdir(), env, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    queueJob(job, () => {
+      const env = { ...process.env, COORDINATOR_PROJECT_DIR: projectDir() };
+      const child = spawnProcess(process.execPath, [RUN_MJS, 'self', '--html', '--queued'], { cwd: tmpdir(), env, detached: true, stdio: 'ignore', windowsHide: true });
+      // A start that fails after spawn() returned: let go of the writer's lock and write the page here.
+      child.once('error', () => { try { if (JSON.parse(readFileSync(job.lock, 'utf8')).pid === child.pid) rmSync(job.lock, { force: true }); } catch { /* gone */ } writeSnapshot(); });
+      child.unref();
+      return child.pid;
+    });
     return null;
   } catch (e) {
     console.error(`warning: coordinator.html is written in place (no background writer: ${e.message})`);
     return writeSnapshot();
-  }
-}
-// The background writer: one at a time (coordinator.html.writer); it renders again while the stamp moved during a
-// render, and checks once more after letting go, so a change stamped while it was finishing is never left unwritten.
-function drainSnapshots() {
-  for (;;) {
-    let release;
-    try { release = holdLock(snapshotWriter(), { job: 'coordinator.html' }, { waitMs: 0 }); } catch { return null; } // another writer has it
-    try {
-      for (;;) {
-        const want = readWant();
-        if (want === readDone()) break; // a writer before this one already covered it
-        writeSnapshot();
-        writeAtomic(snapshotDone(), want);
-        if (readWant() === want) break;
-      }
-    } finally { release(); }
-    if (readWant() === readDone()) return snapshotFile();
   }
 }
 
@@ -1077,7 +1065,9 @@ const commands = {
     // Lines changed since the last reviewed head: from round 2 a small delta gets one critic (lib/rules.mjs oneCritic).
     const pu = pre.units.find((x) => x.id === unit);
     const delta = pu && o.head ? deltaOf(pu, o.head.toLowerCase()) : null;
-    return change(run, 'unit.built', (s) => {
+    // Without --head there is no commit to check (a unit with no code, or a lead who left it out): said, not refused.
+    const warning = !head && !precheckOff() ? 'no --head: no precheck ran on this build (built --head <sha> --base <sha> runs it)' : null;
+    const out = change(run, 'unit.built', (s) => {
       const u = unitOf(s, unit); if (u.status !== 'building') throw new Error(`unit ${unit} is ${u.status}, not building`); expect(s, u, 'built');
       if (fresh) u.precheck = { base: fresh.base, head: fresh.head, hits: fresh.hits, at: now() };
       const rec = u.precheck && head && (u.precheck.head.startsWith(head) || head.startsWith(u.precheck.head)) ? u.precheck : null;
@@ -1096,6 +1086,7 @@ const commands = {
       addCost(s, u, costEntry(o, { step: 'built', role: 'builder', model: u.builtBy && u.builtBy !== UNSPECIFIED ? u.builtBy : null, at: now() }));
       delete u.specialistMarks; // a new build is judged again by every specialist
     }, { unit });
+    return warning ? { ...out, warning } : out;
   },
   behave([run, unit], o) {
     let id; let warning = null;
@@ -1498,10 +1489,11 @@ const commands = {
   study([run], o) { let id; const s = change(run, 'study', (st) => { id = addStudy(st, o); }); return { ...s, study: id }; },
   self(_, o) {
     if (o.json !== undefined && o.html !== undefined) throw new Error('--json or --html, not both');
+    if (o.queued !== undefined && !o.html) throw new Error('--queued goes with --html');
+    if (o.html && o.queued) return { file: snapshotFile(), job: drainJob(snapshotJob(), renderSnapshot) };
+    if (o.html) return { file: writeSnapshot() };
     const m = selfModel({ ...loadSelf(), current: null });
     if (o.json) return m;
-    if (o.queued !== undefined && !o.html) throw new Error('--queued goes with --html');
-    if (o.html) return { file: o.queued ? drainSnapshots() : writeSnapshot() };
     process.stdout.write(selfText(m));
     return null;
   },
@@ -1723,16 +1715,11 @@ const commands = {
       for (const id of mine) runs.push({ run: id, ...(await commands.next([id], { ...o, all: undefined })) });
       return { lead: me, runs, ...(runs.length ? {} : { note: 'this window leads no open run here' }) };
     }
-    if (!exists(run)) throw new Error(`no run: ${run}`);
-    const cur = readRun(runDir(run));
-    let stopped; let s = cur.state;
+    let stopped; let s = load(run);
     const expired = !s.closed && spent(s, Date.now());
     // Expired: applyStops changes the loaded state in memory only; it is never saved.
     if (expired) stopped = applyStops(s);
     else {
-      // A write rewrites the pages: load their modules first (main() skips them for next). next writes when it
-      // records a stop, and when the snapshot is rebuilt (behind the log after a pull, or edited by hand).
-      if (cur.rebuilt || cur.edited || (!s.closed && applyStops(structuredClone(s)).size > 0)) await loadPages();
       // Recording a stop is a lead step (lib/lead.mjs); reading what to do next is not. Whether it records
       // one is decided on the locked state, with the lead check, in the same write as the stop.
       s = change(run, 'run.stop', (st) => { stopped = applyStops(st); }, { leadWhen: { o, when: (st) => applyStops(structuredClone(st)).size > 0 } });
@@ -1785,16 +1772,23 @@ const commands = {
     // The record says which commit was tested: a run made here must be on that commit with no tracked change on
     // top; a result given from elsewhere must name a commit this repository has.
     let head;
-    if (given.length) head = commitOf(projectDir(), o.head, 'head');
+    // A result from elsewhere (CI, another repository's checkout) is recorded for the commit as given, in full when
+    // this repository has it.
+    if (given.length) { try { head = commitOf(projectDir(), o.head, 'head'); } catch { head = o.head.toLowerCase(); } }
     else {
       if (o.fail !== undefined) throw new Error('--fail goes with --result: a command\'s exit code says whether it passed');
-      let here; try { here = checkedOut(process.cwd()); } catch { throw new Error(`suite runs in the unit's checkout: ${process.cwd()} is not a git checkout`); }
-      if (!sameHead(o.head, here)) throw new Error(`suite refused: this checkout is at ${here.slice(0, 12)}, not --head ${o.head}: run it in the unit's worktree at that commit`);
-      const dirty = changedTracked(process.cwd());
-      if (dirty.length) throw new Error(`suite refused: ${dirty.length} tracked file(s) changed on top of ${here.slice(0, 12)} (${dirty.slice(0, 3).join(', ')}${dirty.length > 3 ? ', …' : ''}): commit them, then run the suite on that commit`);
-      head = here;
+      // The checkout must be at --head with nothing uncommitted, checked again once the lock is ours: the tree may
+      // change while this call waits for another suite.
+      const atHead = () => {
+        let here; try { here = checkedOut(process.cwd()); } catch { throw new Error(`suite runs in the unit's checkout: ${process.cwd()} is not a git checkout`); }
+        if (!sameHead(o.head, here)) throw new Error(`suite refused: this checkout is at ${here.slice(0, 12)}, not --head ${o.head}: run it in the unit's worktree at that commit`);
+        const loose = uncommitted(process.cwd());
+        if (loose.length) throw new Error(`suite refused: ${loose.length} file(s) not in ${here.slice(0, 12)} (changed or untracked: ${loose.slice(0, 3).join(', ')}${loose.length > 3 ? ', …' : ''}): commit them, then run the suite on that commit`);
+        return here;
+      };
+      head = atHead();
       const release = holdLock(join(registryHome(), 'suite.lock'), { run, unit, head: o.head }, { onWait: (h) => console.error(`waiting: a full suite is running on this machine (run ${h.run ?? '?'}, unit ${h.unit ?? '?'}, since ${h.at})`) });
-      let r; try { r = runSuite(SUITE_ARGV, { cwd: process.cwd() }); } finally { release(); }
+      let r; try { if (atHead() !== head) throw new Error(`suite refused: the checkout moved off ${head.slice(0, 12)} while waiting`); r = runSuite(SUITE_ARGV, { cwd: process.cwd() }); } finally { release(); }
       ({ code, seconds } = r); ok = code === 0;
       results = summaryLines(r.output).map((l) => text(l, 'result', 300));
       if (!results.length) results = [`exit code ${code}`];
@@ -2178,7 +2172,7 @@ let BY = null;
 export async function main(args = process.argv.slice(2)) {
   helpAndExit(import.meta.url, args);
   const [cmd, ...all] = args;
-  LEAD = null; CLAIMED = null; BY = null; SUITE_ARGV = [];
+  LEAD = null; CLAIMED = null; BY = null; SUITE_ARGV = []; PAGES_DUE.clear();
   // suite runs the command after --, as given: cut there first, so none of its words (--harness included) is
   // read as a run.mjs option.
   const cut = cmd === 'suite' ? all.indexOf('--') : -1;
@@ -2210,6 +2204,11 @@ export async function main(args = process.argv.slice(2)) {
       }
     }
     const out = await commands[cmd](pos, opt);
+    if (PAGES_DUE.size) {
+      await loadPages();
+      for (const id of PAGES_DUE) withLock(stateFile(id), () => derived(loadRun(runDir(id))));
+      PAGES_DUE.clear();
+    }
     const claimed = (o) => (CLAIMED && o && typeof o === 'object' && !Array.isArray(o) ? { ...o, claim: CLAIMED } : o);
     if (out !== null) console.log(JSON.stringify(claimed(out.id === undefined || ['models', 'next', 'lead', 'list', 'stats', 'where', 'hud', 'questions', 'behaviours', 'self', 'gaps', 'push', 'pull', 'map', 'touches', 'report', 'quality', 'bench'].includes(cmd) ? out : { ok: true, run: out.id, decision: decide(out).decision, ...(out.asked ? { asked: out.asked } : {}), ...(out.label ? { label: out.label } : {}), ...(out.asking ? { asking: out.asking } : {}), ...(out.study ? { study: out.study } : {}), ...(out.behaviour ? { behaviour: out.behaviour } : {}), ...(out.evidence ? { evidence: out.evidence } : {}), ...(out.warning ? { warning: out.warning } : {}), ...(out.setup ? { setup: out.setup } : {}), ...(out.checks ? { checks: out.checks } : {}) }), null, 2));
   } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

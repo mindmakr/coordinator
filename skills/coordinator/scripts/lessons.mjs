@@ -47,7 +47,8 @@ function main(cmd, pos, opt) {
   const touch = (id, field) => update(file, [], (all) => {
     const l = all.find((x) => x.id === id);
     if (!l) throw new Error(`no lesson ${id}`);
-    l[field]++; l.lastAt = now;
+    l[field]++;
+    if (field === 'seen') l.lastAt = now; else l.lastUsedAt = now; // lastAt: when it was last learned (the ranking's recency)
   });
   switch (cmd) {
     case 'add': {

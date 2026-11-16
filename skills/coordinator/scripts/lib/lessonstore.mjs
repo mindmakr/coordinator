@@ -9,7 +9,7 @@ export const lessonsFile = (base) => join(base, 'lessons.json');
 // only rose because it ranked high (the same five lessons rode in every brief while 50 of 69 were never shown).
 export const rank = (l) => l.seen;
 export const byRank = (a, b) => rank(b) - rank(a) || String(b.lastAt).localeCompare(String(a.lastAt));
-const carried = (l) => (Array.isArray(l.usedIn) ? l.usedIn.length : 0);
+const carried = (l) => l.used ?? 0; // every run that carried it (usedIn keeps only the last 30)
 // For a brief: of the lessons that recurred as often, the ones carried in fewer runs first, so hints rotate.
 const byBrief = (a, b) => rank(b) - rank(a) || carried(a) - carried(b) || String(b.lastAt).localeCompare(String(a.lastAt));
 const valid = (l) => l !== null && typeof l === 'object' && typeof l.id === 'string' && typeof l.text === 'string';
@@ -40,7 +40,7 @@ export function markUsed(lessons, run, now = new Date().toISOString()) {
         const runs = Array.isArray(l.usedIn) ? l.usedIn : (l.usedIn = []);
         if (runs.includes(run)) continue;
         runs.push(run); if (runs.length > 30) runs.shift();
-        l.used = (l.used ?? 0) + 1; l.lastAt = now; counted++;
+        l.used = (l.used ?? 0) + 1; l.lastUsedAt = now; counted++; // lastAt stays when it was last learned: ranking reads it
       }
     });
   }

@@ -69,7 +69,7 @@ export const projectDir = () => (process.env.COORDINATOR_PROJECT_DIR ? resolve(p
 
 export function baseDir(scope = 'project') {
   if (process.env.COORDINATOR_DIR) return resolve(process.env.COORDINATOR_DIR);
-  return scope === 'global' ? join(homedir(), '.coordinator') : join(mainCheckout(), '.coordinator');
+  return scope === 'global' ? join(homedir(), '.coordinator') : join(projectDir(), '.coordinator');
 }
 
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -89,7 +89,7 @@ export function withLock(file, fn) {
         const seen = readFileSync(lock, 'utf8');
         if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS && readFileSync(lock, 'utf8') === seen) unlinkSync(lock);
       } catch { /* released or taken meanwhile */ }
-      if (Date.now() >= deadline) throw new Error(`lock busy: ${lock}`);
+      if (Date.now() > deadline) throw new Error(`lock busy: ${lock}`);
       pause(wait);
     }
   }
@@ -101,7 +101,7 @@ export function withLock(file, fn) {
 // A lock held for as long as a long job runs (a full test suite), not seconds like withLock: it records who holds
 // it (info, with this process's pid) and is taken over only when that process is gone, never for its age. Waits
 // up to waitMs (onWait(holder) is told once), then throws. Returns the function that releases it.
-const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+export const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 export function holdLock(file, info = {}, { waitMs = 60 * 60_000, onWait = null, alive = pidAlive } = {}) {
   mkdirSync(dirname(file), { recursive: true });
   const stamp = JSON.stringify({ ...info, pid: process.pid, at: new Date().toISOString(), nonce: Math.random() });
@@ -117,16 +117,11 @@ export function holdLock(file, info = {}, { waitMs = 60 * 60_000, onWait = null,
         continue;
       }
       if (holder && !told) { told = true; onWait?.(holder); }
-      if (Date.now() > deadline) throw new Error(`lock busy: ${file}${holder ? ` (held by pid ${holder.pid} since ${holder.at})` : ''}`);
+      if (Date.now() >= deadline) throw new Error(`lock busy: ${file}${holder ? ` (held by pid ${holder.pid} since ${holder.at})` : ''}`);
       pause(wait);
     }
   }
   return () => { try { if (readFileSync(file, 'utf8') === stamp) unlinkSync(file); } catch { /* already gone */ } };
-}
-
-// Whether a holdLock file is held by a live process (a dead holder's file does not count), without taking it.
-export function lockHeld(file, { alive = pidAlive } = {}) {
-  try { const h = JSON.parse(readFileSync(file, 'utf8')); return Number.isInteger(h.pid) && alive(h.pid); } catch { return false; }
 }
 
 export function readJson(file, fallback) {
